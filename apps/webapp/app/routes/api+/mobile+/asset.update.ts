@@ -39,8 +39,10 @@ import {
 } from "~/modules/api/mobile-custom-fields.server";
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
+import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -92,6 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
       categoryId,
       newLocationId,
       currentLocationId,
+      tags,
       valuation,
       customFields,
     } = z
@@ -105,6 +108,9 @@ export async function action({ request }: ActionFunctionArgs) {
         categoryId: z.string().optional(),
         newLocationId: z.string().optional(),
         currentLocationId: z.string().optional(),
+        // Full desired tag set (replace). Omit to leave tags unchanged; pass
+        // [] to clear. Validated below against the caller's organization.
+        tags: z.array(z.string()).optional(),
         valuation: z.number().nullable().optional(),
         customFields: z
           .array(
@@ -209,6 +215,12 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    // why: tag ids from request input are attacker-controlled; assert they
+    // belong to the caller's org AND are assignable to assets (useFor empty or
+    // ASSET) before connecting, so a crafted request can't attach a booking-only
+    // tag. No-op when no tags supplied. Mirrors the create path.
+    await assertTagsAssignableToAssets({ tagIds: tags ?? [], organizationId });
+
     const asset = await updateAsset({
       id: assetId,
       userId: user.id,
@@ -219,6 +231,9 @@ export async function action({ request }: ActionFunctionArgs) {
       categoryId,
       newLocationId: newLocationId || undefined,
       currentLocationId: currentLocationId || undefined,
+      // Replace the asset's tags with the supplied set. `undefined` (field
+      // omitted) leaves them unchanged; `[]` clears them.
+      tags: tags !== undefined ? buildTagsSet(tags.join(",")) : undefined,
       valuation: valuation !== undefined ? valuation : undefined,
       customFieldsValues,
     });

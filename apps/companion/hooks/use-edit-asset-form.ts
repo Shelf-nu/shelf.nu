@@ -21,12 +21,13 @@
  * @see {@link file://../components/asset-edit/custom-field-input.tsx CustomFieldInput}
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   api,
   type AssetDetail,
   type Category,
   type Location,
+  type Tag,
   type MobileCustomFieldDefinition,
   type MobileCustomFieldType,
 } from "@/lib/api";
@@ -120,6 +121,9 @@ export type EditAssetFormState = {
   setSelectedCategory: (v: Category | null) => void;
   selectedLocation: Location | null;
   setSelectedLocation: (v: Location | null) => void;
+  /** Multi-select: the asset's tags (pre-populated from the loaded asset). */
+  selectedTags: Tag[];
+  setSelectedTags: (v: Tag[]) => void;
   valuation: string;
   setValuation: (v: string) => void;
 
@@ -138,8 +142,10 @@ export type EditAssetFormState = {
   // Picker data
   categories: Category[];
   locations: Location[];
+  tags: Tag[];
   isCategoriesLoading: boolean;
   isLocationsLoading: boolean;
+  isTagsLoading: boolean;
 
   // Submission
   isSubmitting: boolean;
@@ -177,6 +183,7 @@ export function useEditAssetForm(
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(
     null
   );
+  const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [valuation, setValuation] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -208,8 +215,10 @@ export function useEditAssetForm(
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
+  const [isTagsLoading, setIsTagsLoading] = useState(false);
 
   // ── Load existing asset ─────────────────────────
   useEffect(() => {
@@ -241,6 +250,9 @@ export function useEditAssetForm(
               image: null,
               parentId: null,
             });
+          }
+          if (a.tags?.length) {
+            setSelectedTags(a.tags.map((t) => ({ id: t.id, name: t.name })));
           }
           if (a.valuation != null && a.valuation > 0) {
             setValuation(String(a.valuation));
@@ -277,10 +289,31 @@ export function useEditAssetForm(
     setIsLocationsLoading(false);
   }, [orgId]);
 
+  // Stale-response guard: if orgId changes mid-flight, only the latest fetch
+  // commits its tag list. Unlike the create screen we intentionally do NOT prune
+  // selectedTags against the list here, because in edit they are the asset's own
+  // saved tags and must be preserved even if a tag was later made booking-only.
+  const latestTagsRequestRef = useRef(0);
+  const loadTags = useCallback(async () => {
+    if (!orgId) return;
+    const requestId = ++latestTagsRequestRef.current;
+    setIsTagsLoading(true);
+    try {
+      const { data } = await api.tags(orgId);
+      if (requestId !== latestTagsRequestRef.current) return;
+      if (data?.tags) setTags(data.tags);
+    } finally {
+      if (requestId === latestTagsRequestRef.current) {
+        setIsTagsLoading(false);
+      }
+    }
+  }, [orgId]);
+
   useEffect(() => {
     loadCategories();
     loadLocations();
-  }, [loadCategories, loadLocations]);
+    loadTags();
+  }, [loadCategories, loadLocations, loadTags]);
 
   // ── Load custom field definitions ───────────────
   // Mirrors `new.tsx` so the edit screen sees the full set of applicable
@@ -374,6 +407,8 @@ export function useEditAssetForm(
     setSelectedCategory,
     selectedLocation,
     setSelectedLocation,
+    selectedTags,
+    setSelectedTags,
     valuation,
     setValuation,
     customFields,
@@ -383,8 +418,10 @@ export function useEditAssetForm(
     retryLoadCustomFields,
     categories,
     locations,
+    tags,
     isCategoriesLoading,
     isLocationsLoading,
+    isTagsLoading,
     isSubmitting,
     setIsSubmitting,
   };

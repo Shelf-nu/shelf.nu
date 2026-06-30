@@ -11,6 +11,7 @@
  * @see {@link file://../../../hooks/use-edit-asset-form.ts useEditAssetForm}
  * @see {@link file://../../../components/asset-edit/custom-field-input.tsx CustomFieldInput}
  */
+import { useState } from "react";
 import {
   View,
   Text,
@@ -34,6 +35,7 @@ import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
 import { PickerField } from "@/components/asset-edit/picker-field";
+import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 
@@ -80,11 +82,16 @@ export default function EditAssetScreen() {
 
   const form = useEditAssetForm(assetId, currentOrg?.id);
 
+  // Local: the tag dropdown's open state (the picker is controlled so this
+  // screen can coordinate it with the category / location dropdowns).
+  const [showTagsPicker, setShowTagsPicker] = useState(false);
+
   const { isDirty } = useFormValidation({
     title: form.title,
     description: form.description,
     selectedCategory: form.selectedCategory,
     selectedLocation: form.selectedLocation,
+    selectedTags: form.selectedTags,
     valuation: form.valuation,
     customFields: form.customFields,
     originalAsset: form.originalAsset,
@@ -160,6 +167,18 @@ export default function EditAssetScreen() {
     if (newLocId !== origLocId) {
       payload.newLocationId = newLocId || "";
       payload.currentLocationId = origLocId || "";
+    }
+
+    // Tags: send the full desired set only when it changed (compare sorted id
+    // lists, order-independent). Omitting leaves tags untouched server-side;
+    // an empty array clears them.
+    const origTagIds = (form.originalAsset?.tags ?? []).map((t) => t.id).sort();
+    const newTagIds = form.selectedTags.map((t) => t.id).sort();
+    const tagsChanged =
+      origTagIds.length !== newTagIds.length ||
+      origTagIds.some((id, i) => id !== newTagIds[i]);
+    if (tagsChanged) {
+      payload.tags = form.selectedTags.map((t) => t.id);
     }
 
     // Valuation
@@ -381,6 +400,16 @@ export default function EditAssetScreen() {
               )}
             />
           )}
+
+          {/* ── Tags Picker (multi-select) ─────────────── */}
+          <TagPickerField
+            tags={form.tags}
+            selectedTags={form.selectedTags}
+            onChange={form.setSelectedTags}
+            isLoading={form.isTagsLoading}
+            isOpen={showTagsPicker}
+            onToggle={setShowTagsPicker}
+          />
 
           {/* ── Valuation ──────────────────────────────── */}
           <ValuationField
