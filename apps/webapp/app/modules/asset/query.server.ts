@@ -1583,6 +1583,16 @@ export function parseSortingOptions(sortBy: string[]): {
         orderByParts.push(
           getNormalizedSortExpression(`"${columnName}"`, field.direction)
         );
+      } else if (field.name === "valuation") {
+        // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
+        // what the "Value" cell displays. INDIVIDUAL assets are quantity=1 so
+        // this is identical to sorting on `assetValue` for them; QT assets
+        // are now ordered by total worth (the number users actually compare),
+        // not per-unit price. `assetValue` and `assetQuantity` are aliases on
+        // the outer SELECT — safe to multiply without quoting concerns.
+        orderByParts.push(
+          `("assetValue" * "assetQuantity") ${field.direction}`
+        );
       } else {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);

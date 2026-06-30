@@ -17,6 +17,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getAssetTotalValue } from "~/utils/asset-value";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -96,6 +97,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 title: true,
                 status: true,
                 valuation: true,
+                // QT-aware total value: quantity is needed so the reducer
+                // below can multiply per-unit valuation × quantity for
+                // QUANTITY_TRACKED assets. INDIVIDUAL assets are always
+                // quantity: 1, so the math collapses to the prior behaviour.
+                quantity: true,
                 mainImage: true,
                 thumbnailImage: true,
                 category: { select: { id: true, name: true } },
@@ -134,8 +140,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Total value = sum of the contained assets' valuation (a kit has no own
     // value field), mirroring the web kit overview's summed valuation.
+    // QT-aware: multiplies valuation × quantity. Non-breaking — same response
+    // field, more accurate value for kits containing QT assets.
     const totalValue = assets.reduce(
-      (sum, asset) => sum + (asset.valuation ?? 0),
+      (sum, asset) => sum + getAssetTotalValue(asset),
       0
     );
 
