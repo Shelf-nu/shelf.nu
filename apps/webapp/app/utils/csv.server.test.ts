@@ -404,6 +404,47 @@ describe("buildCsvExportDataFromAssets", () => {
       '""',
     ]);
   });
+
+  it("emits per-unit valuation and qty-aware total_value side by side", () => {
+    // QT asset: 100 boxes at €1/each. `valuation` column stays per-unit
+    // (CSV round-trip safe — re-import won't inflate it), while the new
+    // synthetic `total_value` column reports the qty-aware total (€100).
+    const assets = [
+      {
+        id: "asset-pens",
+        title: "Pens",
+        valuation: 1,
+        quantity: 100,
+        type: "QUANTITY_TRACKED",
+        unitOfMeasure: "boxes",
+        tags: [],
+        custody: [],
+        customFields: [],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      // Injected by the export caller at MAX_SAFE_INTEGER; here we pin
+      // it to position 2 for a stable assertion.
+      { name: "total_value", visible: true, position: 2 },
+    ];
+
+    const [headers, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      request: baseRequest,
+    });
+
+    expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
+    expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
 });
 
 describe("buildCsvExportDataFromBookings", () => {
