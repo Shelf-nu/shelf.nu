@@ -15,7 +15,7 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { addDays, isBefore } from "date-fns";
+import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import z from "zod";
@@ -43,7 +43,6 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
   getDateTimeFormatFromHints,
-  getHints,
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -10785,10 +10784,17 @@ export async function computeBookingKitDrift({
  * resulting drift via {@link computeBookingKitDrift} so the user
  * acknowledges the change before confirming.
  *
+ * **Booking window.** The new booking's `from`/`to` are taken from the
+ * caller-provided dates rather than being derived here, so the duplicate
+ * dialog controls the window (timezone normalization happens upstream).
+ *
  * @param args.bookingId - The source booking
  * @param args.organizationId - The caller's organization
  * @param args.userId - The user creating the duplicate (becomes the creator)
- * @param args.request - Used for client hints (timezone for `from`/`to`)
+ * @param args.from - Start date for the new booking
+ * @param args.to - End date for the new booking
+ * @param args.request - The incoming request, forwarded to `getBooking` for
+ *   client-hint resolution and ownership checks
  * @returns The newly created booking row
  * @throws {ShelfError} If anything in the transaction fails
  */
@@ -10796,11 +10802,15 @@ export async function duplicateBooking({
   bookingId,
   organizationId,
   userId,
+  from,
+  to,
   request,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
   userId: User["id"];
+  from: Date;
+  to: Date;
   request: Request;
 }) {
   try {
@@ -10812,7 +10822,6 @@ export async function duplicateBooking({
         notificationRecipients: { select: { id: true } },
       },
     });
-    const hints = getHints(request);
 
     // Split the source's snapshot into standalone and kit-driven buckets.
     // Standalone slices are copied verbatim. Kit-driven slices are
@@ -10905,20 +10914,8 @@ export async function duplicateBooking({
         data: {
           name: bookingToDuplicate.name + " (Copy)",
           description: bookingToDuplicate.description,
-          from: DateTime.fromFormat(
-            DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
-              DATE_TIME_FORMAT
-            ),
-            DATE_TIME_FORMAT,
-            { zone: hints.timeZone }
-          ).toJSDate(),
-          to: DateTime.fromFormat(
-            DateTime.fromJSDate(addDays(new Date(), 1), {
-              zone: hints.timeZone,
-            }).toFormat(DATE_TIME_FORMAT),
-            DATE_TIME_FORMAT,
-            { zone: hints.timeZone }
-          ).toJSDate(),
+          from,
+          to,
           organizationId,
           creatorId: userId,
           status: BookingStatus.DRAFT,

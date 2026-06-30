@@ -3834,11 +3834,18 @@ describe("getBooking", () => {
 });
 
 describe("duplicateBooking", () => {
+  // Shared booking window reused across duplicate scenarios: a fixed future
+  // window, intentionally distinct from any now/tomorrow default, so assertions
+  // prove the caller-provided dates flow through. Centralized so a contract
+  // change only needs editing here.
+  const DUPLICATE_FROM = new Date("2099-08-01T09:00:00.000Z");
+  const DUPLICATE_TO = new Date("2099-08-03T17:00:00.000Z");
+
   beforeEach(() => {
     vitest.clearAllMocks();
   });
 
-  it("should duplicate booking successfully", async () => {
+  it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);
 
     const originalBooking = {
@@ -3865,6 +3872,9 @@ describe("duplicateBooking", () => {
       name: "Copy of Test Booking",
     };
 
+    const from = DUPLICATE_FROM;
+    const to = DUPLICATE_TO;
+
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue(originalBooking);
     //@ts-expect-error missing vitest type
@@ -3874,6 +3884,8 @@ describe("duplicateBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      from,
+      to,
       request: new Request("https://example.com"),
     });
 
@@ -3884,6 +3896,8 @@ describe("duplicateBooking", () => {
           status: BookingStatus.DRAFT,
           organizationId: "org-1",
           creatorId: "user-1",
+          from,
+          to,
         }),
       })
     );
@@ -3993,6 +4007,8 @@ describe("duplicateBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
       request: new Request("https://example.com"),
     });
 
@@ -4143,6 +4159,8 @@ describe("duplicateBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
       request: new Request("https://example.com"),
     });
 
