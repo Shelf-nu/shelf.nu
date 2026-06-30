@@ -24,7 +24,9 @@ export function resolveUserDisplayName(
   return `${first} ${last}`.trim();
 }
 
-/** Resolves the team member name and includes an email if needed */
+/** Resolves the team member name and includes an email if needed.
+ *  Null-safe — returns "" when teamMember is null/undefined.
+ */
 export const resolveTeamMemberName = (
   teamMember: {
     name: string;
@@ -34,6 +36,7 @@ export const resolveTeamMemberName = (
   },
   includeEmail?: boolean
 ): string => {
+  if (!teamMember) return "";
   const displayName = teamMember?.user
     ? resolveUserDisplayName(teamMember.user)
     : "";
