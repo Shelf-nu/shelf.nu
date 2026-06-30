@@ -17,6 +17,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
+import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
@@ -159,6 +160,8 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
+        <BulkArchiveDialog type="archive" />
+        <BulkArchiveDialog type="reinstate" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
       </When>
@@ -400,6 +403,23 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   label="Mark as unavailable"
                   type="unavailable"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="archive"
+                  label="Archive"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="reinstate"
+                  label="Reinstate"
                   onClick={closeMenu}
                   disabled={isLoading}
                 />

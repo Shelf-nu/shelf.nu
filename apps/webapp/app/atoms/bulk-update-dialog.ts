@@ -16,6 +16,7 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   activate: false,
   deactivate: false,
   archive: false,
+  reinstate: false,
   cancel: false,
   available: false,
   unavailable: false,
