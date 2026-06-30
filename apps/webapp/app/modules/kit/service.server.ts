@@ -3021,16 +3021,37 @@ export async function updateKitLocation({
             where: { kitId: id },
             select: { id: true, assetId: true, quantity: true },
           });
-          if (assetKitsForKit.length > 0) {
-            await tx.assetLocation.createMany({
-              data: assetKitsForKit.map((ak) => ({
-                assetId: ak.assetId,
-                locationId: newLocationId,
-                organizationId,
-                quantity: ak.quantity,
-                assetKitId: ak.id,
-              })),
-            });
+          // Skip INDIVIDUAL assets that already hold a manual
+          // AssetLocation row (`assetKitId IS NULL`). The
+          // `enforce_individual_asset_single_location` trigger
+          // (packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql)
+          // permits at most one AssetLocation row per INDIVIDUAL asset:
+          // manual placements override kit-driven cascades for
+          // INDIVIDUAL assets — they can hold at most one
+          // AssetLocation row.
+          const manualAssetIds = new Set(
+            (
+              await tx.assetLocation.findMany({
+                where: {
+                  assetId: { in: assetKitsForKit.map((ak) => ak.assetId) },
+                  assetKitId: null,
+                  asset: { type: "INDIVIDUAL" },
+                },
+                select: { assetId: true },
+              })
+            ).map((r) => r.assetId)
+          );
+          const dataToCreate = assetKitsForKit
+            .filter((ak) => !manualAssetIds.has(ak.assetId))
+            .map((ak) => ({
+              assetId: ak.assetId,
+              locationId: newLocationId,
+              organizationId,
+              quantity: ak.quantity,
+              assetKitId: ak.id,
+            }));
+          if (dataToCreate.length > 0) {
+            await tx.assetLocation.createMany({ data: dataToCreate });
           }
         }
 
@@ -3334,16 +3355,37 @@ export async function bulkUpdateKitLocation({
             where: { kitId: { in: actualKitIds } },
             select: { id: true, assetId: true, quantity: true },
           });
-          if (assetKitsForKits.length > 0) {
-            await tx.assetLocation.createMany({
-              data: assetKitsForKits.map((ak) => ({
-                assetId: ak.assetId,
-                locationId: newLocationId,
-                organizationId,
-                quantity: ak.quantity,
-                assetKitId: ak.id,
-              })),
-            });
+          // Skip INDIVIDUAL assets that already hold a manual
+          // AssetLocation row (`assetKitId IS NULL`). The
+          // `enforce_individual_asset_single_location` trigger
+          // (packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql)
+          // permits at most one AssetLocation row per INDIVIDUAL asset:
+          // manual placements override kit-driven cascades for
+          // INDIVIDUAL assets — they can hold at most one
+          // AssetLocation row.
+          const manualAssetIds = new Set(
+            (
+              await tx.assetLocation.findMany({
+                where: {
+                  assetId: { in: assetKitsForKits.map((ak) => ak.assetId) },
+                  assetKitId: null,
+                  asset: { type: "INDIVIDUAL" },
+                },
+                select: { assetId: true },
+              })
+            ).map((r) => r.assetId)
+          );
+          const dataToCreate = assetKitsForKits
+            .filter((ak) => !manualAssetIds.has(ak.assetId))
+            .map((ak) => ({
+              assetId: ak.assetId,
+              locationId: newLocationId,
+              organizationId,
+              quantity: ak.quantity,
+              assetKitId: ak.id,
+            }));
+          if (dataToCreate.length > 0) {
+            await tx.assetLocation.createMany({ data: dataToCreate });
           }
         }
 
