@@ -214,6 +214,11 @@ export default createHonoServer<ServerEnv>({
           "/reset-password",
           "/send-otp",
           "/healthcheck",
+          // Native-app deep-link association files (iOS Universal Links /
+          // Android App Links). Must be publicly reachable — the OS fetches
+          // them unauthenticated to verify the Companion app's domain claim.
+          "/.well-known/apple-app-site-association",
+          "/.well-known/assetlinks.json",
           "/api/public-stats",
           "/api/oss-friends",
           "/api/stripe-webhook",

@@ -3,6 +3,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  assertMobileCanUseBookings,
   getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
@@ -46,6 +47,8 @@ export async function action({ request }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.checkin,
     });
+
+    await assertMobileCanUseBookings(organizationId);
 
     const body = await request.json();
     const { bookingId, assetIds, timeZone } = z

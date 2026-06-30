@@ -7,7 +7,11 @@ import {
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
-import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
+import {
+  assertCanUseBookings,
+  canUseAudits,
+  canUseBarcodes,
+} from "~/utils/subscription.server";
 import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
@@ -240,6 +244,36 @@ export async function getMobileUserContext(
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
   };
+}
+
+/**
+ * Asserts the organization may use bookings — a TEAM-plan feature. Mobile twin
+ * of the web route-layer `assertCanUseBookings` gate.
+ *
+ * `requireOrganizationAccess` only proves membership and returns the org id, so
+ * this loads the org `type` before asserting. Every mobile booking endpoint
+ * (create/update/reserve/remove + checkout/checkin/partial) should call this so
+ * personal workspaces can't use bookings on mobile, matching web.
+ *
+ * @param organizationId - The caller's active organization id.
+ * @throws {ShelfError} 404 if the org is missing; 403 for personal workspaces.
+ */
+export async function assertMobileCanUseBookings(organizationId: string) {
+  const organization = await db.organization.findUnique({
+    where: { id: organizationId },
+    select: { type: true },
+  });
+
+  if (!organization) {
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found.",
+      label: "Auth",
+      status: 404,
+    });
+  }
+
+  assertCanUseBookings(organization);
 }
 
 /**
