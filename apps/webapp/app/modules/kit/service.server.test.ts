@@ -29,7 +29,7 @@ import {
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
-import { createNotes } from "../note/service.server";
+import { createNote, createNotes } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
@@ -46,6 +46,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirstOrThrow: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -192,6 +193,14 @@ vitest.mock("~/modules/note/service.server", () => ({
   createKitMoveNote: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: `bulkUpdateKitLocation` writes per-location system notes via
+// `createSystemLocationNote` after the tx commits. Stubbed so tests
+// don't depend on the real note pipeline (which calls into db.note
+// + markdoc helpers and would unmask unrelated mock gaps).
+vitest.mock("~/modules/location-note/service.server", () => ({
+  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
+}));
+
 // why: testing kit service without executing actual activity event recording
 vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vitest.fn().mockResolvedValue(undefined),
@@ -242,7 +251,9 @@ describe("createKit", () => {
     );
     //@ts-expect-error missing vitest type
     db.location.findFirst.mockImplementation(({ where }) =>
-      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+      where?.id
+        ? Promise.resolve({ id: where.id, name: where.id })
+        : Promise.resolve(null)
     );
   });
 
@@ -445,7 +456,9 @@ describe("updateKit", () => {
     );
     //@ts-expect-error missing vitest type
     db.location.findFirst.mockImplementation(({ where }) =>
-      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+      where?.id
+        ? Promise.resolve({ id: where.id, name: where.id })
+        : Promise.resolve(null)
     );
   });
 
@@ -3203,5 +3216,526 @@ describe("moveAssetKitUnits", () => {
     expect(db.assetLocation.createMany).not.toHaveBeenCalled();
     expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
     expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Verifies the kit-location cascade respects the
+ * `enforce_individual_asset_single_location` Postgres trigger
+ * (packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql).
+ *
+ * INDIVIDUAL assets that already hold a manual AssetLocation row
+ * (`assetKitId IS NULL`) must be skipped when re-creating kit-driven
+ * AssetLocation rows: the trigger permits at most one row per
+ * INDIVIDUAL asset, so a blind `createMany` raises 23514.
+ *
+ * QUANTITY_TRACKED assets and INDIVIDUAL assets with no manual row are
+ * cascaded normally.
+ */
+describe("updateKitLocation - manual placement guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: `assertLocationBelongsToOrg` calls `db.location.findFirst` —
+    // echo a row back for any id so the guard passes (a stricter
+    // version of the createKit mock above).
+    //@ts-expect-error missing vitest type
+    db.location.findFirst.mockImplementation(({ where }) =>
+      where?.id
+        ? Promise.resolve({ id: where.id, name: where.id })
+        : Promise.resolve(null)
+    );
+  });
+
+  it("control: cascades all QUANTITY_TRACKED assets when no manual rows exist", async () => {
+    expect.assertions(3);
+
+    const kitRow = {
+      id: "kit-1",
+      name: "Kit 1",
+      assetKits: [
+        {
+          quantity: 10,
+          asset: {
+            id: "asset-qty",
+            title: "Batch",
+            type: AssetType.QUANTITY_TRACKED,
+            quantity: 50,
+            unitOfMeasure: "kg",
+            assetLocations: [],
+          },
+        },
+      ],
+    };
+
+    // why: kit fetched at the top of `updateKitLocation` — drives the
+    // in-memory `kit.assets` list that the cascade + audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findUnique.mockResolvedValue(kitRow);
+    // why: post-deleteMany re-read of the kit's AssetKit rows; the resulting
+    // ids/quantities are what the cascade writes into `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-1", assetId: "asset-qty", quantity: 10 },
+    ]);
+    // why: manual-row probe — empty here so the control path cascades every
+    // asset (no INDIVIDUAL manual placement blocks the cascade).
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: null,
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetKit: { kitId: "kit-1" } },
+    });
+    // Manual-row probe ran.
+    expect(db.assetLocation.findMany).toHaveBeenCalledWith({
+      where: {
+        assetId: { in: ["asset-qty"] },
+        assetKitId: null,
+        asset: { type: "INDIVIDUAL" },
+      },
+      select: { assetId: true },
+    });
+    // Cascade row created for the qty-tracked asset.
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-qty",
+          locationId: "loc-new",
+          organizationId: "org-1",
+          quantity: 10,
+          assetKitId: "ak-1",
+        },
+      ],
+    });
+  });
+
+  it("control: cascades INDIVIDUAL assets when no manual row blocks them", async () => {
+    expect.assertions(2);
+
+    const kitRow = {
+      id: "kit-1",
+      name: "Kit 1",
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "asset-ind",
+            title: "Single",
+            type: AssetType.INDIVIDUAL,
+            quantity: null,
+            unitOfMeasure: null,
+            assetLocations: [],
+          },
+        },
+      ],
+    };
+
+    // why: kit fetched at the top of `updateKitLocation` — drives the
+    // in-memory `kit.assets` list that the cascade + audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findUnique.mockResolvedValue(kitRow);
+    // why: post-deleteMany re-read of the kit's AssetKit rows; the resulting
+    // ids/quantities are what the cascade writes into `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-ind", assetId: "asset-ind", quantity: 1 },
+    ]);
+    // why: manual-row probe — empty so the INDIVIDUAL asset is free to take
+    // the kit-driven row (no `enforce_individual_asset_single_location` conflict).
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: null,
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetKit: { kitId: "kit-1" } },
+    });
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-ind",
+          locationId: "loc-new",
+          organizationId: "org-1",
+          quantity: 1,
+          assetKitId: "ak-ind",
+        },
+      ],
+    });
+  });
+
+  it("regression: skips INDIVIDUAL asset whose manual AssetLocation row already exists", async () => {
+    expect.assertions(3);
+
+    const kitRow = {
+      id: "kit-1",
+      name: "Kit 1",
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "asset-ind-manual",
+            title: "Manually placed",
+            type: AssetType.INDIVIDUAL,
+            quantity: null,
+            unitOfMeasure: null,
+            assetLocations: [
+              { location: { id: "loc-manual", name: "Manual Loc" } },
+            ],
+          },
+        },
+        {
+          quantity: 5,
+          asset: {
+            id: "asset-qty",
+            title: "Batch",
+            type: AssetType.QUANTITY_TRACKED,
+            quantity: 50,
+            unitOfMeasure: "kg",
+            assetLocations: [],
+          },
+        },
+      ],
+    };
+
+    // why: kit fetched at the top of `updateKitLocation` — drives the
+    // in-memory `kit.assets` list that the cascade + audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findUnique.mockResolvedValue(kitRow);
+    // why: post-deleteMany re-read of the kit's AssetKit rows; the resulting
+    // ids/quantities are what the cascade writes into `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-ind", assetId: "asset-ind-manual", quantity: 1 },
+      { id: "ak-qty", assetId: "asset-qty", quantity: 5 },
+    ]);
+    // why: manual-row probe — populated for the INDIVIDUAL asset so the
+    // guard must skip it (manual placement wins over kit cascade).
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([
+      { assetId: "asset-ind-manual" },
+    ]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: null,
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    // Kit-driven rows still cleared.
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetKit: { kitId: "kit-1" } },
+    });
+    // createMany payload omits the manually-placed INDIVIDUAL asset.
+    expect(db.assetLocation.createMany).toHaveBeenCalledTimes(1);
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-qty",
+          locationId: "loc-new",
+          organizationId: "org-1",
+          quantity: 5,
+          assetKitId: "ak-qty",
+        },
+      ],
+    });
+  });
+
+  it("regression: skipped INDIVIDUAL asset emits no event and no note", async () => {
+    expect.assertions(4);
+
+    // Same setup as the regression case above — kit-1 contains an INDIVIDUAL
+    // asset (manual row exists) + a QUANTITY_TRACKED asset (no manual row).
+    const kitRow = {
+      id: "kit-1",
+      name: "Kit 1",
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "asset-ind-manual",
+            title: "Manually placed",
+            type: AssetType.INDIVIDUAL,
+            quantity: null,
+            unitOfMeasure: null,
+            assetLocations: [
+              { location: { id: "loc-manual", name: "Manual Loc" } },
+            ],
+          },
+        },
+        {
+          quantity: 5,
+          asset: {
+            id: "asset-qty",
+            title: "Batch",
+            type: AssetType.QUANTITY_TRACKED,
+            quantity: 50,
+            unitOfMeasure: "kg",
+            assetLocations: [],
+          },
+        },
+      ],
+    };
+
+    // why: kit fetched at the top of `updateKitLocation` — drives the
+    // in-memory `kit.assets` list that the cascade + audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findUnique.mockResolvedValue(kitRow);
+    // why: post-deleteMany re-read of the kit's AssetKit rows; the resulting
+    // ids/quantities are what the cascade writes into `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-ind", assetId: "asset-ind-manual", quantity: 1 },
+      { id: "ak-qty", assetId: "asset-qty", quantity: 5 },
+    ]);
+    // why: manual-row probe — populated for the INDIVIDUAL asset so the
+    // guard must skip it from both the cascade AND the audit trail.
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([
+      { assetId: "asset-ind-manual" },
+    ]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: null,
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    // Event fires for the cascaded QT asset only — the skipped INDIVIDUAL
+    // asset must not appear (audit trail matches persisted state).
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    const eventsArg = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(eventsArg.map((e: { assetId: string }) => e.assetId)).toEqual([
+      "asset-qty",
+    ]);
+    // Note fires for the cascaded QT asset only.
+    const noteCalls = (createNote as ReturnType<typeof vitest.fn>).mock.calls;
+    const noteAssetIds = noteCalls.map(
+      (c) => (c[0] as { assetId: string }).assetId
+    );
+    expect(noteAssetIds).toEqual(["asset-qty"]);
+    expect(noteAssetIds).not.toContain("asset-ind-manual");
+  });
+});
+
+describe("bulkUpdateKitLocation - manual placement guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: `assertLocationBelongsToOrg` calls `db.location.findFirst` —
+    // echo a row back for any id so the guard passes (mirrors the
+    // setup in the `updateKitLocation` describe above).
+    //@ts-expect-error missing vitest type
+    db.location.findFirst.mockImplementation(({ where }) =>
+      where?.id
+        ? Promise.resolve({ id: where.id, name: where.id })
+        : Promise.resolve(null)
+    );
+  });
+
+  it("regression: skips INDIVIDUAL asset with manual row across multiple kits", async () => {
+    expect.assertions(3);
+
+    // Two kits in the bulk set; the first contains an INDIVIDUAL asset
+    // that already has a manual AssetLocation row.
+    const kitsWithAssetsRows = [
+      {
+        id: "kit-a",
+        name: "Kit A",
+        locationId: null,
+        location: null,
+        assetKits: [
+          {
+            quantity: 1,
+            asset: {
+              id: "asset-ind-manual",
+              title: "Manually placed",
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+              unitOfMeasure: null,
+              assetLocations: [
+                { location: { id: "loc-manual", name: "Manual Loc" } },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: "kit-b",
+        name: "Kit B",
+        locationId: null,
+        location: null,
+        assetKits: [
+          {
+            quantity: 3,
+            asset: {
+              id: "asset-qty",
+              title: "Batch",
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 50,
+              unitOfMeasure: "kg",
+              assetLocations: [],
+            },
+          },
+        ],
+      },
+    ];
+
+    // why: kits fetched at the top of `bulkUpdateKitLocation` — drives
+    // the in-memory `kitsWithAssets`/`allAssets` lists that the cascade +
+    // audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsWithAssetsRows);
+    // why: post-deleteMany re-read of the bulk set's AssetKit rows; the
+    // resulting ids/quantities are what the cascade writes into
+    // `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-ind", assetId: "asset-ind-manual", quantity: 1 },
+      { id: "ak-qty", assetId: "asset-qty", quantity: 3 },
+    ]);
+    // why: manual-row probe — populated for the INDIVIDUAL asset so the
+    // guard must skip it from both the cascade AND the audit trail.
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([
+      { assetId: "asset-ind-manual" },
+    ]);
+
+    const { bulkUpdateKitLocation } = await import("./service.server");
+
+    await bulkUpdateKitLocation({
+      kitIds: ["kit-a", "kit-b"],
+      organizationId: "org-1",
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetKit: { kitId: { in: ["kit-a", "kit-b"] } } },
+    });
+    expect(db.assetLocation.createMany).toHaveBeenCalledTimes(1);
+    // Skipped asset not in payload; QT asset still cascaded.
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-qty",
+          locationId: "loc-new",
+          organizationId: "org-1",
+          quantity: 3,
+          assetKitId: "ak-qty",
+        },
+      ],
+    });
+  });
+
+  it("regression: bulk path emits no event for skipped INDIVIDUAL", async () => {
+    expect.assertions(2);
+
+    // Same setup as the bulk regression case above — kit-a holds an
+    // INDIVIDUAL asset with a manual row, kit-b holds a QT asset.
+    const kitsWithAssetsRows = [
+      {
+        id: "kit-a",
+        name: "Kit A",
+        locationId: null,
+        location: null,
+        assetKits: [
+          {
+            quantity: 1,
+            asset: {
+              id: "asset-ind-manual",
+              title: "Manually placed",
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+              unitOfMeasure: null,
+              assetLocations: [
+                { location: { id: "loc-manual", name: "Manual Loc" } },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: "kit-b",
+        name: "Kit B",
+        locationId: null,
+        location: null,
+        assetKits: [
+          {
+            quantity: 3,
+            asset: {
+              id: "asset-qty",
+              title: "Batch",
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 50,
+              unitOfMeasure: "kg",
+              assetLocations: [],
+            },
+          },
+        ],
+      },
+    ];
+
+    // why: kits fetched at the top of `bulkUpdateKitLocation` — drives
+    // the in-memory `kitsWithAssets`/`allAssets` lists that the cascade +
+    // audit-trail iterate.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsWithAssetsRows);
+    // why: post-deleteMany re-read of the bulk set's AssetKit rows; the
+    // resulting ids/quantities are what the cascade writes into
+    // `assetLocation.createMany`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-ind", assetId: "asset-ind-manual", quantity: 1 },
+      { id: "ak-qty", assetId: "asset-qty", quantity: 3 },
+    ]);
+    // why: manual-row probe — populated for the INDIVIDUAL asset so the
+    // guard must skip it from both the cascade AND the audit trail.
+    //@ts-expect-error missing vitest type
+    db.assetLocation.findMany.mockResolvedValue([
+      { assetId: "asset-ind-manual" },
+    ]);
+
+    const { bulkUpdateKitLocation } = await import("./service.server");
+
+    await bulkUpdateKitLocation({
+      kitIds: ["kit-a", "kit-b"],
+      organizationId: "org-1",
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    // Event fires for the cascaded QT asset only — the skipped INDIVIDUAL
+    // asset must not appear (audit trail matches persisted state).
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    const eventsArg = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(eventsArg.map((e: { assetId: string }) => e.assetId)).toEqual([
+      "asset-qty",
+    ]);
   });
 });

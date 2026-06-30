@@ -2987,6 +2987,11 @@ export async function updateKitLocation({
         (asset) => (getPrimaryLocation(asset)?.id ?? null) !== newLocationId
       );
 
+      // Lifted out of the tx so the post-tx note loop can also use it
+      // (without re-running the manual-row probe). Populated inside the tx
+      // once the filtered `dataToCreate` is built.
+      let cascadedAssetIds = new Set<string>();
+
       // Connect kit to the new location AND cascade per-asset placement via
       // the AssetLocation pivot, atomically with the per-asset
       // ASSET_LOCATION_CHANGED events. The DEFERRED
@@ -3021,22 +3026,54 @@ export async function updateKitLocation({
             where: { kitId: id },
             select: { id: true, assetId: true, quantity: true },
           });
-          if (assetKitsForKit.length > 0) {
-            await tx.assetLocation.createMany({
-              data: assetKitsForKit.map((ak) => ({
-                assetId: ak.assetId,
-                locationId: newLocationId,
-                organizationId,
-                quantity: ak.quantity,
-                assetKitId: ak.id,
-              })),
-            });
+          // Skip INDIVIDUAL assets that already hold a manual
+          // AssetLocation row (`assetKitId IS NULL`). The
+          // `enforce_individual_asset_single_location` trigger
+          // (packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql)
+          // permits at most one AssetLocation row per INDIVIDUAL asset:
+          // manual placements override kit-driven cascades for
+          // INDIVIDUAL assets — they can hold at most one
+          // AssetLocation row.
+          const manualAssetIds = new Set(
+            (
+              await tx.assetLocation.findMany({
+                where: {
+                  assetId: { in: assetKitsForKit.map((ak) => ak.assetId) },
+                  assetKitId: null,
+                  asset: { type: "INDIVIDUAL" },
+                },
+                select: { assetId: true },
+              })
+            ).map((r) => r.assetId)
+          );
+          const dataToCreate = assetKitsForKit
+            .filter((ak) => !manualAssetIds.has(ak.assetId))
+            .map((ak) => ({
+              assetId: ak.assetId,
+              locationId: newLocationId,
+              organizationId,
+              quantity: ak.quantity,
+              assetKitId: ak.id,
+            }));
+          // Track which assets actually got a kit-driven row so the
+          // audit-trail (events + per-asset notes) matches the persisted
+          // state — skipped manual-placement assets must not appear.
+          cascadedAssetIds = new Set(dataToCreate.map((row) => row.assetId));
+          if (dataToCreate.length > 0) {
+            await tx.assetLocation.createMany({ data: dataToCreate });
           }
         }
 
-        if (userId && assetsWithLocationChange.length > 0) {
+        // why: skipped INDIVIDUAL assets (pinned by a manual AssetLocation
+        // row) don't actually move with the kit — exclude them from the
+        // activity event so the audit trail matches the persisted state.
+        const cascadedAssetsForEvents = assetsWithLocationChange.filter(
+          (asset) => cascadedAssetIds.has(asset.id)
+        );
+
+        if (userId && cascadedAssetsForEvents.length > 0) {
           await recordEvents(
-            assetsWithLocationChange.map((asset) => ({
+            cascadedAssetsForEvents.map((asset) => ({
               organizationId,
               actorUserId: userId,
               action: "ASSET_LOCATION_CHANGED" as const,
@@ -3058,7 +3095,13 @@ export async function updateKitLocation({
       });
 
       // Add notes to assets about location update via parent kit
-      if (userId && assetIds.length > 0) {
+      // why: skipped INDIVIDUAL assets (pinned by a manual AssetLocation
+      // row) don't actually move with the kit — exclude them from the
+      // per-asset note so the audit trail matches the persisted state.
+      const cascadedAssetsForNotes = kit.assets.filter((asset) =>
+        cascadedAssetIds.has(asset.id)
+      );
+      if (userId && cascadedAssetsForNotes.length > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -3074,7 +3117,7 @@ export async function updateKitLocation({
 
         // Create individual notes for each asset
         await Promise.all(
-          kit.assets.map((asset) =>
+          cascadedAssetsForNotes.map((asset) =>
             createNote({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: getPrimaryLocation(asset), // Use the asset's current location
@@ -3301,6 +3344,11 @@ export async function bulkUpdateKitLocation({
         (asset) => (getPrimaryLocation(asset)?.id ?? null) !== newLocationId
       );
 
+      // Lifted out of the tx so the post-tx per-asset note loop can also use it
+      // (without re-running the manual-row probe). Populated inside the tx
+      // once the filtered `dataToCreate` is built.
+      let cascadedAssetIds = new Set<string>();
+
       // Connect kits to the new location AND cascade per-asset placement via
       // the AssetLocation pivot, atomically with the per-asset
       // ASSET_LOCATION_CHANGED events. The DEFERRED
@@ -3334,22 +3382,54 @@ export async function bulkUpdateKitLocation({
             where: { kitId: { in: actualKitIds } },
             select: { id: true, assetId: true, quantity: true },
           });
-          if (assetKitsForKits.length > 0) {
-            await tx.assetLocation.createMany({
-              data: assetKitsForKits.map((ak) => ({
-                assetId: ak.assetId,
-                locationId: newLocationId,
-                organizationId,
-                quantity: ak.quantity,
-                assetKitId: ak.id,
-              })),
-            });
+          // Skip INDIVIDUAL assets that already hold a manual
+          // AssetLocation row (`assetKitId IS NULL`). The
+          // `enforce_individual_asset_single_location` trigger
+          // (packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql)
+          // permits at most one AssetLocation row per INDIVIDUAL asset:
+          // manual placements override kit-driven cascades for
+          // INDIVIDUAL assets — they can hold at most one
+          // AssetLocation row.
+          const manualAssetIds = new Set(
+            (
+              await tx.assetLocation.findMany({
+                where: {
+                  assetId: { in: assetKitsForKits.map((ak) => ak.assetId) },
+                  assetKitId: null,
+                  asset: { type: "INDIVIDUAL" },
+                },
+                select: { assetId: true },
+              })
+            ).map((r) => r.assetId)
+          );
+          const dataToCreate = assetKitsForKits
+            .filter((ak) => !manualAssetIds.has(ak.assetId))
+            .map((ak) => ({
+              assetId: ak.assetId,
+              locationId: newLocationId,
+              organizationId,
+              quantity: ak.quantity,
+              assetKitId: ak.id,
+            }));
+          // Track which assets actually got a kit-driven row so the
+          // audit-trail (events + per-asset notes) matches the persisted
+          // state — skipped manual-placement assets must not appear.
+          cascadedAssetIds = new Set(dataToCreate.map((row) => row.assetId));
+          if (dataToCreate.length > 0) {
+            await tx.assetLocation.createMany({ data: dataToCreate });
           }
         }
 
-        if (assetsWithLocationChange.length > 0) {
+        // why: skipped INDIVIDUAL assets (pinned by a manual AssetLocation
+        // row) don't actually move with the kit — exclude them from the
+        // activity event so the audit trail matches the persisted state.
+        const cascadedAssetsForEvents = assetsWithLocationChange.filter(
+          (asset) => cascadedAssetIds.has(asset.id)
+        );
+
+        if (cascadedAssetsForEvents.length > 0) {
           await recordEvents(
-            assetsWithLocationChange.map((asset) => ({
+            cascadedAssetsForEvents.map((asset) => ({
               organizationId,
               actorUserId: userId,
               action: "ASSET_LOCATION_CHANGED" as const,
@@ -3371,7 +3451,15 @@ export async function bulkUpdateKitLocation({
       });
 
       // Create notes for affected assets
-      if (allAssets.length > 0) {
+      // why: skipped INDIVIDUAL assets (pinned by a manual AssetLocation
+      // row) don't actually move with the kit — exclude them from the
+      // per-asset note so the audit trail matches the persisted state.
+      // (Kit-level system notes below are emitted per-kit and remain
+      // unfiltered — they describe the kit-level movement, not asset rows.)
+      const cascadedAssetsForNotes = allAssets.filter((asset) =>
+        cascadedAssetIds.has(asset.id)
+      );
+      if (cascadedAssetsForNotes.length > 0) {
         const user = await getUserByID(userId, {
           select: {
             id: true,
@@ -3387,7 +3475,7 @@ export async function bulkUpdateKitLocation({
 
         // Create individual notes for each asset
         await Promise.all(
-          allAssets.map((asset) =>
+          cascadedAssetsForNotes.map((asset) =>
             createNote({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: getPrimaryLocation(asset),
