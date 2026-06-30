@@ -1040,6 +1040,9 @@ export async function getAssetsForAuditSession({
       select: {
         id: true,
         title: true,
+        // Surfaced so the audit row can flag an archived asset with the
+        // "Archived" badge (issue #382).
+        archivedAt: true,
         mainImage: true,
         thumbnailImage: true,
         mainImageExpiration: true,

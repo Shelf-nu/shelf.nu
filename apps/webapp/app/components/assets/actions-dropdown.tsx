@@ -96,6 +96,15 @@ const ConditionalActionsDropdown = () => {
     ? { reason: "This asset is part of a kit that's currently in use." }
     : false;
 
+  /**
+   * An archived asset is frozen: every action is disabled except Reinstate.
+   * Thread this into each action's `disabled` so the whole menu reads as
+   * read-only with one consistent reason, while Reinstate stays enabled.
+   */
+  const archivedActionDisabled: { reason: string } | false = isArchived
+    ? { reason: "This asset is archived. Reinstate it to make changes." }
+    : false;
+
   function handleMenuClose() {
     setOpen(false);
   }
@@ -228,6 +237,7 @@ const ConditionalActionsDropdown = () => {
                       width="full"
                       onClick={handleMenuClose}
                       disabled={
+                        archivedActionDisabled ||
                         custodyActionDisabled ||
                         assetIsPartOfUnavailableKit ||
                         disableReleaseForSelfService
@@ -245,7 +255,7 @@ const ConditionalActionsDropdown = () => {
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                       width="full"
                       onClick={handleMenuClose}
-                      disabled={custodyActionDisabled}
+                      disabled={archivedActionDisabled || custodyActionDisabled}
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
@@ -288,7 +298,9 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={handleMenuClose}
                     disabled={
-                      assetIsCheckedOut
+                      archivedActionDisabled
+                        ? archivedActionDisabled
+                        : assetIsCheckedOut
                         ? true
                         : assetIsPartOfKit
                         ? {
@@ -315,6 +327,7 @@ const ConditionalActionsDropdown = () => {
                   <UpdateGpsCoordinatesForm
                     // Closes the dropdown when the button is clicked
                     callback={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   />
                 </div>
                 <div className="border-b px-0 py-1 md:p-0">
@@ -324,6 +337,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
                       setIsRelinkQrDialogOpen(true);
@@ -343,6 +357,7 @@ const ConditionalActionsDropdown = () => {
                       variant="link"
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                       width="full"
+                      disabled={archivedActionDisabled}
                       onClick={() => {
                         handleMenuClose();
                         setIsSetReminderDialogOpen(true);
@@ -362,6 +377,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="pen" /> Edit
@@ -376,6 +392,7 @@ const ConditionalActionsDropdown = () => {
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
                     onClick={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="duplicate" /> Duplicate
@@ -436,7 +453,9 @@ const ConditionalActionsDropdown = () => {
                         className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
                         width="full"
                         disabled={
-                          assetIsCheckedOut || assetIsPartOfUnavailableKit
+                          archivedActionDisabled ||
+                          assetIsCheckedOut ||
+                          assetIsPartOfUnavailableKit
                         }
                       >
                         Delete

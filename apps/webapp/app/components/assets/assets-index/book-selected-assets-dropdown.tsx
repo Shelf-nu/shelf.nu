@@ -79,6 +79,14 @@ function ConditionalActionsDropdown() {
       };
     }
 
+    /** If any selected asset is archived (frozen — can't be booked). */
+    const someAssetsArchived = realAssets.some((asset) => !!asset.archivedAt);
+    if (someAssetsArchived) {
+      return {
+        reason: "Some of the assets are archived. Reinstate them to book.",
+      };
+    }
+
     /** If any asset is marked as unavailable. */
     const someAssetsMarkedUnavailable = realAssets.some(
       (asset) => !asset.availableToBook

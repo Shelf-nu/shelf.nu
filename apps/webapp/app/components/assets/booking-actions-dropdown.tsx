@@ -30,7 +30,9 @@ export default function BookingActionsDropdown() {
       }
     : false;
 
-  const disabledTrigger = availableToBook
+  const disabledTrigger = asset.archivedAt
+    ? { reason: "This asset is archived. Reinstate it to book it." }
+    : availableToBook
     ? false
     : {
         reason: "This asset has been marked as unavailable for bookings.",

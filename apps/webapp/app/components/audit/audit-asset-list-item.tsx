@@ -14,6 +14,7 @@
 
 import { useLoaderData } from "react-router";
 
+import { ArchivedBadge } from "~/components/assets/archived-badge";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
@@ -124,9 +125,10 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode ? (
+              {displayCode || item.archivedAt ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <AssetCodeBadge {...displayCode} />
+                  {item.archivedAt ? <ArchivedBadge /> : null}
+                  {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
                 </div>
               ) : null}
             </div>

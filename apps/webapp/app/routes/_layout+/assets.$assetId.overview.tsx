@@ -1505,12 +1505,17 @@ export default function AssetOverview() {
                   <Switch
                     name={zo.fields.availableToBook()}
                     disabled={
-                      !canUpdateAvailability || isFormProcessing(fetcher.state)
-                    } // Disable for self service users
+                      !canUpdateAvailability ||
+                      isFormProcessing(fetcher.state) ||
+                      // Archived assets are frozen: no actions except reinstate.
+                      !!asset?.archivedAt
+                    } // Disable for self service users + archived assets
                     defaultChecked={asset?.availableToBook}
                     required
                     title={
-                      !canUpdateAvailability
+                      asset?.archivedAt
+                        ? "This asset is archived. Reinstate it to change availability."
+                        : !canUpdateAvailability
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }

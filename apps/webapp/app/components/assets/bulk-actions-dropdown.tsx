@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -82,6 +83,18 @@ function ConditionalDropdown() {
   const disabled = selectedAssets.length === 0;
 
   const allSelected = isSelectingAllItems(selectedAssets);
+
+  const [searchParams] = useSearchParams();
+  // In the Archived view the selection is archived assets, which are frozen:
+  // every bulk action is disabled except Reinstate (the calm "archived =
+  // read-only except reinstate" rule, issue #382).
+  const archivedView = searchParams.get("archived") === "archived";
+  const archivedBulkDisabled: { reason: string } | false = archivedView
+    ? {
+        reason:
+          "Archived assets are read-only. Reinstate them to make changes.",
+      }
+    : false;
 
   const { roles, isSelfService } = useUserRoleHelper();
   const user = useUserData();
@@ -264,7 +277,7 @@ function ConditionalDropdown() {
                   type="start-audit"
                   label="Create audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -281,7 +294,7 @@ function ConditionalDropdown() {
                   type="add-to-audit"
                   label="Add to existing audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -299,7 +312,8 @@ function ConditionalDropdown() {
                   label="Release custody"
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreInCustody ||
+                    archivedBulkDisabled ||
+                    (!allAssetsAreInCustody ||
                     someAssetPartOfUnavailableKit ||
                     disableReleaseCustody
                       ? {
@@ -309,7 +323,7 @@ function ConditionalDropdown() {
                             ? "Self service can only release their own custody."
                             : "Some of the selected assets are not in custody.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -319,13 +333,14 @@ function ConditionalDropdown() {
                   label={isSelfService ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreAvailable || someAssetPartOfUnavailableKit
+                    archivedBulkDisabled ||
+                    (!allAssetsAreAvailable || someAssetPartOfUnavailableKit
                       ? {
                           reason: someAssetPartOfUnavailableKit
                             ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
                             : "Some of the selected assets are not available.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -342,7 +357,7 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="tag-add"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Assign tags"
                 />
               </DropdownMenuItem>
@@ -350,7 +365,7 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="tag-remove"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Remove tags"
                 />
               </DropdownMenuItem>
@@ -358,14 +373,14 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="location"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -374,12 +389,13 @@ function ConditionalDropdown() {
                   type="add-to-kit"
                   onClick={closeMenu}
                   disabled={
-                    someAssetCheckedOut
+                    archivedBulkDisabled ||
+                    (someAssetCheckedOut
                       ? {
                           reason:
                             "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -388,7 +404,7 @@ function ConditionalDropdown() {
                   label="Remove from kit"
                   type="remove-from-kit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -396,7 +412,7 @@ function ConditionalDropdown() {
                   label="Mark as available"
                   type="available"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-b py-1 lg:p-0">
@@ -404,7 +420,7 @@ function ConditionalDropdown() {
                   label="Mark as unavailable"
                   type="unavailable"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
 
@@ -413,7 +429,11 @@ function ConditionalDropdown() {
                   type="archive"
                   label="Archive"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={
+                    archivedView
+                      ? { reason: "These assets are already archived." }
+                      : isLoading
+                  }
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-b py-1 lg:p-0">
@@ -421,7 +441,14 @@ function ConditionalDropdown() {
                   type="reinstate"
                   label="Reinstate"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={
+                    archivedView
+                      ? isLoading
+                      : {
+                          reason:
+                            "Switch to the Archived view to reinstate assets.",
+                        }
+                  }
                 />
               </DropdownMenuItem>
 
@@ -431,12 +458,13 @@ function ConditionalDropdown() {
                   label="Delete"
                   onClick={closeMenu}
                   disabled={
-                    someAssetCheckedOut
+                    archivedBulkDisabled ||
+                    (someAssetCheckedOut
                       ? {
                           reason:
                             "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
