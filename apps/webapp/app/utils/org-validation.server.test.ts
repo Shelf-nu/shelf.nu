@@ -15,10 +15,6 @@
 import { ShelfError } from "./error";
 import {
   assertAssetsBelongToOrg,
-  assertCustomFieldsBelongToOrg,
-  assertTagsBelongToOrg,
-  assertTagsAssignableToAssets,
-  assertTeamMemberBelongsToOrg,
   assertAssetKitsBelongToOrg,
   assertAssetModelBelongsToOrg,
   assertCategoryBelongsToOrg,
@@ -27,6 +23,7 @@ import {
   assertLocationBelongsToOrg,
   assertLocationsBelongToOrg,
   assertTagsBelongToOrg,
+  assertTagsAssignableToAssets,
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
