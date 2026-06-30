@@ -94,8 +94,10 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    // A real $0 valuation renders as "$0" (or workspace equivalent), not "—".
-    cell: ({ row }) => <CurrencyCell value={row.original.valuation} />,
+    // Asset-aware: shows TOTAL (valuation × quantity) for QT assets, with
+    // a "<unit price> × N <unit>" subtext. A real $0 valuation renders as
+    // "$0" (or workspace equivalent), not "—". See {@link CurrencyCell}.
+    cell: ({ row }) => <CurrencyCell asset={row.original} />,
   },
 ];
 

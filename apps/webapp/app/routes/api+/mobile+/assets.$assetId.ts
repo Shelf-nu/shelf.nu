@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -44,7 +45,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         updatedAt: true,
         userId: true,
         category: { select: { id: true, name: true, color: true } },
-        location: { select: { id: true, name: true } },
+        // Select location through the pivot and synthesise the singular
+        // `location` below so the mobile JSON contract stays flat.
+        assetLocations: {
+          select: { location: { select: { id: true, name: true } } },
+        },
         custody: {
           select: {
             createdAt: true,
@@ -64,7 +69,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             },
           },
         },
-        kit: { select: { id: true, name: true, status: true } },
+        assetKits: {
+          select: {
+            kit: { select: { id: true, name: true, status: true } },
+          },
+        },
         tags: { select: { id: true, name: true } },
         qrCodes: { select: { id: true } },
         organization: { select: { currency: true } },
@@ -103,11 +112,63 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    // Strip internal user id; keep mainImageExpiration so the client can
-    // decide when to call the refresh endpoint.
-    const { userId: _, ...assetData } = asset;
+    // Flatten kit / location / custody via the shared mobile shaper so the
+    // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,
+    // single-or-null `asset.custody`) is preserved. The helper expects a
+    // narrower select than this detail route loads — we hand it a projected
+    // view, then merge the detail-only fields (notes, customFields, tags,
+    // qrCodes, organization, valuation, timestamps, etc.) back on top.
+    //
+    // why: the detail-endpoint selects a richer `custody` shape than the
+    // helper (it includes `createdAt` + nested `custodian.user` for the
+    // "Custody Since" + email rows on the asset detail screen) — so we
+    // discard the helper's `custody` and re-attach the detail-shaped one
+    // below. Same trick for `category` (detail loads id+name+color, helper
+    // only types {name}).
+    const flattened = shapeMobileAssetResponse({
+      id: asset.id,
+      title: asset.title,
+      status: asset.status,
+      mainImage: asset.mainImage,
+      availableToBook: asset.availableToBook,
+      // Helper's `category` type is `{ name } | null`; widen-then-narrow.
+      category: asset.category ? { name: asset.category.name } : null,
+      assetKits: asset.assetKits.map((ak) => ({
+        kit: { id: ak.kit.id, name: ak.kit.name },
+      })),
+      assetLocations: asset.assetLocations,
+      custody: asset.custody.map((c) => ({
+        custodian: { id: c.custodian.id, name: c.custodian.name },
+      })),
+    });
 
-    return data({ asset: assetData });
+    // Strip internal user id and the raw pivot arrays the helper already
+    // flattened; keep mainImageExpiration so the client can decide when to
+    // call the refresh endpoint. Re-attach the richer detail-only custody +
+    // category shapes that the companion's asset-detail screen reads.
+    const {
+      userId: _,
+      assetLocations: __,
+      assetKits: ___,
+      custody: detailCustody,
+      category: detailCategory,
+      ...assetData
+    } = asset;
+
+    return data({
+      asset: {
+        ...assetData,
+        kit: flattened.kit,
+        kitId: flattened.kitId,
+        location: flattened.location,
+        // why: re-attach the detail-shape custody (with createdAt +
+        // custodian.user) — the helper's narrower shape drops both.
+        custody: detailCustody[0] ?? null,
+        // why: re-attach the wider category shape (id + color) the detail
+        // endpoint loads — the helper only types {name}.
+        category: detailCategory,
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

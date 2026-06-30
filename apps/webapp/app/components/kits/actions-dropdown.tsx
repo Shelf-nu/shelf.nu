@@ -61,8 +61,16 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     select: { custodian: { select: { userId: true } } };
   }>;
 
-  const someAssetIsNotAvailable = kit.assets.some(
-    (asset) => asset.status !== "AVAILABLE"
+  // QUANTITY_TRACKED assets don't block kit actions: their row-level status
+  // can be IN_CUSTODY because *some* units are operator-allocated, but
+  // Option B math (Phase 3d-Polish-2 `buildKitCustodyInheritData`) handles
+  // that on assign by writing only the remaining-pool quantity. Same
+  // precedent as the manage-assets picker filter (asset/service.server.ts).
+  // Fully-allocated qty-tracked assets are silently skipped by Option B,
+  // they still don't block.
+  const someAssetIsNotAvailable = kit.assetKits.some(
+    (ak) =>
+      ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
   );
 
   const { roles, isSelfService } = useUserRoleHelper();
@@ -299,7 +307,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         contextType="kit"
         contextId={kit.id}
         contextName={kit.name}
-        assetCount={kit.assets.length}
+        assetCount={kit.assetKits.length}
         open={isStartAuditOpen}
         onClose={() => setIsStartAuditOpen(false)}
         showTrigger={false}

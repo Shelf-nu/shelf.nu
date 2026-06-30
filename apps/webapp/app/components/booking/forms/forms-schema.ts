@@ -199,40 +199,46 @@ interface BookingFormSchemaParams {
 }
 
 /**
- * Returns a Zod validation schema for the booking form based on the action and booking status.
+ * Parameters for the date-only booking validators.
  *
- * Validation logic depends on two factors: the booking `status` and the `action` being performed.
- *
- * - Action: "new"
- *   - All fields are updated.
- *
- * - Action: "save"
- *   - If status is "DRAFT":
- *     - All fields are updated.
- *   - If status is "RESERVED", "ONGOING", or "OVERDUE":
- *     - Only `name` and `description` are updated.
- *
- * - Action: "reserve"
- *   - All fields are updated.
- *
- * - Other actions:
- *   - No relevant fields are updated.
- *   - Only base-level validation applies.
+ * Reuses the exact field types from {@link BookingFormSchemaParams} (via
+ * `Pick`) so every caller that validates booking dates — the new-booking form
+ * and the duplicate dialog — shares identical inputs and therefore identical
+ * rules. `bookingSettings.tagsRequired` rides along but is irrelevant to the
+ * date logic, which only reads buffer/max-length settings.
  */
-export function BookingFormSchema({
+export type BookingDateSchemaParams = Pick<
+  BookingFormSchemaParams,
+  "hints" | "workingHours" | "bookingSettings" | "isAdminOrOwner"
+>;
+
+/**
+ * Builds the three Zod pieces that validate a booking's start/end dates:
+ * the per-field start schema, the per-field end schema, and the cross-field
+ * `superRefine` that compares the two and enforces max booking length.
+ *
+ * This is the single source of truth for booking date validation. Both
+ * {@link BookingFormSchema} and {@link DuplicateBookingSchema} consume it so
+ * the duplicate dialog validates dates with exactly the same rules — same Zod
+ * issue codes, messages, and error paths — as the new-booking form.
+ *
+ * For ADMIN/OWNER callers (`isAdminOrOwner`), the buffer-start and max-length
+ * restrictions are bypassed; working-hours restrictions still apply when
+ * enabled.
+ *
+ * @param params - The hints, raw working hours, booking settings, and
+ *   admin/owner flag. See {@link BookingDateSchemaParams}.
+ * @returns The `startDateSchema`, `endDateSchema`, and `crossFieldDateValidation`
+ *   refinement, ready to compose into a `z.object(...).superRefine(...)`.
+ */
+function buildBookingDateSchemas({
   hints,
-  action,
-  status,
   workingHours: rawWorkingHours,
   bookingSettings,
   isAdminOrOwner = false,
-}: BookingFormSchemaParams) {
-  const {
-    bufferStartTime,
-    tagsRequired,
-    maxBookingLength,
-    maxBookingLengthSkipClosedDays,
-  } = bookingSettings;
+}: BookingDateSchemaParams) {
+  const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
+    bookingSettings;
 
   // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
   // They can still be restricted by working hours if enabled
@@ -242,40 +248,9 @@ export function BookingFormSchema({
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
-  // Base schema - let TypeScript infer the complex Zod types
-  const baseSchema = z.object({
-    name: z.string().min(2, "Name is required"),
-    assetIds: z.array(z.string()).optional(),
-    description: z.string().optional(),
-    custodian: z
-      .string()
-      .transform((val, ctx) => {
-        if (!val && val === "") {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Please select a custodian",
-          });
-          return z.NEVER;
-        }
-        return JSON.parse(val);
-      })
-      .pipe(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          userId: z.string().optional().nullable(),
-        })
-      ),
-    startDate: coerceLocalDate(hints?.timeZone).optional(),
-    endDate: coerceLocalDate(hints?.timeZone).optional(),
-    tags: tagsRequired
-      ? z.string().min(1, "At least one tag is required")
-      : z.string().optional(),
-  });
-
   // Create enhanced date schemas with working hours and buffer validation
-  const createValidatedStartDateSchema = () =>
-    coerceLocalDate(hints?.timeZone).superRefine((data, ctx) => {
+  const startDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+    (data, ctx) => {
       // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
@@ -304,10 +279,11 @@ export function BookingFormSchema({
           });
         }
       }
-    });
+    }
+  );
 
-  const createValidatedEndDateSchema = () =>
-    coerceLocalDate(hints?.timeZone).superRefine((data, ctx) => {
+  const endDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+    (data, ctx) => {
       // Only validate working hours for end date (no future date requirement)
       if (workingHours && hints?.timeZone) {
         const validation = validateWorkingHours(
@@ -322,7 +298,8 @@ export function BookingFormSchema({
           });
         }
       }
-    });
+    }
+  );
 
   const crossFieldDateValidation = (data: any, ctx: z.RefinementCtx) => {
     if (data.endDate && data.startDate && data.endDate <= data.startDate) {
@@ -362,10 +339,98 @@ export function BookingFormSchema({
     }
   };
 
+  return { startDateSchema, endDateSchema, crossFieldDateValidation };
+}
+
+/**
+ * Returns a Zod validation schema for the booking form based on the action and booking status.
+ *
+ * Validation logic depends on two factors: the booking `status` and the `action` being performed.
+ *
+ * - Action: "new"
+ *   - All fields are updated.
+ *
+ * - Action: "save"
+ *   - If status is "DRAFT":
+ *     - All fields are updated.
+ *   - If status is "RESERVED", "ONGOING", or "OVERDUE":
+ *     - Only `name` and `description` are updated.
+ *
+ * - Action: "reserve"
+ *   - All fields are updated.
+ *
+ * - Other actions:
+ *   - No relevant fields are updated.
+ *   - Only base-level validation applies.
+ *
+ * @param params - The form schema inputs. See {@link BookingFormSchemaParams}.
+ * @param params.hints - Client hints (timezone) used to coerce/validate dates.
+ * @param params.action - The form action ("new" | "save" | "reserve"); selects
+ *   which field set and refinements apply.
+ * @param params.status - The current booking status (drives the "save" branch).
+ * @param params.workingHours - The org's working-hours config (normalized
+ *   internally) used to validate start/end dates.
+ * @param params.bookingSettings - Buffer, tag-required, and max-length settings.
+ * @param params.isAdminOrOwner - When true, buffer/max-length restrictions are
+ *   bypassed (working-hours restrictions still apply).
+ * @returns A Zod schema (with cross-field date refinement) for the booking form,
+ *   shaped per the given `action`/`status`.
+ */
+export function BookingFormSchema({
+  hints,
+  action,
+  status,
+  workingHours: rawWorkingHours,
+  bookingSettings,
+  isAdminOrOwner = false,
+}: BookingFormSchemaParams) {
+  const { tagsRequired } = bookingSettings;
+
+  // Build the shared start/end date validators so the form validates dates with
+  // exactly the same rules as the duplicate dialog (single source of truth).
+  const { startDateSchema, endDateSchema, crossFieldDateValidation } =
+    buildBookingDateSchemas({
+      hints,
+      workingHours: rawWorkingHours,
+      bookingSettings,
+      isAdminOrOwner,
+    });
+
+  // Base schema - let TypeScript infer the complex Zod types
+  const baseSchema = z.object({
+    name: z.string().min(2, "Name is required"),
+    assetIds: z.array(z.string()).optional(),
+    description: z.string().optional(),
+    custodian: z
+      .string()
+      .transform((val, ctx) => {
+        if (!val && val === "") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Please select a custodian",
+          });
+          return z.NEVER;
+        }
+        return JSON.parse(val);
+      })
+      .pipe(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          userId: z.string().optional().nullable(),
+        })
+      ),
+    startDate: coerceLocalDate(hints?.timeZone).optional(),
+    endDate: coerceLocalDate(hints?.timeZone).optional(),
+    tags: tagsRequired
+      ? z.string().min(1, "At least one tag is required")
+      : z.string().optional(),
+  });
+
   // Enhanced schema with date validation
   const fullSchema = baseSchema.extend({
-    startDate: createValidatedStartDateSchema(),
-    endDate: createValidatedEndDateSchema(),
+    startDate: startDateSchema,
+    endDate: endDateSchema,
   });
 
   // Schema with ID field for existing bookings
@@ -411,6 +476,50 @@ export function BookingFormSchema({
 }
 
 export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
+
+/**
+ * Returns a Zod validation schema for the booking "duplicate" dialog.
+ *
+ * The duplicate dialog renders ONLY the start/end date fields (name, custodian
+ * and tags are carried over from the source booking), so this schema validates
+ * just those two dates — it does NOT require `name`, `custodian`, or `tags`.
+ *
+ * Dates are validated with exactly the same rules as the new-booking form: it
+ * reuses {@link buildBookingDateSchemas}, so the future-date/buffer check,
+ * working-hours check, end-after-start check, and max-booking-length check all
+ * produce identical messages and error paths (`startDate` / `endDate`).
+ *
+ * @param params - The hints, raw working hours, booking settings, and
+ *   admin/owner flag. See {@link BookingDateSchemaParams}.
+ * @returns A `z.object({ startDate, endDate })` schema with the cross-field
+ *   refinement applied via `superRefine`.
+ */
+export function DuplicateBookingSchema({
+  hints,
+  workingHours,
+  bookingSettings,
+  isAdminOrOwner = false,
+}: BookingDateSchemaParams) {
+  const { startDateSchema, endDateSchema, crossFieldDateValidation } =
+    buildBookingDateSchemas({
+      hints,
+      workingHours,
+      bookingSettings,
+      isAdminOrOwner,
+    });
+
+  return z
+    .object({
+      startDate: startDateSchema,
+      endDate: endDateSchema,
+    })
+    .superRefine(crossFieldDateValidation);
+}
+
+/** Inferred Zod schema type returned by {@link DuplicateBookingSchema}. */
+export type DuplicateBookingSchemaType = ReturnType<
+  typeof DuplicateBookingSchema
+>;
 
 interface ExtendBookingSchemaParams {
   workingHours?: any;

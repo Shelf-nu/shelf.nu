@@ -10,6 +10,7 @@ import {
   PackageMinus,
   PackagePlus,
   QrCode,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Spinner } from "./spinner";
 
@@ -136,7 +137,8 @@ export type IconType =
   | "qr-code"
   | "mouse-pointer-click"
   | "add-to-kit"
-  | "remove-from-kit";
+  | "remove-from-kit"
+  | "adjust-quantity";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -208,6 +210,7 @@ export const iconsMap: IconsMap = {
   "mouse-pointer-click": <MousePointerClick />,
   "add-to-kit": <PackagePlus />,
   "remove-from-kit": <PackageMinus />,
+  "adjust-quantity": <SlidersHorizontal />,
   "start-audit": <ClipboardList />,
   "add-to-audit": <ClipboardList />,
   "delete-audit": <TrashIcon />,

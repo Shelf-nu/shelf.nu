@@ -1,6 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -47,8 +47,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    // Validate that the custodian belongs to the same organization (early 404).
-    // The SELF_SERVICE self-restriction itself is enforced inside the service.
+    /**
+     * Validate the custodian belongs to the same organization (early 404).
+     * We don't keep the result around any more — the SELF_SERVICE
+     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
+     * share one implementation). The lookup here is still needed: it 404s
+     * the request if the requested custodianId is from another org or
+     * doesn't exist.
+     */
     await getTeamMember({
       id: custodian.id,
       organizationId,
@@ -70,9 +76,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    // SELF_SERVICE self-restriction is enforced inside bulkAssignCustody so
-    // web and mobile share one implementation.
-    await bulkAssignCustody({
+    /**
+     * The SELF_SERVICE "assign-to-self" guard now lives inside
+     * `bulkCheckOutAssets` itself (centralised so web + mobile share
+     * one source of truth). We just pass `role` through.
+     */
+    const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
       role,
       assetIds,
@@ -83,10 +92,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       settings,
     });
 
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — assign custody individually.`
+        : "";
+
     sendNotification({
       title: `Assets are now in custody of ${custodian.name}`,
-      message:
-        "Remember, these assets will be unavailable until it is manually checked in.",
+      message: `Remember, these assets will be unavailable until custody is manually released.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

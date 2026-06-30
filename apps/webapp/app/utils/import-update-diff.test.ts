@@ -5,11 +5,13 @@
  * @see {@link file://./import-update-diff.ts}
  */
 import { describe, expect, it } from "vitest";
+import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
   compareCoreField,
   compareCustomField,
   computeAssetDiffs,
+  describeBulkUpdateRowFailure,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -393,6 +395,258 @@ describe("compareCoreField", () => {
       expect(
         compareCoreField("availableToBook", "Yes", asset, "Available to book")
       ).toBeNull();
+    });
+  });
+
+  // ── Wave-1 update-path additions: qty-tracked + AssetModel diffs ─────
+  // The diff layer is "preview-only" — the apply path enforces the actual
+  // type-vs-cell rules. The diff branches here are responsible for
+  // silently no-op'ing on the "wrong" type so the preview doesn't
+  // advertise changes the apply path will discard.
+  describe("quantity (qty-tracked)", () => {
+    it("produces a diff for a QUANTITY_TRACKED asset when the value differs", () => {
+      const asset = makeAsset({ type: "QUANTITY_TRACKED", quantity: 10 });
+      const result = compareCoreField("quantity", "42", asset, "Quantity");
+      expect(result).toEqual({
+        field: "Quantity",
+        currentValue: "10",
+        newValue: "42",
+      });
+    });
+
+    it("returns null when quantity is unchanged", () => {
+      const asset = makeAsset({ type: "QUANTITY_TRACKED", quantity: 10 });
+      expect(compareCoreField("quantity", "10", asset, "Quantity")).toBeNull();
+    });
+
+    it("produces a warning for an invalid quantity value", () => {
+      const asset = makeAsset({ type: "QUANTITY_TRACKED", quantity: 5 });
+      const result = compareCoreField("quantity", "abc", asset, "Quantity");
+      expect(result?.warning).toContain("valid quantity");
+    });
+
+    it("silently no-ops on INDIVIDUAL assets (apply path drops the cell)", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", quantity: 1 });
+      expect(compareCoreField("quantity", "99", asset, "Quantity")).toBeNull();
+    });
+  });
+
+  describe("minQuantity (qty-tracked)", () => {
+    it("produces a diff for a QUANTITY_TRACKED asset", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        minQuantity: 5,
+      });
+      const result = compareCoreField(
+        "minQuantity",
+        "10",
+        asset,
+        "Min quantity"
+      );
+      expect(result?.newValue).toBe("10");
+      expect(result?.currentValue).toBe("5");
+    });
+
+    it("shows (none) for null current minQuantity", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        minQuantity: null,
+      });
+      const result = compareCoreField(
+        "minQuantity",
+        "3",
+        asset,
+        "Min quantity"
+      );
+      expect(result?.currentValue).toBe("(none)");
+    });
+
+    it("warns on negative minQuantity", () => {
+      const asset = makeAsset({ type: "QUANTITY_TRACKED", quantity: 50 });
+      const result = compareCoreField(
+        "minQuantity",
+        "-5",
+        asset,
+        "Min quantity"
+      );
+      expect(result?.warning).toContain("min quantity");
+    });
+
+    it("silently no-ops on INDIVIDUAL assets", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", quantity: 1 });
+      expect(
+        compareCoreField("minQuantity", "5", asset, "Min quantity")
+      ).toBeNull();
+    });
+  });
+
+  describe("unitOfMeasure (qty-tracked)", () => {
+    it("detects a string change on a QUANTITY_TRACKED asset", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        unitOfMeasure: "boxes",
+      });
+      const result = compareCoreField(
+        "unitOfMeasure",
+        "tons",
+        asset,
+        "Unit of measure"
+      );
+      expect(result?.currentValue).toBe("boxes");
+      expect(result?.newValue).toBe("tons");
+    });
+
+    it("returns null when value is unchanged", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        unitOfMeasure: "boxes",
+      });
+      expect(
+        compareCoreField("unitOfMeasure", "boxes", asset, "Unit of measure")
+      ).toBeNull();
+    });
+
+    it("shows (none) when the asset has no unitOfMeasure yet", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        unitOfMeasure: null,
+      });
+      const result = compareCoreField(
+        "unitOfMeasure",
+        "tons",
+        asset,
+        "Unit of measure"
+      );
+      expect(result?.currentValue).toBe("(none)");
+      expect(result?.newValue).toBe("tons");
+    });
+
+    it("silently no-ops on INDIVIDUAL assets", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", quantity: 1 });
+      expect(
+        compareCoreField("unitOfMeasure", "x", asset, "Unit of measure")
+      ).toBeNull();
+    });
+  });
+
+  describe("consumptionType (qty-tracked)", () => {
+    it("detects a valid change on a QUANTITY_TRACKED asset", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        consumptionType: "ONE_WAY",
+      });
+      const result = compareCoreField(
+        "consumptionType",
+        "TWO_WAY",
+        asset,
+        "Consumption type"
+      );
+      expect(result?.newValue).toBe("TWO_WAY");
+      expect(result?.currentValue).toBe("ONE_WAY");
+    });
+
+    it("returns null when the value matches (case-insensitive uppercase)", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        consumptionType: "ONE_WAY",
+      });
+      expect(
+        compareCoreField(
+          "consumptionType",
+          "one_way",
+          asset,
+          "Consumption type"
+        )
+      ).toBeNull();
+    });
+
+    it("warns on an invalid consumption type", () => {
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        consumptionType: "ONE_WAY",
+      });
+      const result = compareCoreField(
+        "consumptionType",
+        "THREE_WAY",
+        asset,
+        "Consumption type"
+      );
+      expect(result?.warning).toContain("Unrecognized");
+    });
+
+    it("silently no-ops on INDIVIDUAL assets", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", quantity: 1 });
+      expect(
+        compareCoreField(
+          "consumptionType",
+          "ONE_WAY",
+          asset,
+          "Consumption type"
+        )
+      ).toBeNull();
+    });
+  });
+
+  describe("assetModel (INDIVIDUAL only)", () => {
+    it("produces a diff for an INDIVIDUAL asset with no model linked", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", assetModelId: null });
+      const result = compareCoreField(
+        "assetModel",
+        "Dell Latitude",
+        asset,
+        "Asset model"
+      );
+      expect(result?.currentValue).toBe("(none)");
+      expect(result?.newValue).toBe("Dell Latitude");
+    });
+
+    it("emits a warning-marked diff on QUANTITY_TRACKED assets so the dropped cell surfaces in the warnings pill", () => {
+      // Regression guard for the edge case where a row carrying ONLY
+      // an assetModel cell on a quantity-tracked asset previously landed
+      // in skippedAssets with the generic "No changes detected" reason —
+      // hiding the dropped cell from the user. The diff now emits a
+      // warning-marked FieldChange; the apply layer skips the field
+      // (because `.warning` is set) AND forwards the warning text into
+      // `result.warnings` so the user sees a yellow "Warnings" entry.
+      const asset = makeAsset({
+        type: "QUANTITY_TRACKED",
+        quantity: 10,
+        assetModelId: null,
+      });
+      const result = compareCoreField(
+        "assetModel",
+        "Dell Latitude",
+        asset,
+        "Asset model"
+      );
+      expect(result).not.toBeNull();
+      expect(result?.warning).toMatch(/quantity-tracked/i);
+      expect(result?.warning).toMatch(/INDIVIDUAL/);
+      expect(result?.newValue).toBe("Dell Latitude");
+    });
+  });
+
+  describe("type cell (read-only)", () => {
+    // The `type` internal-field key is intentionally NOT in UPDATABLE_FIELDS,
+    // which means analyzeUpdateHeaders won't classify a "Type" column as
+    // updatable in the first place. But the compareCoreField switch must
+    // also be defensive and treat it as a no-op so a stray callsite can't
+    // accidentally produce a diff.
+    it("returns null regardless of cell value", () => {
+      const asset = makeAsset({ type: "INDIVIDUAL", quantity: 1 });
+      expect(
+        compareCoreField("type", "QUANTITY_TRACKED", asset, "Type")
+      ).toBeNull();
+      expect(compareCoreField("type", "INDIVIDUAL", asset, "Type")).toBeNull();
+      expect(compareCoreField("type", "", asset, "Type")).toBeNull();
     });
   });
 });
@@ -895,5 +1149,66 @@ describe("computeAssetDiffs", () => {
     // Name is exempt from clearing
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeBulkUpdateRowFailure
+// ---------------------------------------------------------------------------
+
+describe("describeBulkUpdateRowFailure", () => {
+  const GENERIC =
+    "We could not create or update this Asset. Please try again or contact support.";
+
+  it("returns 'Unknown error' for non-Error causes", () => {
+    expect(describeBulkUpdateRowFailure("oops")).toBe("Unknown error");
+    expect(describeBulkUpdateRowFailure(null)).toBe("Unknown error");
+  });
+
+  it("returns the message for a plain Error", () => {
+    expect(describeBulkUpdateRowFailure(new Error("boom"))).toBe("boom");
+  });
+
+  it("returns the ShelfError message when it wraps no underlying error", () => {
+    const err = new ShelfError({
+      cause: null,
+      message: GENERIC,
+      label: "Assets",
+    });
+    expect(describeBulkUpdateRowFailure(err)).toBe(GENERIC);
+  });
+
+  it("surfaces the underlying Prisma code + detail behind the generic wrapper", () => {
+    // why: mimic a Prisma known-request error shape (code + multi-line message)
+    const prismaError = Object.assign(
+      new Error(
+        "Invalid `prisma.asset.update()` invocation\n\n  The column `Asset.foo` does not exist."
+      ),
+      { code: "P2022" }
+    );
+    const wrapped = new ShelfError({
+      cause: prismaError,
+      message: GENERIC,
+      label: "Assets",
+    });
+
+    const result = describeBulkUpdateRowFailure(wrapped);
+
+    expect(result).toContain(GENERIC);
+    expect(result).toContain("P2022:");
+    expect(result).toContain("The column `Asset.foo` does not exist.");
+    // Only the actionable last line — not the "Invalid `prisma...` invocation"
+    // preamble — so the CSV report stays concise and leaks no internal detail.
+    expect(result).not.toContain("invocation");
+    expect(result).not.toContain("\n");
+  });
+
+  it("does not duplicate the message when the underlying matches the wrapper", () => {
+    const wrapped = new ShelfError({
+      cause: new Error(GENERIC),
+      message: GENERIC,
+      label: "Assets",
+    });
+    expect(describeBulkUpdateRowFailure(wrapped)).toBe(GENERIC);
   });
 });

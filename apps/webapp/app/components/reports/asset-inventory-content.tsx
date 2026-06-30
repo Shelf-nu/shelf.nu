@@ -113,9 +113,10 @@ const ASSET_INVENTORY_COLUMNS: ColumnDef<AssetInventoryRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) => (
-      <CurrencyCell value={row.original.valuation} treatZeroAsEmpty />
-    ),
+    // Asset-aware: shows TOTAL (valuation × quantity) for QT assets, with
+    // a "<unit price> × N <unit>" subtext. INDIVIDUAL assets render the
+    // single-line value as before. See {@link CurrencyCell}.
+    cell: ({ row }) => <CurrencyCell asset={row.original} treatZeroAsEmpty />,
   },
   {
     accessorKey: "createdAt",

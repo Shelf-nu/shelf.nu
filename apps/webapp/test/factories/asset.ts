@@ -11,7 +11,9 @@ export function createAsset(overrides: Partial<Asset> = {}): Partial<Asset> {
     status: "AVAILABLE" as AssetStatus,
     organizationId: "org-789",
     categoryId: null,
-    locationId: null,
+    // location is now the `AssetLocation` pivot, not a scalar
+    // FK. Tests that need a location should pass `assetLocations` via
+    // overrides (mirrors how `kit` is handled through `assetKits`).
     mainImage: null,
     mainImageExpiration: null,
     valuation: null,
