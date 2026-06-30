@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import { hasCustody } from "~/modules/custody/utils";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
 import { SERVER_URL } from "~/utils/env";
@@ -37,7 +39,7 @@ export function AvailabilityLabel({
   isAlreadyAdded?: boolean;
 }) {
   const { booking } = useLoaderData<{ booking: Booking }>();
-  const isPartOfKit = !!asset.kitId;
+  const isPartOfKit = (asset.assetKits ?? []).length > 0;
 
   /** User scanned the asset and it is already in booking */
   if (isAlreadyAdded) {
@@ -80,9 +82,14 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Has custody
+   * Has custody — skip for QUANTITY_TRACKED assets since they can have
+   * partial custody while still having available units for booking.
+   * The status badge and quantity picker already communicate availability.
    */
-  if (asset.custody) {
+  if (
+    hasCustody(asset.custody as Record<string, unknown>[] | null | undefined) &&
+    !isQuantityTracked(asset)
+  ) {
     return (
       <AvailabilityBadge
         badgeText={"In custody"}
@@ -101,8 +108,9 @@ export function AvailabilityLabel({
     hasAssetBookingConflicts(asset, booking.id) &&
     !["ONGOING", "OVERDUE"].includes(booking.status)
   ) {
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -142,15 +150,25 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Is currently checked out
+   * Is currently checked out.
+   *
+   * QUANTITY_TRACKED assets are exempted here as defense-in-depth:
+   * `list-asset-content.tsx` already passes `isCheckedOut={false}` for QT
+   * rows (because a QT asset can be "checked out" on this booking while
+   * still having free units elsewhere). But `AvailabilityLabel` is also
+   * mounted from other surfaces (asset pickers, drawers) where the
+   * upstream `isCheckedOut` value may still leak in for a QT asset.
+   * Belt-and-suspenders: skip the "Checked out" badge for QT regardless
+   * of caller — the dedicated `InsufficientStockBadge` + status badge
+   * already communicate the relevant state.
    */
-
-  if (isCheckedOut) {
+  if (isCheckedOut && !isQuantityTracked(asset)) {
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -204,27 +222,57 @@ export function AvailabilityLabel({
   return null;
 }
 
+/**
+ * Visual variant for the shared `AvailabilityBadge` shell.
+ *
+ *  - `"warning"` (default) — the legacy amber treatment used by every
+ *    pre-existing badge (Unavailable, In custody, Already booked, …).
+ *  - `"error"` — red-tinted (BADGE_COLORS.red palette) for hard
+ *    blockers like the new `InsufficientStockBadge`, where the booking
+ *    cannot proceed at the booked quantity. Same shell + tooltip
+ *    layout, only the color stops differ.
+ */
+export type AvailabilityBadgeVariant = "warning" | "error";
+
 export function AvailabilityBadge({
   badgeText,
   tooltipTitle,
   tooltipContent,
   className,
+  variant = "warning",
 }: {
   badgeText: string;
   tooltipTitle: string;
   tooltipContent: string | ReactNode;
   className?: string;
+  /**
+   * Color treatment for the badge shell. Defaults to `"warning"` (amber)
+   * for backwards compatibility with the existing call sites.
+   */
+  variant?: AvailabilityBadgeVariant;
 }) {
+  // Variant → palette classes. Kept inline (rather than via `BADGE_COLORS`
+  // style props) so it composes with the rest of the shell's Tailwind
+  // utilities and so existing call sites that pass a custom `className`
+  // keep working. The hex values in `BADGE_COLORS.red` (#FFEBEE / #C62828)
+  // are sourced via the Tailwind `red-50` / `red-700` tokens, which match
+  // closely enough for this surface and keep us off hardcoded hex.
+  const variantClasses =
+    variant === "error"
+      ? "bg-red-50 border-red-200 text-red-700"
+      : "bg-warning-50 border-warning-200 text-warning-700";
+
   return (
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             className={tw(
-              "inline-block  bg-warning-50 px-[6px] py-[2px]",
-              "rounded-md border border-warning-200",
-              "text-xs text-warning-700",
+              "inline-block px-[6px] py-[2px]",
+              "rounded-md border",
+              "text-xs",
               "availability-badge",
+              variantClasses,
               className
             )}
           >
@@ -247,6 +295,41 @@ export function AvailabilityBadge({
 }
 
 /**
+ * "Insufficient stock" badge for QT booking rows where the booked
+ * quantity on this booking exceeds the units available across the
+ * workspace pool (after subtracting operator custody, other-booking
+ * reservations, and active checkouts elsewhere).
+ *
+ * Red-tinted (`variant="error"`) because — unlike the amber availability
+ * warnings — this is a hard blocker: the booking cannot be checked out
+ * at the booked quantity until the operator either reduces it or frees
+ * units elsewhere in the workspace.
+ *
+ * NEVER renders for INDIVIDUAL assets — they have their own
+ * "Already booked" / "Checked out" paths via `AvailabilityLabel`. Callers
+ * must gate on `isQuantityTracked` before mounting this component.
+ *
+ * @param bookedQuantity - units this booking reserves of the asset
+ * @param availableUnits - units free across the workspace right now
+ */
+export function InsufficientStockBadge({
+  bookedQuantity,
+  availableUnits,
+}: {
+  bookedQuantity: number;
+  availableUnits: number;
+}) {
+  return (
+    <AvailabilityBadge
+      variant="error"
+      badgeText="Insufficient stock"
+      tooltipTitle="Not enough units available"
+      tooltipContent={`This booking reserves ${bookedQuantity} units, but only ${availableUnits} are available across the workspace (after subtracting custody, other reservations, and active checkouts). Reduce the booked quantity or free up units before checking out.`}
+    />
+  );
+}
+
+/**
  * A kit is not available for the following reasons
  * 1. Kit has unavailable status
  * 2. Kit or some asset is in custody
@@ -258,23 +341,35 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
-  const bookings = kit.assets.flatMap((asset) =>
-    asset?.bookings.length ? asset.bookings : []
+  // Phase 3a renamed the implicit M2M `Asset.bookings` to the explicit
+  // `BookingAsset` pivot, so we walk `bookingAssets` and pluck the
+  // related booking from each pivot row. Main's `asset.bookings`
+  // shape no longer exists in this branch's schema.
+  const kitAssets = kit.assetKits.map((ak) => ak.asset);
+  const bookings = kitAssets.flatMap(
+    (asset) => asset?.bookingAssets.map((ba) => ba.booking) ?? []
   );
 
   /** Checks whether this is checked out in another not overlapping booking */
   const isCheckedOutInANonConflictingBooking =
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
+  // For QUANTITY_TRACKED assets, `Custody` rows reflect partial
+  // operator allocations on a single pooled asset — they should not
+  // flag the whole kit as in-custody just because Pleb is holding 4
+  // of 80 Pens. Only INDIVIDUAL custody rows escalate to the kit
+  // level. Mirrors the qty-aware exemptions in the kit
+  // ActionsDropdown + manage-assets picker fixed in 4a-Polish.
   const isInCustody =
-    kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
+    kit.status === "IN_CUSTODY" ||
+    kitAssets.some((a) => !isQuantityTracked(a) && hasCustody(a.custody));
 
-  const isKitWithoutAssets = kit.assets.length === 0;
+  const isKitWithoutAssets = kitAssets.length === 0;
 
-  const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
+  const someAssetMarkedUnavailable = kitAssets.some((a) => !a.availableToBook);
 
   // Apply same booking conflict logic as isCheckedOut
-  const someAssetHasUnavailableBooking = kit.assets.some((asset) =>
+  const someAssetHasUnavailableBooking = kitAssets.some((asset) =>
     hasAssetBookingConflicts(asset, currentBookingId)
   );
 
@@ -304,9 +399,11 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   // Check if kit is checked out in current booking - don't show availability label
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
-    kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+    kit.assetKits.some((ak) =>
+      ak.asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 

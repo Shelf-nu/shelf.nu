@@ -26,26 +26,20 @@ vitest.mock("react-router", async () => {
 });
 
 // why: external auth — we don't want to hit Supabase in tests
-vitest.mock("~/modules/api/mobile-auth.server", () => ({
-  requireMobileAuth: vitest.fn(),
-  requireOrganizationAccess: vitest.fn(),
-  MOBILE_ASSET_SELECT: {
-    id: true,
-    title: true,
-    status: true,
-    mainImage: true,
-    category: { select: { name: true } },
-    location: { select: { name: true } },
-  },
-  MOBILE_KIT_SELECT: {
-    id: true,
-    name: true,
-    status: true,
-    image: true,
-    _count: { select: { assets: true } },
-    assets: { select: { id: true, status: true, availableToBook: true } },
-  },
-}));
+// why: stub only auth + org-access (out of scope for these route-shape tests);
+// load the real MOBILE_ASSET_SELECT / MOBILE_KIT_SELECT projections + the
+// shapeMobileAssetResponse / shapeMobileKitResponse helpers so the response-
+// shape assertions exercise the actual flattening, not a hand-mirrored stub.
+vitest.mock("~/modules/api/mobile-auth.server", async () => {
+  const actual = await vitest.importActual<
+    typeof import("~/modules/api/mobile-auth.server")
+  >("~/modules/api/mobile-auth.server");
+  return {
+    ...actual,
+    requireMobileAuth: vitest.fn(),
+    requireOrganizationAccess: vitest.fn(),
+  };
+});
 
 // why: external database — we don't want to hit the real database in tests
 vitest.mock("~/database/db.server", () => ({
@@ -92,13 +86,21 @@ const mockUser = {
   onboarded: true,
 };
 
+// Post-Phase-4a/4b shape: pivot rows (assetKits/assetLocations/custody) feed
+// `shapeMobileAssetResponse`, which flattens them to the legacy `kit`/`kitId`/
+// `location`/`custody` shape the in-App-Store companion consumes. Matches the
+// exact projection MOBILE_ASSET_SELECT returns from Prisma — keeps the helper
+// happy and the response-shape assertions meaningful.
 const mockAsset = {
   id: "asset-1",
   title: "Test Laptop",
   status: "AVAILABLE",
   mainImage: null,
+  availableToBook: true,
   category: { name: "Electronics" },
-  location: { name: "Office A" },
+  assetKits: [],
+  assetLocations: [{ location: { id: "loc-1", name: "Office A" } }],
+  custody: [],
 };
 
 const mockBarcode = {
@@ -109,6 +111,7 @@ const mockBarcode = {
   kitId: null,
   organizationId: "org-1",
   asset: mockAsset,
+  kit: null,
 };
 
 function createBarcodeRequest(value: string, orgId = "org-1") {

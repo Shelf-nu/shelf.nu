@@ -62,7 +62,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const kit = await getKit({
       id: kitId,
       organizationId,
-      extraInclude: { assets: true },
+      extraInclude: {
+        assetKits: { select: { asset: { select: { id: true } } } },
+      },
       userOrganizations,
       request,
     });
@@ -107,7 +109,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...teamMembersData,
       // For consistency, also provide teamMembersForForm
       teamMembersForForm: teamMembersData.teamMembers,
-      assetIds: kit.assets.map((a) => a.id),
+      assetIds: kit.assetKits.map((ak) => ak.asset.id),
       ...tagsData,
     });
   } catch (cause) {

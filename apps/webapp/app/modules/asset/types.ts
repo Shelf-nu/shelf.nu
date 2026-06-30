@@ -40,8 +40,22 @@ export interface UpdateAssetPayload {
   description?: Asset["description"];
   /** Pass 'uncategorized' to clear the category */
   categoryId?: Asset["categoryId"];
-  newLocationId?: Asset["locationId"];
-  currentLocationId?: Asset["locationId"];
+  /** Pass null to clear the asset model association */
+  assetModelId?: string | null;
+  // `Asset.locationId` no longer exists (location lives on the
+  // `AssetLocation` pivot). These carry the single primary-location id
+  // through the update flow.
+  newLocationId?: string | null;
+  currentLocationId?: string | null;
+  /**
+   * Per-asset single-location qty for QUANTITY_TRACKED placements via
+   * the asset-overview update-location dialog. When provided alongside
+   * `newLocationId`, the new pivot row uses this value (subject to the
+   * orthogonal-MAX re-validation in `updateAsset`). Falls back to
+   * `Asset.quantity` (full pool) when omitted — preserves back-compat
+   * for paths that don't expose a qty input yet (bulk + scan + mobile).
+   */
+  newLocationQuantity?: number;
   mainImage?: Asset["mainImage"];
   thumbnailImage?: string | null;
   mainImageExpiration?: Asset["mainImageExpiration"];
@@ -59,6 +73,10 @@ export interface UpdateAssetPayload {
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
   request: Request;
+  quantity?: Asset["quantity"];
+  minQuantity?: Asset["minQuantity"];
+  consumptionType?: Asset["consumptionType"];
+  unitOfMeasure?: Asset["unitOfMeasure"];
 }
 
 export interface CreateAssetFromContentImportPayload
@@ -73,6 +91,20 @@ export interface CreateAssetFromContentImportPayload
   custodian?: string;
   bookable?: "yes" | "no";
   imageUrl?: string; // URL of the image to import
+  /** AssetModel reference by name (case-insensitive). Resolved /
+   * upserted via createAssetModelsIfNotExists during import. */
+  assetModel?: string;
+  /** AssetType — defaults to INDIVIDUAL when omitted */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  /** Required (>0) for QUANTITY_TRACKED; defaults to 1 for INDIVIDUAL */
+  quantity?: string;
+  /** Optional low-stock threshold for QUANTITY_TRACKED */
+  minQuantity?: string;
+  /** Free-form text label ("boxes", "kg", …) for QUANTITY_TRACKED */
+  unitOfMeasure?: string;
+  /** Required for QUANTITY_TRACKED. ONE_WAY (consumed on checkout) or
+   * TWO_WAY (returned with consumption report). */
+  consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
 
 export interface CreateAssetFromBackupImportPayload
@@ -146,35 +178,65 @@ export type AdvancedIndexAsset = Pick<
   | "thumbnailImage"
   | "mainImageExpiration"
   | "categoryId"
-  | "locationId"
   | "organizationId"
   | "status"
+  | "type"
   | "valuation"
+  | "quantity"
+  | "unitOfMeasure"
   | "availableToBook"
-  | "kitId"
 > & {
   qrId: string; // QR code will always be available
+  assetModelId?: string | null;
+  assetModelName?: string | null;
+  /** Primary kit (oldest pivot row) — mirrors the LATERAL primary-pick
+   * used by ORDER BY and filters. Kept alongside `kits` for back-compat
+   * with consumers that only need the primary. */
   kit: Pick<Kit, "id" | "name"> | null;
+  /** Full kit membership for the asset, ordered by `AssetKit.createdAt`.
+   * A multi-kit QUANTITY_TRACKED asset surfaces all kits here so the
+   * asset-index "Kit" column can render the primary plus a "+N more"
+   * affordance (mirror of `custody`). Always an array, never null. */
+  kits: Array<Pick<Kit, "id" | "name" | "status">>;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name" | "color">[];
+  /** Primary placement (oldest pivot row) — see `kit` above. */
   location:
     | (Pick<Location, "id" | "name"> & {
         parentId?: Location["parentId"];
         childCount?: number;
       })
     | null;
-  custody: {
-    custodian: {
-      name: string;
-      user: {
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-        profilePicture: string | null;
-        email: string;
-      } | null;
-    };
-  } | null;
+  /** Full placement list for the asset, ordered by
+   * `AssetLocation.createdAt`. Mirror of `kits`. Always an array. */
+  locations: Array<
+    Pick<Location, "id" | "name"> & {
+      parentId?: Location["parentId"];
+      childCount?: number;
+    }
+  >;
+  custody:
+    | {
+        /** Custodian display name; mirrored at the top level so callers
+         * can read it without descending into `custodian`. */
+        name?: string;
+        /** Per-custody quantity; meaningful for QUANTITY_TRACKED assets
+         * where the same asset can be split across multiple custodians.
+         * Optional because the booking-derived synthetic custody case
+         * does not project a quantity. */
+        quantity?: number;
+        custodian: {
+          name: string;
+          user: {
+            id: string;
+            firstName: string | null;
+            lastName: string | null;
+            profilePicture: string | null;
+            email: string;
+          } | null;
+        };
+      }[]
+    | null;
   customFields: (AssetCustomFieldValue & {
     customField: Pick<
       CustomField,
