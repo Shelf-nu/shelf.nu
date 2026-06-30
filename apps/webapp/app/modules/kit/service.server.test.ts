@@ -57,6 +57,9 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: updateKitAssets now calls assertAssetsAreNotArchived (issue #382),
+      // which counts archived assets. Default 0 = none archived.
+      count: vitest.fn().mockResolvedValue(0),
     },
     assetKit: {
       create: vitest.fn().mockResolvedValue({}),

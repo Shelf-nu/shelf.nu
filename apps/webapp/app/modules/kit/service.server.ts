@@ -54,6 +54,7 @@ import {
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertCategoryBelongsToOrg,
   assertLocationBelongsToOrg,
@@ -3649,6 +3650,9 @@ export async function updateKitAssets({
       firstName: user?.firstName,
       lastName: user?.lastName,
     });
+
+    // Archived assets are frozen (issue #382): they can't be added to a kit.
+    await assertAssetsAreNotArchived({ assetIds, organizationId });
 
     const kitWithRelations = await db.kit
       .findUniqueOrThrow({

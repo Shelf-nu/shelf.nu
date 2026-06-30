@@ -94,6 +94,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   userCanViewSpecificCustody,
   userHasCustodyViewPermission,
@@ -579,6 +580,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
       return payload(null);
     } else if (intent === "updateField") {
+      // Archived assets are frozen (issue #382): no field edits.
+      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+
       const { fieldName } = parseData(
         formData,
         z.object({

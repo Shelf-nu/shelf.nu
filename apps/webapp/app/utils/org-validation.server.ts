@@ -47,6 +47,13 @@ export type OrgValidationTxClient = {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string }[]>;
+    count: (args: {
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        archivedAt: { not: null };
+      };
+    }) => Promise<number>;
   };
   tag: {
     findMany: (args: {
@@ -142,6 +149,53 @@ export async function assertAssetsBelongToOrg(
       title: "Invalid assets",
       message:
         "Some of the selected assets do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that none of the given assets are archived.
+ *
+ * Archived assets are frozen: the only allowed mutations are reinstate and
+ * permanent delete (issue #382). Call this to server-enforce the UI's disabled
+ * state on every OTHER asset mutation (edit, location, tags, category, kit-add,
+ * availability, …), so a crafted request can't change an archived asset.
+ * Dedupes the input; a no-op for an empty list.
+ *
+ * @param params.assetIds - Asset IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any of the assets is archived
+ */
+export async function assertAssetsAreNotArchived(
+  {
+    assetIds,
+    organizationId,
+  }: { assetIds: Asset["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  const client = tx ?? db;
+
+  const archivedCount = await client.asset.count({
+    where: {
+      id: { in: [...new Set(assetIds)] },
+      organizationId,
+      archivedAt: { not: null },
+    },
+  });
+
+  if (archivedCount > 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Asset is archived",
+      message:
+        "Archived assets are read-only. Reinstate them before making changes.",
       label,
       status: 400,
       shouldBeCaptured: false,

@@ -52,6 +52,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -303,6 +304,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: intent2ActionMap[intent],
     });
+
+    // Archived assets are frozen (issue #382): only delete + reinstate are
+    // allowed. Block the other mutating intents server-side.
+    if (
+      intent === "relink-qr-code" ||
+      intent === "set-reminder" ||
+      intent === "add-barcode"
+    ) {
+      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+    }
 
     switch (intent) {
       case "delete": {

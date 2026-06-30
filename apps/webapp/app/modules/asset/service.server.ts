@@ -114,6 +114,7 @@ import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertCustomFieldsBelongToOrg,
   assertLocationBelongsToOrg,
@@ -5444,6 +5445,9 @@ export async function updateAssetBookingAvailability({
   organizationId,
 }: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
   try {
+    // Archived assets are frozen (issue #382): availability can't be toggled.
+    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+
     return await db.asset.update({
       where: { id, organizationId },
       data: { availableToBook },
@@ -6001,6 +6005,9 @@ export async function bulkCheckOutAssets({
       currentSearchParams,
       settings,
     });
+
+    // Archived assets are frozen (issue #382): can't be assigned custody.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
@@ -6726,6 +6733,9 @@ export async function bulkUpdateAssetCategory({
       return true;
     }
 
+    // Archived assets are frozen (issue #382): can't change their category.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     // Fetch before-state so we can emit per-asset events and notes only for
     // assets whose category actually changes.
     const newCategoryId = categoryId || null;
@@ -6851,6 +6861,9 @@ export async function bulkAssignAssetTags({
     if (resolvedIds.length === 0) {
       return true;
     }
+
+    // Archived assets are frozen (issue #382): can't add/remove their tags.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     // Validate that every tag id belongs to this organization before
     // wiring it into the `connect`/`disconnect` payload. Prisma's nested
@@ -7011,6 +7024,9 @@ export async function bulkMarkAvailability({
       currentSearchParams,
       settings,
     });
+
+    // Archived assets are frozen (issue #382): can't change availability.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     // Simple, consistent where clause
     await db.asset.updateMany({

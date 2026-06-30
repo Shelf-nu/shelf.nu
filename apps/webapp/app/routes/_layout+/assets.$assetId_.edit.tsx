@@ -43,6 +43,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -174,6 +175,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
+
+    // Archived assets are frozen (issue #382): block the edit form server-side.
+    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
 
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
