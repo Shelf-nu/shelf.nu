@@ -163,6 +163,19 @@ export default function KitRow({
           </div>
         </Td>
 
+        {/* Qty — empty for kit header rows */}
+        <Td> </Td>
+
+        {/*
+          why: out of this rule — kit header has no status badge.
+          Per the code-bearing-entity-list-consistency rule, the
+          per-row InsufficientStockBadge fires inside ListAssetContent
+          for each expanded QT asset child (kit-row delegates to it
+          via the loop below). The kit header itself only surfaces the
+          "Already booked" overlap signal and an asset count; it has
+          no aggregate stock or per-unit booking semantics of its own,
+          so no insufficient-stock badge belongs here.
+        */}
         <Td>
           <When truthy={isOverlapping && !isInProgress}>
             <AvailabilityBadge
@@ -196,6 +209,13 @@ export default function KitRow({
         </Td>
         {shouldShowCheckoutColumns && (
           <>
+            {/*
+              why: kit-header partial-checkout rollup deferred — per-asset rows
+              already surface it via ListAssetContent (badge + Qty progress).
+              Aggregating across mixed-state kit children at the header level
+              would require a unanimity rule similar to kitWasCheckedOut above
+              and is intentionally out of scope here.
+            */}
             {/* Checked out on - for kits we don't show specific dates */}
             <Td>
               <EmptyTableValue />

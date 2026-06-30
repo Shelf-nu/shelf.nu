@@ -70,7 +70,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // Org-scoped lookup (foreign-org id 404s) + ownership fields for the guard.
     const source = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true, creatorId: true, custodianUserId: true },
+      select: {
+        id: true,
+        creatorId: true,
+        custodianUserId: true,
+        from: true,
+        to: true,
+      },
     });
 
     if (!source) {
@@ -110,6 +116,11 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       userId: user.id,
       request,
+      // duplicateBooking now requires explicit dates (quantities restructure).
+      // The mobile flow has no date picker, so clone the source booking's
+      // window; the duplicate lands as a DRAFT the user can reschedule.
+      from: source.from,
+      to: source.to,
     });
 
     return data({

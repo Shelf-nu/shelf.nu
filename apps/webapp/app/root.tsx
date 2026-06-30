@@ -31,9 +31,10 @@ import nProgressCustomStyles from "./styles/nprogress.css?url";
 import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
-import { getBrowserEnv } from "./utils/env";
+import { getBrowserEnv, MAINTENANCE_MODE } from "./utils/env";
 import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
+import { isAdmin } from "./utils/roles.server";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 
 export interface RootData {
@@ -64,14 +65,23 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export const loader = ({ request }: LoaderFunctionArgs) =>
-  payload({
+export const loader = async ({ request, context }: LoaderFunctionArgs) => {
+  // Super admins bypass maintenance — best-effort. If the admin lookup
+  // throws (no session, missing context.getSession, DB error during a
+  // migration, etc.), fall through with admin=null so the loader still
+  // returns a valid payload. Worst case: admin sees the maintenance
+  // screen too. Best case: admin sees the app while users see maintenance.
+  const admin = MAINTENANCE_MODE
+    ? await isAdmin(context).catch(() => null)
+    : null;
+  return payload({
     env: getBrowserEnv(),
-    maintenanceMode: false,
+    maintenanceMode: MAINTENANCE_MODE && !admin,
     requestInfo: {
       hints: getClientHint(request),
     },
   });
+};
 
 export const shouldRevalidate = () => false;
 

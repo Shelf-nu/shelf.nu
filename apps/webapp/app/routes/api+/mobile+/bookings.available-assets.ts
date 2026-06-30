@@ -55,7 +55,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mainImage: asset.mainImage,
         mainImageExpiration: asset.mainImageExpiration,
         thumbnailImage: asset.thumbnailImage,
-        kitId: asset.kitId,
+        // Kit linkage moved to the AssetKit pivot (quantities restructure);
+        // the pivot row's `kitId` FK is the legacy single-kit id the companion
+        // contract expects.
+        kitId: asset.assetKits?.[0]?.kitId ?? null,
       })),
       page,
       perPage,

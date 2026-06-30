@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
@@ -68,10 +69,11 @@ vi.mock("./asset-row-actions-dropdown", () => ({
   AssetRowActionsDropdown: () => <div data-testid="asset-actions" />,
 }));
 
-// why: avoiding availability label rendering during returned badge testing
-vi.mock("./availability-label", () => ({
-  AvailabilityLabel: () => <div data-testid="availability-label" />,
-}));
+// why: exercising the REAL `AvailabilityLabel` + `InsufficientStockBadge`
+// from this module so the QT-aware "Checked out" / "In custody" guards
+// (which short-circuit for QUANTITY_TRACKED) and the red insufficient-stock
+// badge can be observed by these tests. No mock — the originals are pure
+// and only depend on `useLoaderData` (already mocked) + shared utils.
 
 const mockUseLoaderData = vi.fn();
 
@@ -351,5 +353,266 @@ describe("ListAssetContent", () => {
     );
 
     expect(screen.getByTestId("tags-column")).toHaveTextContent("Fragile");
+  });
+
+  // QT booking-row badge cleanup: QUANTITY_TRACKED rows must not surface the
+  // global-status amber "Checked out" / "In custody" badges that
+  // `AvailabilityLabel` shows for INDIVIDUAL assets — for QT the asset can be
+  // checked out / in-custody elsewhere while still having free units to book.
+  // The status badge + dedicated `InsufficientStockBadge` carry that signal
+  // instead. These tests pin the QT-only short-circuits and the per-row
+  // insufficient-stock branch, plus a regression guard that INDIVIDUAL
+  // surfaces the amber "Checked out" badge unchanged.
+  describe("QT availability badges", () => {
+    /**
+     * QT asset that is CHECKED_OUT globally (e.g. some other booking has its
+     * units out). Includes `bookingAssets` so the `isCheckedOut` memo in
+     * `ListAssetContent` can short-circuit cleanly, and `custody` so the
+     * `hasCustody` branch in `AvailabilityLabel` is exercised in test (b).
+     */
+    const qtCheckedOutAsset = {
+      ...baseAsset,
+      id: "asset-qt-1",
+      type: "QUANTITY_TRACKED",
+      status: "CHECKED_OUT",
+      bookingAssets: [
+        // Conflict from a DIFFERENT booking — proves the QT short-circuit
+        // fires regardless of the cross-org booking pressure.
+        {
+          booking: { id: "other-booking", status: "ONGOING" },
+        },
+      ],
+      bookedQuantity: 1,
+    } as unknown as AssetWithBooking;
+
+    /** Same shape but with a custody row attached — used by test (b). */
+    const qtCustodyAsset = {
+      ...qtCheckedOutAsset,
+      status: "AVAILABLE",
+      custody: [{ id: "custody-1" }],
+    } as unknown as AssetWithBooking;
+
+    /**
+     * INDIVIDUAL counterpart for the regression test (d) — same global
+     * CHECKED_OUT signal but typed INDIVIDUAL so the QT short-circuit in
+     * `AvailabilityLabel` must NOT fire.
+     *
+     * No `bookingAssets` entry for any OTHER booking — that would make
+     * `hasAssetBookingConflicts` return true and steer the label into the
+     * "Already booked" branch (a separate signal). Test (d) is specifically
+     * pinning the "Checked out" branch: asset is globally CHECKED_OUT with
+     * no overlapping reservation, which surfaces the amber "Checked out"
+     * `AvailabilityBadge`.
+     */
+    const individualCheckedOutAsset = {
+      ...baseAsset,
+      id: "asset-individual-1",
+      type: "INDIVIDUAL",
+      status: "CHECKED_OUT",
+      bookingAssets: [],
+    } as unknown as AssetWithBooking;
+
+    it("renders only the AVAILABLE status badge for a QT row whose asset is CHECKED_OUT elsewhere on a DRAFT booking", () => {
+      // (a) — QT short-circuits the amber "Checked out" branch in
+      // `AvailabilityLabel`, and there's no separate "Partial custody" badge.
+      // The status badge resolves to AVAILABLE (no qty disposition/checkout
+      // activity on this row).
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-draft",
+          status: "DRAFT",
+          bookingAssets: [{ assetId: qtCheckedOutAsset.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtCheckedOutAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "AVAILABLE" })
+      );
+      // No amber "Checked out" availability badge for QT rows.
+      expect(screen.queryByText("Checked out")).not.toBeInTheDocument();
+      // No blue "Partial custody" badge exists for QT in this surface.
+      expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
+      // And no "Insufficient stock" since the loader didn't ship availability.
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+    });
+
+    it("renders only the AVAILABLE status badge for a QT row with global custody on a RESERVED booking", () => {
+      // (b) — QT short-circuits the "In custody" branch in
+      // `AvailabilityLabel` even when a custody row exists on the asset.
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: qtCustodyAsset.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtCustodyAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "AVAILABLE" })
+      );
+      expect(screen.queryByText("In custody")).not.toBeInTheDocument();
+      expect(screen.queryByText("Checked out")).not.toBeInTheDocument();
+    });
+
+    it("renders the red InsufficientStockBadge when bookedQuantity exceeds availableUnitsByAsset on an ONGOING booking", async () => {
+      // (c) — QT row reserves 10 units; only 3 free across the workspace.
+      // Renders the red-variant `InsufficientStockBadge`, with a hoverable
+      // tooltip body that quotes both numbers verbatim.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 10,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: { [qtRow.id]: 3 },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      const trigger = screen.getByText("Insufficient stock");
+      expect(trigger).toBeInTheDocument();
+      // Red variant — the `AvailabilityBadge` shell switches to red-50/red-200
+      // /red-700 classes when `variant="error"` (set by `InsufficientStockBadge`).
+      // Locking on `bg-red-50` is enough to differentiate from the amber default.
+      expect(trigger).toHaveClass("bg-red-50");
+      expect(trigger).toHaveClass("text-red-700");
+
+      // Hover to surface the tooltip body and verify it mentions both 10/3.
+      // Use pointer-event-based hover (Radix Tooltip listens via pointer events).
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/10 units/);
+      expect(tooltip.textContent).toMatch(/only 3/);
+    });
+
+    it("still renders the amber 'Checked out' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
+      // (d) — Regression guard: the QT short-circuits MUST NOT affect the
+      // INDIVIDUAL path. An INDIVIDUAL asset with global CHECKED_OUT status
+      // still surfaces the amber "Checked out" availability badge on a DRAFT
+      // booking exactly as it did before this cleanup.
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-draft-individual",
+          status: "DRAFT",
+          bookingAssets: [{ assetId: individualCheckedOutAsset.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={individualCheckedOutAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      const badge = screen.getByText("Checked out");
+      expect(badge).toBeInTheDocument();
+      // Amber default variant — `bg-warning-50` is the warning-amber background
+      // applied by `AvailabilityBadge` when `variant` is omitted / "warning".
+      expect(badge).toHaveClass("bg-warning-50");
+    });
+
+    it("does NOT render the InsufficientStockBadge when bookedQuantity is within availableUnits", () => {
+      // (e) — QT row reserves 2 units; 5 free across the workspace. Headroom
+      // exists, so the badge MUST NOT render. Strict-inequality guard in
+      // `list-asset-content.tsx`: at-capacity (booked === available) is also
+      // NOT a problem.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 2,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-ok",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: { [qtRow.id]: 5 },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+    });
   });
 });

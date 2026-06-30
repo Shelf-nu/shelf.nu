@@ -1,12 +1,111 @@
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import {
   flattenSelectedBookingItems,
   getBookingAssetCheckinLabel,
+  getBookingContextAssetStatus,
   isAssetCheckableIn,
   isAssetCheckableOut,
+  type AssetWithStatus,
 } from "./booking-assets";
+
+/**
+ * Minimal stub satisfying `PartialCheckinDetailsType`'s per-asset shape. The
+ * concrete values don't influence `getBookingContextAssetStatus`'s branching
+ * (only presence of the key does), so we keep this cheap and reuse it.
+ */
+const partialCheckinStub = {
+  checkinDate: new Date("2026-04-01T10:00:00Z"),
+  checkedInBy: {
+    id: "user-1",
+    firstName: "Test",
+    lastName: "User",
+    profilePicture: null,
+  },
+};
+
+describe("getBookingContextAssetStatus", () => {
+  it("returns PARTIALLY_CHECKED_IN for INDIVIDUAL asset with partial checkin on ONGOING booking", () => {
+    expect.assertions(1);
+    const asset: AssetWithStatus = {
+      id: "asset-1",
+      status: AssetStatus.CHECKED_OUT,
+      type: "INDIVIDUAL",
+    };
+    const partialCheckinDetails: PartialCheckinDetailsType = {
+      [asset.id]: partialCheckinStub,
+    };
+
+    expect(
+      getBookingContextAssetStatus(
+        asset,
+        partialCheckinDetails,
+        BookingStatus.ONGOING
+      )
+    ).toBe("PARTIALLY_CHECKED_IN");
+  });
+
+  it("returns raw asset.status for INDIVIDUAL asset without partial checkin on ONGOING booking", () => {
+    expect.assertions(1);
+    const asset: AssetWithStatus = {
+      id: "asset-2",
+      status: AssetStatus.CHECKED_OUT,
+      type: "INDIVIDUAL",
+    };
+
+    expect(getBookingContextAssetStatus(asset, {}, BookingStatus.ONGOING)).toBe(
+      AssetStatus.CHECKED_OUT
+    );
+  });
+
+  it("returns raw asset.status for INDIVIDUAL asset on COMPLETE booking even with partial checkin", () => {
+    expect.assertions(1);
+    const asset: AssetWithStatus = {
+      id: "asset-3",
+      status: AssetStatus.CHECKED_OUT,
+      type: "INDIVIDUAL",
+    };
+    const partialCheckinDetails: PartialCheckinDetailsType = {
+      [asset.id]: partialCheckinStub,
+    };
+
+    expect(
+      getBookingContextAssetStatus(
+        asset,
+        partialCheckinDetails,
+        BookingStatus.COMPLETE
+      )
+    ).toBe(AssetStatus.CHECKED_OUT);
+  });
+
+  it("overrides QUANTITY_TRACKED asset to AVAILABLE on DRAFT booking despite CHECKED_OUT global status", () => {
+    expect.assertions(1);
+    const asset: AssetWithStatus = {
+      id: "asset-4",
+      status: AssetStatus.CHECKED_OUT,
+      type: "QUANTITY_TRACKED",
+    };
+
+    expect(getBookingContextAssetStatus(asset, {}, BookingStatus.DRAFT)).toBe(
+      AssetStatus.AVAILABLE
+    );
+  });
+
+  it("does NOT override QUANTITY_TRACKED asset on ONGOING booking — returns raw CHECKED_OUT", () => {
+    expect.assertions(1);
+    const asset: AssetWithStatus = {
+      id: "asset-5",
+      status: AssetStatus.CHECKED_OUT,
+      type: "QUANTITY_TRACKED",
+    };
+
+    expect(getBookingContextAssetStatus(asset, {}, BookingStatus.ONGOING)).toBe(
+      AssetStatus.CHECKED_OUT
+    );
+  });
+});
 
 describe("getBookingAssetCheckinLabel", () => {
   const assetId = "asset-1";
@@ -117,6 +216,75 @@ describe("isAssetCheckableOut", () => {
   it("is NOT checkable-out when the id is in the per-booking checkout records", () => {
     const asset = { id: "asset-1", status: "AVAILABLE" };
     expect(isAssetCheckableOut(asset, new Set(["asset-1"]))).toBe(false);
+  });
+
+  // why: the qty-aware top-off UX hinges on `remainingByAssetId` taking
+  // precedence over the binary "already checked out?" signal for
+  // QUANTITY_TRACKED rows. These four cases pin down the contract — drop one
+  // branch and the bulk dropdown / partial-checkout dialog silently disagree
+  // with each other again, which is exactly the bug the option exists to
+  // prevent.
+  describe("with remainingByAssetId (qty-aware top-off)", () => {
+    it("is checkable-out for QT asset with remaining > 0 even when id is in checkedOutAssetIds", () => {
+      // Top-off case: the row is "partially checked out" — its id is recorded
+      // in the booking's checked-out set — but units remain for this booking,
+      // so the user must still be able to check the rest out.
+      const asset = {
+        id: "asset-1",
+        status: "CHECKED_OUT",
+        type: "QUANTITY_TRACKED",
+      };
+      expect(
+        isAssetCheckableOut(asset, new Set(["asset-1"]), {
+          remainingByAssetId: { "asset-1": 5 },
+        })
+      ).toBe(true);
+    });
+
+    it("is NOT checkable-out for QT asset with remaining = 0", () => {
+      // Map present and authoritative: zero remaining means every booked unit
+      // is dispositioned, so no further check-out is possible — even if the
+      // binary fallback would have said otherwise.
+      const asset = {
+        id: "asset-1",
+        status: "AVAILABLE",
+        type: "QUANTITY_TRACKED",
+      };
+      expect(
+        isAssetCheckableOut(asset, new Set(), {
+          remainingByAssetId: { "asset-1": 0 },
+        })
+      ).toBe(false);
+    });
+
+    it("falls back to the binary check for QT asset when no map is provided (legacy loaders)", () => {
+      // Legacy call sites that haven't been updated to plumb the remaining map
+      // through must keep their pre-existing behaviour — the QT branch is
+      // strictly opt-in via the options arg.
+      const asset = {
+        id: "asset-1",
+        status: "CHECKED_OUT",
+        type: "QUANTITY_TRACKED",
+      };
+      expect(isAssetCheckableOut(asset, new Set())).toBe(false);
+    });
+
+    it("ignores remainingByAssetId for INDIVIDUAL assets (binary check only)", () => {
+      // The QT branch is gated on `type === "QUANTITY_TRACKED"`. An INDIVIDUAL
+      // asset whose id happens to appear in the map must still resolve via the
+      // binary fallback — anything else would let a top-off bug leak into
+      // single-unit assets.
+      const asset = {
+        id: "asset-1",
+        status: "CHECKED_OUT",
+        type: "INDIVIDUAL",
+      };
+      expect(
+        isAssetCheckableOut(asset, new Set(), {
+          remainingByAssetId: { "asset-1": 5 },
+        })
+      ).toBe(false);
+    });
   });
 });
 

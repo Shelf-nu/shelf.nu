@@ -107,6 +107,52 @@ function filterConflictingSelections(
   }
 }
 
+/**
+ * Sentinel value indicating "no default to apply" — distinct from the
+ * empty-string filter value so callers can tell apart "we resolved to
+ * a deliberate empty" vs "we resolved to nothing".
+ */
+const NO_DEFAULT = Symbol("no-default-filter-value");
+
+/** Custom-field shape `resolveFilterDefault` needs to inspect — kept
+ * narrow so the helper stays decoupled from the wider filter context. */
+type CustomFieldSummary = { name?: string; options?: string[] };
+
+/**
+ * Pure resolver: given an empty-valued filter, return the default value
+ * to seed it with, or `NO_DEFAULT` when the user must pick manually.
+ *
+ * Mirrors the previous branched `useEffect` body so the only visible
+ * behaviour change is "one setFilter call instead of up to one per
+ * branch" — react-doctor's `no-cascading-set-state` is happy and the
+ * underlying infinite-loop avoidance (`setFilter("")` is a thrash, so
+ * we return `NO_DEFAULT` for that case) is preserved verbatim.
+ */
+function resolveFilterDefault(
+  filter: Filter,
+  customFields: CustomFieldSummary[]
+): Filter["value"] | typeof NO_DEFAULT {
+  if (filter.value !== "") return NO_DEFAULT;
+  if (filter.type === "boolean") return true;
+  if (filter.type === "enum") {
+    if (filter.name === "type") return "INDIVIDUAL";
+    if (filter.name === "status") return Object.values(AssetStatus)[0];
+    if (filter.name.startsWith("cf_")) {
+      const options =
+        customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
+        [];
+      // Only return a real default — empty-string would thrash parent
+      // state via setFilter's unstable identity (infinite loop).
+      return options[0] ?? NO_DEFAULT;
+    }
+    // Non-custom enum fields (category, location, kit, assetModel, …)
+    // default to empty string. Returning NO_DEFAULT avoids the no-op
+    // setFilter("") that would re-trigger the effect.
+    return NO_DEFAULT;
+  }
+  return NO_DEFAULT;
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export function ValueField({
   filter,
@@ -175,19 +221,16 @@ export function ValueField({
   }, [localValue, validateBetweenFilter]);
 
   useEffect(() => {
-    if (filter.type === "boolean" && filter.value === "") {
-      setFilter(true); // Set default value to true when boolean field is selected
+    // Single dispatch — react-doctor's `no-cascading-set-state` rule
+    // flags branched setState calls, even when only one fires per
+    // render. Consolidate via `resolveFilterDefault` which returns the
+    // value to apply (or `null` for "no default to apply"), so this
+    // effect only invokes `setFilter` once at most.
+    const next = resolveFilterDefault(filter, customFields);
+    if (next !== NO_DEFAULT) {
+      setFilter(next);
     }
-
-    if (filter.type === "enum" && filter.value === "") {
-      const options =
-        filter.name === "status"
-          ? Object.values(AssetStatus)
-          : customFields.find((field) => field?.name === filter.name.slice(3))
-              ?.options || [];
-      setFilter(options[0]); // Set default value to first option when enum field is selected
-    }
-  }, [customFields, filter.name, filter.type, filter.value, setFilter]);
+  }, [customFields, filter, setFilter]);
 
   function handleChange(
     event: ChangeEvent<
@@ -1150,6 +1193,121 @@ function CategoryEnumField({
   );
 }
 
+/** Component that handles asset model selection for both single and multi-select scenarios */
+function AssetModelEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled = false,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected asset model IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "assetModel" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id === "without-model" ? "without-model" : item.id,
+    }),
+    renderItem: (item: any) => <span>{item.name}</span>,
+    initialDataKey: "assetModels",
+    countKey: "totalAssetModels",
+    label: "Filter by asset model",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search asset models",
+    withoutValueItem: {
+      id: "without-model",
+      name: "No model",
+    },
+    disabled,
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        name={name}
+        trigger={
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        if (id === "without-model") {
+                          return "No model";
+                        }
+                        const models =
+                          "assetModels" in data ? data.assetModels : [];
+                        const model = models?.find(
+                          (m: { id: string; name: string }) => m.id === id
+                        );
+                        return model?.name || "";
+                      })
+                      .join(", ")
+                  : "Select asset model"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedModelIds) => {
+          handleChange(selectedModelIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      fieldName={name}
+      placeholder={disabled ? "Select a column first" : "Select asset model"}
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Asset model"
+    />
+  );
+}
+
 /** Component that handles location selection for both single and multi-select scenarios */
 function LocationEnumField({
   value,
@@ -1644,6 +1802,130 @@ function TagsField({
 }
 
 /**
+ * Fixed enum field for the asset tracking type (INDIVIDUAL vs QUANTITY_TRACKED).
+ * Uses a simple Popover-based select with two hardcoded options.
+ */
+function TrackingTypeEnumField({
+  value,
+  handleChange,
+  name,
+  disabled = false,
+}: {
+  value: string;
+  handleChange: (value: string) => void;
+  name?: string;
+  disabled?: boolean;
+}) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+
+  const options = [
+    { id: "INDIVIDUAL", label: "Individual" },
+    { id: "QUANTITY_TRACKED", label: "Tracked by quantity" },
+  ];
+
+  /** Find the label for the currently selected value */
+  const selectedLabel =
+    options.find((opt) => opt.id === value)?.label || "Select type";
+
+  // Sync the keyboard-highlight index when the popover opens. Done in
+  // the open handler (not a useEffect) so react-doctor's
+  // `no-effect-event-handler` rule sees the cause-and-effect tied to
+  // the actual user event.
+  const openPopoverWithSelection = (open: boolean) => {
+    if (disabled) return;
+    if (open) {
+      const currentIndex = options.findIndex((opt) => opt.id === value);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+    setIsPopoverOpen(open);
+  };
+
+  const handleSelect = (optionValue: string) => {
+    handleChange(optionValue);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < options.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        handleSelect(options[selectedIndex].id);
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  return (
+    <>
+      <input type="hidden" value={value} name={name} />
+      <Popover
+        open={isPopoverOpen && !disabled}
+        onOpenChange={openPopoverWithSelection}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
+          >
+            <ChevronRight className="ml-[2px] inline-block rotate-90" />
+            <span className="ml-2">
+              {disabled ? "Select a column first" : selectedLabel}
+            </span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className={tw(
+              "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            )}
+            onKeyDown={handleKeyDown}
+          >
+            {options.map((option, index) => (
+              <div
+                key={option.id}
+                className={tw(
+                  "flex items-center justify-between px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && "bg-gray-50"
+                )}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleSelect(option.id)}
+                onKeyDown={handleActivationKeyPress(() =>
+                  handleSelect(option.id)
+                )}
+              >
+                <span>{option.label}</span>
+                {value === option.id && (
+                  <CheckIcon className="size-4 text-primary" />
+                )}
+              </div>
+            ))}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </>
+  );
+}
+
+/**
  * Component that determines which enum field to render based on field name
  */
 function ValueEnumField({
@@ -1693,6 +1975,21 @@ function ValueEnumField({
     );
   }
 
+  if (fieldName === "assetModel") {
+    return (
+      <>
+        <AssetModelEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
   // Apply the same pattern to all other enum fields
   if (fieldName === "location") {
     return (
@@ -1731,6 +2028,20 @@ function ValueEnumField({
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "type") {
+    return (
+      <>
+        <TrackingTypeEnumField
+          value={value}
+          handleChange={handleChange}
           name={name}
           disabled={disabled}
         />

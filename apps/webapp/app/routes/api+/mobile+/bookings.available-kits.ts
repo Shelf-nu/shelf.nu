@@ -49,10 +49,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { kits, page, perPage, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
         // why: the service only drops empty kits (no assets) from `kits` when
-        // `extraInclude.assets` is set — without it an empty kit passes the
-        // `assets.every` availability check and a user could "add" a kit that
-        // attaches zero assets (while totalKits already excludes it).
-        extraInclude: { assets: { select: { id: true } } },
+        // `extraInclude.assetKits` is set — without it an empty kit passes the
+        // availability check and a user could "add" a kit that attaches zero
+        // assets (while totalKits already excludes it). Post-quantities the
+        // kit→asset link is the AssetKit pivot, so include `assetKits`.
+        extraInclude: { assetKits: { select: { id: true } } },
         request,
         organizationId,
         currentBookingId,

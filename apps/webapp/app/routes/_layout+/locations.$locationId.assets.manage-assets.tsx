@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { AssetStatus, AssetType, type Prisma } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -48,8 +48,12 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import type { PickerAssetMeta } from "~/modules/location/picker-meta.server";
+import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 import { updateLocationAssets } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -93,8 +97,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
           include: {
             kits: { select: { id: true } },
-            assets: {
-              select: { id: true },
+            // Use `include` (not `select`) at the AssetLocation pivot so
+            // Prisma's LocationInclude type narrows through and exposes
+            // nested `asset` in the result type. `quantity` powers the
+            // picker's qty input pre-fill for already-placed rows.
+            assetLocations: {
+              include: { asset: { select: { id: true } } },
             },
           },
         })
@@ -130,6 +138,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalLocations,
     } = paginatedAssets;
 
+    /**
+     * Hydrate per-asset picker metadata for QUANTITY_TRACKED rows on
+     * this page. Drives the qty input's MAX (orthogonal model — see
+     * `getLocationPickerMeta`) and the "Also at: …" indicator for
+     * multi-placement.
+     */
+    const pickerMetaByAssetId = await getLocationPickerMeta({
+      locationId,
+      organizationId,
+      assetIds: assets.map((a) => a.id),
+    });
+
+    const itemsWithPickerMeta = assets.map((a) => ({
+      ...a,
+      pickerMeta: pickerMetaByAssetId.get(a.id) ?? null,
+    }));
+
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -144,7 +169,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       showSidebar: true,
       noScroll: true,
-      items: assets,
+      items: itemsWithPickerMeta,
       categories,
       tags,
       search,
@@ -184,17 +209,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetIds, removedAssetIds, redirectTo } = parseData(
-      await request.formData(),
-      z.object({
-        assetIds: z.array(z.string()).optional().default([]),
-        removedAssetIds: z.array(z.string()).optional().default([]),
-        redirectTo: z.string().optional(),
-      }),
-      {
-        additionalData: { userId, organizationId, locationId },
-      }
-    );
+    const { assetIds, removedAssetIds, assetQuantities, redirectTo } =
+      parseData(
+        await request.formData(),
+        z.object({
+          assetIds: z.array(z.string()).optional().default([]),
+          removedAssetIds: z.array(z.string()).optional().default([]),
+          assetQuantities: AssetQuantitiesSchema,
+          redirectTo: z.string().optional(),
+        }),
+        {
+          additionalData: { userId, organizationId, locationId },
+        }
+      );
 
     await updateLocationAssets({
       assetIds,
@@ -203,6 +230,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       request,
       removedAssetIds,
+      assetQuantities,
     });
 
     /**
@@ -237,28 +265,83 @@ export default function AddAssetsToLocation() {
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
   const locationKitIds = location.kits.map((k) => k.id);
-  const locationAssetsCount = location.assets.length;
+  // Flatten the AssetLocation pivot rows to the simple `asset[]` shape
+  // the component logic expects.
+  const locationAssets = useMemo(
+    () => location.assetLocations.map((al) => al.asset),
+    [location.assetLocations]
+  );
+  const locationAssetsCount = locationAssets.length;
   const hasUnsavedChanges = selectedBulkItemsCount !== locationAssetsCount;
 
   const manageKitsUrl = `/locations/${location.id}/kits/manage-kits`;
 
+  /**
+   * Snapshot of each qty-tracked asset's current AssetLocation.quantity
+   * at this location — used to (a) pre-fill the picker qty input on
+   * initial render and (b) let the qty-edit branch detect submitted-vs-
+   * existing deltas inside `updateLocationAssets`.
+   */
+  const initialLocationQuantities = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const al of location.assetLocations) {
+      map[al.asset.id] = al.quantity;
+    }
+    return map;
+  }, [location.assetLocations]);
+
   const removedAssets = useMemo(
     () =>
-      location.assets.filter(
+      locationAssets.filter(
         (asset) =>
           !selectedBulkItems.some(
             (selectedItem) => selectedItem.id === asset.id
           )
       ),
-    [location.assets, selectedBulkItems]
+    [locationAssets, selectedBulkItems]
   );
 
   /**
-   * Set selected items for kit based on the route data
+   * Per-asset quantity for QUANTITY_TRACKED rows. Submitted as a hidden
+   * JSON field so the action can apply the diff against
+   * `initialLocationQuantities`. Initialised from the location's
+   * current pivot rows so users see "currently 30 at this location"
+   * rather than starting from a blank input.
    */
-  useEffect(() => {
-    setSelectedBulkItems(location.assets);
-  }, [location.assets, setSelectedBulkItems]);
+  const [quantities, setQuantities] = useState<Record<string, number>>(() => ({
+    ...initialLocationQuantities,
+  }));
+
+  const handleQuantityChange = useCallback(
+    (assetId: string, quantity: number) => {
+      setQuantities((prev) => ({ ...prev, [assetId]: quantity }));
+    },
+    []
+  );
+
+  /** Drop the qty entry when the row is deselected. */
+  const removeQuantity = useCallback((assetId: string) => {
+    setQuantities((prev) => {
+      if (!(assetId in prev)) return prev;
+      const next = { ...prev };
+      delete next[assetId];
+      return next;
+    });
+  }, []);
+
+  /**
+   * Initialise the shared Jotai atom synchronously during the first
+   * render (guarded by a ref) rather than running the setter inside a
+   * mount effect — react-doctor's `no-derived-state-effect` flags the
+   * useEffect form, and the render-time init avoids the empty-first-
+   * frame flicker. Mirrors the kit picker at
+   * `kits.$kitId.assets.manage-assets.tsx:365-369`.
+   */
+  const didInitializeSelectedItemsRef = useRef(false);
+  if (!didInitializeSelectedItemsRef.current) {
+    didInitializeSelectedItemsRef.current = true;
+    setSelectedBulkItems(locationAssets);
+  }
 
   return (
     <Tabs
@@ -359,6 +442,24 @@ export default function AddAssetsToLocation() {
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
           navigate={(_assetId, item) => {
+            // Pre-fill (or clear) the qty input alongside the selection
+            // toggle. Mirrors the kit picker's qty-on-toggle behaviour:
+            // INDIVIDUAL rows skip both branches (no qty input renders).
+            const isCurrentlySelected = selectedBulkItems.some(
+              (a) => a.id === item.id
+            );
+            if (isCurrentlySelected) {
+              removeQuantity(item.id);
+            } else if (item.type === AssetType.QUANTITY_TRACKED) {
+              const meta = (
+                item as typeof item & { pickerMeta?: PickerAssetMeta | null }
+              ).pickerMeta;
+              const fallbackMax =
+                meta?.maxAllowedForThisLocation ?? item.quantity ?? 1;
+              const initial =
+                initialLocationQuantities[item.id] ?? Math.max(1, fallbackMax);
+              handleQuantityChange(item.id, initial);
+            }
             updateItem(item);
           }}
           customEmptyStateContent={{
@@ -376,6 +477,11 @@ export default function AddAssetsToLocation() {
               <Th>Tags</Th>
             </>
           }
+          extraItemComponentProps={{
+            quantities,
+            onQuantityChange: handleQuantityChange,
+            initialLocationQuantities,
+          }}
         />
       </TabsContent>
 
@@ -407,6 +513,15 @@ export default function AddAssetsToLocation() {
                 value={asset.id}
               />
             ))}
+            {/* JSON-encoded `Record<assetId, quantity>` — picker writes
+                one entry per selected QUANTITY_TRACKED asset. INDIVIDUAL
+                rows are absent and the service falls back to
+                Asset.quantity (legacy default). */}
+            <input
+              type="hidden"
+              name="assetQuantities"
+              value={JSON.stringify(quantities)}
+            />
             {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageKitsUrl} type="hidden" />
             ) : null}
@@ -439,25 +554,70 @@ export default function AddAssetsToLocation() {
   );
 }
 
+type LocationRowItem = Prisma.AssetGetPayload<{
+  include: {
+    assetLocations: {
+      select: { location: typeof LOCATION_WITH_HIERARCHY };
+    };
+    category: true;
+    tags: true;
+  };
+}> & {
+  /** Attached by the loader. Null for INDIVIDUAL rows or when the
+   * helper skipped the asset (defensive — the loader always covers
+   * every qty-tracked id on the page). */
+  pickerMeta?: PickerAssetMeta | null;
+};
+
 const RowComponent = ({
   item,
+  extraProps: { quantities, onQuantityChange, initialLocationQuantities },
 }: {
-  item: Prisma.AssetGetPayload<{
-    include: {
-      location: typeof LOCATION_WITH_HIERARCHY;
-      category: true;
-      tags: true;
-    };
-  }>;
+  item: LocationRowItem;
+  extraProps: {
+    quantities: Record<string, number>;
+    onQuantityChange: (assetId: string, quantity: number) => void;
+    initialLocationQuantities: Record<string, number>;
+  };
 }) => {
   const { tags, category } = item;
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const isSelected = selectedBulkItems.some((a) => a.id === item.id);
+  const isQty = isQuantityTracked(item);
+  const meta = item.pickerMeta;
+
+  /**
+   * Decide whether to render the per-row qty input. Only qty-tracked
+   * rows that are currently selected qualify — INDIVIDUAL stays a
+   * single-checkbox row, and qty-tracked rows that haven't been
+   * toggled on shouldn't take vertical space for an input the user
+   * can't act on. `pickerMeta` is undefined-safe in case the loader
+   * missed a row (defensive — the loader covers every qty-tracked id
+   * on the page).
+   */
+  const showQtyInput = isQty && isSelected && !!meta;
+  const currentValue =
+    quantities[item.id] ??
+    meta?.maxAllowedForThisLocation ??
+    item.quantity ??
+    1;
+  const max =
+    meta?.maxAllowedForThisLocation ??
+    item.quantity ??
+    Number.POSITIVE_INFINITY;
+  const initialAtThisLocation = initialLocationQuantities[item.id] ?? 0;
+  const otherLocations = meta?.inOtherLocations ?? [];
 
   return (
     <>
       {/* Name */}
       <Td className="w-full min-w-[330px] p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 p-4 md:pr-6">
+          {/* `min-w-0 flex-1` on the title block so its long text
+              (e.g. the multi-placement "Also at: ..." line) wraps
+              cleanly instead of forcing the qty input off-screen.
+              The qty input keeps its `shrink-0` and stays visible. */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
@@ -470,32 +630,126 @@ const RowComponent = ({
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col gap-y-1">
+            {/* Inner text column also gets `min-w-0` so its <p>
+                elements wrap instead of expanding the parent. */}
+            <div className="flex min-w-0 flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
+                {isQuantityTracked(item) && item.quantity != null ? (
+                  <span className="ml-2 text-xs font-normal text-gray-500">
+                    · {item.quantity} {item.unitOfMeasure || "units"}
+                    {/* Surface the strict-available pool when it's
+                        smaller than the asset's total — clarifies why
+                        the qty input's MAX may be lower than the
+                        total. Skipped when meta is missing
+                        (defensive) or when max equals the total (no
+                        constraint to flag). */}
+                    {meta && meta.maxAllowedForThisLocation < item.quantity ? (
+                      <span className="ml-1 text-warning-700">
+                        · {meta.maxAllowedForThisLocation} available
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
               </p>
+              {/* "Also at: Loc X (N)" indicator. Surfaces multi-
+                  placement so the user knows their picker MAX is
+                  capped by allocations elsewhere. Only renders when
+                  the asset is placed at another location. */}
+              {otherLocations.length > 0 && (
+                // Single-line + ellipsis so a multi-placement list
+                // doesn't overflow the Td and visually collide with
+                // the qty input on the right. The full list is
+                // available via the tooltip below and on the asset
+                // overview's "Placed at locations" card.
+                <p
+                  className="truncate text-xs text-gray-500"
+                  title={otherLocations
+                    .map((l) => `${l.locationName} (${l.quantity})`)
+                    .join(", ")}
+                >
+                  Also at:{" "}
+                  {otherLocations
+                    .map((l) => `${l.locationName} (${l.quantity})`)
+                    .join(", ")}
+                </p>
+              )}
               <AssetStatusBadge
                 id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
+                asset={item}
               />
             </div>
           </div>
+          {/* Qty picker for QUANTITY_TRACKED rows. Bounded by the
+              strict-available pool (orthogonal MAX from
+              `getLocationPickerMeta`). `e.stopPropagation()` on the
+              wrapper keeps clicks inside the input from toggling the
+              row's selection state. */}
+          {showQtyInput ? (
+            <div
+              className="ml-auto flex shrink-0 flex-col items-end gap-1 pr-2"
+              role="presentation"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor={`location-qty-${item.id}`}
+                  className="text-xs text-gray-500"
+                >
+                  Qty:
+                </label>
+                <input
+                  id={`location-qty-${item.id}`}
+                  type="number"
+                  min={1}
+                  max={Number.isFinite(max) ? max : undefined}
+                  value={currentValue}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    if (!Number.isFinite(raw)) return;
+                    const capped = Math.max(
+                      1,
+                      Math.min(
+                        Math.floor(raw),
+                        Number.isFinite(max) ? max : raw
+                      )
+                    );
+                    onQuantityChange(item.id, capped);
+                  }}
+                  className="h-8 w-16 rounded-md border border-gray-300 px-2 text-center text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  aria-label={`Quantity for ${item.title}`}
+                />
+                <span className="text-xs text-gray-400">/ {max}</span>
+              </div>
+              {initialAtThisLocation > 0 &&
+              initialAtThisLocation !== currentValue ? (
+                <span className="text-xs text-warning-700">
+                  was {initialAtThisLocation}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </Td>
 
-      {/* Location */}
+      {/* Location — primary placement via the AssetLocation pivot. */}
       <Td>
-        {item.location ? (
-          <LocationBadge
-            location={{
-              id: item.location.id,
-              name: item.location.name,
-              parentId: item.location.parentId ?? undefined,
-              childCount: item.location._count?.children ?? 0,
-            }}
-          />
-        ) : null}
+        {(() => {
+          const primary = getPrimaryLocation(item);
+          if (!primary) return null;
+          return (
+            <LocationBadge
+              location={{
+                id: primary.id,
+                name: primary.name,
+                parentId: primary.parentId ?? undefined,
+                childCount: primary._count?.children ?? 0,
+              }}
+            />
+          );
+        })()}
       </Td>
 
       {/* Category */}

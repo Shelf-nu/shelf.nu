@@ -143,7 +143,11 @@ export async function action({ request }: ActionFunctionArgs) {
           select: { id: true, name: true },
         }),
         db.asset.findMany({
-          where: { kitId: { in: kitIds }, organizationId },
+          // Kit membership is the AssetKit pivot now (quantities restructure).
+          where: {
+            assetKits: { some: { kitId: { in: kitIds } } },
+            organizationId,
+          },
           select: { id: true },
         }),
       ]);
@@ -162,7 +166,8 @@ export async function action({ request }: ActionFunctionArgs) {
       where: {
         id: { in: candidateAssetIds },
         organizationId,
-        bookings: { some: { id: bookingId } },
+        // Asset↔booking membership is the BookingAsset pivot now (quantities).
+        bookingAssets: { some: { bookingId } },
       },
       select: { id: true, title: true },
     });

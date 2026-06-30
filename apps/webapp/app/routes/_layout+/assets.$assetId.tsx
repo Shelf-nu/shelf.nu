@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType, OrganizationRoles } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -18,6 +18,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteAsset,
@@ -25,12 +26,15 @@ import {
   getAsset,
   relinkAssetQrCode,
 } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { computeBookingAssetRemainingToCheckOut } from "~/modules/booking/service.server";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -61,6 +65,29 @@ export const AvailabilityForBookingFormSchema = z.object({
     .default("false"),
 });
 
+/**
+ * Asset detail page parent loader.
+ *
+ * Ships the canonical `asset` record consumed by both this page's header
+ * (notably `AssetStatusBadge` in the sub-heading) AND every child route
+ * outlet (`assets.$assetId.overview.tsx`, `…activity.tsx`, `…bookings.tsx`,
+ * `…reminders.tsx`). Because the header `AssetStatusBadge` reads its
+ * quantity-aware tooltip data straight from `asset.bookingAssets`, this
+ * loader is responsible for honouring the
+ * {@link import('~/components/assets/asset-status-badge/quantity-data').getQuantityData getQuantityData}
+ * contract for ONGOING/OVERDUE rows — i.e. `BookingAsset.quantity` for
+ * those rows MUST be the SERVER-COMPUTED effective claimed count
+ * (`booked − remaining-to-check-out`), NOT the raw pivot snapshot.
+ *
+ * If a child route adds another badge / tooltip that reads `bookingAssets`
+ * from the parent loader, it inherits this corrected shape — no extra work
+ * needed. Mirrors the post-processing in
+ * `~/routes/api+/assets.$assetId.quantity-breakdown.ts` so the inline-SSR
+ * path and the lazy-fetch path agree byte-for-byte.
+ *
+ * @see {@link file://./../api+/assets.$assetId.quantity-breakdown.ts}
+ * @see {@link file://./../../components/assets/asset-status-badge/quantity-data.ts}
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -69,12 +96,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, role } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      }
+    );
 
     const asset = await getAsset({
       id,
@@ -83,18 +112,147 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       include: {
         custody: { include: { custodian: true } },
-        kit: true,
+        assetKits: {
+          select: {
+            id: true,
+            quantity: true,
+            kit: { select: { id: true, name: true, status: true } },
+          },
+        },
         qrCodes: true,
+        bookingAssets: {
+          where: {
+            booking: { status: { in: ["RESERVED", "ONGOING", "OVERDUE"] } },
+          },
+          select: {
+            quantity: true,
+            assetKitId: true,
+            booking: { select: { id: true, name: true, status: true } },
+          },
+        },
       },
     });
+
+    /**
+     * Effective-quantity post-processing for ONGOING / OVERDUE rows.
+     *
+     * The raw `BookingAsset.quantity` shipped by Prisma is the BOOKED
+     * quantity (the snapshot the user reserved at booking time). On the
+     * OUT-flow, units can be scanned out progressively via
+     * `PartialBookingCheckout` — so the BOOKED total may overstate what's
+     * actually checked out at any given moment. The header
+     * `AssetStatusBadge` tooltip's "Checked out" line needs the EFFECTIVE
+     * count (`booked − remaining-to-check-out`), otherwise it over-reports
+     * while a booking is partially scanned out (bug #96).
+     *
+     * RESERVED rows pass through unchanged — reservations have no
+     * `PartialBookingCheckout` claim subtraction (nothing scanned yet).
+     *
+     * Aggregates per `bookingId` because the canonical reducer
+     * `computeBookingAssetRemainingToCheckOut` operates per
+     * (bookingId, assetId) and the tooltip already groups by booking. The
+     * per-slice `assetKitId` discriminator is intentionally collapsed to
+     * `null` on the aggregated active rows — the standalone-vs-kit-driven
+     * split isn't recoverable without re-deriving claim attribution per
+     * slice, which the tooltip's per-booking summation doesn't need.
+     *
+     * Mirrors the post-processing in
+     * `~/routes/api+/assets.$assetId.quantity-breakdown.ts` so the inline
+     * SSR path used by this page and the lazy-fetch path used by index /
+     * picker / scanner-drawer surfaces produce identical numbers.
+     */
+    type RawBookingAssetRow = (typeof asset.bookingAssets)[number];
+    const rawBookingAssets: RawBookingAssetRow[] = asset.bookingAssets ?? [];
+
+    const reservedRows: RawBookingAssetRow[] = [];
+    const activeRows: RawBookingAssetRow[] = [];
+    for (const ba of rawBookingAssets) {
+      const status = ba.booking?.status;
+      if (status === "ONGOING" || status === "OVERDUE") {
+        activeRows.push(ba);
+      } else {
+        reservedRows.push(ba);
+      }
+    }
+
+    // Aggregate active rows by bookingId — multiple slices of the same
+    // asset on the same booking (kit-driven + standalone) share a
+    // booking-level claim pool, so per-booking is the correct grain.
+    type ActiveBookingAggregate = {
+      booking: NonNullable<RawBookingAssetRow["booking"]>;
+      bookedQuantity: number;
+    };
+    const activeByBooking = new Map<string, ActiveBookingAggregate>();
+    for (const ba of activeRows) {
+      const bookingId = ba.booking?.id;
+      if (!bookingId || !ba.booking) continue;
+      const existing = activeByBooking.get(bookingId);
+      if (existing) {
+        existing.bookedQuantity += ba.quantity ?? 0;
+      } else {
+        activeByBooking.set(bookingId, {
+          booking: ba.booking,
+          bookedQuantity: ba.quantity ?? 0,
+        });
+      }
+    }
+
+    // Run each booking through `computeBookingAssetRemainingToCheckOut`
+    // in parallel — independent reads, no shared state.
+    const effectiveActiveRows: RawBookingAssetRow[] = await Promise.all(
+      Array.from(activeByBooking.entries()).map(async ([bookingId, agg]) => {
+        const remaining = await computeBookingAssetRemainingToCheckOut(
+          db,
+          bookingId,
+          asset.id
+        );
+        // effective claimed = booked − remaining-to-check-out, floored at 0
+        const effectiveQuantity = Math.max(0, agg.bookedQuantity - remaining);
+        return {
+          quantity: effectiveQuantity,
+          // Per-slice attribution collapses at the aggregate grain — see
+          // the API endpoint for the same rationale.
+          assetKitId: null,
+          booking: agg.booking,
+        } as RawBookingAssetRow;
+      })
+    );
+
+    // Drop ONGOING/OVERDUE rows with zero effective quantity — they
+    // represent bookings where nothing has been scanned out yet (e.g. a
+    // brand-new ONGOING booking awaiting its first scan). The tooltip
+    // should only show bookings that contribute to the checked-out count.
+    const cleanedActiveRows = effectiveActiveRows.filter(
+      (row) => (row.quantity ?? 0) > 0
+    );
+
+    const assetWithEffectiveBookingAssets = {
+      ...asset,
+      bookingAssets: [...reservedRows, ...cleanedActiveRows],
+    };
+
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members so the
+     * QuantityCustodyDialog in the actions dropdown has initial data.
+     */
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
 
     const header: HeaderData = {
       title: asset.title,
     };
 
     return payload({
-      asset,
+      asset: assetWithEffectiveBookingAssets,
       header,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -353,6 +511,7 @@ export default function AssetDetailsPage() {
               id={asset.id}
               status={asset.status}
               availableToBook={asset.availableToBook}
+              asset={asset}
             />
           </div>
         }

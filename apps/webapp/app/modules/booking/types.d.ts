@@ -18,7 +18,7 @@ export type BookingWithExtraInclude<
 
 export type BookingWithIncludes = Prisma.BookingGetPayload<{
   include: {
-    assets: true;
+    bookingAssets: true;
     custodianTeamMember: true;
     custodianUser: true;
   };
@@ -42,7 +42,7 @@ export type BookingUpdateIntent =
 
 export type BookingWithCustodians = Prisma.BookingGetPayload<{
   include: {
-    assets: true;
+    bookingAssets: true;
     from: true;
     to: true;
     custodianUser: true;

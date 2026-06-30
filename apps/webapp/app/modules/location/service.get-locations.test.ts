@@ -51,8 +51,12 @@ describe("getLocations", () => {
       orderDirection: "desc",
     });
 
+    // Post-pivot: asset placement lives on the `AssetLocation` pivot, so the
+    // _count-driven sort goes through `assetLocations` (was `assets`).
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { assets: { _count: "desc" } } })
+      expect.objectContaining({
+        orderBy: { assetLocations: { _count: "desc" } },
+      })
     );
   });
 
