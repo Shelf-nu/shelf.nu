@@ -503,18 +503,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
       /**
-       * We extend main's "only new asset ids" guard with our slice-aware
-       * payload: `assetIds` carries the genuinely-new standalone-style
-       * asset ids (for FK validation + addedAssetIds reporting), while
-       * `kitSlices` carries the per-AssetKit rows that drive kit-driven
-       * inserts and per-row quantities for QUANTITY_TRACKED. `kitSlices`
-       * is already filtered against `existingAssetKitIds`, so it only
-       * contains genuinely new kit-driven rows.
+       * A pure kit-add has NO genuine standalone assets — every member
+       * already travels through `kitSlices` (one per-AssetKit row that
+       * drives the kit-driven insert and carries per-row quantities for
+       * QUANTITY_TRACKED). So we pass `assetIds: []` here.
+       *
+       * Passing the slice asset ids as `assetIds` too would create a
+       * DUPLICATE standalone `BookingAsset` row (assetKitId NULL) for
+       * every member, on top of the kit-driven row — that was the "kit
+       * assets show twice" bug that inflated all booking counts/progress.
+       *
+       * `updateBookingAssets` still validates and reports correctly with
+       * an empty `assetIds`: FK validation unions `assetIds` with the
+       * slice asset ids, and `addedAssetIds` derives from the kit asset
+       * ids, so the ONGOING/OVERDUE status flip and per-asset
+       * `BOOKING_ASSETS_ADDED` events still fire. `scan-assets.tsx` uses
+       * the same standalone-vs-kit-slice separation.
        */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds: newAssetIds, // Only the newly added assets from kits
+        // Pure kit-add: members are created ONLY as kit-driven rows via
+        // `kitSlices`; no standalone rows — see comment above.
+        assetIds: [],
         kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
         kitSlices,

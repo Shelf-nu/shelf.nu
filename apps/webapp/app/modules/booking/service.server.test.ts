@@ -27,6 +27,7 @@ import {
   getKitIdsByAssets,
   updateBasicBooking,
   updateBookingAssets,
+  buildKitSlicesForBooking,
   reserveBooking,
   checkoutBooking,
   fulfilModelRequestsAndCheckout,
@@ -1902,6 +1903,95 @@ describe("updateBookingAssets", () => {
         arg.filter((v) => v === "asset-shared").length === 2
     );
     expect(sharedAssetIdArray).toBeDefined();
+  });
+});
+
+describe("buildKitSlicesForBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("maps each AssetKit membership row to a kit-driven slice spec", async () => {
+    expect.assertions(2);
+
+    // why: buildKitSlicesForBooking reads kit membership rows via
+    // db.assetKit.findMany — stub the rows so we can assert the mapping
+    // without a real DB. The default mock only echoes `{ id }`, so this
+    // override supplies the assetId/quantity the mapping needs.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-1", assetId: "asset-1", quantity: 1 },
+      { id: "ak-2", assetId: "asset-2", quantity: 4 },
+    ]);
+
+    const slices = await buildKitSlicesForBooking({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+    });
+
+    expect(slices).toEqual([
+      { assetId: "asset-1", assetKitId: "ak-1", quantity: 1 },
+      { assetId: "asset-2", assetKitId: "ak-2", quantity: 4 },
+    ]);
+    // The same asset across multiple kits stays distinct per AssetKit id —
+    // mapping is 1:1 with membership rows, never deduped by assetId.
+    expect(slices).toHaveLength(2);
+  });
+
+  it("excludes memberships already represented on the booking", async () => {
+    expect.assertions(1);
+
+    // why: stub three membership rows; `existingAssetKitIds` should filter
+    // out the ones already on the booking so re-adding a kit is idempotent.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-1", assetId: "asset-1", quantity: 1 },
+      { id: "ak-2", assetId: "asset-2", quantity: 2 },
+      { id: "ak-3", assetId: "asset-3", quantity: 3 },
+    ]);
+
+    const slices = await buildKitSlicesForBooking({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      existingAssetKitIds: new Set(["ak-2"]),
+    });
+
+    expect(slices).toEqual([
+      { assetId: "asset-1", assetKitId: "ak-1", quantity: 1 },
+      { assetId: "asset-3", assetKitId: "ak-3", quantity: 3 },
+    ]);
+  });
+
+  it("org-scopes the AssetKit lookup (cross-org IDOR guard)", async () => {
+    expect.assertions(1);
+
+    // why: capture the where-clause the helper passes so we can prove it is
+    // scoped by organizationId — the only thing stopping a foreign-org kit id
+    // from leaking another org's membership into the caller's booking.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await buildKitSlicesForBooking({
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+    });
+
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { kitId: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("short-circuits to an empty list without querying when no kitIds", async () => {
+    expect.assertions(2);
+
+    const slices = await buildKitSlicesForBooking({
+      kitIds: [],
+      organizationId: "org-1",
+    });
+
+    expect(slices).toEqual([]);
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
   });
 });
 

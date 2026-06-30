@@ -563,6 +563,7 @@ async function updateBookingKitStates({
 export async function createBooking({
   booking,
   assetIds,
+  kitSlices,
   hints,
 }: {
   /**
@@ -580,9 +581,29 @@ export async function createBooking({
   > & { custodianTeamMemberId: string; tags: { id: string }[] };
 
   /**
-   * Asset IDs that are connected to the booking
+   * Standalone asset IDs that are connected to the booking (no kit
+   * attribution — these become `BookingAsset` rows with `assetKitId` NULL).
+   *
+   * This can happen when:
+   * - Booking is created from assets bulk actions
+   * - Booking is created from the asset page
    */
   assetIds: Asset["id"][];
+
+  /**
+   * Optional kit-driven slice specs — one element per `AssetKit` membership
+   * to attach at creation. Each becomes a `BookingAsset` row carrying a
+   * non-null `assetKitId` (the kit-source discriminator). Supplying these
+   * lets a booking be created directly from a kit selection (e.g. "create
+   * booking from kit"). Build them with {@link buildKitSlicesForBooking} so
+   * the resolution stays org-scoped and consistent with the kit-add route.
+   *
+   * Carrying a LIST (not a 1:1 assetId → assetKitId map) is what lets the
+   * same quantity-tracked asset belonging to multiple kits produce multiple
+   * distinct kit-driven rows (the kit partial unique is on
+   * `(bookingId, assetKitId)`).
+   */
+  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
 
   /**
    * Hints are used for setting the timezone of the booking
@@ -612,16 +633,35 @@ export async function createBooking({
       },
     };
 
+    // Normalize the optional kit-driven slices once so every downstream
+    // step (create payload, org validation, events) reads the same list.
+    const slices = kitSlices ?? [];
+
     /**
-     * If assetsIds are passed, we directly connect them.
-     * This can happen when:
-     * - Booking is created from assets bulk actions
-     * - Booking is created from asset page
-     * */
-    if (assetIds.length > 0) {
-      dataToCreate.bookingAssets = {
-        create: assetIds.map((id) => ({ assetId: id })),
-      };
+     * Build the `BookingAsset` rows to create:
+     * - Standalone rows (`{ assetId }`) keep the historical shape exactly —
+     *   `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
+     *   default, so the no-kit path is unchanged byte-for-byte.
+     * - Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
+     *   settable directly in a nested create — mirrors `duplicateBooking`) so
+     *   the same asset can be both standalone AND a kit member without
+     *   tripping the `(bookingId, assetId) WHERE assetKitId IS NULL` partial
+     *   unique.
+     */
+    const bookingAssetRows = [
+      ...assetIds.map((id) => ({ assetId: id })),
+      ...slices.map((s) => ({
+        assetId: s.assetId,
+        quantity: s.quantity,
+        assetKitId: s.assetKitId,
+      })),
+    ];
+
+    // Only set the nested create when there's at least one row — this covers
+    // standalone-only, kit-only, and mixed inputs (and avoids an empty
+    // `create: []` when neither is supplied).
+    if (bookingAssetRows.length > 0) {
+      dataToCreate.bookingAssets = { create: bookingAssetRows };
     }
 
     if (booking.custodianUserId) {
@@ -647,6 +687,29 @@ export async function createBooking({
       if (assetIds.length > 0) {
         await assertAssetsBelongToOrg(
           { assetIds, organizationId: booking.organizationId },
+          tx
+        );
+      }
+
+      // SECURITY (cross-org IDOR): kit-slice asset ids and their source
+      // `AssetKit` ids also originate from request/form input and are written
+      // straight onto `BookingAsset` rows. Prove both belong to the booking's
+      // org before the create — otherwise an attacker could attach Org B's
+      // assets/kit memberships to their own booking. Runs with the active `tx`
+      // so it commits atomically with the create.
+      if (slices.length > 0) {
+        await assertAssetsBelongToOrg(
+          {
+            assetIds: slices.map((s) => s.assetId),
+            organizationId: booking.organizationId,
+          },
+          tx
+        );
+        await assertAssetKitsBelongToOrg(
+          {
+            assetKitIds: slices.map((s) => s.assetKitId),
+            organizationId: booking.organizationId,
+          },
           tx
         );
       }
@@ -695,28 +758,50 @@ export async function createBooking({
           entityType: "BOOKING",
           entityId: created.id,
           bookingId: created.id,
-          meta: { assetCount: assetIds.length },
+          // Count the rows actually created (standalone + kit-driven). For the
+          // no-kit path this equals `assetIds.length` (unchanged); mirrors
+          // `duplicateBooking`, which counts its create payload.
+          meta: { assetCount: bookingAssetRows.length },
         },
         tx
       );
 
-      // One BOOKING_ASSETS_ADDED event per asset attached at creation.
-      // Look up `type`/`unitOfMeasure` so the event meta carries
-      // `quantity` for QUANTITY_TRACKED assets (no-op for INDIVIDUAL).
-      // BookingAsset.quantity is the schema default (1) on this path —
-      // `createBooking` accepts no per-asset quantity input.
-      if (assetIds.length > 0) {
+      // One BOOKING_ASSETS_ADDED event per asset attached at creation —
+      // standalone ids PLUS kit-member asset ids, deduped (an asset can be
+      // both a standalone row and a kit member). Look up `type`/`unitOfMeasure`
+      // so the event meta carries `quantity` for QUANTITY_TRACKED assets
+      // (no-op for INDIVIDUAL).
+      const eventAssetIds = [
+        ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
+      ];
+      if (eventAssetIds.length > 0) {
         const assetTypes = await tx.asset.findMany({
           where: {
-            id: { in: assetIds },
+            id: { in: eventAssetIds },
             organizationId: booking.organizationId,
           },
           select: { id: true, type: true, unitOfMeasure: true },
         });
         const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
 
+        // Sum the booked quantity per asset across every row this create is
+        // responsible for: each standalone row contributes 1 (schema default —
+        // `createBooking` takes no per-asset quantity input) plus each kit
+        // slice's own quantity. Mirrors `updateBookingAssets` so the same
+        // asset added both standalone and via N kits reports the true count.
+        const addedQtyByAssetId = new Map<string, number>();
+        for (const sid of assetIds) {
+          addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
+        }
+        for (const slice of slices) {
+          addedQtyByAssetId.set(
+            slice.assetId,
+            (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+          );
+        }
+
         await recordEvents(
-          assetIds.map((assetId) => {
+          eventAssetIds.map((assetId) => {
             const asset = assetTypeById.get(assetId);
             return {
               organizationId: booking.organizationId,
@@ -726,8 +811,9 @@ export async function createBooking({
               entityId: created.id,
               bookingId: created.id,
               assetId,
-              // Default BookingAsset.quantity on create = 1 (schema default).
-              meta: asset ? assetQtyMeta(asset, 1) : {},
+              meta: asset
+                ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
+                : {},
             };
           }),
           tx
@@ -6553,6 +6639,75 @@ export async function partialCheckoutBooking({
   }
 }
 
+/**
+ * Resolves a set of kits into the kit-driven `BookingAsset` slice specs needed
+ * to add those kits to a booking.
+ *
+ * Each `AssetKit` membership row becomes one slice in the shape the booking
+ * write paths expect (`{ assetId, assetKitId, quantity }`). A kit with N member
+ * assets yields N slices; the SAME asset belonging to MULTIPLE kits yields
+ * MULTIPLE slices (one per `AssetKit.id`). That one-slice-per-membership shape
+ * is exactly what lets a single quantity-tracked asset produce multiple
+ * distinct kit-driven rows — the kit partial unique is on
+ * `(bookingId, assetKitId)`, not `(bookingId, assetId)`.
+ *
+ * Centralizes the resolution previously inlined in the `manage-kits` route
+ * action so `createBooking`, the kit-add route, and any future kit→booking flow
+ * build slices the exact same, org-scoped way (per the repo's
+ * code-abstraction rule).
+ *
+ * SECURITY (cross-org IDOR): `kitIds` originate from request/form input, so the
+ * lookup is scoped by `organizationId`. `AssetKit` carries its own
+ * `organizationId` column, so this is the authoritative org guard — a
+ * foreign-org kit id simply resolves to no rows rather than leaking another
+ * org's kit membership into the caller's booking.
+ *
+ * @param params.kitIds - Kit IDs whose members should become booking slices
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param params.existingAssetKitIds - Optional set of `AssetKit.id`s already
+ *   represented on the target booking; matching memberships are skipped so
+ *   re-adding a kit that's already (partly) present is idempotent per slice.
+ * @returns One slice spec per newly-added `AssetKit` membership
+ * @throws {ShelfError} If the database lookup fails
+ */
+export async function buildKitSlicesForBooking({
+  kitIds,
+  organizationId,
+  existingAssetKitIds,
+}: {
+  kitIds: string[];
+  organizationId: string;
+  existingAssetKitIds?: Set<string>;
+}): Promise<Array<{ assetId: string; assetKitId: string; quantity: number }>> {
+  // Nothing to resolve — short-circuit so callers can pass an empty list freely.
+  if (kitIds.length === 0) return [];
+
+  try {
+    const assetKits = await db.assetKit.findMany({
+      where: { kitId: { in: kitIds }, organizationId },
+      select: { id: true, assetId: true, quantity: true },
+    });
+
+    // One slice per AssetKit membership, skipping memberships already on the
+    // booking so re-adding a kit doesn't duplicate its slices.
+    return assetKits
+      .filter((ak) => !existingAssetKitIds?.has(ak.id))
+      .map((ak) => ({
+        assetId: ak.assetId,
+        assetKitId: ak.id,
+        quantity: ak.quantity,
+      }));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while resolving kit contents for the booking.",
+      additionalData: { kitIds, organizationId },
+      label,
+    });
+  }
+}
+
 export async function updateBookingAssets({
   id,
   organizationId,
@@ -6611,10 +6766,13 @@ export async function updateBookingAssets({
       ];
 
       // Validate that all asset IDs exist before inserting into the join table
-      // to prevent FK violations when assets are deleted between UI load and submission
+      // to prevent FK violations when assets are deleted between UI load and
+      // submission. `type` is selected so we can enforce the standalone/
+      // kit-driven invariant below (INDIVIDUAL assets can't legitimately be
+      // both in the same booking).
       const validAssets = await tx.asset.findMany({
         where: { id: { in: uniqueAssetIds }, organizationId },
-        select: { id: true },
+        select: { id: true, type: true },
       });
       const validAssetIds = validAssets.map((a) => a.id);
 
@@ -6650,10 +6808,35 @@ export async function updateBookingAssets({
         tx
       );
 
+      // INVARIANT: an INDIVIDUAL asset is a single physical unit, so it can
+      // never legitimately be BOTH a standalone row AND a kit-driven row in
+      // the same booking — that would book the one unit twice. Defensive
+      // guard for callers that wrongly route a kit member through the
+      // standalone bucket too: when the SAME INDIVIDUAL asset appears in both
+      // `assetIds` and `kitSlices` in this call, drop it from the standalone
+      // insert and let the kit-driven row own it.
+      //
+      // QUANTITY_TRACKED assets are deliberately EXEMPT: N units booked
+      // standalone PLUS M units via a kit are two legitimate, distinct rows,
+      // so we must NOT touch them here.
+      const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+      const individualKitOverlapAssetIds = new Set(
+        validAssets
+          .filter(
+            (a) => a.type === AssetType.INDIVIDUAL && kitSliceAssetIds.has(a.id)
+          )
+          .map((a) => a.id)
+      );
+
       // Standalone rows go through an upsert keyed on the
       // (bookingId, assetId) partial unique. Dedupe the standalone ids
-      // since the upsert can't accept duplicate keys in one statement.
-      const standaloneAssetIds = [...new Set(assetIds)];
+      // since the upsert can't accept duplicate keys in one statement, and
+      // exclude any INDIVIDUAL asset that is also a kit slice (see invariant
+      // above). `standaloneAssetIds` and `standaloneQuantities` stay
+      // index-aligned because both derive from the same filtered array.
+      const standaloneAssetIds = [...new Set(assetIds)].filter(
+        (assetId) => !individualKitOverlapAssetIds.has(assetId)
+      );
       const standaloneQuantities = standaloneAssetIds.map(
         (assetId) => quantities?.[assetId] ?? 1
       );
