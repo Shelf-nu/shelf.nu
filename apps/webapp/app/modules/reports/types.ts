@@ -353,13 +353,15 @@ export interface CustodySnapshotRow {
   /** Days in custody */
   daysInCustody: number;
   /** Per-unit valuation if set. The displayed "Value" column shows the
-   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
+   * TOTAL (valuation × quantity-in-custody) for QT; see {@link CurrencyCell}. */
   valuation: number | null;
   /** Asset kind — drives the quantity-aware value breakdown in cells. */
   type: AssetType;
-  /** Total stock count; >1 only for QT assets. Nullable to match
-   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
-   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  /** **Units held in this custody** (`Custody.quantity`), NOT workspace
+   * stock. Drives the per-row Value cell multiplier — a custodian holding
+   * 5 of a 100-unit QT pool reports value-for-5, not 100. Typed as
+   * `number | null` for `CurrencyCell` compatibility; `Custody.quantity`
+   * is non-null at the DB layer (Int @default(1)). */
   quantity: number | null;
   /** Optional unit label (e.g. "boxes") used by the value breakdown. */
   unitOfMeasure: string | null;

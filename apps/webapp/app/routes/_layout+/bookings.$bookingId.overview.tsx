@@ -1062,7 +1062,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
-          assets: bookingAssets,
+          // Each `bookingAssets` row is built from a `BookingAsset` pivot
+          // and preserves `bookedQuantity` (= `ba.quantity`). The asset's
+          // stock quantity (spread from `...ba.asset`) is intentionally
+          // ignored here — see `calculateTotalValueOfAssets` JSDoc.
+          assets: bookingAssets.map((a) => ({
+            valuation: a.valuation,
+            bookedQuantity: a.bookedQuantity,
+          })),
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),

@@ -1125,10 +1125,12 @@ async function computeOverdueKpis(
       to: true,
       bookingAssets: {
         select: {
+          // `BookingAsset.quantity` = booked units. Value-at-risk for an
+          // overdue booking is the value of what hasn't been returned —
+          // `valuation × bookedUnits`, NOT `valuation × workspaceStock`.
+          quantity: true,
           asset: {
-            // `quantity` is selected so the value-at-risk reducer below can
-            // compute valuation × quantity (QT-aware totals).
-            select: { id: true, valuation: true, quantity: true },
+            select: { id: true, valuation: true },
           },
         },
       },
@@ -1166,10 +1168,15 @@ async function computeOverdueKpis(
       0,
       b._count.bookingAssets - checkedInAssetIds.size
     );
-    // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+    // Multiplies per-unit valuation × booked units (BookingAsset.quantity).
+    // Using `asset.quantity` (workspace stock) would value a 5-of-100
+    // booked + overdue row at 100 units of risk. See select above.
     totalValueAtRisk += b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((assetSum, ba) => assetSum + getAssetTotalValue(ba.asset), 0);
+      .reduce(
+        (assetSum, ba) => assetSum + (ba.asset.valuation ?? 0) * ba.quantity,
+        0
+      );
   }
 
   // Also track total for context in hero subtitle
@@ -1801,6 +1808,10 @@ async function fetchCustodyRows(
     select: {
       id: true,
       createdAt: true,
+      // `Custody.quantity` = units this custodian actually holds (not
+      // workspace stock). Drives the row's value breakdown — a custodian
+      // holding 5 of a 100-unit pool should see value-for-5, not 100.
+      quantity: true,
       custodian: {
         select: {
           id: true,
@@ -1817,7 +1828,6 @@ async function fetchCustodyRows(
           thumbnailImage: true,
           valuation: true,
           type: true,
-          quantity: true,
           unitOfMeasure: true,
           category: {
             select: { name: true },
@@ -1866,7 +1876,9 @@ async function fetchCustodyRows(
       daysInCustody,
       valuation: c.asset.valuation,
       type: c.asset.type,
-      quantity: c.asset.quantity,
+      // Surfaced as the multiplier for the per-row Value cell — units
+      // in this custody, not asset stock. See select comment above.
+      quantity: c.quantity,
       unitOfMeasure: c.asset.unitOfMeasure,
     };
   });
@@ -1886,12 +1898,13 @@ async function computeCustodyKpis(
     select: {
       createdAt: true,
       teamMemberId: true,
+      // `Custody.quantity` = units held by this custodian. Multiplied
+      // against per-unit valuation below — using `Asset.quantity` (total
+      // stock) would value a 5-of-100 custody at 100 units.
+      quantity: true,
       asset: {
         select: {
           valuation: true,
-          // `quantity` is selected so the totalValue reducer below can
-          // compute valuation × quantity (QT-aware totals).
-          quantity: true,
         },
       },
     },
@@ -1903,9 +1916,9 @@ async function computeCustodyKpis(
   const uniqueCustodians = new Set(custodyRecords.map((c) => c.teamMemberId))
     .size;
 
-  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+  // Multiplies per-unit valuation × custody-held units. See select above.
   const totalValue = custodyRecords.reduce(
-    (sum, c) => sum + getAssetTotalValue(c.asset),
+    (sum, c) => sum + (c.asset.valuation ?? 0) * c.quantity,
     0
   );
 
@@ -2860,11 +2873,14 @@ async function computeDistributionKpis(
   const [totalAssets, totalValueRows, categoryCount, locationCount] =
     await Promise.all([
       db.asset.count({ where: { organizationId } }),
-      // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+      // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
       // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop to `$queryRaw`.
-      db.$queryRaw<{ total: bigint }[]>(
+      // Column name is `value` (Asset.valuation is `@map("value")`). COALESCE
+      // mirrors `getAssetTotalValue` (null quantity → 1, null value → 0).
+      // No `::bigint` cast — it truncated fractional Float valuations.
+      db.$queryRaw<{ total: number | null }[]>(
         Prisma.sql`
-          SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+          SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
           FROM "Asset"
           WHERE "organizationId" = ${organizationId}
         `
@@ -3128,9 +3144,11 @@ async function computeInventoryKpis(
 
   const [totalAssets, totalValueRows, statusCounts] = await Promise.all([
     db.asset.count({ where: scopedWhere }),
-    db.$queryRaw<{ total: bigint }[]>(
+    // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
+    // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+    db.$queryRaw<{ total: number | null }[]>(
       Prisma.sql`
-        SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+        SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
         FROM "Asset"
         WHERE ${whereSql}
       `

@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
 // why: testing location valuation aggregation logic without database
-// dependency. QT-aware totals require SUM(valuation × quantity) which Prisma's
+// dependency. QT-aware totals require SUM(value × quantity) which Prisma's
 // `aggregate({_sum})` cannot express, so the implementation now uses
-// `$queryRaw` — the mock surface mirrors that.
+// `$queryRaw` — the mock surface mirrors that. (Column is `value`, not
+// `valuation`: `Asset.valuation` is `@map("value")` in schema.prisma.)
 vi.mock("~/database/db.server", () => ({
   db: {
     $queryRaw: vi.fn(),
@@ -20,9 +21,11 @@ describe("getLocationTotalValuation", () => {
     queryRawMock.mockReset();
   });
 
-  it("returns the QT-aware total (SUM(valuation × quantity)) for the location", async () => {
-    // bigint is the SQL cast in the implementation; the helper Number()s it.
-    queryRawMock.mockResolvedValue([{ total: BigInt(1234) }]);
+  it("returns the QT-aware total (SUM(value × quantity)) for the location", async () => {
+    // Postgres returns `double precision` for SUM(float * int) — arrives as
+    // a JS number now that the implementation no longer casts to ::bigint
+    // (the cast truncated fractional valuations).
+    queryRawMock.mockResolvedValue([{ total: 1234 }]);
 
     const total = await getLocationTotalValuation({ locationId: "loc-123" });
 
@@ -30,9 +33,18 @@ describe("getLocationTotalValuation", () => {
     expect(total).toBe(1234);
   });
 
+  it("preserves fractional totals (no ::bigint truncation)", async () => {
+    // Prior bigint cast lost the .50; verifies we kept the float through.
+    queryRawMock.mockResolvedValue([{ total: 99.5 }]);
+
+    const total = await getLocationTotalValuation({ locationId: "loc-123" });
+
+    expect(total).toBe(99.5);
+  });
+
   it("returns 0 when no valuation data is available", async () => {
     // COALESCE in the SQL yields 0 for empty/all-null sums.
-    queryRawMock.mockResolvedValue([{ total: BigInt(0) }]);
+    queryRawMock.mockResolvedValue([{ total: 0 }]);
 
     const total = await getLocationTotalValuation({ locationId: "loc-123" });
 

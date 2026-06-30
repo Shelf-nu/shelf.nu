@@ -679,13 +679,15 @@ export async function getLocationTotalValuation({
 }: {
   locationId: Location["id"];
 }) {
-  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+  // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
   // Filter via the `AssetLocation` pivot — there is no `Asset.locationId`.
   // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
   // to `$queryRaw` and keep the same scope (assets joined to the pivot).
-  const rows = await db.$queryRaw<{ total: bigint }[]>(
+  // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
+  // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+  const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
-      SELECT COALESCE(SUM(a.valuation * a.quantity), 0)::bigint AS total
+      SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
       FROM "Asset" a
       WHERE a.id IN (
         SELECT al."assetId" FROM "AssetLocation" al

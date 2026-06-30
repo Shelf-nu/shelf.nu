@@ -458,15 +458,18 @@ export const buildCsvExportDataFromAssets = ({
             // Per the QT-aware design pick: the CSV valuation column now emits
             // the TOTAL value (per-unit × quantity). Asset.valuation is still
             // per-unit in the DB. CSV round-trip is lossy for QT assets —
-            // flagged in the plan as a follow-up to address with a per-unit
-            // column or import-side handling.
-            value = asset.valuation
-              ? formatCurrency({
-                  value: getAssetTotalValue(asset),
-                  locale: "en-US", // Default locale for CSV exports
-                  currency: currentOrganization.currency,
-                })
-              : "";
+            // flagged in the plan (and confirmed by CodeRabbit review) as a
+            // follow-up to address with a per-unit column or import-side
+            // handling. `!= null` (not truthy) so `valuation: 0` still emits
+            // "$0.00" instead of an empty cell.
+            value =
+              asset.valuation != null
+                ? formatCurrency({
+                    value: getAssetTotalValue(asset),
+                    locale: "en-US", // Default locale for CSV exports
+                    currency: currentOrganization.currency,
+                  })
+                : "";
             break;
           case "availableToBook":
             value = asset.availableToBook ? "Yes" : "No";

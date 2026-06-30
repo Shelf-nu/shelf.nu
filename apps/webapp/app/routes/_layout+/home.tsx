@@ -1,3 +1,14 @@
+/**
+ * Dashboard (`/` after auth).
+ *
+ * Server-side aggregates the workspace KPIs surfaced on the landing tile
+ * grid: asset count, total inventory value (QT-aware: `value × quantity`
+ * via raw SQL since Prisma's `aggregate({_sum})` can't multiply), assets
+ * by category / status, locations, team members, recent activity, and
+ * onboarding state. Renders the dashboard hero, KPI tiles, the asset-
+ * by-status donut, and the onboarding checklist; tile clicks navigate
+ * into the corresponding index page or report.
+ */
 import { Prisma } from "@prisma/client";
 import type {
   MetaFunction,
@@ -114,9 +125,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
         db
-          .$queryRaw<{ total: bigint }[]>(
+          // `Asset.valuation` is mapped to the DB column `value` (@map),
+          // so raw SQL must reference `value`. `COALESCE(quantity, 1)`
+          // mirrors `getAssetTotalValue` (which treats nullable quantity
+          // as 1, matching the INDIVIDUAL default). No `::bigint` cast —
+          // it truncated fractional Float valuations. SUM on a Float ×
+          // Int returns `double precision`, which arrives as a JS number.
+          .$queryRaw<{ total: number | null }[]>(
             Prisma.sql`
-            SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+            SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
             FROM "Asset"
             WHERE "organizationId" = ${organizationId}
           `

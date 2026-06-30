@@ -32,6 +32,7 @@ import { DateS } from "~/components/shared/date";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import {
   formatAssetValueWithBreakdown,
+  getAssetTotalValue,
   type AssetForValue,
 } from "~/utils/asset-value";
 import { useHints } from "~/utils/client-hints";
@@ -417,11 +418,13 @@ export function CurrencyCell({
 
   // Asset-aware path: compute the breakdown from the asset itself. Empty
   // when the per-unit price is missing — same "no value set" UX as below.
+  // `treatZeroAsEmpty` keys off the TOTAL (valuation × quantity), not the
+  // per-unit price: a QT asset with `valuation: 1, quantity: 0` displays
+  // "$0", which should collapse to the empty fallback, while a row with
+  // `valuation: 0, quantity: 100` (free items, real stock) already does.
   if (asset) {
-    if (
-      asset.valuation == null ||
-      (treatZeroAsEmpty && asset.valuation === 0)
-    ) {
+    const total = getAssetTotalValue(asset);
+    if (asset.valuation == null || (treatZeroAsEmpty && total === 0)) {
       return <span className="text-gray-400">{emptyFallback}</span>;
     }
 
