@@ -707,6 +707,17 @@ export type CategoriesResponse = {
   categories: Category[];
 };
 
+/** A tag assignable to an asset (asset-create tag picker). */
+export type Tag = {
+  id: string;
+  name: string;
+};
+
+/** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
+export type TagsResponse = {
+  tags: Tag[];
+};
+
 export type CreateAssetResponse = {
   asset: {
     id: string;
@@ -731,6 +742,11 @@ export type UpdateAssetPayload = {
   categoryId?: string;
   newLocationId?: string;
   currentLocationId?: string;
+  /**
+   * Full desired tag-id set (replace). Omit to leave tags unchanged; pass `[]`
+   * to clear all tags.
+   */
+  tags?: string[];
   valuation?: number | null;
   /**
    * Custom field updates. Each entry is the customField `id` (NOT the asset's
