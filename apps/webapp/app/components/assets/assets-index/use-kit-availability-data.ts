@@ -33,7 +33,14 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
-        availableToBook: item.assetKits.some((ak) => ak.asset.availableToBook),
+        // why: match the list view's semantic in kits._index.tsx — a kit is
+        // bookable only when ALL slices are bookable (booking reserves the
+        // whole kit). Undefined assetKits is treated as not-bookable since we
+        // can't verify the slices.
+        availableToBook:
+          item.assetKits == null
+            ? false
+            : !item.assetKits.some((ak) => !ak.asset.availableToBook),
       },
     }));
 
@@ -43,7 +50,7 @@ export function useKitAvailabilityData(items: Items) {
     const allBookings = new Map();
 
     items.forEach((kit) => {
-      kit.assetKits.forEach((ak) => {
+      (kit.assetKits ?? []).forEach((ak) => {
         const asset = ak.asset;
         if ("bookingAssets" in asset && asset.bookingAssets) {
           // Cast through `unknown` because the kits._index loader passes
