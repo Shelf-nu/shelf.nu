@@ -637,6 +637,13 @@ export async function createBooking({
     // step (create payload, org validation, events) reads the same list.
     const slices = kitSlices ?? [];
 
+    // Dedupe the standalone ids up front. `BookingFormSchema` doesn't enforce
+    // uniqueness and API / mobile payloads can repeat an id, which would
+    // otherwise create duplicate standalone rows (violating the
+    // `(bookingId, assetId) WHERE assetKitId IS NULL` partial unique) and
+    // over-count the per-asset event qty meta below. Mirrors updateBookingAssets.
+    const dedupedAssetIds = [...new Set(assetIds)];
+
     // Defensive INDIVIDUAL-overlap guard (mirror of updateBookingAssets): an
     // INDIVIDUAL asset is one physical unit, so it must never be written as BOTH
     // a standalone row AND a kit-driven row — that books it twice. When the same
@@ -647,7 +654,7 @@ export async function createBooking({
     // free-pool standalone slice may legitimately coexist with kit slices), so
     // we only pay for a type lookup when there is an actual overlap.
     const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
-    const overlapAssetIds = [...new Set(assetIds)].filter((id) =>
+    const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
     );
     let individualOverlapAssetIds = new Set<string>();
@@ -665,7 +672,7 @@ export async function createBooking({
           .map((a) => a.id)
       );
     }
-    const standaloneCreateAssetIds = assetIds.filter(
+    const standaloneCreateAssetIds = dedupedAssetIds.filter(
       (id) => !individualOverlapAssetIds.has(id)
     );
 
@@ -716,9 +723,9 @@ export async function createBooking({
       // organization — otherwise an attacker in Org A could supply Org B's
       // IDs and link foreign-org entities into their own booking. Validation
       // runs with the active `tx` so it commits atomically with the create.
-      if (assetIds.length > 0) {
+      if (dedupedAssetIds.length > 0) {
         await assertAssetsBelongToOrg(
-          { assetIds, organizationId: booking.organizationId },
+          { assetIds: dedupedAssetIds, organizationId: booking.organizationId },
           tx
         );
       }
@@ -804,7 +811,7 @@ export async function createBooking({
       // so the event meta carries `quantity` for QUANTITY_TRACKED assets
       // (no-op for INDIVIDUAL).
       const eventAssetIds = [
-        ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
+        ...new Set([...dedupedAssetIds, ...slices.map((s) => s.assetId)]),
       ];
       if (eventAssetIds.length > 0) {
         const assetTypes = await tx.asset.findMany({
@@ -822,7 +829,7 @@ export async function createBooking({
         // slice's own quantity. Mirrors `updateBookingAssets` so the same
         // asset added both standalone and via N kits reports the true count.
         const addedQtyByAssetId = new Map<string, number>();
-        for (const sid of assetIds) {
+        for (const sid of dedupedAssetIds) {
           addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
         }
         for (const slice of slices) {

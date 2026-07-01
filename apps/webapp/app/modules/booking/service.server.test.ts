@@ -500,6 +500,28 @@ describe("createBooking", () => {
     );
   });
 
+  it("dedupes duplicate standalone assetIds into a single BookingAsset row", async () => {
+    // API/mobile payloads aren't uniqueness-checked; a repeated id must not
+    // create two standalone rows (partial-unique violation) or double its
+    // event qty meta.
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+
+    await createBooking({
+      ...mockCreateBookingParams,
+      assetIds: ["asset-1", "asset-1"],
+    });
+
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingAssets: { create: [{ assetId: "asset-1" }] },
+        }),
+      })
+    );
+  });
+
   it("should create a booking without custodian when custodianUserId is null", async () => {
     expect.assertions(1);
     const paramsWithoutCustodian = {
