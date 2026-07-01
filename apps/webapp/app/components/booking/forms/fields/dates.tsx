@@ -31,7 +31,7 @@ export function DatesFields({
   startDateName: string;
   disabled: boolean;
   startDateError?: string;
-  setStartDate?: Dispatch<SetStateAction<string>>;
+  setStartDate: Dispatch<SetStateAction<string>>;
   endDate: string | undefined;
   endDateName: string;
   endDateError?: string;
@@ -70,9 +70,7 @@ export function DatesFields({
           required
           onChange={(event) => {
             // Update start date state to persist user's selection
-            if (setStartDate) {
-              setStartDate(event.target.value);
-            }
+            setStartDate(event.target.value);
 
             /**
              * When user changes the startDate and the new startDate is greater than the endDate
