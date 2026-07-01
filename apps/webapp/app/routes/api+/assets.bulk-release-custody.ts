@@ -1,10 +1,12 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
-import { bulkReleaseCustody } from "~/modules/asset/service.server";
+import { db } from "~/database/db.server";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -41,9 +43,38 @@ export async function action({ request, context }: ActionFunctionArgs) {
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    // SELF_SERVICE self-restriction is enforced inside bulkReleaseCustody so
-    // web and mobile share one implementation.
-    await bulkReleaseCustody({
+    /**
+     * Phase 2 widened Custody from 1:1 to 1:many to support multi-custodian
+     * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
+     * on rows assigned to their own user — guard before delegating to the
+     * bulk service so we fail fast and don't leak counts via partial work.
+     * Symmetric with the SELF_SERVICE assign-side guard centralised inside
+     * `bulkCheckOutAssets` (see asset/service.server.ts).
+     */
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const custodies = await db.custody.findMany({
+        where: {
+          assetId: { in: assetIds },
+          asset: { organizationId },
+        },
+        select: { custodian: { select: { id: true, userId: true } } },
+      });
+
+      if (custodies.some((custody) => custody.custodian.userId !== userId)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message:
+            "Self service user can only release custody of assets assigned to their user.",
+          additionalData: { userId, assetIds },
+          label: "Assets",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId,
       role,
       assetIds,
@@ -52,9 +83,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       settings,
     });
 
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — release custody individually.`
+        : "";
+
     sendNotification({
       title: "Assets are no longer in custody",
-      message: "These assets are available again.",
+      message: `These assets are available again.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

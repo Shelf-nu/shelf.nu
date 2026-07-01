@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
-import { useRouter } from "expo-router";
 import { api } from "./api";
-import { pushIntoTab } from "./navigation";
+import { openShelfWebUrl, pushIntoTab } from "./navigation";
 
 /**
  * Supported deep link patterns:
@@ -11,19 +10,36 @@ import { pushIntoTab } from "./navigation";
  *   shelf://kits/{id}           → Kit detail
  *   shelf://bookings/{id}       → Booking detail
  *   shelf://qr/{qrId}           → QR code resolve → asset or kit detail
+ *   shelf://audits/{id}         → Audit detail
  *   shelf://scanner             → Open scanner
  *
- * Also handles HTTPS universal links:
+ * Also handles HTTPS universal links (iOS) / App Links (Android), which the OS
+ * delivers through the same `Linking` APIs once the native association is in
+ * place (see apps/companion/app.json + the server `/.well-known/*` routes):
+ *
  *   https://app.shelf.nu/qr/{id}
  *   https://app.shelf.nu/assets/{id}
+ *   https://app.shelf.nu/bookings/{id}
+ *   https://app.shelf.nu/audits/{id}
+ *
+ * The claimed paths are kept in sync with the iOS AASA `components` list and
+ * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
+ * are never delivered to the app and keep opening the web. A claimed prefix that
+ * nests deeper than the app can render (e.g. `/assets/:id/edit`) is opened in
+ * the in-app web view instead of landing on the wrong native screen.
  */
 
 type ParsedLink =
   | { type: "asset"; id: string }
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
+  | { type: "audit"; id: string }
   | { type: "qr"; id: string }
   | { type: "scanner" }
+  // A claimed HTTPS prefix matched but the path nests deeper than the native
+  // app can render (e.g. /assets/:id/edit) — open the original URL in the web
+  // view rather than a wrong native screen.
+  | { type: "web"; url: string }
   | { type: "unknown" };
 
 function parseDeepLink(url: string): ParsedLink {
@@ -44,6 +60,23 @@ function parseDeepLink(url: string): ParsedLink {
 
     const [resource, id] = segments;
 
+    // Over-claim guard: the OS delivers every nested path under a claimed prefix
+    // (e.g. /assets/:id/edit, /bookings/:id/overview/checkin-assets), but the
+    // native app only renders the resource detail and the OS path patterns can't
+    // be scoped to a single segment. So for an HTTPS link that nests deeper than
+    // `resource/id`, open the original URL in the in-app web view (loop-safe via
+    // openShelfWebUrl, NOT Linking.openURL which App Links would re-intercept)
+    // rather than landing on the wrong native screen.
+    const CLAIMED_HTTPS_PREFIXES = ["qr", "assets", "bookings", "audits"];
+    if (
+      isHttp &&
+      id &&
+      segments.length > 2 &&
+      CLAIMED_HTTPS_PREFIXES.includes(resource)
+    ) {
+      return { type: "web", url };
+    }
+
     switch (resource) {
       case "assets":
         return id ? { type: "asset", id } : { type: "unknown" };
@@ -51,6 +84,8 @@ function parseDeepLink(url: string): ParsedLink {
         return id ? { type: "kit", id } : { type: "unknown" };
       case "bookings":
         return id ? { type: "booking", id } : { type: "unknown" };
+      case "audits":
+        return id ? { type: "audit", id } : { type: "unknown" };
       case "qr":
         return id ? { type: "qr", id } : { type: "unknown" };
       case "scanner":
@@ -65,13 +100,20 @@ function parseDeepLink(url: string): ParsedLink {
 }
 
 /**
- * Resolves a QR code ID to its linked asset or kit and navigates to it.
- * Falls back to the scanner tab if the QR maps to neither.
+ * Resolves a QR code ID in-app and navigates to the matching screen: an asset
+ * detail when the QR maps to an asset, or a kit detail when it maps to a kit
+ * (kits live in the Assets stack).
+ *
+ * When the QR can't be resolved in-app (it belongs to another org, is unclaimed,
+ * the user isn't authorized, or the lookup errors) we hand off to the web QR
+ * resolver, which renders the correct flow (claim, link, contact-owner, login).
+ * The hand-off uses an in-app browser via {@link openShelfWebUrl} rather than
+ * `Linking.openURL`, because `/qr/*` is now a verified Android App Link and
+ * `Linking.openURL` would re-enter the app and loop back here.
+ *
+ * @param qrId - the scanned or linked QR code id
  */
-async function resolveQrAndNavigate(
-  qrId: string,
-  router: ReturnType<typeof useRouter>
-) {
+async function resolveQrAndNavigate(qrId: string) {
   try {
     const { data, error } = await api.qr(qrId);
     if (!error && data?.qr?.asset?.id) {
@@ -86,10 +128,13 @@ async function resolveQrAndNavigate(
       return;
     }
   } catch {
-    // Fall through to scanner
+    // Fall through to the web resolver below.
   }
-  // If the QR resolves to neither an asset nor a kit, open the scanner
-  router.push("/(tabs)/scanner");
+  // QR resolved to neither an asset nor a kit (other org, unclaimed, error):
+  // hand off to the web resolver. Loop-safe in-app browser via openShelfWebUrl,
+  // NOT Linking.openURL, because /qr/* is a verified App Link and openURL would
+  // re-enter the app and loop back here.
+  void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
 }
 
 /**
@@ -97,8 +142,6 @@ async function resolveQrAndNavigate(
  * Call this hook inside your authenticated layout so navigation is available.
  */
 export function useDeepLinkHandler() {
-  const router = useRouter();
-
   useEffect(() => {
     function handleUrl(event: { url: string }) {
       const link = parseDeepLink(event.url);
@@ -116,12 +159,21 @@ export function useDeepLinkHandler() {
         case "booking":
           pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${link.id}`);
           break;
+        case "audit":
+          pushIntoTab("/(tabs)/audits", `/(tabs)/audits/${link.id}`);
+          break;
         case "qr":
           // Resolve the QR code to an asset and navigate directly
-          resolveQrAndNavigate(link.id, router);
+          void resolveQrAndNavigate(link.id);
           break;
         case "scanner":
-          router.push("/(tabs)/scanner");
+          pushIntoTab("/(tabs)/scanner");
+          break;
+        case "web":
+          // Claimed prefix nested deeper than the app renders: open the real
+          // web page in the in-app browser (loop-safe) instead of a wrong
+          // native screen.
+          void openShelfWebUrl(link.url);
           break;
         case "unknown":
           // Ignore unrecognized links — nothing to navigate to.
@@ -145,5 +197,5 @@ export function useDeepLinkHandler() {
     const subscription = Linking.addEventListener("url", handleUrl);
 
     return () => subscription.remove();
-  }, [router]);
+  }, []);
 }

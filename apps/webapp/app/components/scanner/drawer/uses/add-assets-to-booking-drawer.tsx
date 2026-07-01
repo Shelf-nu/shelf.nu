@@ -1,16 +1,18 @@
 import type { CSSProperties } from "react";
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
@@ -25,12 +27,31 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
   .object({
     assetIds: z.array(z.string()),
     kitIds: z.array(z.string()).optional().default([]),
+    /**
+     * JSON-encoded `Record<assetId, quantity>` matching the booking
+     * picker's `quantities` wire format. Missing entries default
+     * `BookingAsset.quantity` to 1 (the schema default), which keeps
+     * behaviour stable for callers that don't send a map.
+     */
+    quantities: z.string().optional().default("{}"),
+    /**
+     * JSON-encoded `Array<{ assetId, assetKitId }>` — one element per
+     * `AssetKit` membership scanned (i.e. per asset, per kit it belongs
+     * to). The action passes this through to `addScannedAssetsToBooking`
+     * as `kitSlices` so each gets its own kit-driven `BookingAsset` row
+     * with `assetKitId` set. Carrying a list (not a 1:1 map) is what
+     * lets a single asset belonging to MULTIPLE scanned kits produce
+     * MULTIPLE kit-driven rows. Directly-scanned assets stay out of this
+     * list (standalone, `assetKitId = null`).
+     */
+    kitSlices: z.string().optional().default("[]"),
   })
   .refine((data) => data.assetIds.length > 0, {
     message: "At least one asset or kit must be selected",
@@ -75,12 +96,47 @@ export default function AddAssetsToBookingDrawer({
   // Separate asset IDs and kit IDs for the form
   // Extract asset IDs from kits and flatten with directly scanned assets
   const assetIdsFromKits = kits.flatMap((kit) =>
-    kit.assets.map((asset) => asset.id)
+    kit.assetKits.map((ak) => ak.asset.id)
   );
   const assetIdsForBooking = Array.from(
     new Set([...assetIds, ...assetIdsFromKits])
   );
   const kitIdsForBooking = kits.map((k) => k.id);
+
+  // Build the kit-driven slice specs for the server. When a scanned KIT
+  // contributes assets, each contributes one slice carrying that kit's
+  // matching `AssetKit.id`; directly-scanned assets stay out of the list
+  // (server defaults `assetKitId` to NULL → standalone).
+  //
+  // If the same asset shows up via both paths (scan the asset AND scan a
+  // kit containing it), the directly-scanned entry wins — standalone
+  // takes precedence so the user's explicit asset scan isn't silently
+  // treated as kit-driven.
+  //
+  // An asset appearing in MULTIPLE scanned kits produces MULTIPLE slices
+  // (distinct `assetKitId` each) — each is a legal row under the
+  // `(bookingId, assetKitId)` partial unique, so all are created.
+  const directlyScannedAssetIds = new Set(assetIds);
+  const kitSlices: Array<{ assetId: string; assetKitId: string }> = [];
+  for (const kit of kits) {
+    for (const ak of kit.assetKits) {
+      if (directlyScannedAssetIds.has(ak.asset.id)) continue;
+      kitSlices.push({ assetId: ak.asset.id, assetKitId: ak.id });
+    }
+  }
+  const kitSlicesJson = JSON.stringify(kitSlices);
+
+  // Per-asset qty for QUANTITY_TRACKED scans. Only includes ids that
+  // actually appear in the submitted `assetIds` (filters out stale
+  // entries from a previous scan session).
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  const quantitiesJson = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(assetQuantities).filter(([assetId]) =>
+        assetIdsForBooking.includes(assetId)
+      )
+    )
+  );
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
@@ -88,11 +144,29 @@ export default function AddAssetsToBookingDrawer({
   // Asset blockers
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => booking.assets.some((a) => a?.id === asset.id))
+    .filter((asset) =>
+      booking.bookingAssets.some((ba) => ba.assetId === asset.id)
+    )
     .map((a) => !!a && a.id);
 
+  // Only INDIVIDUAL assets that are in a kit are truly "scan the kit
+  // QR instead" cases — the whole asset is committed to a kit, so
+  // booking the asset directly would conflict with the kit.
+  //
+  // QUANTITY_TRACKED assets only have a *slice* of their pool in any
+  // given kit (`AssetKit.quantity` ≤ `Asset.quantity`); the free
+  // remainder is bookable individually. Server-side availability
+  // re-validation (sum-within-pool + DEFERRED trigger) is the source
+  // of truth — this client-side blocker is just UX. So qty-tracked
+  // rows with kit memberships are no longer blocked here.
   const assetsPartOfKitIds = assets
-    .filter((asset) => !!asset && asset.kitId && asset.id)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.assetKits.length > 0 &&
+        asset.id
+    )
     .map((asset) => asset.id);
 
   const unavailableAssetsIds = assets
@@ -101,7 +175,7 @@ export default function AddAssetsToBookingDrawer({
 
   // Kit blockers
   const kitsWithUnavailableAssets = kits
-    .filter((kit) => kit.assets.some((a) => !a.availableToBook))
+    .filter((kit) => kit.assetKits.some((ak) => !ak.asset.availableToBook))
     .map((kit) => kit.id);
 
   const qrIdsOfUnavailableKits = Object.entries(items)
@@ -250,6 +324,12 @@ export default function AddAssetsToBookingDrawer({
         }
         return null;
       }}
+      // Booking context so the API attaches `pickerMeta` with the
+      // strict-available pool (custody + overlapping-booking aware,
+      // matching the booking manage-assets picker).
+      searchParams={{
+        pickerContext: JSON.stringify({ type: "booking", id: booking.id }),
+      }}
     />
   );
 
@@ -257,8 +337,14 @@ export default function AddAssetsToBookingDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsToBookingSchema}
       formData={{
+        // `assetIds` carries the full union (directly-scanned + kit
+        // members); the server splits it into the standalone bucket vs
+        // the `kitSlices` bucket so an asset in two kits still produces
+        // two kit-driven rows.
         assetIds: assetIdsForBooking,
         kitIds: kitIdsForBooking,
+        quantities: quantitiesJson,
+        kitSlices: kitSlicesJson,
       }}
       items={items}
       onClearItems={clearList}
@@ -285,10 +371,13 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.unavailable(!asset.availableToBook),
-    assetLabelPresets.partOfKit(!!asset.kitId),
+    assetLabelPresets.partOfKit(
+      asset.assetKits.length > 0,
+      isQuantityTracked(asset)
+    ),
     // Custom preset for "already in this booking"
     {
-      condition: booking.assets.some((a) => a?.id === asset.id),
+      condition: booking.bookingAssets.some((ba) => ba.assetId === asset.id),
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",
@@ -310,24 +399,54 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const [, AssetAvailabilityLabels] =
     createAvailabilityLabels(availabilityConfigs);
 
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
+  const qtyTracked = isQuantityTracked(asset) && asset.quantity != null;
+  const alreadyInBooking = booking.bookingAssets.some(
+    (ba) => ba.assetId === asset.id
+  );
+  // `pickerMeta` is the booking picker's available pool — same
+  // formula as `bookings/$bookingId/overview/manage-assets`.
+  const pickerMeta = qtyTracked ? asset.pickerMeta ?? null : null;
+  const totalQty = qtyTracked ? (asset.quantity as number) : 0;
+  const maxAllowed = pickerMeta?.maxAllowed ?? totalQty;
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+  return (
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+          {qtyTracked ? (
+            <span className="ml-2 text-xs font-normal text-gray-500">
+              · {totalQty} {asset.unitOfMeasure || "units"}
+              {pickerMeta && pickerMeta.maxAllowed < totalQty ? (
+                <span className="ml-1 text-warning-700">
+                  · {pickerMeta.maxAllowed} available
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </p>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
+
+      {qtyTracked && !alreadyInBooking && maxAllowed > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={maxAllowed}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }
@@ -343,10 +462,10 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const availabilityConfigs = [
     kitLabelPresets.inCustody(kit.status === KitStatus.IN_CUSTODY),
     kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
-      kit.assets.some((asset) => !asset.availableToBook)
+      kit.assetKits.some((ak) => !ak.asset.availableToBook)
     ),
     // Custom preset for "already checked out" - only show when booking is checked out
     {
@@ -369,7 +488,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

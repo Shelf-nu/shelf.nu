@@ -79,6 +79,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         await bulkArchiveBookings({
           bookingIds,
           organizationId,
+          userId,
           currentSearchParams,
         });
 
