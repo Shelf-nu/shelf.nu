@@ -59,7 +59,13 @@ export function DatesFields({
           disabled={workingHoursDisabled}
           error={startDateError}
           className="w-full"
-          defaultValue={startDate}
+          // Controlled (mirrors the End Date input below) so the field stays in
+          // sync with `startDate` state. When the parent re-renders with a new
+          // value on a client-side navigation between bookings (e.g. the
+          // duplicate → redirect flow), an uncontrolled `defaultValue` would
+          // keep showing the previously-rendered booking's start date until a
+          // full page refresh. A controlled `value` reflects the update.
+          value={startDate}
           placeholder="Booking"
           required
           onChange={(event) => {

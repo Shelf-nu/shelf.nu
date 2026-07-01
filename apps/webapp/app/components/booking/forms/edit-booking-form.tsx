@@ -204,11 +204,26 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   });
 
   /**
-   * Sync the editable `endDate` state with the `incomingEndDate` prop when it
-   * changes. Using the "store prior prop in ref + update during render" pattern
-   * (the React-recommended replacement for prop-sync effects) satisfies
+   * Sync the editable `startDate` / `endDate` state with the incoming loader
+   * props when they change. React Router reuses this component instance across
+   * a client-side navigation between two bookings (same route, different
+   * param), so `useState` keeps the previously-rendered booking's dates unless
+   * we mirror the new props here. Without the `startDate` sync, the duplicate →
+   * redirect flow showed the SOURCE booking's start date until a full refresh.
+   *
+   * Uses the "store prior prop in ref + update during render" pattern (the
+   * React-recommended replacement for prop-sync effects), which satisfies
    * `no-effect-event-handler` while preserving the original behaviour.
    */
+  const lastIncomingStartDateRef = useRef(incomingStartDate);
+  if (
+    incomingStartDate &&
+    incomingStartDate !== lastIncomingStartDateRef.current
+  ) {
+    lastIncomingStartDateRef.current = incomingStartDate;
+    setStartDate(incomingStartDate);
+  }
+
   const lastIncomingEndDateRef = useRef(incomingEndDate);
   if (incomingEndDate && incomingEndDate !== lastIncomingEndDateRef.current) {
     lastIncomingEndDateRef.current = incomingEndDate;
