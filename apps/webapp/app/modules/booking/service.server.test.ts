@@ -470,6 +470,36 @@ describe("createBooking", () => {
     expect(result).toEqual(mockBookingData);
   });
 
+  it("drops an INDIVIDUAL asset from the standalone bucket when it is also a kit slice", async () => {
+    // Defense-in-depth: an INDIVIDUAL asset present in BOTH `assetIds` and
+    // `kitSlices` is one physical unit and must be written ONCE (the kit-driven
+    // row), never twice. QUANTITY_TRACKED would be kept in both buckets.
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+    // why: the overlap guard looks up types for the overlapping id; mark it
+    // INDIVIDUAL so it is dropped from the standalone insert.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL" },
+    ]);
+
+    await createBooking({
+      ...mockCreateBookingParams,
+      assetIds: ["asset-1"],
+      kitSlices: [{ assetId: "asset-1", assetKitId: "ak-1", quantity: 1 }],
+    });
+
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingAssets: {
+            create: [{ assetId: "asset-1", quantity: 1, assetKitId: "ak-1" }],
+          },
+        }),
+      })
+    );
+  });
+
   it("should create a booking without custodian when custodianUserId is null", async () => {
     expect.assertions(1);
     const paramsWithoutCustodian = {
@@ -1903,6 +1933,45 @@ describe("updateBookingAssets", () => {
         arg.filter((v) => v === "asset-shared").length === 2
     );
     expect(sharedAssetIdArray).toBeDefined();
+  });
+
+  it("skips a kit slice for an INDIVIDUAL asset already standalone on the booking", async () => {
+    // Adding a kit whose INDIVIDUAL member is already a standalone row must NOT
+    // insert a second (kit-driven) row for that one physical unit. QT is exempt.
+    expect.assertions(2);
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: validAssets lookup must report the member as INDIVIDUAL for the skip.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL" },
+    ]);
+    // why: the asset already exists on the booking as a standalone row.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetId: "asset-1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: [],
+      kitIds: ["kit-1"],
+      kitSlices: [{ assetId: "asset-1", assetKitId: "ak-1", quantity: 1 }],
+    });
+
+    // The kit-driven raw INSERT must NOT run for the skipped slice — no
+    // $executeRaw call should carry the AssetKit id.
+    const kitInsertCall = (
+      db.$executeRaw as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls.find((call: unknown[]) =>
+      call.some((arg) => Array.isArray(arg) && arg.includes("ak-1"))
+    );
+    expect(kitInsertCall).toBeUndefined();
+    expect(db.booking.findUniqueOrThrow).toHaveBeenCalled();
   });
 });
 

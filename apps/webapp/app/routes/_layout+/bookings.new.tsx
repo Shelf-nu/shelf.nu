@@ -277,6 +277,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     if (kitIds.length > 0) {
       kitSlices = await buildKitSlicesForBooking({ kitIds, organizationId });
+      // Fail fast when a kit-originated submission resolves to no slices (stale
+      // page, deleted/emptied kit, or tampered input). The form pre-filled
+      // `assetIds` with the kit's members, so silently falling through would
+      // write them as loose standalone rows (assetKitId NULL) — breaking the
+      // kit-slice invariant and re-opening the duplicate/count bugs this fixes.
+      if (kitSlices.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Kit not found",
+          message:
+            "The selected kit could not be resolved. Please reload and try again.",
+          label: "Booking",
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
       const kitMemberIds = new Set(kitSlices.map((s) => s.assetId));
       // Subtract kit members so a kit member is never written as BOTH a kit
       // slice and a standalone row (which would duplicate it on the booking).

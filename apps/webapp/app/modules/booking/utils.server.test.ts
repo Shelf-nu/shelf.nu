@@ -505,6 +505,22 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.returnedCount).toBe(0);
   });
 
+  it("qty asset CHECKED_OUT globally but this booking has progressive records → stays Booked", () => {
+    // Global CHECKED_OUT status can come from a DIFFERENT overlapping booking
+    // for a shared QT asset. Because THIS booking has progressive records
+    // (checkedOutAssetIds non-empty), the all-at-once fallback must NOT fire —
+    // trust the per-row counter, so this un-scanned row stays Booked.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [QT("gloves", 100, 0, 0, null, AssetStatus.CHECKED_OUT)],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["some-other-asset"],
+      bookingStatus: BookingStatus.ONGOING,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.bookedCount).toBe(1);
+    expect(p.checkedOutCount).toBe(0);
+  });
+
   it("qty asset with partial checkout AND partial returns — still Partial (one asset, one bucket)", () => {
     // C=5, D=2, B=50. D >= B? no. C >= B? no. 0 < C < B → Partial.
     // The row collapses to a single bucket — the asset is mid-flight.
@@ -588,6 +604,24 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.totalUnits).toBe(1);
     expect(p.returnedCount).toBe(1);
     expect(p.bookedCount).toBe(0);
+  });
+
+  it("COMPLETE multi-slice QT — never-checked-out slice stays Booked when records exist", () => {
+    // checkedOutAssetIds is asset-level; with progressive records present a
+    // checked-out slice must NOT drag a sibling never-checked-out slice into
+    // Returned. Each slice uses its own C.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        QT("gloves", 50, 50, 0, "K1"), // slice checked out
+        QT("gloves", 30, 0, 0, null), // sibling slice never checked out
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["gloves"],
+      bookingStatus: BookingStatus.COMPLETE,
+    });
+    expect(p.totalUnits).toBe(2);
+    expect(p.returnedCount).toBe(1); // the checked-out slice
+    expect(p.bookedCount).toBe(1); // the never-checked-out slice
   });
 
   it("qty asset with two slices (kit-driven + standalone) — each slice is its own asset count", () => {

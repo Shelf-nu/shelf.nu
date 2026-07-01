@@ -637,19 +637,51 @@ export async function createBooking({
     // step (create payload, org validation, events) reads the same list.
     const slices = kitSlices ?? [];
 
+    // Defensive INDIVIDUAL-overlap guard (mirror of updateBookingAssets): an
+    // INDIVIDUAL asset is one physical unit, so it must never be written as BOTH
+    // a standalone row AND a kit-driven row — that books it twice. When the same
+    // INDIVIDUAL asset appears in both `assetIds` and `kitSlices`, drop it from
+    // the standalone bucket and let the kit slice own it. The only current
+    // caller (`bookings.new`) already subtracts kit members, so this just
+    // hardens the service against future callers. QUANTITY_TRACKED is exempt (a
+    // free-pool standalone slice may legitimately coexist with kit slices), so
+    // we only pay for a type lookup when there is an actual overlap.
+    const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+    const overlapAssetIds = [...new Set(assetIds)].filter((id) =>
+      kitSliceAssetIds.has(id)
+    );
+    let individualOverlapAssetIds = new Set<string>();
+    if (overlapAssetIds.length > 0) {
+      const overlapTypes = await db.asset.findMany({
+        where: {
+          id: { in: overlapAssetIds },
+          organizationId: booking.organizationId,
+        },
+        select: { id: true, type: true },
+      });
+      individualOverlapAssetIds = new Set(
+        overlapTypes
+          .filter((a) => a.type === AssetType.INDIVIDUAL)
+          .map((a) => a.id)
+      );
+    }
+    const standaloneCreateAssetIds = assetIds.filter(
+      (id) => !individualOverlapAssetIds.has(id)
+    );
+
     /**
      * Build the `BookingAsset` rows to create:
      * - Standalone rows (`{ assetId }`) keep the historical shape exactly —
      *   `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
      *   default, so the no-kit path is unchanged byte-for-byte.
      * - Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
-     *   settable directly in a nested create — mirrors `duplicateBooking`) so
-     *   the same asset can be both standalone AND a kit member without
-     *   tripping the `(bookingId, assetId) WHERE assetKitId IS NULL` partial
-     *   unique.
+     *   settable directly in a nested create — mirrors `duplicateBooking`). A
+     *   QUANTITY_TRACKED asset may be both standalone AND a kit member (two
+     *   distinct rows under the two partial uniques); INDIVIDUAL overlaps were
+     *   already removed from the standalone bucket above.
      */
     const bookingAssetRows = [
-      ...assetIds.map((id) => ({ assetId: id })),
+      ...standaloneCreateAssetIds.map((id) => ({ assetId: id })),
       ...slices.map((s) => ({
         assetId: s.assetId,
         quantity: s.quantity,
@@ -6820,12 +6852,41 @@ export async function updateBookingAssets({
       // standalone PLUS M units via a kit are two legitimate, distinct rows,
       // so we must NOT touch them here.
       const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
-      const individualKitOverlapAssetIds = new Set(
-        validAssets
-          .filter(
-            (a) => a.type === AssetType.INDIVIDUAL && kitSliceAssetIds.has(a.id)
+      const individualKitSliceAssetIds = [...kitSliceAssetIds].filter(
+        (assetId) =>
+          validAssets.some(
+            (a) => a.id === assetId && a.type === AssetType.INDIVIDUAL
           )
-          .map((a) => a.id)
+      );
+      const individualKitOverlapAssetIds = new Set(
+        individualKitSliceAssetIds.filter((assetId) =>
+          assetIds.includes(assetId)
+        )
+      );
+
+      // FINDING: an INDIVIDUAL kit member ALREADY on the booking as a standalone
+      // row would be booked twice if we also inserted its kit-driven row (the
+      // two partial uniques don't collide). The same-call guard above only
+      // covers overlap WITHIN this call; here we check rows already persisted and
+      // SKIP the kit slice for any INDIVIDUAL asset that already has a standalone
+      // row — the existing row already books that single physical unit. (QT is
+      // exempt: a free-pool standalone slice legitimately coexists with kits.)
+      const existingStandaloneIndividualAssetIds = new Set<string>(
+        individualKitSliceAssetIds.length > 0
+          ? (
+              await tx.bookingAsset.findMany({
+                where: {
+                  bookingId: id,
+                  assetKitId: null,
+                  assetId: { in: individualKitSliceAssetIds },
+                },
+                select: { assetId: true },
+              })
+            ).map((row) => row.assetId)
+          : []
+      );
+      const effectiveSlices = slices.filter(
+        (s) => !existingStandaloneIndividualAssetIds.has(s.assetId)
       );
 
       // Standalone rows go through an upsert keyed on the
@@ -6846,10 +6907,11 @@ export async function updateBookingAssets({
       // DO NOTHING because adding the same kit twice should be a no-op,
       // not an upsert (the picker filters already-added kits out
       // client-side anyway). One row per kit slice, so an asset in two
-      // kits yields two rows with distinct assetKitId.
-      const kitAssetIds = slices.map((s) => s.assetId);
-      const kitQuantities = slices.map((s) => s.quantity);
-      const kitAssetKitIds = slices.map((s) => s.assetKitId);
+      // kits yields two rows with distinct assetKitId. Uses `effectiveSlices`
+      // so an INDIVIDUAL already-standalone member is skipped (see above).
+      const kitAssetIds = effectiveSlices.map((s) => s.assetId);
+      const kitQuantities = effectiveSlices.map((s) => s.quantity);
+      const kitAssetKitIds = effectiveSlices.map((s) => s.assetKitId);
 
       // The complete set of assets touched by this call — standalone +
       // kit-driven, deduped. Everything after the insert (status flip,

@@ -11,9 +11,15 @@ standalone (free pool), non-null = kit-driven (FK → `AssetKit.id`). The two
 the same `(booking, asset)` — by design for QT free-pool + kit bookings.
 
 `createBooking` / `updateBookingAssets` create a standalone row for **every**
-`assetIds` entry and a kit row for **every** `kitSlices` entry — they do NOT
-cross-check the buckets. So when adding a kit, routing its member asset ids
-through `assetIds` is always wrong, in one of two ways:
+`assetIds` entry and a kit row for **every** `kitSlices` entry. Both have a
+**safety net for `AssetType.INDIVIDUAL` only**: `updateBookingAssets` drops an
+INDIVIDUAL asset from the standalone insert when it also appears in `kitSlices`
+in the same call (and skips a kit slice when that INDIVIDUAL asset is already a
+standalone row on the booking); `createBooking` applies the same same-call
+filter. `QUANTITY_TRACKED` is deliberately **not** covered (a free-pool slice may
+legitimately coexist with kit slices), so do not rely on the net — route kit
+members correctly. Routing member asset ids through `assetIds` is wrong in one
+of two ways:
 
 - Pass members in **both** `assetIds` AND `kitSlices` → **duplicate** rows
   (member shows twice; inflates every count/progress/value total). This was the
