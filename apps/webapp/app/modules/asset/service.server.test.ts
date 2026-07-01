@@ -2592,7 +2592,12 @@ describe("getAssets search fallback", () => {
     orderDirection: "desc" as const,
   };
 
-  /** The title branch only exists in the full search clause, never the narrow one. */
+  /**
+   * Title contains-clause used to assert the full (post-fallback) search clause
+   * surfaces title matches. Note: title now ALSO appears in the narrow fast-path
+   * clause (see the first test below) so bare-numeric substrings embedded in a
+   * title are matched without needing the zero-row fallback.
+   */
   const titleClause = {
     title: { contains: "103468", mode: "insensitive" },
   };
@@ -2611,12 +2616,47 @@ describe("getAssets search fallback", () => {
 
     expect(findManyMock).toHaveBeenCalledTimes(1);
     const where = (findManyMock.mock.calls[0][0] as any).where;
-    // Narrow clause: sequentialId / barcode / qr only — no title branch.
-    expect(JSON.stringify(where.OR)).not.toContain("title");
+    // Narrow clause covers the indexed ID columns: sequentialId / barcode / qr.
     expect(where.OR).toContainEqual({
       sequentialId: { contains: "103468", mode: "insensitive" },
     });
+    expect(where.OR).toContainEqual({
+      barcodes: {
+        some: { value: { contains: "103468", mode: "insensitive" } },
+      },
+    });
+    expect(where.OR).toContainEqual({
+      qrCodes: { some: { id: { contains: "103468", mode: "insensitive" } } },
+    });
+    // ...and ALSO title + description (both trigram-indexed), so a bare-numeric
+    // substring embedded in a title is matched directly in the fast path
+    // instead of relying on the zero-row fallback.
+    expect(where.OR).toContainEqual({
+      title: { contains: "103468", mode: "insensitive" },
+    });
+    expect(where.OR).toContainEqual({
+      description: { contains: "103468", mode: "insensitive" },
+    });
     expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("matches a title-embedded number in the fast path without falling back", async () => {
+    // why: regression guard for the dropped "451" → "KCI-451 Kids Resources Box"
+    // match. "451" is ID-shaped (bare digits) so it takes the narrow path, but
+    // the number lives only inside the title. The narrow clause must carry a
+    // `title` contains-clause so the row surfaces on the FIRST query — otherwise
+    // an unrelated ID-column match returns rows, suppresses the zero-row
+    // fallback, and the title-only asset is silently dropped.
+    findManyMock.mockResolvedValueOnce([{ id: "kci-451" }] as never);
+    countMock.mockResolvedValueOnce(1 as never);
+
+    await getAssets({ ...baseParams, search: "451" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(where.OR).toContainEqual({
+      title: { contains: "451", mode: "insensitive" },
+    });
   });
 
   it("falls back to the full search when the narrow clause matches nothing", async () => {

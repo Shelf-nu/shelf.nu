@@ -306,12 +306,13 @@ describe("manage-kits route validation", () => {
         })
       );
 
-      // The route derives `assetIds` from the newly-added kit slices —
-      // the shared asset's id is forwarded once (deduped) so the
-      // service-side asset-status flip downstream sees it.
+      // A pure kit-add passes `assetIds: []` — the kit members travel ONLY
+      // through `kitSlices`. Forwarding them as `assetIds` too would create
+      // duplicate standalone rows (the "kit assets show twice" bug). The
+      // service derives the asset-status flip + events from the kit slices.
       expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetIds: ["asset-shared"],
+          assetIds: [],
           kitSlices: [
             {
               assetId: "asset-shared",
@@ -715,12 +716,14 @@ describe("manage-kits route validation", () => {
       );
 
       // updateBookingAssets must be called exactly once with ONLY kit1
-      // (not kit2). The route derives `assetIds` from the newly-added kit
-      // slices so the service-side asset-status flip sees them.
+      // (not kit2). A pure kit-add passes `assetIds: []`; the member id
+      // (asset3) travels via `kitSlices`, and the service derives the
+      // status flip + events from those slices. Passing it as `assetIds`
+      // too would create a duplicate standalone row.
       expect(bookingService.updateBookingAssets).toHaveBeenCalledTimes(1);
       expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetIds: ["asset3"],
+          assetIds: [],
           kitIds: ["kit1"], // ONLY the newly-added kit, not the pre-existing available kit2
           kitSlices: [
             {

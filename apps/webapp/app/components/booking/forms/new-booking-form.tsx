@@ -31,6 +31,14 @@ type NewBookingFormData = {
   booking: {
     custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     assetIds?: string[] | null;
+    /**
+     * Optional originating kit id. Present only when the booking is being
+     * created FROM a kit (kit detail → "Create new booking"). Submitted as a
+     * hidden `kitId` input so the action resolves the kit's memberships into
+     * kit-driven slices, keeping the kit grouped in the new booking instead of
+     * its members landing as loose standalone rows.
+     */
+    kitId?: string;
   };
 
   /**
@@ -42,7 +50,7 @@ type NewBookingFormData = {
 
 export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
-  const { custodianRef, assetIds } = booking;
+  const { custodianRef, assetIds, kitId } = booking;
 
   const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
@@ -204,6 +212,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               value={item}
             />
           ))}
+          {/* Submitted only when creating a booking FROM a kit, so the action
+              can resolve the kit's memberships into kit-driven slices. */}
+          {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
           <div className={tw("actions-wrapper flex flex-col gap-2")}>
             {!assetIds ? (
               <Button

@@ -134,7 +134,10 @@ export async function resolveMobileScannedCode({
 
   const membership = await db.userOrganization.findUnique({
     where: {
-      userId_organizationId: { userId: user.id, organizationId: qr.organizationId },
+      userId_organizationId: {
+        userId: user.id,
+        organizationId: qr.organizationId,
+      },
     },
     select: { id: true },
   });

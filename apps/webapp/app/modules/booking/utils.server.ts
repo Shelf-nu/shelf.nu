@@ -406,14 +406,38 @@ export function calculateBookingLifecycleProgress({
    * At COMPLETE/ARCHIVED, rows where any units were ever checked out collapse
    * to Returned; rows that were never out stay Booked. Partial and CheckedOut
    * are unreachable in the final branch by construction.
+   *
+   * QUICK-CHECKOUT CAVEAT: `checkedOutQuantity` (C) is sourced ONLY from
+   * `PartialBookingCheckout` rows (progressive checkout). A quick / all-at-once
+   * checkout writes NO such rows, so C stays 0 even though every booked unit is
+   * physically out. Relying on C alone would mis-bucket such a row as Booked.
+   * The reliable "all-at-once happened" signal is `checkedOutAssetIds` being
+   * EMPTY (its only source is those same records) — a PER-BOOKING signal. We do
+   * NOT use the asset's global `status`: a QUANTITY_TRACKED asset shared across
+   * overlapping bookings can read CHECKED_OUT because of a DIFFERENT booking
+   * (conflict detection only bars INDIVIDUAL assets from overlapping). We also
+   * do NOT use asset-level `wasCheckedOut` for the per-row math — it would
+   * over-mark a never-scanned slice of a multi-slice QT asset once ANY sibling
+   * slice was checked out.
    */
+  const wasAllAtOnceCheckout = checkedOutAssetIds.length === 0;
   const qtyBucketOf = (a: LifecycleAsset): Bucket => {
     const B = Math.max(0, a.bookedQuantity ?? 0);
-    const C = Math.max(0, a.checkedOutQuantity ?? 0);
+    let C = Math.max(0, a.checkedOutQuantity ?? 0);
     const D = Math.max(0, a.dispositionedQuantity ?? 0);
+    // Quick checkout: an all-at-once checkout of THIS booking (no progressive
+    // records ⇒ empty checkedOutAssetIds) put every booked unit out. Only ever
+    // raises C toward B, so progressive partial counts are untouched. When
+    // records DO exist we trust the per-row counter.
+    if (!isFinal && wasAllAtOnceCheckout && D === 0 && C < B) {
+      C = B;
+    }
     if (isFinal) {
-      // Any units ever checked out → Returned; otherwise still Booked.
-      return C > 0 ? "returned" : "booked";
+      // Any units ever checked out → Returned; otherwise still Booked. A pure
+      // all-at-once checkout leaves no records (C=0), so treat every row as
+      // Returned. When records exist, use the per-row C so a never-checked-out
+      // slice of a multi-slice QT asset correctly stays Booked.
+      return C > 0 || wasAllAtOnceCheckout ? "returned" : "booked";
     }
     if (B > 0 && D >= B) return "returned";
     if (B > 0 && C >= B && D < B) return "checkedOut";
