@@ -1,8 +1,6 @@
 import {
-  AssetStatus,
   type AssetType,
   type ConsumptionType,
-  KitStatus,
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
