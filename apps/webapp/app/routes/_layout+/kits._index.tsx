@@ -7,6 +7,7 @@ import type {
   LinksFunction,
 } from "react-router";
 import { data, redirect, Link, useLoaderData } from "react-router";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -37,6 +38,7 @@ import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -108,28 +110,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           qrCodes: { select: { id: true } },
-          assets: {
+          assetKits: {
             select: {
+              // AssetKit.id surfaces the kit-slice discriminator. The
+              // consumer filters `bookingAssets[].assetKitId === ak.id`
+              // so a QT asset shared between Kit A and Kit B only emits
+              // each booking on its own kit's calendar — without this,
+              // every kit containing the pooled asset would show every
+              // booking of it (Codex review #2676 P2).
               id: true,
-              availableToBook: true,
-              status: true,
-              ...(view === "availability" && {
-                bookings: {
-                  where: {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                  },
-                  select: {
-                    id: true,
-                    name: true,
-                    status: true,
-                    from: true,
-                    to: true,
-                    description: true,
-                    custodianTeamMember: true,
-                    custodianUser: true,
-                  },
+              asset: {
+                select: {
+                  id: true,
+                  availableToBook: true,
+                  status: true,
+                  // Post-Phase-3a: bookings reach assets through the
+                  // BookingAsset pivot (Asset.bookings was removed).
+                  // useKitAvailabilityData reads
+                  // asset.bookingAssets[].booking — see
+                  // components/assets/assets-index/use-kit-availability-data.ts.
+                  // The pre-pivot `bookings: { ... }` select here threw a
+                  // PrismaClientValidationError on every kit search with
+                  // ?view=availability (Sentry SHELF-WEBAPP-1P1).
+                  ...(view === "availability" && {
+                    bookingAssets: {
+                      where: {
+                        booking: {
+                          status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        },
+                      },
+                      select: {
+                        // Discriminator for per-kit attribution in the
+                        // consumer. NULL = standalone slice (not bound
+                        // to a kit) — those are filtered out so they
+                        // don't pollute any kit's availability calendar.
+                        assetKitId: true,
+                        booking: {
+                          select: {
+                            id: true,
+                            name: true,
+                            status: true,
+                            from: true,
+                            to: true,
+                            description: true,
+                            // FK columns the consumer reads directly
+                            // (bookingWithRelations.kitId at line 87,
+                            // .custodianUserId at line 117 of the
+                            // useKitAvailabilityData hook). Without
+                            // these, both fields were undefined at
+                            // runtime — CodeRabbit review #2676.
+                            kitId: true,
+                            custodianUserId: true,
+                            custodianTeamMember: true,
+                            custodianUser: true,
+                          },
+                        },
+                      },
+                    },
+                  }),
                 },
-              }),
+              },
             },
           },
           category: true,
@@ -387,8 +427,12 @@ function ListContent({
       typeof KITS_INCLUDE_FIELDS,
       {
         qrCodes: { select: { id: true } };
-        assets: {
-          select: { id: true; availableToBook: true; status: true };
+        assetKits: {
+          select: {
+            asset: {
+              select: { id: true; availableToBook: true; status: true };
+            };
+          };
         };
         category: true;
         location: typeof LOCATION_WITH_HIERARCHY;
@@ -400,6 +444,14 @@ function ListContent({
   const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
     typeof LOCATION_WITH_HIERARCHY
   > | null;
+
+  // Resolve the kit's display code. Kits don't have sequentialId/preferred-
+  // BarcodeId in v1 — the resolver's optional fields tolerate that and fall
+  // back to QR when the workspace prefers SAM.
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
 
   return (
     <>
@@ -427,11 +479,24 @@ function ListContent({
               <span className="word-break mb-1 block font-medium">
                 {item.name}
               </span>
-              <div>
+              {/*
+                Same metadata-line composition as the asset surfaces: status
+                first (glanceable color), code chip second. flex-wrap handles
+                narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
-                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
+                  // why: undefined assetKits ≠ empty kit — we don't know what's in it,
+                  // so default to not-available (matches the calendar view's semantic
+                  // in use-kit-availability-data.ts).
+                  availableToBook={
+                    item.assetKits == null
+                      ? false
+                      : !item.assetKits.some((ak) => !ak.asset.availableToBook)
+                  }
                 />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>
@@ -465,7 +530,7 @@ function ListContent({
           />
         ) : null}
       </Td>
-      <Td>{item._count.assets}</Td>
+      <Td>{item._count.assetKits}</Td>
       <Td>
         <TeamMemberBadge teamMember={item?.custody?.custodian} />
       </Td>

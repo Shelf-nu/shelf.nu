@@ -21,10 +21,14 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import {
   AssetCell,
+  CurrencyCell,
   DateCell,
   ReportTable,
 } from "~/components/reports/report-table";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { IdleAssetRow, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 /**
@@ -90,13 +94,10 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) =>
-      // `!= null` so a real $0 valuation renders as "$0", not "—".
-      row.original.valuation != null ? (
-        `$${row.original.valuation.toLocaleString()}`
-      ) : (
-        <span className="text-gray-400">—</span>
-      ),
+    // Asset-aware: shows TOTAL (valuation × quantity) for QT assets, with
+    // a "<unit price> × N <unit>" subtext. A real $0 valuation renders as
+    // "$0" (or workspace equivalent), not "—". See {@link CurrencyCell}.
+    cell: ({ row }) => <CurrencyCell asset={row.original} />,
   },
 ];
 
@@ -128,6 +129,9 @@ export function IdleAssetsContent({
   timeframeLabel,
   onRowClick,
 }: Props) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
   // Column definitions live at module scope (`IDLE_ASSETS_COLUMNS`) so the
   // array reference — and every cell function inside — is stable across
   // every render. That stability is what prevents TanStack `flexRender`
@@ -180,7 +184,11 @@ export function IdleAssetsContent({
               <span className="text-xs text-gray-500">Total Value</span>
               <span className="text-lg font-medium text-gray-900">
                 {totalIdleValue > 0
-                  ? `$${totalIdleValue.toLocaleString()}`
+                  ? formatCurrency({
+                      value: totalIdleValue,
+                      currency: currentOrganization?.currency ?? "USD",
+                      locale,
+                    })
                   : "—"}
               </span>
             </div>

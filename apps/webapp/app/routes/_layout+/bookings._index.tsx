@@ -5,7 +5,14 @@ import type {
   LoaderFunctionArgs,
   ShouldRevalidateFunction,
 } from "react-router";
-import { data, redirect, Link, Outlet, useMatches } from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  Outlet,
+  useMatches,
+  useLoaderData,
+} from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -34,6 +41,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { hasCustody } from "~/modules/custody/utils";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -148,7 +156,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
-        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        extraInclude: {
+          tags: TAG_WITH_COLOR_SELECT,
+          // Include outstanding model-level reservations so the
+          // assets-sidebar drawer can render the "Unassigned model
+          // reservations (N)" section — and so the drawer trigger opens
+          // for pure book-by-model bookings (0 concrete assets, N
+          // reserved models).
+          modelRequests: {
+            include: {
+              assetModel: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
       }),
 
       // team members for filter dropdown
@@ -189,6 +211,113 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
+    /**
+     * Compute a per-booking map of `assetId → dispositionedQty` (sum
+     * of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
+     * every qty-tracked asset currently visible on this page. Feeds
+     * the `BookingAssetsSidebar` so it can render the same qty
+     * progress indicator and "Partially checked in" badge the
+     * overview page uses.
+     *
+     * Strategy: one aggregate query scoped to the bookingIds on this
+     * page (at most `perPage` bookings, so bounded). Then we bucket the
+     * rows by bookingId and store a Map<string, Record<string, number>>
+     * keyed by bookingId. Empty record for bookings with no activity.
+     */
+    const bookingIdsOnPage = bookings.map((b) => b.id);
+    const dispositionRows =
+      bookingIdsOnPage.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["bookingId", "assetId", "category"],
+            where: {
+              bookingId: { in: bookingIdsOnPage },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+    /**
+     * Per-booking → per-asset disposition totals AND a per-category
+     * breakdown. The sidebar tooltip uses the breakdown to show
+     * Returned / Consumed / Lost / Damaged separately (lost and
+     * damaged units are conceptually different from returned ones).
+     * Both derivations come from the same single groupBy — no extra
+     * DB round-trip.
+     */
+    const dispositionedByBooking: Record<string, Record<string, number>> = {};
+    const dispositionBreakdownByBooking: Record<
+      string,
+      Record<
+        string,
+        { returned: number; consumed: number; lost: number; damaged: number }
+      >
+    > = {};
+    for (const row of dispositionRows) {
+      if (!row.bookingId) continue;
+      const qty = row._sum.quantity ?? 0;
+
+      if (!dispositionedByBooking[row.bookingId]) {
+        dispositionedByBooking[row.bookingId] = {};
+      }
+      dispositionedByBooking[row.bookingId][row.assetId] =
+        (dispositionedByBooking[row.bookingId][row.assetId] ?? 0) + qty;
+
+      if (!dispositionBreakdownByBooking[row.bookingId]) {
+        dispositionBreakdownByBooking[row.bookingId] = {};
+      }
+      const bucket =
+        dispositionBreakdownByBooking[row.bookingId][row.assetId] ??
+        ({
+          returned: 0,
+          consumed: 0,
+          lost: 0,
+          damaged: 0,
+        } as const);
+      const next = { ...bucket };
+      if (row.category === "RETURN") next.returned += qty;
+      else if (row.category === "CONSUME") next.consumed += qty;
+      else if (row.category === "LOSS") next.lost += qty;
+      else if (row.category === "DAMAGE") next.damaged += qty;
+      dispositionBreakdownByBooking[row.bookingId][row.assetId] = next;
+    }
+
+    /**
+     * Per-booking → per-asset progressively-checked-out total. Sums
+     * `PartialBookingCheckout.quantities[i]` across every checkout
+     * session for the bookings on this page, bucketed by
+     * `(bookingId, assetIds[i])`. Feeds the sidebar's new amber
+     * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge: an asset with
+     * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an
+     * active booking is "partly out, no returns yet".
+     *
+     * Legacy fallback: pre-progressive-checkout rows have
+     * `quantities[].length !== assetIds[].length` (often empty). We
+     * count one unit per occurrence in that case, matching the
+     * service-layer read convention (`countCheckedOutUnitsForAsset` in
+     * `apps/webapp/app/modules/booking/service.server.ts`).
+     */
+    const checkoutSessionRows =
+      bookingIdsOnPage.length > 0
+        ? await db.partialBookingCheckout.findMany({
+            where: { bookingId: { in: bookingIdsOnPage } },
+            select: { bookingId: true, assetIds: true, quantities: true },
+          })
+        : [];
+    const checkedOutByBooking: Record<string, Record<string, number>> = {};
+    for (const session of checkoutSessionRows) {
+      const ids = session.assetIds ?? [];
+      const qtys = session.quantities ?? [];
+      const aligned = qtys.length === ids.length;
+      const bucket =
+        checkedOutByBooking[session.bookingId] ??
+        (checkedOutByBooking[session.bookingId] = {});
+      for (let i = 0; i < ids.length; i += 1) {
+        const assetId = ids[i];
+        const quantity = aligned ? qtys[i] ?? 1 : 1;
+        bucket[assetId] = (bucket[assetId] ?? 0) + quantity;
+      }
+    }
+
     const header: HeaderData = {
       title: "Bookings",
     };
@@ -209,6 +338,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         hasActiveFilters,
+        dispositionedByBooking,
+        dispositionBreakdownByBooking,
+        checkedOutByBooking,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
@@ -370,32 +502,63 @@ export default function BookingsIndexPage({
 }
 
 const ListBookingsContent = ({
-  item,
+  item: rawItem,
 }: {
   item: Prisma.BookingGetPayload<{
     include: {
-      assets: {
+      bookingAssets: {
         select: {
           id: true;
-          title: true;
-          availableToBook: true;
-          custody: true;
-          kitId: true;
-          status: true;
-          mainImage: true;
-          thumbnailImage: true;
-          mainImageExpiration: true;
-          category: {
+          quantity: true;
+          // Surfaces the kit-source discriminator the sidebar groups
+          // by. Without this field on the index loader's type, the
+          // sidebar's `BookingWithAssets` type check rejects the data.
+          assetKitId: true;
+          asset: {
             select: {
               id: true;
-              name: true;
-              color: true;
-            };
-          };
-          kit: {
-            select: {
-              id: true;
-              name: true;
+              title: true;
+              type: true;
+              consumptionType: true;
+              availableToBook: true;
+              custody: true;
+              status: true;
+              mainImage: true;
+              thumbnailImage: true;
+              mainImageExpiration: true;
+              // Code-resolution fields - mirror of getBookings' assets select
+              sequentialId: true;
+              preferredBarcodeId: true;
+              qrCodes: { take: 1; select: { id: true } };
+              barcodes: { select: { id: true; type: true; value: true } };
+              category: {
+                select: {
+                  id: true;
+                  name: true;
+                  color: true;
+                };
+              };
+              assetKits: {
+                select: {
+                  id: true;
+                  kitId: true;
+                  kit: {
+                    select: {
+                      id: true;
+                      name: true;
+                      image: true;
+                      imageExpiration: true;
+                      category: {
+                        select: {
+                          id: true;
+                          name: true;
+                          color: true;
+                        };
+                      };
+                    };
+                  };
+                };
+              };
             };
           };
         };
@@ -414,13 +577,59 @@ const ListBookingsContent = ({
       custodianUser: true;
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
+      // Included via `extraInclude` in the loader above so the
+      // assets-sidebar drawer can show outstanding model reservations.
+      modelRequests: {
+        include: {
+          assetModel: {
+            select: { id: true; name: true };
+          };
+        };
+      };
     };
   }>;
 }) => {
+  // Defensive normalisation against a Sentry-observed crash
+  // (SHELF-WEBAPP-1NW): a single client-side render hit
+  // `item.bookingAssets` as undefined and tripped `.some(...)`, breaking
+  // the row through the error boundary. The component's prop type
+  // declares `bookingAssets` as required and the loader always selects
+  // it, so the undefined was either a stale-bundle / hydration mismatch
+  // in the deploy window or an as-yet unidentified loader edge case.
+  //
+  // Normalise once at the top so EVERY downstream reader gets a safe
+  // array — the badge calc below, `<BookingAssetsSidebar />` (which
+  // calls `groupAssets(booking.bookingAssets)` + reads
+  // `booking.bookingAssets.length` in multiple places), and any future
+  // additions. A scoped `?? []` on each reader would be brittle.
+  const item = {
+    ...rawItem,
+    bookingAssets: rawItem.bookingAssets ?? [],
+  };
+
   const hasUnavaiableAssets =
-    item.assets.some(
-      (asset) => !asset.availableToBook || asset.custody !== null
+    item.bookingAssets.some(
+      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
+
+  /**
+   * Pull this booking's slice of the page-wide dispositioned-quantity
+   * map so the sidebar can render qty progress + partial-checkin badge.
+   * Reading from loader data here (instead of threading a prop through
+   * `<List ItemComponent=…>`) keeps the list plumbing unchanged.
+   */
+  const loaderData = useLoaderData<typeof loader>();
+  const dispositionedByAsset =
+    loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
+  const dispositionBreakdownByAsset =
+    loaderData?.dispositionBreakdownByBooking?.[item.id] ?? undefined;
+  /**
+   * Per-asset progressive-checkout totals for this booking. Drives the
+   * sidebar's new amber "partially checked out, no returns yet" badge
+   * + the `{checkedOut}/{booked}` qty display.
+   */
+  const checkedOutByAsset =
+    loaderData?.checkedOutByBooking?.[item.id] ?? undefined;
 
   return (
     <>
@@ -469,7 +678,12 @@ const ListBookingsContent = ({
 
       {/* Assets count */}
       <Td>
-        <BookingAssetsSidebar booking={item} />
+        <BookingAssetsSidebar
+          booking={item}
+          dispositionedByAsset={dispositionedByAsset}
+          dispositionBreakdownByAsset={dispositionBreakdownByAsset}
+          checkedOutByAsset={checkedOutByAsset}
+        />
       </Td>
 
       <Td className="max-w-62">

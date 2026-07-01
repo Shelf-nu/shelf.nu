@@ -4,6 +4,11 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import {
+  getScannerPickerMeta,
+  ScannerPickerContextSchema,
+  type ScannerPickerMeta,
+} from "~/modules/scanner/picker-meta.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -17,6 +22,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  sanitizeAssetExtraInclude,
+  sanitizeKitExtraInclude,
+} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -69,7 +78,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     // Decode the URL-encoded barcode value
     const value = decodeURIComponent(encodedValue);
 
-    const { assetExtraInclude, kitExtraInclude, auditSessionId } = parseData(
+    const {
+      assetExtraInclude,
+      kitExtraInclude,
+      auditSessionId,
+      pickerContext,
+    } = parseData(
       searchParams,
       z.object({
         assetExtraInclude: z
@@ -95,23 +109,48 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             }
           }),
         auditSessionId: z.string().optional(),
+        /** Mirror of the get-scanned-item shape; see that endpoint. */
+        pickerContext: z
+          .string()
+          .optional()
+          .transform((val, ctx) => {
+            if (!val) return undefined;
+            try {
+              return ScannerPickerContextSchema.parse(JSON.parse(val));
+            } catch (e) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Invalid pickerContext: ${
+                  e instanceof Error ? e.message : "parse error"
+                }`,
+              });
+              return z.NEVER;
+            }
+          }),
       })
     ) as {
       assetExtraInclude: Prisma.AssetInclude | undefined;
       kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
+      pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
     };
+
+    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
+    // user-controlled JSON. Allowlist them before merging into the Prisma
+    // include so relation traversal / deep nesting cannot be injected.
+    const safeAssetExtraInclude = sanitizeAssetExtraInclude(assetExtraInclude);
+    const safeKitExtraInclude = sanitizeKitExtraInclude(kitExtraInclude);
 
     const include = {
       ...BARCODE_INCLUDE,
 
       // Include additional data based on search params. This will override the default includes
-      ...(assetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
+      ...(safeAssetExtraInclude
+        ? { asset: { include: { ...ASSET_INCLUDE, ...safeAssetExtraInclude } } }
         : undefined),
 
-      ...(kitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
+      ...(safeKitExtraInclude
+        ? { kit: { include: { ...KIT_INCLUDE, ...safeKitExtraInclude } } }
         : undefined),
     };
 
@@ -175,6 +214,18 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     }
 
+    // Mirror the get-scanned-item endpoint — attach the normalised
+    // strict-available pool when a destination context is present so
+    // barcode-driven scans get the same UX as QR.
+    const pickerMeta: ScannerPickerMeta | null =
+      pickerContext && barcode.asset?.id
+        ? await getScannerPickerMeta({
+            assetId: barcode.asset.id,
+            organizationId,
+            context: pickerContext,
+          })
+        : null;
+
     return data(
       payload({
         barcode: {
@@ -186,6 +237,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,
+                pickerMeta,
               }
             : undefined,
         },

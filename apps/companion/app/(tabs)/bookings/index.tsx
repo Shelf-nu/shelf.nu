@@ -2,11 +2,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
+  ScrollView,
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Animated,
+  Platform,
+  ActionSheetIOS,
+  Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -20,6 +25,7 @@ import {
   borderRadius,
   formatStatus,
   formatDateTime,
+  bookingCountdown,
   hitSlop,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -28,18 +34,50 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import {
+  consumeBookingsListDirty,
+  markBookingsListDirty,
+} from "@/lib/booking-refresh";
 
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
 
-/** Which status filters to show as pills */
+/**
+ * Status filter pills. The mobile list route already accepts any
+ * comma-separated subset of statuses, so we expose the field-critical
+ * individual statuses (Reserved = upcoming, Ongoing = in progress, Overdue =
+ * needs attention) alongside the grouped Active/Completed/All — letting a tech
+ * isolate exactly what they care about on a job.
+ */
 const STATUS_FILTERS: { label: string; value: string }[] = [
-  { label: "Active", value: "RESERVED,ONGOING,OVERDUE" },
+  // DRAFT counts as active: a booking being built (e.g. scan-to-add) must
+  // not vanish from the default view the moment the user leaves it.
+  { label: "Active", value: "DRAFT,RESERVED,ONGOING,OVERDUE" },
+  { label: "Reserved", value: "RESERVED" },
+  { label: "Ongoing", value: "ONGOING" },
+  { label: "Overdue", value: "OVERDUE" },
   { label: "Completed", value: "COMPLETE" },
   {
     label: "All",
     value: "DRAFT,RESERVED,ONGOING,OVERDUE,COMPLETE,ARCHIVED,CANCELLED",
   },
+];
+
+/**
+ * Sort options surfaced in the sort menu. Each maps to the list route's
+ * allowlisted `sortBy`/`sortOrder` params (default = the first entry, which
+ * matches the route's own default of `from asc`). Directions are chosen to be
+ * the useful one per column (soonest dates first, names A–Z, newest created).
+ */
+const SORT_OPTIONS: {
+  label: string;
+  sortBy: string;
+  sortOrder: "asc" | "desc";
+}[] = [
+  { label: "Start date (earliest)", sortBy: "from", sortOrder: "asc" },
+  { label: "Due date (soonest)", sortBy: "to", sortOrder: "asc" },
+  { label: "Name (A–Z)", sortBy: "name", sortOrder: "asc" },
+  { label: "Recently created", sortBy: "createdAt", sortOrder: "desc" },
 ];
 
 export default function BookingsListScreen() {
@@ -66,6 +104,9 @@ function BookingsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortIndex, setSortIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   const listRef = useRef<FlatList>(null);
@@ -87,31 +128,40 @@ function BookingsListContent() {
   }, [activeFilter, syncIndex]);
 
   const fetchBookings = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
+    async (pageNum: number, reset: boolean): Promise<boolean> => {
+      if (!currentOrg) return false;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
+        search: debouncedSearch || undefined,
+        sortBy: SORT_OPTIONS[sortIndex].sortBy,
+        sortOrder: SORT_OPTIONS[sortIndex].sortOrder,
         page: pageNum,
         perPage: PAGE_SIZE,
       });
-      // Request cancelled (navigation) — ignore
-      if (!data && !fetchErr) return;
+      // Request cancelled (navigation): ignore, treat as not-refreshed.
+      if (!data && !fetchErr) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load bookings");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
-      if (reset) setBookings(data.bookings);
-      else setBookings((prev) => [...prev, ...data.bookings]);
+      if (reset) {
+        setBookings(data.bookings);
+        lastLoadedCountRef.current = data.bookings.length;
+      } else setBookings((prev) => [...prev, ...data.bookings]);
+      return true;
     },
-    [currentOrg, activeFilter]
+    [currentOrg, activeFilter, debouncedSearch, sortIndex]
   );
 
   // Refresh on tab focus — skip if data is fresh (< 60s old)
   const hasFetchedBookings = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Count from the latest successful reset fetch, used for the first-load a11y
+  // summary without reading state inside a setBookings updater (impure).
+  const lastLoadedCountRef = useRef(0);
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
@@ -122,19 +172,30 @@ function BookingsListContent() {
     nextPage.current = 1;
   }, [currentOrg?.id]);
 
-  // Re-fetch immediately when filter changes
+  // Debounce the search box (mirrors the assets/kits list debounce).
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Re-fetch immediately when the filter, search, or sort changes
   useEffect(() => {
     if (!currentOrg || !hasFetchedBookings.current) return;
     nextPage.current = 1;
     fetchBookings(1, true).finally(() => {
       lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, debouncedSearch, sortIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
+      // A lifecycle mutation on the detail screen (reserve/cancel/archive/
+      // delete/duplicate) marks the list dirty; bypass the freshness gate so we
+      // don't show stale rows on return.
+      const mustRefresh = consumeBookingsListDirty();
       if (
+        !mustRefresh &&
         hasFetchedBookings.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )
@@ -144,21 +205,29 @@ function BookingsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedBookings.current;
-      fetchBookings(1, true).finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        if (isFirstLoad) {
-          hasFetchedBookings.current = true;
-          setBookings((current) => {
+      fetchBookings(1, true)
+        .then((ok) => {
+          // If a forced (list-dirty) refresh failed or was cancelled, re-mark
+          // so the next focus retries instead of falling back to the 60s gate.
+          if (mustRefresh && !ok) markBookingsListDirty();
+          // First-load a11y summary, only when the fetch succeeded so screen
+          // readers don't announce "No bookings found" while the error/Retry
+          // view is what's actually on screen.
+          if (isFirstLoad && ok) {
             announce(
-              current.length === 0
+              lastLoadedCountRef.current === 0
                 ? "No bookings found"
-                : current.length + " bookings loaded"
+                : lastLoadedCountRef.current + " bookings loaded"
             );
-            return current;
-          });
-        }
-      });
+          }
+        })
+        .finally(() => {
+          setIsLoading(false);
+          lastFetchedAt.current = Date.now();
+          if (isFirstLoad) {
+            hasFetchedBookings.current = true;
+          }
+        });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, activeFilter, fetchBookings])
@@ -180,6 +249,33 @@ function BookingsListContent() {
     setIsLoadingMore(false);
   };
 
+  // Cross-platform sort picker: native action sheet on iOS, Alert on Android
+  // (mirrors the image-source picker pattern in assets/new.tsx).
+  const openSortMenu = () => {
+    Haptics.selectionAsync();
+    const labels = SORT_OPTIONS.map((o) => o.label);
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: "Sort bookings",
+          options: ["Cancel", ...labels],
+          cancelButtonIndex: 0,
+        },
+        (i) => {
+          if (i > 0) setSortIndex(i - 1);
+        }
+      );
+    } else {
+      Alert.alert("Sort bookings", undefined, [
+        { text: "Cancel", style: "cancel" },
+        ...SORT_OPTIONS.map((o, i) => ({
+          text: o.label,
+          onPress: () => setSortIndex(i),
+        })),
+      ]);
+    }
+  };
+
   const renderBooking = useCallback(
     ({ item }: { item: BookingListItem }) => {
       const badge = bookingStatusBadge[item.status] ?? {
@@ -189,6 +285,7 @@ function BookingsListContent() {
 
       const isUrgent = item.status === "OVERDUE";
       const isActive = item.status === "ONGOING" || item.status === "RESERVED";
+      const countdown = bookingCountdown(item.from, item.to, item.status);
 
       return (
         <TouchableOpacity
@@ -227,6 +324,24 @@ function BookingsListContent() {
                 {formatDateTime(item.from)} → {formatDateTime(item.to)}
               </Text>
             </View>
+
+            {countdown && (
+              <View style={styles.metaRow}>
+                <Ionicons
+                  name={countdown.urgent ? "alert-circle" : "time-outline"}
+                  size={13}
+                  color={countdown.urgent ? colors.error : colors.mutedLight}
+                />
+                <Text
+                  style={[
+                    styles.metaText,
+                    countdown.urgent && styles.metaTextUrgent,
+                  ]}
+                >
+                  {countdown.text}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.metaRow}>
               <Ionicons
@@ -317,8 +432,54 @@ function BookingsListContent() {
 
   return (
     <View style={styles.container}>
-      {/* Status filter pills */}
-      <View style={styles.filterRow} accessibilityRole="tablist">
+      {/* Keyword search + sort */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color={colors.mutedLight} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="Search bookings..."
+            placeholderTextColor={colors.mutedLight}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search bookings"
+          />
+          {searchInput.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setSearchInput("")}
+              hitSlop={hitSlop.sm}
+              accessibilityLabel="Clear search"
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <TouchableOpacity
+          style={styles.sortButton}
+          onPress={openSortMenu}
+          accessibilityLabel="Sort bookings"
+          accessibilityRole="button"
+        >
+          <Ionicons name="swap-vertical" size={20} color={colors.muted} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Status filter pills — scrollable: more statuses than fit one row */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+        accessibilityRole="tablist"
+      >
         {STATUS_FILTERS.map((f, i) => (
           <TouchableOpacity
             key={f.value}
@@ -345,7 +506,7 @@ function BookingsListContent() {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Swipeable content area — swipe left/right to cycle filter pills */}
       <View style={styles.flexFill} {...swipePanHandlers}>
@@ -379,6 +540,8 @@ function BookingsListContent() {
               <Text style={styles.emptyTitle}>
                 {activeFilter === 0
                   ? "No active bookings"
+                  : activeFilter === 2
+                  ? "No bookings"
                   : `No ${STATUS_FILTERS[
                       activeFilter
                     ].label.toLowerCase()} bookings`}
@@ -422,11 +585,27 @@ function BookingsListContent() {
           )}
         </Animated.View>
       </View>
+
+      {/* Create booking — only TEAM workspaces can use bookings (matches the
+          server premium gate; personal workspaces 403 on create). */}
+      {currentOrg?.type === "TEAM" && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/(tabs)/bookings/new");
+          }}
+          accessibilityLabel="Create booking"
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={28} color={colors.primaryForeground} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
 
-const useStyles = createStyles((colors) => ({
+const useStyles = createStyles((colors, shadows) => ({
   flexFill: {
     flex: 1,
   },
@@ -441,7 +620,47 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.md,
   },
 
+  // Keyword search box + sort button
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  searchContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.md,
+    color: colors.foreground,
+    padding: 0,
+  },
+  sortButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
   // Filter pills
+  filterScroll: {
+    flexGrow: 0,
+  },
   filterRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -537,6 +756,10 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.sm,
     color: colors.muted,
   },
+  metaTextUrgent: {
+    color: colors.error,
+    fontWeight: "600",
+  },
 
   // Action hint
   actionHint: {
@@ -580,5 +803,17 @@ const useStyles = createStyles((colors) => ({
   },
   footer: {
     paddingVertical: spacing.lg,
+  },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    bottom: spacing.xl,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.lg,
   },
 }));

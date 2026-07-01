@@ -10,7 +10,13 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         lazy: true,
-        freezeOnBlur: true,
+        // freezeOnBlur is deliberately OFF: react-freeze's Suspender can
+        // wedge into an infinite suspense throw/ping/retry loop after a
+        // cross-tab navigate (scanner → booking detail via Alert OK),
+        // pegging the JS thread at ~125% CPU and starving every network
+        // callback. Root-caused live via Hermes debugger: the suspended
+        // fiber chain was Suspender < Freeze < DelayedFreeze < Screen
+        // (react-native-screens 4.16 + RN 0.81 new arch).
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedLight,
         tabBarStyle: {
@@ -37,7 +43,6 @@ export default function TabLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarTestID: "tab-home",
           tabBarAccessibilityLabel: "Home",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" size={size} color={color} />
@@ -49,7 +54,6 @@ export default function TabLayout() {
         options={{
           title: "Assets",
           headerShown: false,
-          tabBarTestID: "tab-assets",
           tabBarAccessibilityLabel: "Assets",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube-outline" size={size} color={color} />
@@ -60,7 +64,6 @@ export default function TabLayout() {
         name="scanner"
         options={{
           title: "Scan",
-          tabBarTestID: "tab-scan",
           tabBarAccessibilityLabel: "Scan",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
@@ -77,7 +80,6 @@ export default function TabLayout() {
         options={{
           title: "Bookings",
           headerShown: false,
-          tabBarTestID: "tab-bookings",
           tabBarAccessibilityLabel: "Bookings",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
@@ -102,7 +104,6 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Settings",
-          tabBarTestID: "tab-settings",
           tabBarAccessibilityLabel: "Settings",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings-outline" size={size} color={color} />

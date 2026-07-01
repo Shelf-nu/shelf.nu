@@ -23,6 +23,7 @@ import type {
   AssetInventoryPdfMeta,
   CustodySnapshotPdfMeta,
 } from "~/modules/reports/types";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 export interface ReportPdfProps {
@@ -392,8 +393,11 @@ function CompliancePreview({ pdfMeta }: { pdfMeta: CompliancePdfMeta }) {
               </tr>
             </thead>
             <tbody>
-              {pdfMeta.custodianPerformance.map((c, i) => (
-                <tr key={i} className="border-b border-gray-100">
+              {pdfMeta.custodianPerformance.map((c) => (
+                <tr
+                  key={c.custodianId ?? c.custodianName}
+                  className="border-b border-gray-100"
+                >
                   <td className="py-1.5">{c.custodianName}</td>
                   <td className="py-1.5 text-right">{c.rate}%</td>
                   <td className="py-1.5 text-right">{c.onTime}</td>
@@ -533,7 +537,11 @@ function AssetInventoryPreview({
           />
           <MetricBox
             label="Total Value"
-            value={`$${pdfMeta.totalValuation.toLocaleString()}`}
+            value={formatCurrency({
+              value: pdfMeta.totalValuation,
+              currency: pdfMeta.currency,
+              locale: pdfMeta.locale,
+            })}
           />
           <MetricBox
             label="Available"
@@ -588,7 +596,13 @@ function AssetInventoryPreview({
                   {row.custodian || "—"}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation ? `$${row.valuation.toLocaleString()}` : "—"}
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
+                        value: row.valuation,
+                        currency: pdfMeta.currency,
+                        locale: pdfMeta.locale,
+                      })}
                 </td>
               </tr>
             ))}
@@ -624,7 +638,11 @@ function CustodySnapshotPreview({
           <MetricBox label="Team Members" value={pdfMeta.totalCustodians} />
           <MetricBox
             label="Total Value"
-            value={`$${pdfMeta.totalValuation.toLocaleString()}`}
+            value={formatCurrency({
+              value: pdfMeta.totalValuation,
+              currency: pdfMeta.currency,
+              locale: pdfMeta.locale,
+            })}
           />
         </div>
       </section>
@@ -669,7 +687,13 @@ function CustodySnapshotPreview({
                   {row.daysInCustody}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation ? `$${row.valuation.toLocaleString()}` : "—"}
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
+                        value: row.valuation,
+                        currency: pdfMeta.currency,
+                        locale: pdfMeta.locale,
+                      })}
                 </td>
               </tr>
             ))}

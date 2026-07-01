@@ -21,6 +21,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -77,21 +78,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             id: true,
           },
         },
-        bookings: {
+        bookingAssets: {
           where: {
-            status: {
-              in: [BookingStatus.RESERVED],
+            booking: {
+              status: {
+                in: [BookingStatus.RESERVED],
+              },
             },
           },
-          select: {
-            id: true,
+          include: {
+            booking: {
+              select: {
+                id: true,
+              },
+            },
           },
         },
       },
     });
 
     /** If the asset already has a custody, this page should not be visible */
-    if (asset && asset.custody) {
+    if (asset && hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
     }
 
@@ -122,6 +129,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           label: "Assets",
         });
       });
+
+    // A self-service user can only take custody for themselves. If they have
+    // no team-member profile in this workspace there is nothing to assign, so
+    // short-circuit instead of rendering a dead-end modal whose POST would then
+    // fail validation. Normally unreachable (a self-service user has their own
+    // member row), but guards the empty-teamMembers anomaly behind the
+    // SHELF-WEBAPP-1MM crash class.
+    if (role === OrganizationRoles.SELF_SERVICE && teamMembers.length === 0) {
+      sendNotification({
+        title: "Cannot take custody",
+        message:
+          "You don't have a team member profile in this workspace, so custody can't be assigned to you. Please contact your workspace admin.",
+        icon: { name: "x", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/assets/${assetId}`);
+    }
 
     const totalTeamMembers = await db.teamMember.count({ where });
 
@@ -308,6 +332,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
+      organizationId,
     });
 
     sendNotification({
@@ -331,7 +356,7 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers } = useLoaderData<typeof loader>();
-  const firstReservedBookingId = asset?.bookings?.[0]?.id;
+  const firstReservedBookingId = asset?.bookingAssets?.[0]?.booking?.id;
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -357,7 +382,7 @@ export default function Custody() {
             <DynamicSelect
               hidden={isSelfService}
               defaultValue={
-                isSelfService
+                isSelfService && teamMembers?.length > 0
                   ? JSON.stringify({
                       id: teamMembers[0].id,
                       name: resolveTeamMemberName(teamMembers[0]),

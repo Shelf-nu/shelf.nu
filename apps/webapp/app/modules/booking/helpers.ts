@@ -1,32 +1,15 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
-
-/**
- * Generates dynamic Prisma orderBy clause for booking assets
- * @param orderBy - The field to sort by (status, title, category, kit)
- * @param orderDirection - The sort direction (asc or desc)
- * @returns Array of Prisma orderBy inputs
- */
-export function getBookingAssetsOrderBy(
-  orderBy: string = "status",
-  orderDirection: "asc" | "desc" = "desc"
-): Prisma.AssetOrderByWithRelationInput[] {
-  const orderByMap: Record<string, Prisma.AssetOrderByWithRelationInput[]> = {
-    status: [{ status: orderDirection }, { createdAt: "asc" }],
-    title: [{ title: orderDirection }],
-    category: [{ category: { name: orderDirection } }],
-  };
-  return orderByMap[orderBy] || orderByMap.status;
-}
 
 type AssetWithKit = {
   id: string;
   title: string;
   status: string;
   kitId: string | null;
-  kit: { name: string } | null;
+  kit: { name: string; location?: { name: string } | null } | null;
   category: { name: string } | null;
+  location?: { name: string } | null;
   [key: string]: unknown;
 };
 
@@ -35,7 +18,7 @@ type AssetWithKit = {
  * Returns: sorted kit assets (grouped) followed by sorted individual assets.
  *
  * @param assets - Array of assets with kit information
- * @param orderBy - Field to sort by (status, title, category, kit)
+ * @param orderBy - Field to sort by (status, title, category, location)
  * @param orderDirection - Sort direction (asc or desc)
  * @returns Sorted array with kit assets grouped together
  */
@@ -57,11 +40,18 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
   }
 
   // Group kit assets by kitId
-  const kitGroups = new Map<string, { kitName: string; assets: T[] }>();
+  const kitGroups = new Map<
+    string,
+    { kitName: string; kitLocationName: string | null; assets: T[] }
+  >();
   for (const asset of kitAssets) {
     const kitId = asset.kitId!;
     if (!kitGroups.has(kitId)) {
-      kitGroups.set(kitId, { kitName: asset.kit!.name, assets: [] });
+      kitGroups.set(kitId, {
+        kitName: asset.kit!.name,
+        kitLocationName: asset.kit!.location?.name ?? null,
+        assets: [],
+      });
     }
     kitGroups.get(kitId)!.assets.push(asset);
   }
@@ -82,6 +72,15 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
         if (!catA && !catB) return a.title.localeCompare(b.title);
         // At this point both catA and catB are defined (handled above)
         return multiplier * catA!.localeCompare(catB!);
+      }
+      case "location": {
+        const locA = a.location?.name;
+        const locB = b.location?.name;
+        // Null locations go to the end regardless of direction
+        if (!locA && locB) return 1;
+        if (locA && !locB) return -1;
+        if (!locA && !locB) return a.title.localeCompare(b.title);
+        return multiplier * locA!.localeCompare(locB!);
       }
       case "status":
       default: {
@@ -134,6 +133,16 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
           // At this point both catA and catB are defined (handled above)
           return multiplier * catA!.localeCompare(catB!);
         }
+        case "location": {
+          const locA = groupA.kitLocationName;
+          const locB = groupB.kitLocationName;
+          // Null locations go to the end regardless of direction
+          if (!locA && locB) return 1;
+          if (locA && !locB) return -1;
+          if (!locA && !locB)
+            return groupA.kitName.localeCompare(groupB.kitName);
+          return multiplier * locA!.localeCompare(locB!);
+        }
         case "status":
         default: {
           // Sort kits by "most urgent" status in the kit
@@ -181,6 +190,132 @@ export function isBookingEarlyCheckout(from: Date): boolean {
 }
 
 /**
+ * Decide whether a checkout should show the early-checkout "adjust start date"
+ * prompt. This is ONLY appropriate for the first checkout that transitions the
+ * booking RESERVED → ONGOING: adjusting the start date once the booking has
+ * already started is meaningless, and `partialCheckoutBooking` ignores the date
+ * choice unless the booking is RESERVED. Used by the scanner drawer and the
+ * bulk partial-checkout dialog so a progressive checkout of remaining items on
+ * an ONGOING/OVERDUE booking never re-prompts.
+ *
+ * @param status - The booking's current status
+ * @param from - The booking's start date
+ * @returns `true` only when the booking is RESERVED and starts >15min from now
+ */
+export function shouldPromptEarlyCheckout(
+  status: BookingStatus,
+  from: Date
+): boolean {
+  return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
+}
+
+/**
+ * Minimal asset shape needed to decide check-out eligibility. `type` drives
+ * the QT-vs-INDIVIDUAL branch in {@link isAssetCheckoutEligible}; legacy
+ * callers that omit it fall through to INDIVIDUAL semantics.
+ */
+type CheckoutEligibilityAsset = {
+  id: string;
+  status: AssetStatus;
+  type?: AssetType;
+};
+
+/**
+ * Decide whether a booking asset is still eligible to be checked out right now.
+ *
+ * An asset is eligible when it has NOT already left the "Booked" bucket and can
+ * physically be checked out. Specifically it must not be:
+ * - already checked out — by a partial-checkout record (`checkedOutIds`) OR a
+ *   live `CHECKED_OUT` status (the all-at-once flow leaves no record);
+ * - already returned via partial check-in (`returnedIds`) — those are AVAILABLE
+ *   again but DONE for this booking;
+ * - in custody (must be released before it can be checked out).
+ *
+ * QUANTITY_TRACKED assets are partial top-off aware: when a per-asset
+ * `remainingByAssetId` map is supplied, eligibility is "remaining > 0" (a QT
+ * asset with 2 of 5 units already out is still eligible for the other 3).
+ * Without the map the helper preserves the legacy binary gate so existing
+ * callers behave unchanged.
+ *
+ * Shared by the scanner drawer's eligibility filter and its "remaining to check
+ * out" denominator so the numerator and denominator always describe the SAME
+ * set (the progress bar can reach 100%).
+ *
+ * @param asset - The asset (id + live status + optional type)
+ * @param checkedOutIds - Set of asset ids already checked out for this booking
+ * @param returnedIds - Set of asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map;
+ *   when present, QT assets are eligible iff `remaining > 0`
+ * @returns `true` when the asset can still be scanned out
+ */
+export function isAssetCheckoutEligible(
+  asset: CheckoutEligibilityAsset,
+  checkedOutIds: Set<string>,
+  returnedIds: Set<string>,
+  remainingByAssetId?: Record<string, number>
+): boolean {
+  if (returnedIds.has(asset.id)) return false;
+  if (asset.status === AssetStatus.IN_CUSTODY) return false;
+  // QUANTITY_TRACKED: eligibility is per-unit when the loader supplies a
+  // value for the asset (top-off-aware path). The asset has remaining
+  // units exactly when remaining > 0. Status CHECKED_OUT for QT implies
+  // remaining === 0 (status flips when every slice is claimed), so the
+  // remaining gate is sufficient. When the map is absent OR the asset has
+  // no entry (legacy callsites, older tests), fall back to the binary
+  // gate so behaviour is unchanged.
+  if (asset.type === AssetType.QUANTITY_TRACKED) {
+    if (remainingByAssetId && asset.id in remainingByAssetId) {
+      return (remainingByAssetId[asset.id] ?? 0) > 0;
+    }
+    // Legacy / unmapped: preserve current behaviour (binary).
+    return (
+      !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
+    );
+  }
+  // INDIVIDUAL: unchanged binary gate.
+  return (
+    !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
+  );
+}
+
+/**
+ * Count the booking assets still available to check out — the scanner's
+ * "remaining to check out" denominator. Asset-scoped (kit assets counted
+ * individually) and uses {@link isAssetCheckoutEligible}, so it stays in lock
+ * step with the scanner's eligibility filter.
+ *
+ * For QUANTITY_TRACKED assets the meaning is "unique assets with remaining
+ * units > 0" — a QT asset with any remaining quantity counts as 1 toward the
+ * denominator, never as its remaining-unit count. INDIVIDUAL assets still
+ * contribute 1. The scanner's progress bar stays asset-scoped, which matches
+ * the existing UI semantics.
+ *
+ * @param bookingAssets - All assets on the booking (id + live status + optional type)
+ * @param checkedOutAssetIds - Asset ids already checked out (record or status)
+ * @param checkedInAssetIds - Asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map
+ *   forwarded to {@link isAssetCheckoutEligible}
+ * @returns Number of assets still eligible to be checked out
+ */
+export function countRemainingCheckoutAssets(
+  bookingAssets: CheckoutEligibilityAsset[],
+  checkedOutAssetIds: string[],
+  checkedInAssetIds: string[],
+  remainingByAssetId?: Record<string, number>
+): number {
+  const checkedOutIds = new Set(checkedOutAssetIds);
+  const returnedIds = new Set(checkedInAssetIds);
+  return bookingAssets.filter((asset) =>
+    isAssetCheckoutEligible(
+      asset,
+      checkedOutIds,
+      returnedIds,
+      remainingByAssetId
+    )
+  ).length;
+}
+
+/**
  * This function checks if the booking is being early checkin.
  * It only considers it early if it's more than 15 minutes before the booking end time.
  */
@@ -223,21 +358,41 @@ export function formatBookingDuration(from: Date, to: Date): string {
 }
 
 /**
- * Core logic for determining if an asset has booking conflicts
- * Used by both isAssetAlreadyBooked and kit-related functions
+ * Core logic for determining if an asset has booking conflicts.
+ * Assets now reference bookings through the BookingAsset pivot table,
+ * so we traverse `asset.bookingAssets[].booking` instead of the
+ * old implicit `asset.bookings[]`.
+ *
+ * For INDIVIDUAL assets, any overlapping booking is a conflict.
+ * For QUANTITY_TRACKED assets, this function always returns false because
+ * multiple bookings can reserve from the same asset as long as the total
+ * reserved quantity does not exceed the available quantity. The actual
+ * quantity availability check is performed at the service layer via
+ * `computeBookingAvailableQuantity()`.
+ *
+ * Used by both isAssetAlreadyBooked and kit-related functions.
  */
 export function hasAssetBookingConflicts(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {
-  if (!asset.bookings?.length) return false;
+  /**
+   * QUANTITY_TRACKED assets can appear in multiple concurrent bookings,
+   * each reserving a portion of the total quantity. Conflict detection
+   * for these assets is handled at the service layer where we have access
+   * to the full quantity context (total, in-custody, reserved amounts).
+   */
+  if (asset.type === AssetType.QUANTITY_TRACKED) return false;
 
-  const conflictingBookings = asset.bookings.filter(
-    (b) => b.id !== currentBookingId
-  );
+  if (!asset.bookingAssets?.length) return false;
+
+  const conflictingBookings = asset.bookingAssets
+    .map((ba) => ba.booking)
+    .filter((b) => b.id !== currentBookingId);
 
   if (conflictingBookings.length === 0) return false;
 
@@ -260,15 +415,137 @@ export function hasAssetBookingConflicts(
 }
 
 /**
- * Determines if an asset is already booked and unavailable for the current booking context
- * Handles partial check-in logic properly
+ * Determines if an asset is already booked and unavailable for the current booking context.
+ * Handles partial check-in logic properly.
+ *
+ * For QUANTITY_TRACKED assets, this always returns false because they support
+ * concurrent bookings — quantity availability is validated at the service layer.
+ *
+ * Uses the BookingAsset pivot relation (`asset.bookingAssets[].booking`)
+ * instead of the removed implicit `asset.bookings[]`.
  */
 export function isAssetAlreadyBooked(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {
   return hasAssetBookingConflicts(asset, currentBookingId);
+}
+
+/**
+ * Minimal asset shape needed for in-memory booking search. Mirrors the fields
+ * selected by `BOOKING_WITH_ASSETS_INCLUDE.assets.select`. Relation fields are
+ * optional/nullable to allow structural subtyping against the richer Prisma
+ * asset payload.
+ *
+ * @see {@link file://./constants.ts} BOOKING_WITH_ASSETS_INCLUDE.assets.select
+ */
+export type SearchableBookingAsset = {
+  id: string;
+  kitId: string | null;
+  title: string;
+  sequentialId?: string | null;
+  category?: { name: string } | null;
+  tags?: { name: string }[] | null;
+  location?: { name: string } | null;
+  qrCodes?: { id: string }[] | null;
+  barcodes?: { value: string }[] | null;
+  kit?: {
+    name?: string | null;
+    location?: { name: string } | null;
+    category?: { name: string } | null;
+  } | null;
+};
+
+/**
+ * Splits a raw search string into lowercased, trimmed, non-empty terms.
+ * Commas separate terms (comma = OR).
+ *
+ * @param search - Raw search string from the `s` query param
+ * @returns Array of normalized terms (empty if the input is blank)
+ */
+function parseBookingSearchTerms(search: string): string[] {
+  return search
+    .toLowerCase()
+    .trim()
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+/**
+ * True when `term` is a case-insensitive substring of any searchable field of
+ * the asset (its own fields, its tags/codes, or its kit's fields).
+ *
+ * @param asset - The asset to test
+ * @param term - An already-lowercased search term
+ */
+function assetMatchesBookingTerm(
+  asset: SearchableBookingAsset,
+  term: string
+): boolean {
+  const haystacks: (string | null | undefined)[] = [
+    asset.title,
+    asset.sequentialId,
+    asset.category?.name,
+    asset.location?.name,
+    asset.kit?.name,
+    asset.kit?.location?.name,
+    asset.kit?.category?.name,
+    ...(asset.tags?.map((tag) => tag.name) ?? []),
+    ...(asset.qrCodes?.map((qr) => qr.id) ?? []),
+    ...(asset.barcodes?.map((barcode) => barcode.value) ?? []),
+  ];
+
+  return haystacks.some(
+    (value) => value != null && value.toLowerCase().includes(term)
+  );
+}
+
+/**
+ * In-memory replacement for the old Prisma multi-relation `OR` search on a
+ * booking's assets. An asset matches if ANY comma-separated term is a
+ * case-insensitive substring of ANY of its searchable fields. A match inside a
+ * kit re-expands to surface the ENTIRE kit (all sibling assets).
+ *
+ * Input order is preserved (callers sort afterwards). Blank/missing search
+ * returns the input array unchanged.
+ *
+ * @param assets - The booking's full asset list
+ * @param search - Raw search string from the `s` query param (may be blank)
+ * @returns The filtered subset (with kits re-expanded)
+ */
+export function filterBookingAssets<T extends SearchableBookingAsset>(
+  assets: T[],
+  search: string | null | undefined
+): T[] {
+  const terms = search ? parseBookingSearchTerms(search) : [];
+  if (terms.length === 0) {
+    return assets;
+  }
+
+  // Comma = OR: an asset matches if any term matches any of its fields.
+  const directMatches = assets.filter((asset) =>
+    terms.some((term) => assetMatchesBookingTerm(asset, term))
+  );
+
+  // Kit re-expansion: a matched asset surfaces its whole kit.
+  const matchedKitIds = new Set(
+    directMatches
+      .map((asset) => asset.kitId)
+      .filter((kitId): kitId is string => Boolean(kitId))
+  );
+  if (matchedKitIds.size === 0) {
+    return directMatches;
+  }
+
+  const directIds = new Set(directMatches.map((asset) => asset.id));
+  return assets.filter(
+    (asset) =>
+      directIds.has(asset.id) ||
+      (asset.kitId != null && matchedKitIds.has(asset.kitId))
+  );
 }

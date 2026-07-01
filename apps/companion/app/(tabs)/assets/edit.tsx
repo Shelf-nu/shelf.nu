@@ -1,3 +1,17 @@
+/**
+ * EditAssetScreen
+ *
+ * Asset edit form for the mobile companion. Mirrors the create flow
+ * (`assets/new.tsx`) but starts from a server-loaded baseline and submits
+ * a partial-update payload containing only changed fields. Hooks into
+ * `useEditAssetForm` for state, `useFormValidation` for the dirty-state
+ * unsaved-changes guard, and `CustomFieldInput` (shared with create) for
+ * each custom-field row.
+ *
+ * @see {@link file://../../../hooks/use-edit-asset-form.ts useEditAssetForm}
+ * @see {@link file://../../../components/asset-edit/custom-field-input.tsx CustomFieldInput}
+ */
+import { useState } from "react";
 import {
   View,
   Text,
@@ -21,28 +35,44 @@ import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
 import { PickerField } from "@/components/asset-edit/picker-field";
+import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 
-/** Build the JSON value payload for a custom field update */
-function buildCustomFieldPayloadValue(type: string, value: string): any {
-  if (!value.trim()) return null; // null to clear the field
-
-  switch (type) {
-    case "BOOLEAN":
-      return { raw: value === "true" };
-    case "DATE":
-      return { raw: value };
-    case "AMOUNT":
-    case "NUMBER": {
-      const num = parseFloat(value);
-      return isNaN(num) ? null : { raw: num };
-    }
-    default:
-      return { raw: value };
-  }
+/**
+ * Build the JSON value payload for a single custom field update.
+ *
+ * Mirrors the CREATE flow's `buildCustomFieldsPayload` in `new.tsx`:
+ * send the form's raw string for every field type, let the SERVER do
+ * the coercion. The webapp's `buildMobileCustomFieldPayload` is the
+ * single source of truth for BOOLEAN string → boolean normalization,
+ * and the downstream `buildCustomFieldValue` handles number / date
+ * parsing. Replicating coercion client-side here would duplicate that
+ * logic and drift over time (which is what the previous `{ raw: ... }`
+ * wrapper was trying to do — and got it wrong, the wrapped shape was
+ * rejected by Zod).
+ *
+ * @param value The string value from the form input.
+ * @returns     The raw string when present, or `null` to clear the
+ *              field on the server side (matches the partial-update
+ *              contract: null = explicit clear, absence = "not
+ *              touched").
+ */
+function buildCustomFieldPayloadValue(value: string): string | null {
+  return value.trim() ? value : null;
 }
 
+/**
+ * The asset edit screen rendered at `/assets/[id]/edit`.
+ *
+ * Loads the asset + custom-field definitions, renders the editable form,
+ * validates required fields client-side before submit, and dispatches a
+ * partial-update payload through `api.updateAsset` containing only the
+ * fields that actually changed (so the server's audit log stays clean).
+ *
+ * @returns The edit form JSX, or a centered loading / error placeholder
+ *          while the asset is being fetched.
+ */
 export default function EditAssetScreen() {
   const router = useRouter();
   const { id: assetId } = useLocalSearchParams<{ id: string }>();
@@ -52,11 +82,16 @@ export default function EditAssetScreen() {
 
   const form = useEditAssetForm(assetId, currentOrg?.id);
 
+  // Local: the tag dropdown's open state (the picker is controlled so this
+  // screen can coordinate it with the category / location dropdowns).
+  const [showTagsPicker, setShowTagsPicker] = useState(false);
+
   const { isDirty } = useFormValidation({
     title: form.title,
     description: form.description,
     selectedCategory: form.selectedCategory,
     selectedLocation: form.selectedLocation,
+    selectedTags: form.selectedTags,
     valuation: form.valuation,
     customFields: form.customFields,
     originalAsset: form.originalAsset,
@@ -71,6 +106,41 @@ export default function EditAssetScreen() {
       return;
     }
     if (!currentOrg || !assetId) return;
+
+    // why: enforce required custom fields BEFORE hitting the server so the
+    // user sees a focused message naming the empty fields instead of a
+    // generic 400. The server enforces the same contract — see the webapp's
+    // mergedSchema validation.
+    if (form.customFieldsError) {
+      Alert.alert(
+        "Custom Fields Unavailable",
+        "We couldn't load the custom field definitions. Please retry before saving."
+      );
+      return;
+    }
+    // why: `form.customFields` is empty (or stale, mid-category-switch) while
+    // defs are loading, so the required-field filter below would silently
+    // produce `[]` and let the save through. Belt-and-suspenders with the
+    // `canSubmit` disable on the button: the button is disabled, but if the
+    // user somehow triggers submit anyway (rapid double-tap before the
+    // disable lands), this guard still catches it. Mirrors `new.tsx`.
+    if (form.isCustomFieldsLoading) {
+      Alert.alert(
+        "Please wait",
+        "Custom fields are still loading. Try again in a moment."
+      );
+      return;
+    }
+    const missingRequired = form.customFields
+      .filter((cf) => cf.required && !cf.value.trim())
+      .map((cf) => cf.name);
+    if (missingRequired.length > 0) {
+      Alert.alert(
+        "Missing required fields",
+        `Please fill in: ${missingRequired.join(", ")}.`
+      );
+      return;
+    }
 
     form.setIsSubmitting(true);
 
@@ -99,6 +169,18 @@ export default function EditAssetScreen() {
       payload.currentLocationId = origLocId || "";
     }
 
+    // Tags: send the full desired set only when it changed (compare sorted id
+    // lists, order-independent). Omitting leaves tags untouched server-side;
+    // an empty array clears them.
+    const origTagIds = (form.originalAsset?.tags ?? []).map((t) => t.id).sort();
+    const newTagIds = form.selectedTags.map((t) => t.id).sort();
+    const tagsChanged =
+      origTagIds.length !== newTagIds.length ||
+      origTagIds.some((id, i) => id !== newTagIds[i]);
+    if (tagsChanged) {
+      payload.tags = form.selectedTags.map((t) => t.id);
+    }
+
     // Valuation
     const numVal = form.valuation.trim()
       ? parseFloat(form.valuation.trim())
@@ -113,7 +195,7 @@ export default function EditAssetScreen() {
       .filter((cf) => cf.value !== cf.originalValue)
       .map((cf) => ({
         id: cf.id,
-        value: buildCustomFieldPayloadValue(cf.type, cf.value),
+        value: buildCustomFieldPayloadValue(cf.value),
       }));
     if (changedCustomFields.length > 0) {
       payload.customFields = changedCustomFields;
@@ -147,7 +229,11 @@ export default function EditAssetScreen() {
     ]);
   };
 
-  const canSubmit = form.title.trim().length >= 2 && !form.isSubmitting;
+  const canSubmit =
+    form.title.trim().length >= 2 &&
+    !form.isSubmitting &&
+    !form.isCustomFieldsLoading &&
+    !form.customFieldsError;
 
   // ── Loading state ───────────────────────────────
   if (form.isLoadingAsset) {
@@ -315,6 +401,16 @@ export default function EditAssetScreen() {
             />
           )}
 
+          {/* ── Tags Picker (multi-select) ─────────────── */}
+          <TagPickerField
+            tags={form.tags}
+            selectedTags={form.selectedTags}
+            onChange={form.setSelectedTags}
+            isLoading={form.isTagsLoading}
+            isOpen={showTagsPicker}
+            onToggle={setShowTagsPicker}
+          />
+
           {/* ── Valuation ──────────────────────────────── */}
           <ValuationField
             value={form.valuation}
@@ -323,24 +419,43 @@ export default function EditAssetScreen() {
           />
 
           {/* ── Custom Fields ──────────────────────────── */}
-          {form.customFields.length > 0 && (
+          {(form.customFields.length > 0 ||
+            form.isCustomFieldsLoading ||
+            form.customFieldsError) && (
             <View style={styles.customFieldsSection}>
               <Text style={styles.sectionLabel}>Custom Fields</Text>
-              {form.customFields.map((cf) => (
-                <View key={cf.id} style={styles.field}>
-                  <Text style={styles.label}>
-                    {cf.name}
-                    {cf.helpText ? (
-                      <Text style={styles.helpText}> — {cf.helpText}</Text>
-                    ) : null}
-                  </Text>
-                  <CustomFieldInput
-                    field={cf}
-                    value={cf.value}
-                    onChange={(val) => form.updateCustomField(cf.id, val)}
-                  />
+              {form.isCustomFieldsLoading && form.customFields.length === 0 ? (
+                <Text style={styles.helpText}>Loading custom fields…</Text>
+              ) : form.customFieldsError ? (
+                <View>
+                  <Text style={styles.helpText}>{form.customFieldsError}</Text>
+                  <TouchableOpacity
+                    onPress={form.retryLoadCustomFields}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.retryLink}>Retry</Text>
+                  </TouchableOpacity>
                 </View>
-              ))}
+              ) : (
+                form.customFields.map((cf) => (
+                  <View key={cf.id} style={styles.field}>
+                    <Text style={styles.label}>
+                      {cf.name}
+                      {cf.required ? (
+                        <Text style={styles.required}> *</Text>
+                      ) : null}
+                      {cf.helpText ? (
+                        <Text style={styles.helpText}> — {cf.helpText}</Text>
+                      ) : null}
+                    </Text>
+                    <CustomFieldInput
+                      field={cf}
+                      value={cf.value}
+                      onChange={(val) => form.updateCustomField(cf.id, val)}
+                    />
+                  </View>
+                ))
+              )}
             </View>
           )}
         </ScrollView>
@@ -568,5 +683,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "400",
     color: colors.mutedLight,
     fontSize: fontSize.sm,
+  },
+  retryLink: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    fontWeight: "500",
+    marginTop: spacing.xs,
   },
 }));

@@ -14,19 +14,15 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import {
-  fontSize,
-  spacing,
-  borderRadius,
-  formatDateTime,
-  hitSlop,
-} from "@/lib/constants";
+import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import { formatDue } from "@/lib/audit-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { userCanSeeOrgWideAudits } from "@/lib/permissions";
 
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
@@ -61,8 +57,49 @@ function AuditsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
+  // BASE/SELF_SERVICE roles are server-side-scoped to their own
+  // assignments regardless of the flag; showing them an "All audits"
+  // toggle would be a lie (the chip flips visually, the result set
+  // never widens). For those roles we hide the toggle entirely and
+  // force `assignedToMe` to true. See `canWidenScope` below.
+  const canWidenScope = userCanSeeOrgWideAudits(currentOrg?.roles);
+  // why: default to the FULL workspace list (not "assigned to me"). The
+  // original dead-end was an admin assigned to 0–1 audits out of many
+  // landing on an empty "nothing assigned to you" screen — when in fact
+  // there were active, unassigned audits anyone could pick up. The list
+  // is server-sorted by due date (most urgent first) and every card now
+  // states its ownership ("Unassigned · anyone can scan" / "Assigned to
+  // you" / "N assigned"), so the urgency-first flat list is legible
+  // without forcing a scope filter. Admins can still narrow to their own
+  // work with the toggle below. BASE/SELF_SERVICE are server-scoped to
+  // their assignments regardless, and the effect below keeps their
+  // (hidden) toggle pinned to true so visible state matches the server.
+  const [assignedToMe, setAssignedToMe] = useState(false);
+  // Snap the toggle to "assigned to me" only once roles are KNOWN and the
+  // role genuinely can't widen scope (BASE/SELF_SERVICE), so the hidden
+  // toggle matches the server's forced scoping — and also catches a
+  // mid-session role downgrade.
+  //
+  // why gate on `rolesKnown`: on a cold mount `currentOrg?.roles` is briefly
+  // undefined, so `canWidenScope` is transiently false. Without this guard
+  // the effect would immediately flip an ADMIN/OWNER onto the assigned-only
+  // (often empty) list, and nothing flips it back once the real role arrives
+  // — re-creating the exact dead-end this screen's full-workspace default is
+  // meant to remove. (Codex review, PR #2583.)
+  const rolesKnown = Array.isArray(currentOrg?.roles);
+  useEffect(() => {
+    if (rolesKnown && !canWidenScope && !assignedToMe) {
+      setAssignedToMe(true);
+    }
+  }, [rolesKnown, canWidenScope, assignedToMe]);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
+  // why: the list re-fires on every status/scope toggle. Without
+  // aborting the previous request, a slow earlier response can land
+  // AFTER the latest one and overwrite the visible list with stale
+  // data. Tracking the in-flight controller in a ref lets us abort
+  // the previous "reset" fetch the moment we kick off a new one.
+  const inFlightListRequest = useRef<AbortController | null>(null);
 
   // Swipe-to-filter gesture
   const {
@@ -79,34 +116,76 @@ function AuditsListContent() {
   }, [activeFilter, syncIndex]);
 
   const fetchAudits = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
-      const { data, error: fetchErr } = await api.audits(currentOrg.id, {
-        status: STATUS_FILTERS[activeFilter].value,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-      });
-      // Request cancelled (navigation) — ignore
-      if (!data && !fetchErr) return;
+    async (pageNum: number, reset: boolean): Promise<boolean> => {
+      if (!currentOrg) return false;
+      // Only abort/replace the controller on a "reset" fetch (filter
+      // change, manual refresh). Pagination appends are append-only so
+      // they don't fight with each other the same way — letting them
+      // share the active controller keeps "load more" working while a
+      // filter switch is in flight.
+      if (reset) {
+        inFlightListRequest.current?.abort();
+        inFlightListRequest.current = new AbortController();
+      }
+      const controller = inFlightListRequest.current;
+      const { data, error: fetchErr } = await api.audits(
+        currentOrg.id,
+        {
+          status: STATUS_FILTERS[activeFilter].value,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          assignedToMe,
+        },
+        controller?.signal
+      );
+      // Returning `false` from the abort / no-data / error branches
+      // lets the callers below differentiate success from failure so
+      // they only mark the list "fresh" on a real successful fetch
+      // (the previous `.finally` refreshed timestamps even on aborted
+      // / failed requests, which then suppressed retries for 60s).
+      if (controller?.signal.aborted) return false;
+      if (!data && !fetchErr) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load audits");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
       if (reset) setAudits(data.audits);
       else setAudits((prev) => [...prev, ...data.audits]);
+      return true;
     },
-    [currentOrg, activeFilter]
+    // why: depend on the org id (not the full object) so an identity-
+    // only re-render from useOrg doesn't churn fetchAudits and cascade
+    // an extra refetch through useFocusEffect after the 60s freshness
+    // window. Consistent with the org-reset useEffect + useFocusEffect
+    // below which already key on `currentOrg?.id`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentOrg?.id, activeFilter, assignedToMe]
+  );
+
+  // Abort any in-flight fetch on unmount so its setState doesn't fire
+  // against an unmounted screen.
+  useEffect(
+    () => () => {
+      inFlightListRequest.current?.abort();
+    },
+    []
   );
 
   // Stale-while-revalidate: skeleton on first load, skip refetch if data is fresh (< 60s old)
   const hasFetchedAudits = useRef(false);
   const lastFetchedAt = useRef(0);
 
-  // Reset cache when org changes so useFocusEffect refetches
+  // Reset cache when org changes so useFocusEffect refetches.
+  // why: also abort any request still in flight against the PREVIOUS
+  // org. Without this, an older response could resolve later and
+  // repopulate the list with audits from the prior org until the next
+  // request finishes.
   useEffect(() => {
+    inFlightListRequest.current?.abort();
+    inFlightListRequest.current = null;
     lastFetchedAt.current = 0;
     hasFetchedAudits.current = false;
     setAudits([]);
@@ -114,14 +193,19 @@ function AuditsListContent() {
     nextPage.current = 1;
   }, [currentOrg?.id]);
 
-  // Re-fetch immediately when filter changes
+  // Re-fetch immediately when filter changes (status OR assignedToMe).
   useEffect(() => {
     if (!currentOrg || !hasFetchedAudits.current) return;
     nextPage.current = 1;
-    fetchAudits(1, true).finally(() => {
-      lastFetchedAt.current = Date.now();
+    fetchAudits(1, true).then((ok) => {
+      // why: only mark the list fresh on a SUCCESSFUL fetch. The old
+      // `.finally` ran on aborted + failed responses too, which then
+      // suppressed `useFocusEffect`'s retry for the 60s freshness
+      // window (so a failed first load could leave the user staring
+      // at an empty/erroring list until they pulled to refresh).
+      if (ok) lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, assignedToMe]); // eslint-disable-line react-hooks/exhaustive-deps
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
@@ -135,8 +219,12 @@ function AuditsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedAudits.current;
-      fetchAudits(1, true).finally(() => {
+      fetchAudits(1, true).then((ok) => {
         setIsLoading(false);
+        // why: same as above — only refresh freshness / flip
+        // `hasFetchedAudits` to true on a real success, so a failed
+        // or aborted first load remains retryable on the next focus.
+        if (!ok) return;
         lastFetchedAt.current = Date.now();
         if (isFirstLoad) {
           hasFetchedAudits.current = true;
@@ -185,10 +273,45 @@ function AuditsListContent() {
           : 0;
       const progressPercent = Math.round(progress * 100);
 
-      const isOverdue =
-        isActive &&
-        item.dueDate &&
-        new Date(item.dueDate).getTime() < Date.now();
+      const due = formatDue(item.dueDate, isActive);
+      const dueColor =
+        due.tier === "overdue"
+          ? colors.error
+          : due.tier === "soon"
+          ? colors.warning
+          : colors.mutedLight;
+      // Ownership drives the card's "who can scan this" line. An audit
+      // with zero assignees is open for anyone to pick up (the case the
+      // user flagged as invisible); otherwise it's either theirs or
+      // someone else's.
+      const ownership: "open" | "mine" | "others" =
+        item.assigneeCount === 0
+          ? "open"
+          : item.isAssignedToMe
+          ? "mine"
+          : "others";
+      // why: the urgency tier (red/amber) and "You" marker are visual-only
+      // signals — without surfacing them through the accessibility label,
+      // VoiceOver / TalkBack users miss two important pieces of context
+      // ("this one's mine", "this one's late"). Compose the label so it
+      // reads the visible state, not just the static fields.
+      const cardA11yLabel = [
+        `Audit: ${item.name}`,
+        item.status,
+        `${item.foundAssetCount} of ${item.expectedAssetCount} found`,
+        due.tier === "overdue"
+          ? "overdue"
+          : due.tier === "soon"
+          ? "due soon"
+          : null,
+        ownership === "open"
+          ? "unassigned, anyone can scan"
+          : ownership === "mine"
+          ? "assigned to you"
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
 
       return (
         <TouchableOpacity
@@ -198,13 +321,15 @@ function AuditsListContent() {
             router.push(`/(tabs)/audits/${item.id}`);
           }}
           activeOpacity={0.6}
-          accessibilityLabel={`Audit: ${item.name}, ${item.status}, ${item.foundAssetCount} of ${item.expectedAssetCount} found`}
+          accessibilityLabel={cardA11yLabel}
           accessibilityRole="button"
         >
           <View style={styles.auditHeader}>
-            <Text style={styles.auditName} numberOfLines={1}>
-              {item.name}
-            </Text>
+            <View style={styles.auditNameRow}>
+              <Text style={styles.auditName} numberOfLines={1}>
+                {item.name}
+              </Text>
+            </View>
             <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
               <View
                 style={[styles.statusDot, { backgroundColor: badge.text }]}
@@ -246,21 +371,25 @@ function AuditsListContent() {
           </View>
 
           <View style={styles.auditMeta}>
-            {item.dueDate && (
+            {due.label && (
               <View style={styles.metaRow}>
                 <Ionicons
-                  name="time-outline"
+                  name={
+                    due.tier === "none" ? "calendar-outline" : "time-outline"
+                  }
                   size={13}
-                  color={isOverdue ? colors.error : colors.mutedLight}
+                  color={dueColor}
                 />
                 <Text
                   style={[
                     styles.metaText,
-                    isOverdue && { color: colors.error, fontWeight: "500" },
+                    (due.tier === "overdue" || due.tier === "soon") && {
+                      color: dueColor,
+                      fontWeight: "500",
+                    },
                   ]}
                 >
-                  {isOverdue ? "Overdue · " : "Due "}
-                  {formatDateTime(item.dueDate)}
+                  {due.label}
                 </Text>
               </View>
             )}
@@ -277,19 +406,42 @@ function AuditsListContent() {
               </Text>
             </View>
 
-            {item.assigneeCount > 0 && (
-              <View style={styles.metaRow}>
-                <Ionicons
-                  name="people-outline"
-                  size={13}
-                  color={colors.mutedLight}
-                />
-                <Text style={styles.metaText}>
-                  {item.assigneeCount}{" "}
-                  {item.assigneeCount === 1 ? "assignee" : "assignees"}
-                </Text>
-              </View>
-            )}
+            <View style={styles.metaRow}>
+              <Ionicons
+                name={
+                  ownership === "open"
+                    ? "scan-circle-outline"
+                    : "people-outline"
+                }
+                size={13}
+                color={
+                  ownership === "open" ? colors.primary : colors.mutedLight
+                }
+              />
+              <Text
+                style={[
+                  styles.metaText,
+                  ownership === "open" && {
+                    // why: `primaryText` (deeper orange), not `primary` —
+                    // brand orange is too light for body text on white
+                    // (3.1:1). The icon above keeps the brighter `primary`
+                    // (icons only need 3:1).
+                    color: colors.primaryText,
+                    fontWeight: "500",
+                  },
+                ]}
+              >
+                {ownership === "open"
+                  ? "Unassigned · anyone can scan"
+                  : ownership === "mine"
+                  ? item.assigneeCount === 1
+                    ? "Assigned to you"
+                    : `You + ${item.assigneeCount - 1} other${
+                        item.assigneeCount - 1 === 1 ? "" : "s"
+                      }`
+                  : `${item.assigneeCount} assigned`}
+              </Text>
+            </View>
           </View>
 
           {isActive && (
@@ -299,7 +451,17 @@ function AuditsListContent() {
                 size={14}
                 color={colors.iconDefault}
               />
-              <Text style={styles.actionHintText}>Tap to scan</Text>
+              {/*
+                why: the card opens the audit detail (where the scan button
+                lives), it does not start the scanner directly — so "Tap to
+                scan" overpromised. Mirror the detail screen's own CTA wording
+                so the hint names the action you're heading into.
+              */}
+              <Text style={styles.actionHintText}>
+                {item.status === "PENDING"
+                  ? "Start scanning"
+                  : "Continue scanning"}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
@@ -348,6 +510,43 @@ function AuditsListContent() {
 
   return (
     <View style={styles.container}>
+      {/*
+        Scope toggle: "Assigned to me" vs everything in the org.
+        Hidden for BASE/SELF_SERVICE users — the mobile audits endpoint
+        force-scopes them to their own assignments regardless of the
+        flag, so a toggle that flips visually but never widens the
+        result set is a UI lie.
+      */}
+      {canWidenScope ? (
+        <View style={styles.scopeRow}>
+          <TouchableOpacity
+            style={[styles.scopeChip, assignedToMe && styles.scopeChipActive]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setAssignedToMe((v) => !v);
+            }}
+            hitSlop={hitSlop.sm}
+            accessibilityRole="switch"
+            accessibilityLabel="Show only audits assigned to me"
+            accessibilityState={{ checked: assignedToMe }}
+          >
+            <Ionicons
+              name={assignedToMe ? "person" : "person-outline"}
+              size={14}
+              color={assignedToMe ? colors.primary : colors.muted}
+            />
+            <Text
+              style={[
+                styles.scopeChipText,
+                assignedToMe && styles.scopeChipTextActive,
+              ]}
+            >
+              {assignedToMe ? "Assigned to me" : "All audits"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {/* Status filter pills */}
       <View style={styles.filterRow} accessibilityRole="tablist">
         {STATUS_FILTERS.map((f, i) => (
@@ -408,17 +607,52 @@ function AuditsListContent() {
                 color={colors.border}
               />
               <Text style={styles.emptyTitle}>
-                {activeFilter === 0
+                {assignedToMe
+                  ? activeFilter === 0
+                    ? "No active audits assigned to you"
+                    : activeFilter === 2
+                    ? // why: STATUS_FILTERS[2] is "All", which would
+                      // interpolate to the ungrammatical "No all
+                      // audits assigned to you". Special-case it.
+                      "No audits assigned to you"
+                    : `No ${STATUS_FILTERS[
+                        activeFilter
+                      ].label.toLowerCase()} audits assigned to you`
+                  : activeFilter === 0
                   ? "No active audits"
+                  : activeFilter === 2
+                  ? "No audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter
                     ].label.toLowerCase()} audits`}
               </Text>
               <Text style={styles.emptyText}>
-                {activeFilter === 0
+                {assignedToMe
+                  ? canWidenScope
+                    ? "Tap “All audits” above to see audits across the workspace."
+                    : "Ask an admin to assign an audit to you, or create one from the web app."
+                  : activeFilter === 0
                   ? "Create an audit from the web app to get started"
                   : "Try selecting a different status filter"}
               </Text>
+              {/*
+                Escape hatch only renders when the user can actually
+                widen scope. BASE/SELF_SERVICE see the prompt above
+                instead — no false promise.
+              */}
+              {assignedToMe && canWidenScope ? (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setAssignedToMe(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show all audits"
+                >
+                  <Text style={styles.retryText}>Show all audits</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : (
             <FlatList
@@ -469,6 +703,38 @@ const useStyles = createStyles((colors) => ({
     justifyContent: "center",
     alignItems: "center",
     gap: spacing.md,
+  },
+
+  // Scope toggle (Assigned to me vs All audits)
+  scopeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  scopeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 30,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scopeChipActive: {
+    backgroundColor: colors.primaryBg,
+    borderColor: colors.primary,
+  },
+  scopeChipText: {
+    fontSize: fontSize.sm,
+    fontWeight: "500",
+    color: colors.muted,
+  },
+  scopeChipTextActive: {
+    color: colors.primary,
   },
 
   // Filter pills
@@ -522,13 +788,18 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center",
     gap: spacing.sm,
   },
-  auditName: {
+  auditNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     flex: 1,
+  },
+  auditName: {
+    flexShrink: 1,
     fontSize: fontSize.md,
     fontWeight: "600",
     color: colors.foreground,
   },
-
   // Status badge
   statusBadge: {
     flexDirection: "row",

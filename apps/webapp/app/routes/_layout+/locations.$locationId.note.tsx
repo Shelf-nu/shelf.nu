@@ -129,8 +129,8 @@ async function assertLocationBelongsToOrganization({
   locationId: string;
   organizationId: string;
 }) {
-  const location = await db.location.findUnique({
-    where: { id: locationId },
+  const location = await db.location.findFirst({
+    where: { id: locationId, organizationId },
     select: { organizationId: true },
   });
 

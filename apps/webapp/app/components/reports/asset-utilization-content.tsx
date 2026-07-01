@@ -22,6 +22,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import {
   AssetCell,
+  CurrencyCell,
   NumberCell,
   ReportTable,
 } from "~/components/reports/report-table";
@@ -86,12 +87,9 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) =>
-      row.original.valuation ? (
-        `$${row.original.valuation.toLocaleString()}`
-      ) : (
-        <span className="text-gray-400">—</span>
-      ),
+    // Asset-aware: shows TOTAL (valuation × quantity) for QT assets, with
+    // a "<unit price> × N <unit>" subtext. See {@link CurrencyCell}.
+    cell: ({ row }) => <CurrencyCell asset={row.original} treatZeroAsEmpty />,
   },
 ];
 

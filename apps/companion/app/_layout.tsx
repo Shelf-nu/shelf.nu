@@ -13,7 +13,12 @@ import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
+import { initSentry } from "@/lib/sentry";
+import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
+
+// Initialise crash/error reporting as early as possible (no-ops in dev / no DSN).
+initSentry();
 
 // Keep the native splash visible until our animated splash is mounted.
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -83,7 +88,7 @@ function RootLayoutNav() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
@@ -96,3 +101,7 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+// Sentry.wrap enables better error-boundary capture + touch context. No-ops
+// gracefully when Sentry isn't initialised (dev / no DSN).
+export default Sentry.wrap(RootLayout);

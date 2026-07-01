@@ -27,6 +27,16 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { AssetImage } from "~/components/assets/asset-image";
+import KitImage from "~/components/kits/kit-image";
+import { DateS } from "~/components/shared/date";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import {
+  formatAssetValueWithBreakdown,
+  getAssetTotalValue,
+  type AssetForValue,
+} from "~/utils/asset-value";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 export interface ReportTableProps<TData> {
@@ -286,6 +296,12 @@ export function StatusCell({
 
 /**
  * Date cell renderer with consistent formatting.
+ *
+ * Delegates to the shared {@link DateS} component so dates render in the
+ * user's locale + timezone (from `useHints()`) rather than a hardcoded
+ * `en-US` format — per the CLAUDE.md "Date Display" rule that all UI dates
+ * must go through `DateS`. The outer span preserves `tabular-nums` column
+ * alignment in report tables.
  */
 export function DateCell({ date }: { date: Date | null }) {
   if (!date) {
@@ -294,17 +310,21 @@ export function DateCell({ date }: { date: Date | null }) {
 
   return (
     <span className="tabular-nums">
-      {date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })}
+      <DateS
+        date={date}
+        options={{ month: "short", day: "numeric", year: "numeric" }}
+      />
     </span>
   );
 }
 
 /**
  * Number cell renderer with proper alignment.
+ *
+ * For `format="currency"`, the value is rendered in the workspace's configured
+ * currency (read via `useCurrentOrganization`) and the user's locale (read via
+ * `useHints`). Falls back to USD only if the workspace has no currency set,
+ * which should not happen in practice (the Prisma default is USD).
  */
 export function NumberCell({
   value,
@@ -313,6 +333,9 @@ export function NumberCell({
   value: number | null;
   format?: "number" | "currency" | "percent";
 }) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
   if (value === null || value === undefined) {
     return <span className="text-gray-400">—</span>;
   }
@@ -321,23 +344,126 @@ export function NumberCell({
 
   switch (format) {
     case "currency":
-      formatted = new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-      }).format(value);
+      formatted = formatCurrency({
+        value,
+        currency: currentOrganization?.currency ?? "USD",
+        locale,
+      });
       break;
     case "percent":
-      formatted = new Intl.NumberFormat("en-US", {
+      formatted = new Intl.NumberFormat(locale, {
         style: "percent",
         minimumFractionDigits: 0,
         maximumFractionDigits: 1,
       }).format(value / 100);
       break;
     default:
-      formatted = value.toLocaleString();
+      formatted = value.toLocaleString(locale);
   }
 
   return <span className="tabular-nums">{formatted}</span>;
+}
+
+/**
+ * Currency cell renderer for use inside TanStack column definitions that live
+ * at module scope. Reads workspace currency + user locale via hooks so the
+ * column array stays referentially stable across renders (no `useMemo` needed).
+ *
+ * `0` renders as a real "$0" (or workspace equivalent), not the empty
+ * fallback — pass `treatZeroAsEmpty` if the caller prefers the dash for zero.
+ *
+ * When the caller passes an `asset` (with `type`, `quantity`, `valuation`,
+ * and optionally `unitOfMeasure`), the cell switches to the quantity-aware
+ * two-line layout: the TOTAL value (valuation × quantity) renders on top,
+ * with a small "<unit price> × N <unit>" subtext underneath. Used for
+ * QUANTITY_TRACKED assets whose per-unit valuation does not match the total
+ * worth carried by the row. INDIVIDUAL assets (or QT assets with quantity
+ * ≤ 1) collapse back to the single-line layout — visually identical to the
+ * pre-Wave-B behaviour.
+ *
+ * @example Plain value (legacy callers)
+ * { accessorKey: "valuation", cell: ({ row }) => <CurrencyCell value={row.original.valuation} /> }
+ *
+ * @example Asset-aware (QT-friendly) — preferred for asset rows
+ * { accessorKey: "valuation", cell: ({ row }) => <CurrencyCell asset={row.original} /> }
+ */
+export function CurrencyCell({
+  value,
+  asset,
+  emptyFallback = "—",
+  treatZeroAsEmpty = false,
+}: {
+  /**
+   * Numeric value to format when `asset` is not provided. `null`/`undefined`
+   * renders the empty fallback. Ignored when `asset` is set — the breakdown
+   * is computed from `asset.valuation × asset.quantity` instead.
+   */
+  value?: number | null | undefined;
+  /**
+   * Optional asset shape for quantity-aware rendering. When set, the cell
+   * displays the TOTAL value on top with a "<unit> × N <unit>" subtext for
+   * QT assets whose total differs from the per-unit price. The breakdown
+   * collapses to a single line for INDIVIDUAL assets and QT assets with
+   * quantity ≤ 1 or `valuation: null`.
+   */
+  asset?: AssetForValue;
+  /** Fallback text when value is missing. Defaults to em-dash. */
+  emptyFallback?: string;
+  /** When true, `0` renders as the empty fallback instead of "$0". */
+  treatZeroAsEmpty?: boolean;
+}) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+  const currency = currentOrganization?.currency ?? "USD";
+
+  // Asset-aware path: compute the breakdown from the asset itself. Empty
+  // when the per-unit price is missing — same "no value set" UX as below.
+  // `treatZeroAsEmpty` keys off the TOTAL (valuation × quantity), not the
+  // per-unit price: a QT asset with `valuation: 1, quantity: 0` displays
+  // "$0", which should collapse to the empty fallback, while a row with
+  // `valuation: 0, quantity: 100` (free items, real stock) already does.
+  if (asset) {
+    const total = getAssetTotalValue(asset);
+    if (asset.valuation == null || (treatZeroAsEmpty && total === 0)) {
+      return <span className="text-gray-400">{emptyFallback}</span>;
+    }
+
+    const breakdown = formatAssetValueWithBreakdown(asset, {
+      currency,
+      locale,
+    });
+
+    // No breakdown to surface (INDIVIDUAL or QT-with-qty-≤-1): single line,
+    // visually identical to the legacy `value` path so unrelated rows don't
+    // suddenly get extra vertical space.
+    if (breakdown.unit == null || breakdown.suffix == null) {
+      return <span className="tabular-nums">{breakdown.total}</span>;
+    }
+
+    return (
+      <div className="flex flex-col leading-tight">
+        <span className="tabular-nums">{breakdown.total}</span>
+        <span className="text-xs tabular-nums text-gray-500">
+          {breakdown.unit} {breakdown.suffix}
+        </span>
+      </div>
+    );
+  }
+
+  // Legacy plain-number path: no asset, just format the scalar value.
+  if (value == null || (treatZeroAsEmpty && value === 0)) {
+    return <span className="text-gray-400">{emptyFallback}</span>;
+  }
+
+  return (
+    <span className="tabular-nums">
+      {formatCurrency({
+        value,
+        currency,
+        locale,
+      })}
+    </span>
+  );
 }
 
 /**
@@ -383,6 +509,41 @@ export function AssetCell({
           thumbnailImage,
         }}
         alt="" // Decorative - asset name is displayed in adjacent text
+        className="size-8 shrink-0 rounded object-cover"
+      />
+      <span className="font-medium">{name}</span>
+    </div>
+  );
+}
+
+/**
+ * Kit name cell with thumbnail image.
+ * The kit counterpart to {@link AssetCell}, used by the Top Booked Kits report.
+ *
+ * Uses KitImage for placeholder handling and client-side token refresh (the
+ * report loader pre-refreshes expired URLs server-side, so the fetcher inside
+ * KitImage stays dormant in practice — see `refreshExpiredKitImages`).
+ */
+export function KitCell({
+  name,
+  image,
+  imageExpiration,
+  kitId,
+}: {
+  name: string;
+  image: string | null;
+  imageExpiration: Date | string | null;
+  kitId: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <KitImage
+        kit={{
+          kitId,
+          image,
+          imageExpiration,
+          alt: "", // Decorative - kit name is displayed in adjacent text
+        }}
         className="size-8 shrink-0 rounded object-cover"
       />
       <span className="font-medium">{name}</span>

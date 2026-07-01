@@ -6,6 +6,14 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  /**
+   * Canonical "can use Audits" capability from `/api/mobile/me`
+   * (server-side `canUseAudits`: the paid add-on flag, OR always true when
+   * premium gating is disabled). Premium-aware so client gating matches
+   * the server. When false the companion hides Audits entry points and
+   * every mobile audit endpoint returns 403.
+   */
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
@@ -94,6 +102,20 @@ export type AssetDetail = {
   }[];
 };
 
+/**
+ * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
+ * statuses power the kit batch blockers ("kit has assets in custody"),
+ * mirroring the web scanner drawers.
+ */
+export type ScannedKit = {
+  id: string;
+  name: string;
+  status: string;
+  image: string | null;
+  _count: { assets: number };
+  assets: { id: string; status: string; availableToBook: boolean }[];
+};
+
 export type QrResponse = {
   qr: {
     id: string;
@@ -105,9 +127,15 @@ export type QrResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the QR is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
 
@@ -124,11 +152,90 @@ export type BarcodeResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the barcode is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
+
+// ── Kits ────────────────────────────────────────────────
+
+export type KitStatus = "AVAILABLE" | "IN_CUSTODY" | "CHECKED_OUT";
+
+export type KitListItem = {
+  id: string;
+  name: string;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  _count: { assets: number };
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+  custody: { custodian: { id: string; name: string } } | null;
+};
+
+export type KitsResponse = {
+  kits: KitListItem[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type KitDetailAsset = {
+  id: string;
+  title: string;
+  status: string;
+  valuation: number | null;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+};
+
+export type KitDetail = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  createdAt: string;
+  updatedAt: string;
+  category: { id: string; name: string; color: string } | null;
+  location: { id: string; name: string } | null;
+  qrCodes: { id: string }[];
+  organization: { currency: string };
+  /** Sum of the contained assets' valuation (computed server-side). */
+  totalValue: number;
+  custody: {
+    createdAt: string;
+    custodian: {
+      id: string;
+      name: string;
+      user: {
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+      } | null;
+    };
+  } | null;
+  assets: KitDetailAsset[];
+};
+
+export type KitDetailResponse = { kit: KitDetail };
+
+/** Intents accepted by POST /api/mobile/kits/bulk-actions */
+export type KitBulkIntent =
+  | "assign-custody"
+  | "release-custody"
+  | "update-location";
 
 export type TeamMember = {
   id: string;
@@ -185,12 +292,15 @@ export type UpdateImageResponse = {
   };
 };
 
+/**
+ * Response of the three mobile bulk endpoints (bulk-assign-custody,
+ * bulk-release-custody, bulk-update-location). The underlying services are
+ * all-or-nothing — the routes return only `{ success: true }`, never partial
+ * counts. Client-side blockers (lib/batch-blockers.ts) guarantee only clean
+ * batches are submitted.
+ */
 export type BulkActionResponse = {
   success: boolean;
-  assigned?: number;
-  released?: number;
-  updated?: number;
-  skipped?: number;
 };
 
 export type BookingStatus =
@@ -256,6 +366,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
+  tags: { id: string; name: string }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
@@ -266,6 +377,24 @@ export type BookingDetailResponse = {
   checkedInAssetIds: string[];
   canCheckout: boolean;
   canCheckin: boolean;
+  /**
+   * False when the workspace requires explicit (scan/select) check-in for the
+   * caller's role — the app hides the quick "Check In All" button to match the
+   * web, which never offers quick check-in under that policy.
+   */
+  canQuickCheckin: boolean;
+  /**
+   * Per-booking lifecycle-action availability, computed server-side mirroring
+   * the web ActionsDropdown gating (role + status + permission). The detail
+   * screen shows only the enabled actions; the server endpoints enforce the
+   * same gates regardless.
+   */
+  bookingActions: {
+    canCancel: boolean;
+    canArchive: boolean;
+    canDuplicate: boolean;
+    canDelete: boolean;
+  };
 };
 
 export type BookingActionResponse = {
@@ -289,6 +418,107 @@ export type PartialCheckinResponse = {
   };
 };
 
+export type PartialCheckoutResponse = {
+  success: boolean;
+  checkedOutCount: number;
+  remainingCount: number;
+  isComplete: boolean;
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+// ── Booking create / edit / reserve ─────────────────────
+
+/** Common response from create / update / reserve mobile booking endpoints. */
+export type BookingMutationResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+/**
+ * Payload for `POST /api/mobile/bookings/create`. Dates are local wire strings
+ * in `yyyy-MM-dd'T'HH:mm` (no offset); `timeZone` is the device IANA zone so the
+ * server can resolve them — there is no client-hint cookie on native. Assets are
+ * optional at create (the picker/scanner add them afterwards, mirroring web).
+ */
+export type CreateBookingPayload = {
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+  assetIds?: string[];
+};
+
+/** Payload for `POST /api/mobile/bookings/update`. */
+export type UpdateBookingPayload = {
+  bookingId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+};
+
+export type RemoveBookingAssetsResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+  removedCount: number;
+};
+
+/** Availability-aware asset row for the booking picker. */
+export type AvailableAsset = {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  mainImageExpiration: string | null;
+  thumbnailImage: string | null;
+  kitId: string | null;
+};
+
+export type AvailableAssetsResponse = {
+  assets: AvailableAsset[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+/** Availability-aware kit row for the booking picker. */
+export type AvailableKit = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+export type AvailableKitsResponse = {
+  kits: AvailableKit[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type BookingTag = { id: string; name: string };
+
+export type BookingTagsResponse = {
+  tags: BookingTag[];
+};
+
 // ── Audit Types ────────────────────────────────────────
 
 export type AuditStatus = "PENDING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
@@ -309,6 +539,12 @@ export type AuditListItem = {
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null };
   assigneeCount: number;
+  /**
+   * True when the authenticated mobile user is among the audit's
+   * assignees. Server-computed on the list endpoint so the companion
+   * can render a "Yours" marker without an extra round-trip per row.
+   */
+  isAssignedToMe: boolean;
 };
 
 export type AuditsResponse = {
@@ -325,6 +561,24 @@ export type AuditExpectedAsset = {
   auditAssetId: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Where the asset is supposed to be physically. Surfaced on the
+   * audit detail row so the field worker can navigate to the right
+   * shelf / room without leaving the audit context. Null when the
+   * asset has no location set or the server didn't load it.
+   */
+  locationName: string | null;
+  /**
+   * Asset category name — helps when the image is generic and you
+   * need to disambiguate "which laptop" among many identical rows.
+   */
+  categoryName: string | null;
+  /**
+   * Display name of the team member currently holding the asset, if
+   * any. Helps explain why an expected asset can't be found at its
+   * location (someone has it on loan).
+   */
+  custodianName: string | null;
 };
 
 export type AuditScanData = {
@@ -334,6 +588,12 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  /** Asset's location name at scan time, or null if it has no location set. */
+  assetLocationName: string | null;
+  /** Number of COMMENT notes recorded against this scanned asset. */
+  auditNotesCount: number;
+  /** Number of condition photos uploaded for this scanned asset. */
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {
@@ -381,6 +641,43 @@ export type CompleteAuditResponse = {
   success: boolean;
 };
 
+// ── Audit Notes & Images Types ────────────────────────────
+
+export type AuditNoteUser = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  email: string;
+  profilePicture: string | null;
+};
+
+export type AuditNote = {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: AuditNoteUser | null;
+};
+
+export type CreateAuditNoteResponse = {
+  note: AuditNote;
+};
+
+export type AuditImage = {
+  id: string;
+  imageUrl: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  auditSessionId: string;
+  auditAssetId: string | null;
+  uploadedById: string | null;
+  createdAt: string;
+};
+
+export type UploadAuditImageResponse = {
+  image: AuditImage;
+};
+
 export type DashboardAudit = {
   id: string;
   name: string;
@@ -388,6 +685,15 @@ export type DashboardAudit = {
   expectedAssetCount: number;
   foundAssetCount: number;
   dueDate: string | null;
+  /**
+   * Number of users assigned; 0 = unassigned ("anyone can scan").
+   * Optional: older webapp builds (before this field shipped) omit it, so
+   * the client must tolerate its absence and hide ownership rather than
+   * render "undefined assigned" against a not-yet-deployed server.
+   */
+  assigneeCount?: number;
+  /** Whether the current user is among the assignees ("Assigned to you"). Optional — see `assigneeCount`. */
+  isAssignedToMe?: boolean;
 };
 
 export type Category = {
@@ -401,12 +707,33 @@ export type CategoriesResponse = {
   categories: Category[];
 };
 
+/** A tag assignable to an asset (asset-create tag picker). */
+export type Tag = {
+  id: string;
+  name: string;
+};
+
+/** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
+export type TagsResponse = {
+  tags: Tag[];
+};
+
 export type CreateAssetResponse = {
   asset: {
     id: string;
     title: string;
   };
 };
+
+/**
+ * Server-accepted scalar value for a custom field on create / update.
+ * The webapp coerces these into the appropriate stored representation:
+ * - string  → TEXT / MULTILINE_TEXT / DATE (ISO) / OPTION (option text)
+ * - number  → NUMBER / AMOUNT
+ * - boolean → BOOLEAN
+ * - null    → clear the value (UPDATE only)
+ */
+export type CustomFieldValue = string | number | boolean | null;
 
 export type UpdateAssetPayload = {
   assetId: string;
@@ -415,8 +742,73 @@ export type UpdateAssetPayload = {
   categoryId?: string;
   newLocationId?: string;
   currentLocationId?: string;
+  /**
+   * Full desired tag-id set (replace). Omit to leave tags unchanged; pass `[]`
+   * to clear all tags.
+   */
+  tags?: string[];
   valuation?: number | null;
-  customFields?: { id: string; value: any }[];
+  /**
+   * Custom field updates. Each entry is the customField `id` (NOT the asset's
+   * custom-field-value row id) plus the new value. Omitted fields are left
+   * unchanged on the server.
+   */
+  customFields?: { id: string; value: CustomFieldValue }[];
+};
+
+/**
+ * Definition of an active custom field as returned by
+ * `GET /api/mobile/custom-fields`. The companion uses this shape to render
+ * the right input (via `CustomFieldInput`) and to enforce required-ness
+ * client-side before submitting the create / update payload.
+ *
+ * Field semantics:
+ * - `id`        — stable CustomField primary key; used as the dictionary
+ *                 key on the form's local id → value map.
+ * - `name`      — human-readable label shown above the input.
+ * - `type`      — one of `TEXT`, `MULTILINE_TEXT`, `BOOLEAN`, `DATE`,
+ *                 `NUMBER`, `AMOUNT`, `OPTION`. Drives input rendering.
+ * - `helpText`  — optional hint shown next to the label (and forwarded as
+ *                 an `accessibilityHint` to screen readers).
+ * - `required`  — when true, the create / update screens block submit
+ *                 until a non-empty value is provided. The server enforces
+ *                 the same contract; the client check is a UX improvement.
+ * - `options`   — only populated for `type === "OPTION"`. The allowed set
+ *                 of values the user may pick from. Empty array / null for
+ *                 every other type.
+ */
+/**
+ * Discriminated union of all supported custom-field types. Keeping this as
+ * a literal union (not `string`) catches typos at compile time — the most
+ * common confusion is webapp internals using lowercase identifiers
+ * (`"option"`, `"boolean"`) while the database and this API contract use
+ * uppercase. Add a new constant here when introducing a new field type.
+ */
+export type MobileCustomFieldType =
+  | "TEXT"
+  | "MULTILINE_TEXT"
+  | "BOOLEAN"
+  | "DATE"
+  | "NUMBER"
+  | "AMOUNT"
+  | "OPTION";
+
+export type MobileCustomFieldDefinition = {
+  id: string;
+  name: string;
+  type: MobileCustomFieldType;
+  helpText: string | null;
+  required: boolean;
+  options: string[] | null;
+};
+
+/**
+ * Response payload for `GET /api/mobile/custom-fields?orgId=...&categoryId=...`.
+ * Returns the full set of active custom-field definitions that apply to the
+ * selected category (or to "no category" when `categoryId` is omitted).
+ */
+export type CustomFieldsResponse = {
+  customFields: MobileCustomFieldDefinition[];
 };
 
 export type UpdateAssetResponse = {

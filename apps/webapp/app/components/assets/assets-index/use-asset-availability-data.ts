@@ -27,28 +27,54 @@ export function useAssetAvailabilityData(items: Items) {
 
   const { resources, events } = useMemo(() => {
     const safeItems = items ?? [];
-    const resources = safeItems.map((item) => ({
-      id: item.id,
-      title: item.title,
-      extendedProps: {
-        mainImage: item.mainImage,
-        thumbnailImage: item.thumbnailImage,
-        mainImageExpiration: item.mainImageExpiration,
-        status: item.status,
-        availableToBook: item.availableToBook,
-        category: item.category,
-      },
-    }));
+    const resources = safeItems.map((item) => {
+      // Normalize code-resolution fields across simple-mode shape (has
+      // `qrCodes` relation + `preferredBarcodeId`) and advanced-mode shape
+      // (`AdvancedIndexAsset` has a flat `qrId: string` and no
+      // `preferredBarcodeId`). Both shapes carry `sequentialId` + `barcodes`.
+      const preferredBarcodeId =
+        "preferredBarcodeId" in item ? item.preferredBarcodeId : null;
+      const qrCodes =
+        "qrCodes" in item && Array.isArray(item.qrCodes) && item.qrCodes.length
+          ? item.qrCodes
+          : "qrId" in item && item.qrId
+          ? [{ id: item.qrId }]
+          : [];
+
+      return {
+        id: item.id,
+        title: item.title,
+        extendedProps: {
+          mainImage: item.mainImage,
+          thumbnailImage: item.thumbnailImage,
+          mainImageExpiration: item.mainImageExpiration,
+          status: item.status,
+          availableToBook: item.availableToBook,
+          category: item.category,
+          // Passed through to `resourceLabelContent` in `assets-list.tsx`
+          // so the chip renders consistently with every other code-bearing
+          // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+          sequentialId: item.sequentialId,
+          preferredBarcodeId,
+          qrCodes,
+          barcodes: item.barcodes ?? [],
+        },
+      };
+    });
 
     const events = safeItems
       .map((asset) => {
-        if (!asset.bookings) {
+        if (!("bookingAssets" in asset) || !asset.bookingAssets) {
           return [];
         }
 
         return [
-          ...asset.bookings.map((b) => {
-            const booking = b as AdvancedAssetBooking;
+          ...(
+            asset.bookingAssets as unknown as {
+              booking: AdvancedAssetBooking;
+            }[]
+          ).map((ba) => {
+            const booking = ba.booking;
             const custodianName = booking?.custodianUser
               ? resolveUserDisplayName(booking.custodianUser)
               : booking.custodianTeamMember?.name;

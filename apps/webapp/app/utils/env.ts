@@ -18,6 +18,13 @@ declare global {
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
       SENTRY_DSN: string;
+      /**
+       * Release identifier passed to Sentry.init so events on the client
+       * are tagged with the same version as the server. Resolved from
+       * SENTRY_RELEASE / FLY_RELEASE_VERSION at request time (see
+       * getBrowserEnv); empty when neither is set in the deploy env.
+       */
+      SENTRY_RELEASE: string;
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
@@ -55,6 +62,9 @@ declare global {
       DATABASE_URL: string;
       DIRECT_URL: string;
       SENTRY_DSN: string;
+      SENTRY_RELEASE: string;
+      /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
+      FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
@@ -64,6 +74,8 @@ declare global {
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
       COOKIE_DOMAIN: string;
+      POSTHOG_API_KEY: string;
+      POSTHOG_HOST: string;
     }
   }
 }
@@ -182,6 +194,17 @@ export const SENTRY_DSN = getEnv("SENTRY_DSN", {
   isRequired: false,
 });
 
+/**
+ * Release identifier for Sentry. Set explicitly via SENTRY_RELEASE at
+ * deploy time (e.g. the git SHA); falls back to Fly's auto-injected
+ * FLY_RELEASE_VERSION so we still get *some* tag on production hosts
+ * even before the deploy pipeline is updated. Empty in local dev.
+ */
+export const SENTRY_RELEASE =
+  getEnv("SENTRY_RELEASE", { isSecret: false, isRequired: false }) ||
+  getEnv("FLY_RELEASE_VERSION", { isSecret: false, isRequired: false }) ||
+  "";
+
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
   isRequired: false,
 });
@@ -191,6 +214,21 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
  * We need this in order to make our webhook work properly.
  */
 export const CUSTOM_INSTALL_CUSTOMERS = getEnv("CUSTOM_INSTALL_CUSTOMERS", {
+  isRequired: false,
+});
+
+/**
+ * PostHog server-side analytics (free→paid funnel events). Optional — when
+ * `POSTHOG_API_KEY` is unset the server analytics client is a no-op (see
+ * ~/integrations/posthog/client.server). `POSTHOG_HOST` defaults to PostHog
+ * US cloud in the client when empty.
+ */
+export const POSTHOG_API_KEY = getEnv("POSTHOG_API_KEY", {
+  isSecret: true,
+  isRequired: false,
+});
+export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
+  isSecret: true,
   isRequired: false,
 });
 
@@ -313,5 +351,6 @@ export function getBrowserEnv() {
     SUPPORT_EMAIL,
     FULL_CALENDAR_LICENSE_KEY,
     SENTRY_DSN,
+    SENTRY_RELEASE,
   };
 }

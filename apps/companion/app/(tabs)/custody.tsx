@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { pushIntoTab } from "@/lib/navigation";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
@@ -41,7 +41,6 @@ export default function MyCustodyScreen() {
 }
 
 function MyCustodyContent() {
-  const router = useRouter();
   const { currentOrg, isLoading: orgLoading, error: orgError } = useOrg();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
@@ -161,7 +160,9 @@ function MyCustodyContent() {
       return (
         <TouchableOpacity
           style={styles.assetCard}
-          onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
+          onPress={() =>
+            pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`)
+          }
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
             item.category ? `, ${item.category.name}` : ""
@@ -214,7 +215,7 @@ function MyCustodyContent() {
         </TouchableOpacity>
       );
     },
-    [router, colors, statusBadge, styles]
+    [colors, statusBadge, styles]
   );
 
   if (orgLoading) {

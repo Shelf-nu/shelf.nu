@@ -2,17 +2,19 @@
   "expo": {
     "name": "Shelf",
     "slug": "shelf-companion",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shelf",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.shelf.companion",
+      "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {
-        "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets."
+        "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
+        "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits."
       }
     },
     "android": {
@@ -21,7 +23,32 @@
         "backgroundColor": "#FF7809"
       },
       "package": "com.shelf.companion",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": ["android.permission.CAMERA"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            { "scheme": "https", "host": "app.shelf.nu", "pathPrefix": "/qr/" },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/assets/"
+            },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/bookings/"
+            },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/audits/"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -50,7 +77,8 @@
       "expo-font",
       "expo-web-browser",
       "expo-quick-actions",
-      "./plugins/swift-concurrency-fix"
+      "./plugins/swift-concurrency-fix",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true

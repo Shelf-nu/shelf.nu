@@ -14,6 +14,11 @@ export const lightColors = {
   primaryLight: "#F38744",
   primaryBg: "#FEF6EE",
   primaryForeground: "#FFFFFF",
+  // Accessible orange for ORANGE TEXT on light surfaces. `primary` itself
+  // is only ~3.1:1 on white (fine for icons/large graphics, fails the
+  // 4.5:1 bar for body text), so small brand-tinted labels must use this
+  // deeper shade instead. WCAG AA 5.4:1 on white.
+  primaryText: "#B54708",
 
   // Neutrals — Gray scale from webapp
   white: "#FFFFFF",
@@ -83,6 +88,9 @@ export const darkColors: Colors = {
   primaryLight: "#FFA566",
   primaryBg: "#2A1B0E",
   primaryForeground: "#FFFFFF",
+  // Brand orange is already legible as text on the dark surfaces
+  // (~7:1 on #161B22), so the text token matches `primary` here.
+  primaryText: "#FF8C42",
 
   // Neutrals — GitHub-style dark palette
   white: "#161B22", // "white" becomes the card/surface color in dark mode

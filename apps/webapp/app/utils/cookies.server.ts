@@ -64,6 +64,28 @@ export function setCookie(cookieValue: string): [string, string] {
   return ["Set-Cookie", cookieValue];
 }
 
+/**
+ * MOBILE SSO PKCE CHALLENGE COOKIE
+ *
+ * Carries the PKCE `code_challenge` (S256) across the native-app SSO round-trip.
+ * A PKCE-capable companion build appends `?code_challenge=…` when it opens
+ * `/sso-login`; the loader stashes it here so it survives the browser-session
+ * redirect chain (Supabase → IdP → `/oauth/callback/mobile`), where it is bound
+ * to the minted auth code and then cleared. HttpOnly + short-lived: it only
+ * needs to outlive one SSO login. The value is a non-secret hash, so it is not
+ * signed — tampering only breaks the attacker's own exchange.
+ *
+ * @see apps/webapp/app/routes/_auth+/sso-login.tsx — sets it
+ * @see apps/webapp/app/routes/_auth+/oauth.callback_.mobile.tsx — reads + clears it
+ */
+export const mobilePkceChallengeCookie = createCookie("mobile_pkce_challenge", {
+  path: "/",
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 10, // 10 min — must outlive the IdP login + the redirect chain
+});
+
 /** USER PREFS COOKIE */
 
 export const userPrefs = createCookie("user-prefs", {
@@ -222,6 +244,48 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
   });
 
 /**
+ * Normalize a filter param string for the Advanced-mode Assets index.
+ *
+ * Column filters not in operator form (e.g. `?location=<uuid>` emitted by
+ * report drill-downs or external deep links) are promoted to `is:<value>`
+ * so downstream filter parsing applies them rather than dropping them
+ * silently — which previously broke drill-down for Advanced-mode workspaces.
+ * Non-column params (page, search, etc.) pass through unchanged.
+ *
+ * Values that contain a `:` but fail operator validation are treated as
+ * **malformed operator attempts** and dropped, preserving the previous
+ * reject-unknown-operator semantics. Otherwise downstream code would split
+ * something like `?status=foo:AVAILABLE` into operator=`is`, value=`foo`
+ * and try to cast `foo` to the AssetStatus enum at query time.
+ *
+ * Used by both the URL path (CASE 1) and the cookie path (CASE 2) of
+ * {@link getAdvancedFiltersFromRequest}.
+ */
+function normalizeAdvancedFilterParams(
+  filters: string,
+  columnNames: string[]
+): URLSearchParams {
+  const normalized = new URLSearchParams();
+  new URLSearchParams(filters).forEach((value, key) => {
+    if (!columnNames.includes(key)) {
+      normalized.append(key, value);
+      return;
+    }
+    if (advancedFilterFormatSchema.safeParse(value).success) {
+      normalized.append(key, value);
+      return;
+    }
+    // Only promote unambiguous bare values. A `:` indicates the caller meant
+    // operator form; if it didn't validate above, the operator is unknown and
+    // we keep the old "drop malformed" behavior rather than coercing it.
+    if (value && !value.includes(":")) {
+      normalized.append(key, `is:${value}`);
+    }
+  });
+  return normalized;
+}
+
+/**
  * Gets and validates advanced filters from request parameters
  * Ensures URL parameters match the expected advanced filter format
  * @param request - The incoming request
@@ -243,27 +307,12 @@ export async function getAdvancedFiltersFromRequest(
   const cookieHeader = request.headers.get("Cookie");
   const advancedAssetFilterCookie =
     createAdvancedAssetFilterCookie(organizationId);
+  const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
   // CASE 1: URL has filters
   // Validate them, save to cookie, and return (with redirect if validation changed params)
   if (filters) {
-    const validatedParams = new URLSearchParams();
-    const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-    // Validate each filter parameter
-    new URLSearchParams(filters).forEach((value, key) => {
-      // Non-column params (like page, search) pass through without validation
-      if (!columnNames.includes(key as any)) {
-        validatedParams.append(key, value);
-        return;
-      }
-
-      // Column filters must match advanced filter format (e.g., "is:AVAILABLE")
-      if (advancedFilterFormatSchema.safeParse(value).success) {
-        validatedParams.append(key, value);
-      }
-    });
-
+    const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
     const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
@@ -284,23 +333,10 @@ export async function getAdvancedFiltersFromRequest(
     filters = (await advancedAssetFilterCookie.parse(cookieHeader)) || "";
 
     if (filters) {
-      const validatedParams = new URLSearchParams();
-      const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-      // Validate each filter from cookie
-      new URLSearchParams(filters).forEach((value, key) => {
-        // Non-column params pass through
-        if (!columnNames.includes(key as any)) {
-          validatedParams.append(key, value);
-          return;
-        }
-
-        // Column filters must match advanced filter format
-        if (advancedFilterFormatSchema.safeParse(value).success) {
-          validatedParams.append(key, value);
-        }
-      });
-
+      const validatedParams = normalizeAdvancedFilterParams(
+        filters,
+        columnNames
+      );
       const validatedParamsString = validatedParams.toString();
       const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
@@ -322,8 +358,3 @@ export async function getAdvancedFiltersFromRequest(
     redirectNeeded: false,
   };
 }
-
-/** HIDE PWA INSTALL PROMPT COOKIE */
-export const installPwaPromptCookie = createCookie("hide-pwa-install-prompt", {
-  maxAge: 60 * 60 * 24 * 14, // two weeks
-});

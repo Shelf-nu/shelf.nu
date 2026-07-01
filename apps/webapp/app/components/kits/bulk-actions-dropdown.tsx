@@ -18,6 +18,7 @@ import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import KitBulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
+import KitsBulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -137,6 +138,16 @@ function ConditionalDropdown() {
         <BulkReleaseCustodyDialog />
       </When>
 
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        })}
+      >
+        <KitsBulkStartAuditDialog />
+      </When>
+
       <DropdownMenu
         modal={false}
         onOpenChange={(open) => {
@@ -176,6 +187,27 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.create,
+              })}
+            >
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="start-audit"
+                  label="Create audit"
+                  onClick={closeMenu}
+                />
+              </DropdownMenuItem>
+            </When>
+
             <When
               truthy={userHasPermission({
                 roles,

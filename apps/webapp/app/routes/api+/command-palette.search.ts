@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import { db } from "~/database/db.server";
 import { getAssets } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -232,7 +234,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Execute parallel searches
     const [assetResults, audits, kits, bookings, locations, teamMembers] =
       await Promise.all([
-        // Assets (always allowed) - using enhanced search from asset service
+        // Assets (always allowed) - using enhanced search from asset service.
+        // The asset-index default include no longer eagerly loads customFields
+        // (see fields.ts), so add them back here for the command palette,
+        // which surfaces matching custom-field values in its results.
         getAssets({
           search: query,
           organizationId,
@@ -243,6 +248,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           extraInclude: {
             barcodes: {
               select: { id: true, value: true, type: true },
+            },
+            // Pulled so the search-result row can show the asset's
+            // primary placement (read via `getPrimaryLocation`).
+            assetLocations: {
+              select: { location: { select: { name: true } } },
+            },
+            customFields: {
+              where: {
+                customField: { active: true, deletedAt: null },
+              },
             },
           },
         }),
@@ -270,7 +285,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assets: true } },
+                _count: { select: { assetKits: true } },
               },
             })
           : Promise.resolve([]),
@@ -302,7 +317,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assets: true } },
+                _count: { select: { assetLocations: true } },
               },
             })
           : Promise.resolve([]),
@@ -330,33 +345,58 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         query,
-        assets: assetResults.assets.map((asset) => ({
-          id: asset.id,
-          title: asset.title,
-          sequentialId: asset.sequentialId,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration?.toISOString() ?? null,
-          locationName: asset.location?.name ?? null,
-          description: asset.description,
-          qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
-          categoryName: asset.category?.name ?? null,
-          tagNames: asset.tags?.map((tag) => tag.name) ?? [],
-          custodianName: (asset.custody as any)?.custodian?.name ?? null,
-          custodianUserName: (asset.custody as any)?.custodian?.user
-            ? `${(asset.custody as any).custodian.user.firstName} ${
-                (asset.custody as any).custodian.user.lastName
-              }`.trim()
-            : null,
-          barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
-          customFieldValues:
-            asset.customFields
-              ?.map((cf) => {
-                const value = cf.value as any;
-                const extractedValue = value?.raw ?? value ?? "";
-                return String(extractedValue);
-              })
-              .filter(Boolean) ?? [],
-        })),
+        assets: assetResults.assets.map((asset) => {
+          /** Custody records from getAssets may include custodian if the query includes it */
+          const primaryCustody = getPrimaryCustody(
+            asset.custody as Array<
+              Record<string, unknown> & {
+                custodian?: {
+                  name?: string;
+                  user?: {
+                    firstName?: string | null;
+                    lastName?: string | null;
+                  } | null;
+                };
+              }
+            >
+          );
+          return {
+            id: asset.id,
+            title: asset.title,
+            sequentialId: asset.sequentialId,
+            mainImage: asset.mainImage,
+            mainImageExpiration:
+              asset.mainImageExpiration?.toISOString() ?? null,
+            // `getAssets` widens its `extraInclude` arg to
+            // `Prisma.AssetInclude`, so the return type can't narrow back
+            // to the `assetLocations` shape we requested above. Cast at
+            // the boundary — the docstring on `getPrimaryLocation`
+            // documents this as the escape hatch.
+            locationName:
+              getPrimaryLocation(
+                asset as unknown as {
+                  assetLocations: { location: { name: string } }[];
+                }
+              )?.name ?? null,
+            description: asset.description,
+            qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
+            categoryName: asset.category?.name ?? null,
+            tagNames: asset.tags?.map((tag) => tag.name) ?? [],
+            custodianName: primaryCustody?.custodian?.name ?? null,
+            custodianUserName: primaryCustody?.custodian?.user
+              ? `${primaryCustody.custodian.user.firstName} ${primaryCustody.custodian.user.lastName}`.trim()
+              : null,
+            barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
+            customFieldValues:
+              asset.customFields
+                ?.map((cf) => {
+                  const value = cf.value as any;
+                  const extractedValue = value?.raw ?? value ?? "";
+                  return String(extractedValue);
+                })
+                .filter(Boolean) ?? [],
+          };
+        }),
         audits: audits.map((audit) => ({
           id: audit.id,
           name: audit.name,
@@ -369,7 +409,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: kit.name,
           description: kit.description || null,
           status: kit.status,
-          assetCount: kit._count?.assets || 0,
+          assetCount: kit._count?.assetKits ?? 0,
         })),
         bookings: bookings.map((booking) => ({
           id: booking.id,
@@ -387,7 +427,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: location.name,
           description: location.description || null,
           address: location.address || null,
-          assetCount: location._count?.assets || 0,
+          assetCount: location._count?.assetLocations || 0,
         })),
         teamMembers: teamMembers.map((member) => ({
           id: member.id,

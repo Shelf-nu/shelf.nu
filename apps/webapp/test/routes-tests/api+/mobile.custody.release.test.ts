@@ -30,6 +30,20 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn(),
   requireOrganizationAccess: vitest.fn(),
   requireMobilePermission: vitest.fn(),
+  getMobileUserContext: vitest.fn(),
+}));
+
+// why: PR #2533 reads the current custody record before calling
+// `releaseCustody` so it can attach `teamMemberId` + `targetUserId` to the
+// `CUSTODY_RELEASED` activity event. Without a mock here the test reaches
+// real Prisma and the call rejects with `P1001 Can't reach database`,
+// turning `body.asset` into `undefined`.
+vitest.mock("~/database/db.server", () => ({
+  db: {
+    custody: {
+      findFirst: vitest.fn(),
+    },
+  },
 }));
 
 // why: external service — we mock custody release without hitting the database
@@ -64,13 +78,16 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
+import { OrganizationRoles } from "@prisma/client";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
+import { db } from "~/database/db.server";
 
 const mockUser = {
   id: "user-1",
@@ -111,10 +128,28 @@ describe("POST /api/mobile/custody/release", () => {
 
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
+    // Caller's role is read to enforce the SELF_SERVICE self-restriction inside
+    // releaseCustody. ADMIN here so the release is permitted.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: OrganizationRoles.ADMIN,
+      canUseBarcodes: false,
+    });
+
     (releaseCustody as any).mockResolvedValue({
       id: "asset-1",
       title: "Test Laptop",
       status: "AVAILABLE",
+    });
+
+    // why: PR #2533 reads the current custody record before calling
+    // `releaseCustody` so it can attribute the `CUSTODY_RELEASED` event
+    // to the team member who held the asset (and the user behind that
+    // team member, if any).
+    (db.custody.findFirst as any).mockResolvedValue({
+      custodian: {
+        id: "team-member-1",
+        user: { id: "user-2" },
+      },
     });
   });
 
@@ -128,9 +163,19 @@ describe("POST /api/mobile/custody/release", () => {
     expect(body.asset).toBeDefined();
     expect(body.asset.id).toBe("asset-1");
 
+    // PR #2533 threads the `activityEvent` payload through so
+    // `releaseCustody` records `CUSTODY_RELEASED` in the same tx as the
+    // mutation, with actor + previous custodian attribution.
     expect(releaseCustody).toHaveBeenCalledWith({
       assetId: "asset-1",
       organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+      activityEvent: {
+        actorUserId: "user-1",
+        teamMemberId: "team-member-1",
+        targetUserId: "user-2",
+      },
     });
 
     expect(createNote).toHaveBeenCalledWith(

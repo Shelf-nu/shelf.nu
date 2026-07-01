@@ -91,6 +91,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     /** Query the QR and include the asset and userId for later use */
     const qr = await db.qr
       .findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: public ("_public+") unauthenticated route — a finder of a lost item scans the QR to contact its owner; there is no caller org context to scope by, the QR's own org is resolved from the code itself
         where: {
           id: qrId,
         },

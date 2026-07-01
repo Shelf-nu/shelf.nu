@@ -18,6 +18,14 @@ interface NotesSectionProps {
   onChangeNoteText: (text: string) => void;
   onPostNote: () => void;
   isPostingNote: boolean;
+  /**
+   * When `false` the post-note input and button are disabled with a hint
+   * label. The parent uses this to surface the case where the workspace
+   * context (`currentOrg`) hasn't resolved yet — without it the user can
+   * type a note, tap Post, and silently get nothing because the parent
+   * `handlePostNote` early-returns on missing `orgId`.
+   */
+  canPostNote?: boolean;
 }
 
 export const NotesSection = memo(function NotesSection({
@@ -26,9 +34,12 @@ export const NotesSection = memo(function NotesSection({
   onChangeNoteText,
   onPostNote,
   isPostingNote,
+  canPostNote = true,
 }: NotesSectionProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+
+  const postDisabled = !noteText.trim() || isPostingNote || !canPostNote;
 
   return (
     <View style={styles.sectionContainer}>
@@ -36,35 +47,46 @@ export const NotesSection = memo(function NotesSection({
         Activity{notes?.length ? ` (${notes.length})` : ""}
       </Text>
 
-      {/* Add note input */}
-      <View style={styles.noteInputContainer}>
-        <TextInput
-          style={styles.noteInput}
-          value={noteText}
-          onChangeText={onChangeNoteText}
-          placeholder="Add a note..."
-          placeholderTextColor={colors.placeholderText}
-          multiline
-          maxLength={5000}
-          accessibilityLabel="Add a note"
-        />
-        <TouchableOpacity
-          style={[
-            styles.notePostBtn,
-            (!noteText.trim() || isPostingNote) && styles.notePostBtnDisabled,
-          ]}
-          onPress={onPostNote}
-          disabled={!noteText.trim() || isPostingNote}
-          accessibilityLabel="Post note"
-          accessibilityRole="button"
-        >
-          {isPostingNote ? (
-            <ActivityIndicator size="small" color={colors.primaryForeground} />
-          ) : (
-            <Ionicons name="send" size={16} color={colors.primaryForeground} />
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Add note input — hidden for roles without asset:update (server
+          requires it); read-only activity feed still renders below. */}
+      {canPostNote && (
+        <View style={styles.noteInputContainer}>
+          <TextInput
+            style={styles.noteInput}
+            value={noteText}
+            onChangeText={onChangeNoteText}
+            placeholder="Add a note..."
+            placeholderTextColor={colors.placeholderText}
+            multiline
+            maxLength={5000}
+            accessibilityLabel="Add a note"
+          />
+          <TouchableOpacity
+            style={[
+              styles.notePostBtn,
+              postDisabled && styles.notePostBtnDisabled,
+            ]}
+            onPress={onPostNote}
+            disabled={postDisabled}
+            accessibilityLabel="Post note"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: postDisabled }}
+          >
+            {isPostingNote ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <Ionicons
+                name="send"
+                size={16}
+                color={colors.primaryForeground}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Notes list */}
       {notes && notes.length > 0 ? (

@@ -15,11 +15,11 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 
 import {
+  buildKitSlicesForBooking,
   getExistingBookingDetails,
   loadBookingsData,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { getAvailableKitAssetForBooking } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -37,7 +37,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { intersected } from "~/utils/utils";
 
 export const meta = () => [{ title: appendToMetaTitle("Add kit to booking") }];
 
@@ -89,52 +88,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-const processBooking = async (
-  bookingId: string,
-  kitIds: string[] | undefined
-) => {
-  try {
-    let finalAssetIds: string[] = [];
-    let booking;
-    if (kitIds && kitIds.length > 0) {
-      const promises = [
-        getAvailableKitAssetForBooking(kitIds),
-        getExistingBookingDetails(bookingId),
-      ];
-
-      const [assets, bookingDetails] = await Promise.all(promises);
-      finalAssetIds = assets as string[];
-      booking = bookingDetails;
-    } else {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid operation.",
-        label: "Booking",
-      });
-    }
-
-    if (finalAssetIds.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "No assets available.",
-        label: "Booking",
-      });
-    }
-
-    return {
-      finalAssetIds,
-      bookingInfo: booking,
-    };
-  } catch (cause: any) {
-    throw new ShelfError({
-      cause: cause,
-      message:
-        cause?.message || "Something went wrong while processing the booking.",
-      label: "Booking",
-    });
-  }
-};
-
+/**
+ * Adds the currently-viewed kit (or kits, via the hidden `kitIds[]` inputs) to
+ * an existing DRAFT/RESERVED booking.
+ *
+ * Kit members are added as **kit-driven** `BookingAsset` rows (each carrying the
+ * originating `AssetKit.id` on `assetKitId`) — NOT as standalone rows. The
+ * booking overview groups rows by `assetKitId`, so writing members through the
+ * standalone `assetIds` bucket (the previous bug) produced loose rows with a
+ * NULL `assetKitId` and silently dropped the kit grouping. Slice resolution is
+ * delegated to the shared `buildKitSlicesForBooking` helper so this flow,
+ * `createBooking`, and the manage-kits route all build slices the same,
+ * org-scoped way.
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -153,24 +119,51 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       shouldBeCaptured: false,
     });
 
-    if (!kitIds?.length && !bookingId?.length) {
+    if (!kitIds || kitIds.length === 0) {
       throw new ShelfError({
         cause: null,
-        message: `No kitIds found or booking not found.`,
+        message: `No kits found to add to the booking.`,
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
-    const { finalAssetIds, bookingInfo } = await processBooking(
+    // Validate the target booking: confirms it exists in the caller's org and
+    // is still DRAFT/RESERVED (the only states that accept new items). Also
+    // returns the existing BookingAsset rows so we can skip kit slices that are
+    // already present. `updateBookingAssets` re-checks existence but NOT
+    // status, so this guard is what blocks adding to a non-editable booking.
+    const bookingInfo = await getExistingBookingDetails(
       bookingId,
-      kitIds
+      organizationId
     );
 
-    const bookingAssets = (
-      "assets" in bookingInfo ? bookingInfo.assets : []
-    ).map((asset) => asset.id);
+    // AssetKit ids already represented on this booking. We dedupe by AssetKit
+    // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
+    // booking both standalone AND kit-driven at once, so a standalone row must
+    // not block re-adding the kit-driven slice. `assetKitId` is non-null only
+    // on kit-driven rows.
+    const existingAssetKitIds = new Set(
+      bookingInfo.bookingAssets
+        .map((ba) => ba.assetKitId)
+        .filter((id): id is string => id != null)
+    );
 
-    if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
+    // Resolve the kit memberships into kit-driven slice specs (org-scoped),
+    // skipping any AssetKit already on the booking. Routing members through
+    // `kitSlices` rather than the standalone `assetIds` bucket is what keeps the
+    // kit recognizable in the booking overview (which groups by `assetKitId`).
+    const kitSlices = await buildKitSlicesForBooking({
+      kitIds,
+      organizationId,
+      existingAssetKitIds,
+    });
+
+    // Empty slices means every membership of the selected kit(s) is already on
+    // the booking — nothing new to add. Surface the same friendly message as
+    // before so the user picks a different booking.
+    if (kitSlices.length === 0) {
       throw new ShelfError({
         cause: null,
         message: `The booking you have selected already contains the kit you are trying to add. Please select a different booking.`,
@@ -178,6 +171,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
     const user = await getUserByID(authSession.userId, {
       select: {
         id: true,
@@ -187,12 +181,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
+    // Add the kit(s) as kit-driven rows only: `assetIds: []` prevents duplicate
+    // standalone rows for the members, `kitSlices` carries the per-membership
+    // rows, and `kitIds` lets the ONGOING/OVERDUE status flip cascade to the
+    // kit(s) themselves.
     const booking = await updateBookingAssets({
       id: bookingId,
       organizationId,
-      assetIds: finalAssetIds,
+      assetIds: [],
+      kitSlices,
+      kitIds,
       userId,
     });
+
+    // Distinct member assets just added — used to attribute the per-asset
+    // "added to booking" note below.
+    const addedAssetIds = Array.from(
+      new Set(kitSlices.map((slice) => slice.assetId))
+    );
 
     const actor = wrapUserLinkForNote({
       id: authSession.userId,
@@ -207,7 +213,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       content: `${actor} added asset to ${bookingLink}.`,
       type: "UPDATE",
       userId: authSession.userId,
-      assetIds: finalAssetIds,
+      assetIds: addedAssetIds,
+      organizationId,
     });
 
     sendNotification({

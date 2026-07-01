@@ -14,7 +14,7 @@ export const LOCATION_WITH_HIERARCHY = {
 } satisfies Prisma.LocationDefaultArgs;
 
 export const KITS_INCLUDE_FIELDS = {
-  _count: { select: { assets: true } },
+  _count: { select: { assetKits: true } },
   custody: {
     select: {
       custodian: {
@@ -43,10 +43,38 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    location: LOCATION_WITH_HIERARCHY,
+    // `quantity` is pulled so loaders can show per-location slices and
+    // derive the "placed / unplaced" split for qty-tracked assets.
+    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
+    // driven placements so the UI can render the "via kit" badge
+    // alongside the kit-driven rows.
+    assetLocations: {
+      select: {
+        quantity: true,
+        assetKitId: true,
+        location: LOCATION_WITH_HIERARCHY,
+        assetKit: {
+          select: {
+            id: true,
+            kit: { select: { id: true, name: true } },
+          },
+        },
+      },
+    },
     custody: {
       select: {
         createdAt: true,
+        quantity: true,
+        // why: kit-allocated custody rows must not be released directly
+        // from the asset's custody-breakdown card. The UI uses
+        // `kitCustodyId` to swap the Release button for a "held via kit"
+        // badge — releasing the parent kit is the only correct path.
+        kitCustodyId: true,
+        kitCustody: {
+          select: {
+            kit: { select: { id: true, name: true } },
+          },
+        },
         custodian: {
           include: {
             user: true,
@@ -75,29 +103,46 @@ export const getAssetOverviewFields = (
             required: true,
             type: true,
             categories: true,
+            options: true,
           },
         },
       },
     },
-    kit: { select: { id: true, name: true, status: true } },
-    bookings: {
+    assetModel: { select: { id: true, name: true } },
+    // A QUANTITY_TRACKED asset can sit in multiple kits at distinct slices.
+    // Pull `quantity` so the asset-overview sidebar can list each kit with
+    // its allocation and so the loader can derive a true "available" pool
+    // (units NOT in any kit, custody, or active booking).
+    assetKits: {
+      select: {
+        quantity: true,
+        kit: { select: { id: true, name: true, status: true } },
+      },
+    },
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
-        // Exclude bookings where this asset has been partially checked in
-        NOT: {
-          partialCheckins: {
-            some: {
-              assetIds: { has: assetId },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+          // Exclude bookings where this asset has been partially checked in
+          NOT: {
+            partialCheckins: {
+              some: {
+                assetIds: { has: assetId },
+              },
             },
           },
         },
       },
-      select: {
-        id: true,
-        name: true,
-        from: true,
-        custodianTeamMember: true,
-        custodianUser: true,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            name: true,
+            from: true,
+            custodianTeamMember: true,
+            custodianUser: true,
+          },
+        },
       },
     },
   } satisfies Prisma.AssetInclude;
@@ -141,12 +186,30 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    location: LOCATION_WITH_HIERARCHY,
+    // `quantity` is pulled so loaders can show per-location slices and
+    // derive the "placed / unplaced" split for qty-tracked assets.
+    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
+    // driven placements so the UI can render the "via kit" badge
+    // alongside the kit-driven rows.
+    assetLocations: {
+      select: {
+        quantity: true,
+        assetKitId: true,
+        location: LOCATION_WITH_HIERARCHY,
+        assetKit: {
+          select: {
+            id: true,
+            kit: { select: { id: true, name: true } },
+          },
+        },
+      },
+    },
     custody: {
       select: {
+        quantity: true,
         custodian: {
           select: {
             name: true,
@@ -165,50 +228,48 @@ export const assetIndexFields = ({
         },
       },
     },
-    customFields: {
-      where: {
-        customField: {
-          active: true,
-          deletedAt: null,
-        },
-      },
-      include: {
-        customField: {
-          select: {
-            id: true,
-            name: true,
-            helpText: true,
-            required: true,
-            type: true,
-            categories: true,
-          },
-        },
-      },
-    },
+    // why: customFields used to be eagerly loaded here for every asset row.
+    // The simple asset index doesn't render them (only the advanced columns
+    // do), and on a 13k-asset workspace this multi-row include scaled with
+    // the number of active custom fields. Advanced mode uses
+    // advancedAssetIndexFields below; the command-palette search re-adds
+    // customFields via extraInclude.
     qrCodes: {
       select: { id: true },
       take: 1,
+    },
+    // Asset-code resolution: surfaces the linked barcodes so `resolveDisplayCode`
+    // (in `app/modules/barcode/display.ts`) can render the workspace-preferred
+    // or per-asset-override code on list views. Narrow select keeps payload small.
+    barcodes: {
+      select: { id: true, type: true, value: true },
     },
     /**
      * Include booking custodian data for CHECKED_OUT assets inline,
      * eliminating the N+1 re-query in updateAssetsWithBookingCustodians().
      * Only ONGOING/OVERDUE bookings have custodian info relevant to display.
      */
-    bookings: {
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+        },
       },
       take: 1,
-      select: {
-        id: true,
-        status: true,
-        custodianTeamMember: true,
-        custodianUser: {
+      include: {
+        booking: {
           select: {
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
+            id: true,
+            status: true,
+            custodianTeamMember: true,
+            custodianUser: {
+              select: {
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                profilePicture: true,
+              },
+            },
           },
         },
       },
@@ -219,34 +280,40 @@ export const assetIndexFields = ({
   if (bookingTo && bookingFrom && unavailableBookingStatuses) {
     return {
       ...fields,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: { in: unavailableBookingStatuses },
-          OR: [
-            {
-              from: { lte: bookingTo },
-              to: { gte: bookingFrom },
-            },
-            {
-              from: { gte: bookingFrom },
-              to: { lte: bookingTo },
-            },
-          ],
+          booking: {
+            status: { in: unavailableBookingStatuses },
+            OR: [
+              {
+                from: { lte: bookingTo },
+                to: { gte: bookingFrom },
+              },
+              {
+                from: { gte: bookingFrom },
+                to: { lte: bookingTo },
+              },
+            ],
+          },
         },
-        select: {
-          from: true,
-          to: true,
-          status: true,
-          id: true,
-          name: true,
-          // Custodian fields needed by updateAssetsWithBookingCustodians()
-          custodianTeamMember: true,
-          custodianUser: {
+        include: {
+          booking: {
             select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              profilePicture: true,
+              from: true,
+              to: true,
+              status: true,
+              id: true,
+              name: true,
+              // Custodian fields needed by updateAssetsWithBookingCustodians()
+              custodianTeamMember: true,
+              custodianUser: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  profilePicture: true,
+                },
+              },
             },
           },
         },
@@ -259,12 +326,13 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    location: {
+    assetLocations: {
       select: {
-        name: true,
+        quantity: true,
+        location: { select: { name: true } },
       },
     },
     custody: {

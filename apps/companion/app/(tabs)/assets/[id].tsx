@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -17,12 +17,14 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type Location as LocationType } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
   borderRadius,
   formatStatus,
   formatDate,
+  formatCurrency,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -33,6 +35,7 @@ import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
+import { InfoRow } from "@/components/shared/info-row";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
@@ -54,6 +57,25 @@ export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentOrg } = useOrg();
+  // Role-aware UI. Server enforces these on every API call
+  // (requireMobilePermission); this hides actions the user cannot perform
+  // so BASE/SELF_SERVICE don't tap buttons that 403. Mirrors scanner.tsx.
+  const roles = currentOrg?.roles;
+  const canUpdateAsset = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "update",
+  });
+  const canDeleteAsset = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "delete",
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "custody",
+  });
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
 
@@ -68,7 +90,7 @@ export default function AssetDetailScreen() {
     setIsLoading,
     fetchAsset,
     onRefresh,
-  } = useAssetData(id);
+  } = useAssetData(id, currentOrg?.id);
 
   // Custody actions
   const {
@@ -130,9 +152,10 @@ export default function AssetDetailScreen() {
   // ── Notes Action ────────────────────────────────────
 
   const handlePostNote = async () => {
-    if (!asset || !noteText.trim() || isPostingNote) return;
+    const orgId = currentOrg?.id;
+    if (!asset || !noteText.trim() || isPostingNote || !orgId) return;
     setIsPostingNote(true);
-    const { error: err } = await api.addNote(asset.id, noteText.trim());
+    const { error: err } = await api.addNote(asset.id, noteText.trim(), orgId);
     if (err) {
       Alert.alert("Error", err);
     } else {
@@ -172,19 +195,6 @@ export default function AssetDetailScreen() {
       Alert.alert("Deleted", `"${asset.title}" has been deleted.`, [
         { text: "OK", onPress: () => router.back() },
       ]);
-    }
-  };
-
-  // ── Helpers ─────────────────────────────────────────
-
-  const formatCurrency = (value: number, currency: string) => {
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency,
-      }).format(value);
-    } catch {
-      return `${currency} ${value.toFixed(2)}`;
     }
   };
 
@@ -262,6 +272,7 @@ export default function AssetDetailScreen() {
             onImagePress={() => setShowImageZoom(true)}
             onUploadPress={handleImagePress}
             isUploading={isUploadingImage}
+            canUpload={canUpdateAsset}
           />
 
           {/* ── Title + Status ─────────────────────────── */}
@@ -297,6 +308,9 @@ export default function AssetDetailScreen() {
             isActionLoading={isActionLoading}
             showOverflowMenu={showOverflowMenu}
             setShowOverflowMenu={setShowOverflowMenu}
+            canUpdate={canUpdateAsset}
+            canDelete={canDeleteAsset}
+            canCustody={canCustody}
           />
 
           {/* ── Details Card ───────────────────────────── */}
@@ -320,6 +334,12 @@ export default function AssetDetailScreen() {
                 icon="layers-outline"
                 label="Kit"
                 value={asset.kit.name}
+                // Kit detail lives in this same stack, so a plain push keeps
+                // "back" returning to this asset.
+                onPress={() =>
+                  router.push(`/(tabs)/assets/kits/${asset.kit!.id}`)
+                }
+                accessibilityLabel={`View kit ${asset.kit.name}`}
               />
             )}
             {asset.custody && (
@@ -413,12 +433,6 @@ export default function AssetDetailScreen() {
                 <Text style={styles.qrIdText} selectable numberOfLines={1}>
                   {asset.qrCodes[0].id}
                 </Text>
-                {asset.qrCodes.length > 1 && (
-                  <Text style={styles.qrExtraText}>
-                    +{asset.qrCodes.length - 1} more QR code
-                    {asset.qrCodes.length > 2 ? "s" : ""} linked
-                  </Text>
-                )}
               </View>
             </View>
           )}
@@ -436,6 +450,11 @@ export default function AssetDetailScreen() {
             onChangeNoteText={setNoteText}
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
+            // why: composer shows only when the workspace is resolved AND
+            // the role can update the asset (server requires asset:update
+            // to add a note). BASE/SELF_SERVICE get a read-only activity
+            // feed instead of a box that 403s on Post.
+            canPostNote={!!currentOrg?.id && canUpdateAsset}
           />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -499,7 +518,14 @@ export default function AssetDetailScreen() {
           <TeamMemberPicker
             visible={showCustodyPicker}
             orgId={currentOrg.id}
-            onSelect={handleAssignCustody}
+            onSelect={(member) => {
+              // Mirror handleLocationSelect: dismiss the picker before the
+              // confirm/assign flow so the user sees the refetched asset
+              // detail and the new custody state — not a stuck member list
+              // with no visible feedback (read as "it didn't work").
+              setShowCustodyPicker(false);
+              handleAssignCustody(member);
+            }}
             onClose={() => setShowCustodyPicker(false)}
           />
           <LocationPicker
@@ -514,32 +540,6 @@ export default function AssetDetailScreen() {
     </>
   );
 }
-
-// ── Sub-components ─────────────────────────────────────
-
-const InfoRow = memo(function InfoRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-}) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <View style={styles.infoRow}>
-      <View style={styles.infoLabel}>
-        <Ionicons name={icon as any} size={16} color={colors.muted} />
-        <Text style={styles.infoLabelText}>{label}</Text>
-      </View>
-      <Text style={styles.infoValue} numberOfLines={2} selectable>
-        {value}
-      </Text>
-    </View>
-  );
-});
 
 // ── Styles ─────────────────────────────────────────────
 
@@ -641,24 +641,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
     overflow: "hidden",
     ...shadows.sm,
-  },
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  infoLabel: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  infoLabelText: { fontSize: fontSize.base, color: colors.muted },
-  infoValue: {
-    fontSize: fontSize.base,
-    fontWeight: "600",
-    color: colors.foreground,
-    maxWidth: "55%",
-    textAlign: "right",
   },
 
   // Section containers (tags, QR)

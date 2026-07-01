@@ -118,3 +118,96 @@ export function formatDateTime(dateStr: string) {
     minute: "2-digit",
   });
 }
+
+/**
+ * Compact magnitude for a millisecond span — "30m", "6h", "2d", "3w".
+ * Used by the booking countdown so a field tech reads "Due in 3h" at a glance.
+ *
+ * @param ms - A duration in milliseconds (negative values are clamped to 0).
+ * @returns The largest sensible unit as a short string.
+ */
+export function formatDurationShort(ms: number): string {
+  const mins = Math.max(0, Math.round(ms / 60000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 14) return `${days}d`;
+  return `${Math.round(days / 7)}w`;
+}
+
+/**
+ * At-a-glance timing for a booking, derived purely from its dates + status.
+ * Returns null for states where a countdown is meaningless (DRAFT being built,
+ * or terminal complete/archived/cancelled). RESERVED bookings already past
+ * their window read "Was due …" (muted) rather than "Overdue", since they were
+ * never checked out — only ONGOING/OVERDUE bookings are truly overdue.
+ *
+ * @param from - Booking start ISO date string.
+ * @param to - Booking end ISO date string.
+ * @param status - Booking status.
+ * @param now - Current epoch ms (injectable for tests; defaults to Date.now()).
+ * @returns `{ text, urgent }` or null.
+ */
+export function bookingCountdown(
+  from: string,
+  to: string,
+  status: string,
+  now: number = Date.now()
+): { text: string; urgent: boolean } | null {
+  if (["DRAFT", "COMPLETE", "ARCHIVED", "CANCELLED"].includes(status)) {
+    return null;
+  }
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return null;
+
+  if (status === "OVERDUE" || (status === "ONGOING" && now > toMs)) {
+    return {
+      text: `Overdue by ${formatDurationShort(now - toMs)}`,
+      urgent: true,
+    };
+  }
+  if (status === "ONGOING") {
+    return {
+      text: `Due in ${formatDurationShort(toMs - now)}`,
+      urgent: toMs - now < 24 * 60 * 60 * 1000,
+    };
+  }
+  // RESERVED
+  if (now < fromMs) {
+    return {
+      text: `Starts in ${formatDurationShort(fromMs - now)}`,
+      urgent: false,
+    };
+  }
+  if (now > toMs) {
+    return {
+      text: `Was due ${formatDurationShort(now - toMs)} ago`,
+      urgent: false,
+    };
+  }
+  return {
+    text: `Due in ${formatDurationShort(toMs - now)}`,
+    urgent: toMs - now < 24 * 60 * 60 * 1000,
+  };
+}
+
+/**
+ * Formats a numeric amount as currency, falling back to "<CODE> <amount>" when
+ * the runtime can't resolve the currency (e.g. an unknown ISO code).
+ *
+ * @param value - The amount to format.
+ * @param currency - ISO 4217 currency code (e.g. "USD").
+ * @returns The localized currency string.
+ */
+export function formatCurrency(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(2)}`;
+  }
+}
