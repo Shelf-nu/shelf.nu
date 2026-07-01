@@ -795,9 +795,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * from "fully out" for QT assets that span multiple slices (kit +
      * standalone, or several kit slices).
      */
+    // Legacy / all-at-once checkout fallback. A quick checkout flips the asset
+    // status to CHECKED_OUT but writes NO `PartialBookingCheckout` rows, so the
+    // progressive `checkedOutByBookingAsset` counters are all 0 even though every
+    // booked unit is physically out. An ONGOING/OVERDUE booking with ZERO
+    // checkout sessions can ONLY have reached that state via the all-at-once flow
+    // (the progressive flow always writes a session row per batch), so treat every
+    // booked unit as out → remaining 0. Without this the inline math reports
+    // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
+    // checkout in the bulk-checkout dialog + scanner drawer.
+    //
+    // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
+    // (modules/booking/service.server.ts), which the checkout-assets route uses;
+    // this loader mirrors that logic in-memory to avoid an extra query per asset.
+    const isLegacyAllAtOnceCheckout =
+      checkoutSessions.length === 0 &&
+      (booking.status === BookingStatus.ONGOING ||
+        booking.status === BookingStatus.OVERDUE);
+
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
+      if (isLegacyAllAtOnceCheckout && totalBooked > 0) {
+        remainingToCheckOutByAsset[assetId] = 0;
+        continue;
+      }
       let totalCheckedOut = 0;
       for (const row of rows) {
         totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
@@ -1062,7 +1084,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
-          assets: bookingAssets,
+          // Each `bookingAssets` row is built from a `BookingAsset` pivot
+          // and preserves `bookedQuantity` (= `ba.quantity`). The asset's
+          // stock quantity (spread from `...ba.asset`) is intentionally
+          // ignored here — see `calculateTotalValueOfAssets` JSDoc.
+          assets: bookingAssets.map((a) => ({
+            valuation: a.valuation,
+            bookedQuantity: a.bookedQuantity,
+          })),
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),

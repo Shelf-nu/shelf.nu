@@ -447,6 +447,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
+  tags: { id: string; name: string }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
@@ -457,6 +458,24 @@ export type BookingDetailResponse = {
   checkedInAssetIds: string[];
   canCheckout: boolean;
   canCheckin: boolean;
+  /**
+   * False when the workspace requires explicit (scan/select) check-in for the
+   * caller's role — the app hides the quick "Check In All" button to match the
+   * web, which never offers quick check-in under that policy.
+   */
+  canQuickCheckin: boolean;
+  /**
+   * Per-booking lifecycle-action availability, computed server-side mirroring
+   * the web ActionsDropdown gating (role + status + permission). The detail
+   * screen shows only the enabled actions; the server endpoints enforce the
+   * same gates regardless.
+   */
+  bookingActions: {
+    canCancel: boolean;
+    canArchive: boolean;
+    canDuplicate: boolean;
+    canDelete: boolean;
+  };
 };
 
 export type BookingActionResponse = {
@@ -490,6 +509,95 @@ export type PartialCheckoutResponse = {
     name: string;
     status: BookingStatus;
   };
+};
+
+// ── Booking create / edit / reserve ─────────────────────
+
+/** Common response from create / update / reserve mobile booking endpoints. */
+export type BookingMutationResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+/**
+ * Payload for `POST /api/mobile/bookings/create`. Dates are local wire strings
+ * in `yyyy-MM-dd'T'HH:mm` (no offset); `timeZone` is the device IANA zone so the
+ * server can resolve them — there is no client-hint cookie on native. Assets are
+ * optional at create (the picker/scanner add them afterwards, mirroring web).
+ */
+export type CreateBookingPayload = {
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+  assetIds?: string[];
+};
+
+/** Payload for `POST /api/mobile/bookings/update`. */
+export type UpdateBookingPayload = {
+  bookingId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+};
+
+export type RemoveBookingAssetsResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+  removedCount: number;
+};
+
+/** Availability-aware asset row for the booking picker. */
+export type AvailableAsset = {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  mainImageExpiration: string | null;
+  thumbnailImage: string | null;
+  kitId: string | null;
+};
+
+export type AvailableAssetsResponse = {
+  assets: AvailableAsset[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+/** Availability-aware kit row for the booking picker. */
+export type AvailableKit = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+export type AvailableKitsResponse = {
+  kits: AvailableKit[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type BookingTag = { id: string; name: string };
+
+export type BookingTagsResponse = {
+  tags: BookingTag[];
 };
 
 // ── Audit Types ────────────────────────────────────────
@@ -680,6 +788,17 @@ export type CategoriesResponse = {
   categories: Category[];
 };
 
+/** A tag assignable to an asset (asset-create tag picker). */
+export type Tag = {
+  id: string;
+  name: string;
+};
+
+/** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
+export type TagsResponse = {
+  tags: Tag[];
+};
+
 export type CreateAssetResponse = {
   asset: {
     id: string;
@@ -704,6 +823,11 @@ export type UpdateAssetPayload = {
   categoryId?: string;
   newLocationId?: string;
   currentLocationId?: string;
+  /**
+   * Full desired tag-id set (replace). Omit to leave tags unchanged; pass `[]`
+   * to clear all tags.
+   */
+  tags?: string[];
   valuation?: number | null;
   /**
    * Custom field updates. Each entry is the customField `id` (NOT the asset's

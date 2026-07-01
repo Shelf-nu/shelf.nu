@@ -51,7 +51,16 @@ export function hasCustody(
 export function formatCustodyList<T extends Record<string, unknown>>(
   custody: T[] | null | undefined
 ): { primary: T | null; others: T[]; total: number } {
-  if (!custody || custody.length === 0) {
+  // Defensive `Array.isArray` against Sentry-observed crashes
+  // (SHELF-WEBAPP-1NX, 1NY): a truthy non-array object with a `.length`
+  // field bypasses both the `!custody` and `length === 0` guards, then
+  // crashes on `custody.slice(1)` with "r.slice is not a function" —
+  // breaking the asset list + dashboard row through the error boundary.
+  // The TypeScript signature claims `T[] | null | undefined`, but the
+  // runtime value can drift (loader code path returning the pre-Phase-2
+  // 1:1 shape, hydration mismatch, etc.). Treat anything non-array as
+  // empty rather than letting it crash the row.
+  if (!custody || !Array.isArray(custody) || custody.length === 0) {
     return { primary: null, others: [], total: 0 };
   }
   return {

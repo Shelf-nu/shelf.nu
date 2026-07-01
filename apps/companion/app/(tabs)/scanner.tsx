@@ -19,7 +19,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -450,7 +450,7 @@ function ScannerContent() {
                   label: "Link in Browser",
                   icon: "open-outline",
                   onPress: () => {
-                    Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                    void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                     dismissResult();
                   },
                 },
@@ -808,7 +808,7 @@ function ScannerContent() {
               label: "Open in Browser",
               icon: "open-outline",
               onPress: () => {
-                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -831,7 +831,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                 dismissResult();
               },
             };

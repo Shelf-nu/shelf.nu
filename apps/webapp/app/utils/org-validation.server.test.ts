@@ -23,6 +23,7 @@ import {
   assertLocationBelongsToOrg,
   assertLocationsBelongToOrg,
   assertTagsBelongToOrg,
+  assertTagsAssignableToAssets,
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
@@ -320,6 +321,56 @@ describe("assertTagsBelongToOrg", () => {
 
     const err = await assertTagsBelongToOrg(
       { tagIds: ["t1"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid tags");
+  });
+});
+
+describe("assertTagsAssignableToAssets", () => {
+  it("is a no-op for an empty list", async () => {
+    const tx = txWith({});
+    await expect(
+      assertTagsAssignableToAssets({ tagIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.tag.findMany).not.toHaveBeenCalled();
+  });
+
+  it("queries org-scoped AND asset-assignable tags (useFor empty or ASSET)", async () => {
+    const tx = txWith({
+      tag: { findMany: vitest.fn().mockResolvedValue([{ id: "t1" }]) },
+    });
+
+    await assertTagsAssignableToAssets(
+      { tagIds: ["t1"], organizationId: ORG },
+      tx
+    );
+
+    // The where clause must constrain BOTH org and the asset-assignable predicate
+    // so a same-org booking-only tag is rejected, not just cross-org ids.
+    expect(tx.tag.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: ["t1"] },
+          organizationId: ORG,
+          OR: [{ useFor: { isEmpty: true } }, { useFor: { has: "ASSET" } }],
+        }),
+      })
+    );
+  });
+
+  it("rejects with a 400 ShelfError when a tag is not asset-assignable/foreign", async () => {
+    // findMany returns fewer rows than requested (the booking-only tag is
+    // filtered out by the useFor predicate) -> mismatch -> throw.
+    const tx = txWith({
+      tag: { findMany: vitest.fn().mockResolvedValue([]) },
+    });
+
+    const err = await assertTagsAssignableToAssets(
+      { tagIds: ["booking-only"], organizationId: ORG },
       tx
     ).catch((e) => e);
 

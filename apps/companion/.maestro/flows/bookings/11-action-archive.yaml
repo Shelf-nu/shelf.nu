@@ -1,0 +1,102 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Archive action (mobile) [FIXTURE-DEPENDENT]"
+tags:
+  - bookings
+  - archive
+  - actions
+  - fixture-dependent
+env:
+  BOOKING_NAME: "QA Test Booking 1"
+
+---
+# Verifies the booking-detail overflow "Archive booking" action: opens a
+# COMPLETE booking, archives it, asserts the badge flips Complete -> Archived
+# in place, and that it leaves the Completed filter on a fresh fetch.
+#
+# !! NOT IDEMPOTENT / NOT SELF-CLEANING — read before adding to a CI run:
+#   - Archive only renders for status COMPLETE (canArchive). The app cannot
+#     create a COMPLETE booking (needs reserve -> check-out -> check-in), so
+#     this flow consumes a pre-existing COMPLETE fixture.
+#   - There is NO in-app un-archive. After this runs, the booking is ARCHIVED
+#     and the test can't re-run until it's reset via DB:
+#       UPDATE "Booking" SET status='COMPLETE' WHERE id='<id>';
+#   - Set BOOKING_NAME to the exact COMPLETE booking to archive.
+#   Keep this OUT of the idempotent smoke suite; run only in seeded envs where a
+#   throwaway COMPLETE booking can be provisioned and reset afterward.
+#
+# Action steps verified live on-device 2026-06-23 (archived "QA Test Booking 1"
+# then restored it to COMPLETE). Preamble copied from 06.
+
+- runFlow: ../../shared/login.yaml
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+- extendedWaitUntil:
+    visible: "Filter: Completed.*"
+    timeout: 30000
+- tapOn: "Filter: Completed.*"
+- scrollUntilVisible:
+    element:
+      text: "Booking: ${BOOKING_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: "Booking: ${BOOKING_NAME}.*"
+- extendedWaitUntil:
+    visible: "${BOOKING_NAME}"
+    timeout: 30000
+- assertVisible: "Complete"
+
+# Archive -> confirm (single-word "Archive" taps reliably via text).
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Archive booking"
+    timeout: 10000
+- tapOn: "Archive booking"
+- extendedWaitUntil:
+    visible: "Archive Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Archive$"
+# Badge flips in place (handleArchive refetches; no router.back()).
+- extendedWaitUntil:
+    visible: "Archived"
+    timeout: 30000
+- assertNotVisible: "Complete"
+- takeScreenshot: archive-action-archived
+
+# Cross-check on a fresh launch: gone from the Completed filter.
+- launchApp
+- tapOn:
+    text: "http://localhost:8081"
+    optional: true
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 90000
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+- extendedWaitUntil:
+    visible: "Filter: Completed.*"
+    timeout: 30000
+- tapOn: "Filter: Completed.*"
+- extendedWaitUntil:
+    notVisible: "Booking: ${BOOKING_NAME}.*"
+    timeout: 30000
+- takeScreenshot: archive-action-gone-from-completed

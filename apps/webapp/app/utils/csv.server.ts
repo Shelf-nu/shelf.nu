@@ -44,6 +44,7 @@ import {
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
@@ -347,6 +348,13 @@ export async function exportAssetsFromIndexToCsv({
     columns: [
       { name: "name", visible: true, position: 0 },
       ...(settings.columns as Column[]),
+      // Synthetic export-only column: emits `valuation × quantity` so QT
+      // inventories report total worth without overwriting the per-unit
+      // `valuation` column (kept lossless for CSV → re-import round-trip).
+      // Always appended at the end so existing user column ordering is
+      // unaffected. Not in `defaultFields` / column-picker schema, so
+      // users can't toggle or reorder it via settings.
+      { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
     ],
     currentOrganization,
     request,
@@ -403,7 +411,11 @@ export const buildCsvExportDataFromAssets = ({
 
       // If it's not a custom field, it must be a fixed field or 'name'
       if (!column.name.startsWith("cf_")) {
-        const fieldName = column.name as FixedField | BarcodeField | "name";
+        const fieldName = column.name as
+          | FixedField
+          | BarcodeField
+          | "name"
+          | "total_value";
 
         switch (fieldName) {
           case "id":
@@ -454,13 +466,34 @@ export const buildCsvExportDataFromAssets = ({
               : "";
             break;
           case "valuation":
-            value = asset.valuation
-              ? formatCurrency({
-                  value: asset.valuation,
-                  locale: "en-US", // Default locale for CSV exports
-                  currency: currentOrganization.currency,
-                })
-              : "";
+            // Per-unit price — matches `Asset.valuation` in the DB so CSV
+            // round-trip (export → re-import) is lossless. The qty-aware
+            // total is emitted separately under `total_value` (see below)
+            // so users see both without breaking the import contract.
+            // `!= null` so `valuation: 0` exports as "$0.00" instead of "".
+            value =
+              asset.valuation != null
+                ? formatCurrency({
+                    value: asset.valuation,
+                    locale: "en-US", // Default locale for CSV exports
+                    currency: currentOrganization.currency,
+                  })
+                : "";
+            break;
+          case "total_value":
+            // Synthetic export-only column injected by the caller (see
+            // `exportAssetsToCsv` and the `ColumnLabelKey` doc). Emits
+            // `valuation × quantity` so QT inventories report correctly —
+            // a Pens row stocked at 100 boxes at €1 each shows €100 here
+            // while the `valuation` column above stays at €1 per-unit.
+            value =
+              asset.valuation != null
+                ? formatCurrency({
+                    value: getAssetTotalValue(asset),
+                    locale: "en-US",
+                    currency: currentOrganization.currency,
+                  })
+                : "";
             break;
           case "availableToBook":
             value = asset.availableToBook ? "Yes" : "No";

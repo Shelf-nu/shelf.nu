@@ -7,6 +7,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
   getMobileUserContext,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
@@ -61,6 +62,11 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    // Bookings are a TEAM-tier (premium) feature. Every other booking mutation
+    // gates here; without it a PERSONAL workspace could add assets via mobile,
+    // bypassing the entitlement the web enforces.
+    await assertMobileCanUseBookings(organizationId);
+
     const { bookingId, assetIds, kitIds } = BodySchema.parse(
       await request.json()
     );
@@ -68,7 +74,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // Org-scoped booking lookup — a foreign-org booking id 404s here.
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true, status: true, from: true, to: true },
+      select: {
+        id: true,
+        status: true,
+        from: true,
+        to: true,
+        custodianUserId: true,
+      },
     });
 
     if (!booking) {
@@ -79,9 +91,26 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    // BASE is as restricted as SELF_SERVICE for managing booking assets (own
+    // bookings only, DRAFT only via canUserManageBookingAssets). Keying only on
+    // SELF_SERVICE let a BASE user with `booking:update` add assets to anyone's
+    // non-draft booking via this endpoint.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
 
-    if (!canUserManageBookingAssets(booking, isSelfService)) {
+    // Self-service / BASE users may only modify their own bookings.
+    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        message: "You can only modify your own bookings.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",

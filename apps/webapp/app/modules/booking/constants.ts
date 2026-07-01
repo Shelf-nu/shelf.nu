@@ -126,6 +126,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           availableToBook: true,
           status: true,
           valuation: true,
+          // `Asset.quantity` is the workspace stock pool — surfaced for QT
+          // availability/headroom math, NOT for booking-value totals.
+          // The booking total uses `BookingAsset.quantity` (booked units)
+          // — see `calculateTotalValueOfAssets`. Using `asset.quantity`
+          // there would value a 5-of-100 booking at 100 units.
+          quantity: true,
           // Asset-code resolution fields — see `app/modules/barcode/display.ts`
           // for the canonical select shape. Tight `take: 1` + narrow `select`
           // keeps query weight minimal even with hundreds of booking assets.

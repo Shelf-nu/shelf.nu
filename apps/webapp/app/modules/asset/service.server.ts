@@ -738,17 +738,24 @@ export async function getAssets(params: {
 
         // Fast path: when every term looks like an asset identifier — either
         // bare digits ("21035", a UPC barcode) or canonical sequentialId
-        // ("SAM-0001") — narrow the OR clause to the three columns where an
+        // ("SAM-0001") — narrow the OR clause to the columns where an
         // ID-shaped value can legitimately live: sequentialId, barcode value,
-        // and QR id. All three are covered by trigram GIN indexes added in
-        // migration 20260525110348, so the planner stays on indexed scans and
-        // a real ID lookup (the common case) returns immediately.
+        // QR id, plus title and description. The ID columns are covered by
+        // trigram GIN indexes added in migration 20260525110348, and
+        // title/description are covered by the composite trigram GIN index
+        // Asset_title_description_idx — so the planner stays on indexed scans
+        // and a real ID lookup (the common case) returns immediately.
         //
-        // A bare number can ALSO be embedded in a title, description, or
-        // custom field (e.g. "Armchair (Old SKU: 103468)"), and the shape
-        // alone cannot tell those apart from a real barcode. So we flag the
-        // query for fallback: if this narrow clause returns zero rows,
-        // getAssets builds and re-runs with the full clause below.
+        // title + description are included here (not deferred to the fallback)
+        // because a bare-numeric term often lives ONLY inside a title — e.g.
+        // searching "451" must match "KCI-451 Kids Resources Box". Without
+        // these branches the narrow query can still return rows (some OTHER
+        // asset matches "451" in an ID column), which suppresses the
+        // zero-row fallback and silently drops the title-only match.
+        //
+        // The fallback flag stays set so the remaining slow-path columns
+        // (custodian names, category/location/tags, custom-field JSON ILIKE)
+        // are still covered when this clause returns zero rows.
         if (searchTerms.every(looksLikeAssetId)) {
           shouldFallbackToFullSearch = true;
           where.OR = searchTerms.flatMap((term) => [
@@ -763,6 +770,11 @@ export async function getAssets(params: {
                 some: { id: { contains: term, mode: "insensitive" } },
               },
             },
+            // Trigram-indexed (Asset_title_description_idx) — matches a
+            // bare-numeric substring embedded in a title/description directly
+            // in the fast path, without relying on the zero-row fallback.
+            { title: { contains: term, mode: "insensitive" } },
+            { description: { contains: term, mode: "insensitive" } },
           ]);
           // Remember how many entries belong to the search so the fallback can
           // swap them out without disturbing filter clauses appended later.
@@ -2295,9 +2307,17 @@ export async function updateAsset({
             : {}),
           ...(customFieldValuesToRemove.length > 0
             ? {
-                deleteMany: customFieldValuesToRemove.map((cf) => ({
-                  customFieldId: cf.id,
-                })),
+                // Collapse N per-field deleteMany filters into ONE `IN`
+                // clause so Prisma issues a single SELECT pre-flight +
+                // single DELETE, not 2N round trips (Sentry N+1
+                // SHELF-WEBAPP-1NZ, 1P0). Prisma's nested `deleteMany`
+                // accepts EITHER a single where OR an array of wheres —
+                // the array form fans out into per-entry queries.
+                deleteMany: {
+                  customFieldId: {
+                    in: customFieldValuesToRemove.map((cf) => cf.id),
+                  },
+                },
               }
             : {}),
         },

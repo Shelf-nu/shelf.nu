@@ -30,6 +30,9 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
+  // why: the route premium-gates with assertMobileCanUseBookings; mock it so
+  // the gate is a no-op in these tests (mirrors the sibling booking tests).
+  assertMobileCanUseBookings: vi.fn(),
 }));
 
 // why: external service — we mock the partial checkout to avoid database calls

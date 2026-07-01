@@ -48,6 +48,7 @@ import type {
 } from "~/modules/asset-index-settings/helpers";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -232,16 +233,36 @@ export function AdvancedIndexColumn({
       return <DescriptionColumn value={item.description ?? ""} />;
 
     case "valuation": {
-      const value = item?.valuation
-        ? formatCurrency({
-            value: item.valuation,
-            locale,
-            currency: currentOrganization.currency,
-          })
-        : null;
+      // Quantity-aware: render TOTAL (valuation × quantity) on top, with a
+      // small "<unit price> × N <unit>" subtext for QT assets whose total
+      // differs from the per-unit price. INDIVIDUAL assets and QT with
+      // quantity ≤ 1 collapse to a single line — visually unchanged from
+      // the legacy behaviour. See {@link formatAssetValueWithBreakdown}.
+      if (item?.valuation == null) {
+        return (
+          <Td className="w-full max-w-none whitespace-nowrap">
+            <EmptyTableValue />
+          </Td>
+        );
+      }
+
+      const breakdown = formatAssetValueWithBreakdown(item, {
+        currency: currentOrganization.currency,
+        locale,
+      });
+
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
-          {value ? value : <EmptyTableValue />}
+          {breakdown.unit && breakdown.suffix ? (
+            <div className="flex flex-col leading-tight">
+              <span className="tabular-nums">{breakdown.total}</span>
+              <span className="text-xs tabular-nums text-gray-500">
+                {breakdown.unit} {breakdown.suffix}
+              </span>
+            </div>
+          ) : (
+            <span className="tabular-nums">{breakdown.total}</span>
+          )}
         </Td>
       );
     }

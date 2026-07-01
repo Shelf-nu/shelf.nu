@@ -112,25 +112,59 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           qrCodes: { select: { id: true } },
           assetKits: {
             select: {
+              // AssetKit.id surfaces the kit-slice discriminator. The
+              // consumer filters `bookingAssets[].assetKitId === ak.id`
+              // so a QT asset shared between Kit A and Kit B only emits
+              // each booking on its own kit's calendar — without this,
+              // every kit containing the pooled asset would show every
+              // booking of it (Codex review #2676 P2).
+              id: true,
               asset: {
                 select: {
                   id: true,
                   availableToBook: true,
                   status: true,
+                  // Post-Phase-3a: bookings reach assets through the
+                  // BookingAsset pivot (Asset.bookings was removed).
+                  // useKitAvailabilityData reads
+                  // asset.bookingAssets[].booking — see
+                  // components/assets/assets-index/use-kit-availability-data.ts.
+                  // The pre-pivot `bookings: { ... }` select here threw a
+                  // PrismaClientValidationError on every kit search with
+                  // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
-                    bookings: {
+                    bookingAssets: {
                       where: {
-                        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        booking: {
+                          status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        },
                       },
                       select: {
-                        id: true,
-                        name: true,
-                        status: true,
-                        from: true,
-                        to: true,
-                        description: true,
-                        custodianTeamMember: true,
-                        custodianUser: true,
+                        // Discriminator for per-kit attribution in the
+                        // consumer. NULL = standalone slice (not bound
+                        // to a kit) — those are filtered out so they
+                        // don't pollute any kit's availability calendar.
+                        assetKitId: true,
+                        booking: {
+                          select: {
+                            id: true,
+                            name: true,
+                            status: true,
+                            from: true,
+                            to: true,
+                            description: true,
+                            // FK columns the consumer reads directly
+                            // (bookingWithRelations.kitId at line 87,
+                            // .custodianUserId at line 117 of the
+                            // useKitAvailabilityData hook). Without
+                            // these, both fields were undefined at
+                            // runtime — CodeRabbit review #2676.
+                            kitId: true,
+                            custodianUserId: true,
+                            custodianTeamMember: true,
+                            custodianUser: true,
+                          },
+                        },
                       },
                     },
                   }),
@@ -453,8 +487,13 @@ function ListContent({
               <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
+                  // why: undefined assetKits ≠ empty kit — we don't know what's in it,
+                  // so default to not-available (matches the calendar view's semantic
+                  // in use-kit-availability-data.ts).
                   availableToBook={
-                    !item.assetKits.some((ak) => !ak.asset.availableToBook)
+                    item.assetKits == null
+                      ? false
+                      : !item.assetKits.some((ak) => !ak.asset.availableToBook)
                   }
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

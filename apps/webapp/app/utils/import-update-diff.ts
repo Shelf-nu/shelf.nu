@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
   AssetForUpdate,
@@ -949,4 +950,61 @@ export function computeAssetDiffs({
     skippedAssets,
     failedRows,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Failure Reporting
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a diagnosable per-row failure message for the bulk-update report.
+ *
+ * When `updateAsset` hits an unexpected database error it rethrows a *generic*
+ * ShelfError whose `message` is a fixed fallback ("We could not create or
+ * update this Asset. Please try again or contact support.") and which is not
+ * captured to Sentry. That fallback hides the real reason (e.g. a Prisma error
+ * code), so a failed bulk-import row currently carries no diagnosable signal.
+ *
+ * The original error is preserved on the ShelfError's `cause`. When that
+ * underlying error is present, we append its code + first line so the
+ * downloadable report explains *why* the row failed instead of repeating the
+ * opaque fallback.
+ *
+ * @param cause - The error thrown while applying a single row's update
+ * @returns A report-friendly message, including the underlying reason when available
+ */
+export function describeBulkUpdateRowFailure(cause: unknown): string {
+  const baseMessage = isLikeShelfError(cause)
+    ? (cause as ShelfError).message
+    : cause instanceof Error
+    ? cause.message
+    : "Unknown error";
+
+  // Unwrap one level: the generic ShelfError stores the original error (often a
+  // Prisma error) on `.cause`.
+  const underlying = isLikeShelfError(cause)
+    ? (cause as ShelfError).cause
+    : null;
+
+  if (underlying instanceof Error) {
+    const code =
+      "code" in underlying &&
+      typeof (underlying as { code?: unknown }).code === "string"
+        ? `${(underlying as { code: string }).code}: `
+        : "";
+    // Prisma messages prefix the reason with an "Invalid `prisma...` invocation"
+    // line plus a file path; the actionable reason is the LAST non-empty line.
+    // Surface only that, so the report stays concise and doesn't leak the
+    // invocation preamble or internal paths.
+    const lines = underlying.message
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const detail = (lines[lines.length - 1] ?? "").slice(0, 300);
+    if (detail && detail !== baseMessage) {
+      return `${baseMessage} (${code}${detail})`;
+    }
+  }
+
+  return baseMessage;
 }

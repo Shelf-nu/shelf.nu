@@ -250,13 +250,19 @@ export async function fetchAllPdfRelatedData(
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
-        // `sortedAssets` is the deduped + search-filtered + kit-grouped
-        // projection that the PDF renders, so the total stays aligned
-        // with the exported rows. Multi-slice qty-tracked assets are
-        // counted once at the asset level (matching the bookingAssets
-        // grouping above); per-slice valuation expansion would belong
-        // in `calculateTotalValueOfAssets` itself, not here.
-        assets: sortedAssets,
+        // Sum per-slice from the `BookingAsset` pivot, scoped to the
+        // search-visible asset ids. Each slice contributes its own
+        // `ba.quantity` (booked units) × per-unit `valuation`, so a QT
+        // asset stocked at 100 with 5 booked contributes value-for-5,
+        // not value-for-100. Multi-slice (standalone + kit) sums each
+        // slice independently — the deduped `sortedAssets` is the
+        // rendered ROW list, not the value-summation list.
+        assets: booking.bookingAssets
+          .filter((ba) => visibleAssetIds.includes(ba.assetId))
+          .map((ba) => ({
+            valuation: ba.asset.valuation,
+            bookedQuantity: ba.quantity,
+          })),
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),
