@@ -41,6 +41,8 @@ import {
   extendBooking,
   removeAssets,
   addScannedAssetsToBooking,
+  processBooking,
+  getExistingBookingDetails,
   getOngoingBookingForAsset,
   bulkArchiveBookings,
   bulkCancelBookings,
@@ -1597,7 +1599,10 @@ describe("updateBookingAssets", () => {
     expect(result).toEqual(mockBooking);
   });
 
-  it("should update asset status to CHECKED_OUT for ONGOING booking", async () => {
+  it("does NOT flip asset status to CHECKED_OUT for ONGOING booking (progressive checkout)", async () => {
+    // Progressive checkout: assets added to an ONGOING booking join it as line
+    // items but stay AVAILABLE until purposefully checked out. Adding must not
+    // flip status as a side-effect.
     expect.assertions(3);
 
     const mockBooking = {
@@ -1617,14 +1622,11 @@ describe("updateBookingAssets", () => {
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(db.$executeRaw).toHaveBeenCalled();
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
-      data: { status: AssetStatus.CHECKED_OUT },
-    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
   });
 
-  it("should update asset status to CHECKED_OUT for OVERDUE booking", async () => {
+  it("does NOT flip asset status to CHECKED_OUT for OVERDUE booking (progressive checkout)", async () => {
     expect.assertions(3);
 
     const mockBooking = {
@@ -1644,14 +1646,13 @@ describe("updateBookingAssets", () => {
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(db.$executeRaw).toHaveBeenCalled();
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
-      data: { status: AssetStatus.CHECKED_OUT },
-    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
   });
 
-  it("should update kit status to CHECKED_OUT when kitIds provided for ONGOING booking", async () => {
+  it("does NOT flip kit status to CHECKED_OUT when kitIds provided for ONGOING booking (progressive checkout)", async () => {
+    // Kits added to an active booking stay AVAILABLE too — no status sync at
+    // add time; checkout is a deliberate, separate step.
     expect.assertions(4);
 
     const mockBooking = {
@@ -1670,106 +1671,9 @@ describe("updateBookingAssets", () => {
     const result = await updateBookingAssets(params);
 
     expect(db.$executeRaw).toHaveBeenCalled();
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
-      data: { status: AssetStatus.CHECKED_OUT },
-    });
-    expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["kit-1", "kit-2"] },
-        organizationId: "org-1",
-        assetKits: { some: { assetId: { in: ["asset-1", "asset-2"] } } },
-      },
-      data: { status: KitStatus.CHECKED_OUT },
-    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
-  });
-
-  it("scopes the kit CHECKED_OUT flip to kits containing a newly-added asset, not arbitrary kitIds", async () => {
-    expect.assertions(2);
-
-    const mockBooking = {
-      id: "booking-1",
-      name: "Test Booking",
-      status: BookingStatus.ONGOING,
-    };
-    // @ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-
-    await updateBookingAssets({
-      ...mockUpdateBookingAssetsParams, // assetIds: ["asset-1","asset-2"], org-1
-      // caller over-supplies kit-2; only kits owning a newly-added asset must flip
-      kitIds: ["kit-1", "kit-2"],
-    });
-
-    // assets still flipped as before (unchanged behavior)
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
-      data: { status: AssetStatus.CHECKED_OUT },
-    });
-
-    // kit flip carries the relation-scope guard tying it to the newly-added assets
-    expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["kit-1", "kit-2"] },
-        organizationId: "org-1",
-        assetKits: { some: { assetId: { in: ["asset-1", "asset-2"] } } },
-      },
-      data: { status: KitStatus.CHECKED_OUT },
-    });
-  });
-
-  it("should not update kit status when no kitIds provided", async () => {
-    expect.assertions(3);
-
-    const mockBooking = {
-      id: "booking-1",
-      name: "Test Booking",
-      status: BookingStatus.ONGOING,
-    };
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Asset 1" },
-      { id: "asset-2", title: "Asset 2" },
-    ]);
-
-    await updateBookingAssets(mockUpdateBookingAssetsParams);
-
-    expect(db.$executeRaw).toHaveBeenCalled();
-    expect(db.asset.updateMany).toHaveBeenCalled();
-    expect(db.kit.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("should not update kit status when empty kitIds array provided", async () => {
-    expect.assertions(3);
-
-    const mockBooking = {
-      id: "booking-1",
-      name: "Test Booking",
-      status: BookingStatus.ONGOING,
-    };
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Asset 1" },
-      { id: "asset-2", title: "Asset 2" },
-    ]);
-
-    const params = {
-      ...mockUpdateBookingAssetsParams,
-      kitIds: [],
-    };
-
-    await updateBookingAssets(params);
-
-    expect(db.$executeRaw).toHaveBeenCalled();
-    expect(db.asset.updateMany).toHaveBeenCalled();
-    expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
   it("should not update asset or kit status for RESERVED booking", async () => {
@@ -6884,7 +6788,7 @@ describe("addScannedAssetsToBooking", () => {
     ).rejects.toThrow(/already booked or checked out/i);
 
     // The conflicting asset must never be connected to the booking — the guard
-    // runs before the connect/force-checkout transaction.
+    // runs before the connect transaction.
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
@@ -6939,6 +6843,122 @@ describe("addScannedAssetsToBooking", () => {
       ]),
       expect.anything()
     );
+  });
+});
+
+describe("getExistingBookingDetails — addable statuses", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it.each([
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+    BookingStatus.OVERDUE,
+  ])("allows adding to a %s booking", async (status) => {
+    // Progressive checkout: active (ONGOING/OVERDUE) bookings accept new items
+    // too, not just not-yet-started DRAFT/RESERVED ones.
+    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "booking-1",
+      status,
+      bookingAssets: [],
+    });
+
+    const result = await getExistingBookingDetails("booking-1", "org-1");
+    expect(result.status).toBe(status);
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ])("rejects adding to a terminal %s booking", async (status) => {
+    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "booking-1",
+      status,
+      bookingAssets: [],
+    });
+
+    await expect(
+      getExistingBookingDetails("booking-1", "org-1")
+    ).rejects.toThrow(/Draft, Reserved, Ongoing or Overdue/i);
+  });
+});
+
+describe("processBooking — checked-out guard for active bookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Wire the two db.asset.findMany call sites processBooking triggers:
+   *  1. getAvailableAssetsIdsForBooking — no `status` filter; must return
+   *     `{ id, status, assetKits }` rows.
+   *  2. the guard — filters `status: CHECKED_OUT`; returns the offending rows.
+   */
+  function mockAssets(
+    rows: Array<{ id: string; title?: string; status: AssetStatus }>
+  ) {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        if (args?.where?.status === AssetStatus.CHECKED_OUT) {
+          return Promise.resolve(
+            rows
+              .filter((r) => r.status === AssetStatus.CHECKED_OUT)
+              .map((r) => ({ id: r.id, title: r.title ?? r.id }))
+          );
+        }
+        return Promise.resolve(
+          rows.map((r) => ({ id: r.id, status: r.status, assetKits: [] }))
+        );
+      }
+    );
+  }
+
+  function mockBooking(status: BookingStatus) {
+    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "booking-1",
+      status,
+      bookingAssets: [],
+    });
+  }
+
+  it("blocks a CHECKED_OUT asset from being added to an ONGOING booking", async () => {
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await expect(
+      processBooking("booking-1", ["asset-1"], "org-1")
+    ).rejects.toThrow(/already checked out/i);
+  });
+
+  it("allows AVAILABLE assets to be added to an ONGOING booking (they stay available)", async () => {
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1"
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("does NOT block a CHECKED_OUT asset for a DRAFT booking (guard is active-only)", async () => {
+    mockBooking(BookingStatus.DRAFT);
+    mockAssets([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1"
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
   });
 });
 
