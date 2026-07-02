@@ -22,6 +22,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Alert } from "react-native";
 import {
   api,
   type AssetDetail,
@@ -146,6 +147,10 @@ export type EditAssetFormState = {
   isCategoriesLoading: boolean;
   isLocationsLoading: boolean;
   isTagsLoading: boolean;
+  /** Server-computed: caller may mint tags inline (admins/owners). */
+  canCreateTag: boolean;
+  /** Create a tag inline; adds it to `tags` and returns it, or null on failure. */
+  createTag: (name: string) => Promise<Tag | null>;
 
   // Submission
   isSubmitting: boolean;
@@ -219,6 +224,9 @@ export function useEditAssetForm(
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
+  // Server-computed from GET /api/mobile/tags: whether the caller may mint
+  // tags inline (admins/owners). Gates the picker's "create tag" row.
+  const [canCreateTag, setCanCreateTag] = useState(false);
 
   // ── Load existing asset ─────────────────────────
   useEffect(() => {
@@ -302,12 +310,35 @@ export function useEditAssetForm(
       const { data } = await api.tags(orgId);
       if (requestId !== latestTagsRequestRef.current) return;
       if (data?.tags) setTags(data.tags);
+      // Server-computed create capability (gates the picker's inline
+      // "create tag" row; false on older servers that omit the flag).
+      setCanCreateTag(data?.canCreate ?? false);
     } finally {
       if (requestId === latestTagsRequestRef.current) {
         setIsTagsLoading(false);
       }
     }
   }, [orgId]);
+
+  // Inline tag creation from the picker (admins/owners; the server enforces
+  // `tag.create`). Adds the new tag to the local list so the dropdown shows it
+  // without a refetch (the API helper already invalidated the cached list).
+  const createTag = useCallback(
+    async (name: string): Promise<Tag | null> => {
+      if (!orgId) return null;
+      const { data, error } = await api.createTag(orgId, name);
+      if (error || !data?.tag) {
+        Alert.alert("Couldn't create tag", error || "Please try again.");
+        return null;
+      }
+      const tag = data.tag;
+      setTags((prev) =>
+        [...prev, tag].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      return tag;
+    },
+    [orgId]
+  );
 
   useEffect(() => {
     loadCategories();
@@ -422,6 +453,8 @@ export function useEditAssetForm(
     isCategoriesLoading,
     isLocationsLoading,
     isTagsLoading,
+    canCreateTag,
+    createTag,
     isSubmitting,
     setIsSubmitting,
   };
