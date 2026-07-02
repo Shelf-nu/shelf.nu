@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { BookingStatus, KitStatus, type Prisma } from "@prisma/client";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -13,6 +13,7 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { db } from "~/database/db.server";
 
 import {
   buildKitSlicesForBooking,
@@ -25,6 +26,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -106,7 +108,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -130,14 +132,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // Validate the target booking: confirms it exists in the caller's org and
-    // is still DRAFT/RESERVED (the only states that accept new items). Also
-    // returns the existing BookingAsset rows so we can skip kit slices that are
-    // already present. `updateBookingAssets` re-checks existence but NOT
-    // status, so this guard is what blocks adding to a non-editable booking.
+    // is in an addable state (DRAFT/RESERVED/ONGOING/OVERDUE). Also returns the
+    // existing BookingAsset rows so we can skip kit slices that are already
+    // present. `updateBookingAssets` re-checks existence but NOT status, so this
+    // guard is what blocks adding to a terminal (COMPLETE/ARCHIVED/CANCELLED)
+    // booking.
     const bookingInfo = await getExistingBookingDetails(
       bookingId,
       organizationId
     );
+
+    // Cross-user IDOR guard: `booking:create` is granted org-wide to
+    // SELF_SERVICE/BASE, so without this a non-owner could add kits to another
+    // user's booking. No-op for ADMIN/OWNER. Mirrors the asset flow's guard in
+    // processBooking and the sibling adjust-asset-quantity route.
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingInfo.creatorId,
+        custodianUserId: bookingInfo.custodianUserId,
+      },
+      userId,
+      role,
+      action: "add kits to",
+    });
 
     // AssetKit ids already represented on this booking. We dedupe by AssetKit
     // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
@@ -149,6 +166,66 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .map((ba) => ba.assetKitId)
         .filter((id): id is string => id != null)
     );
+
+    // Progressive-checkout guard (parity with the manage-kits route): a kit that
+    // is physically CHECKED_OUT on ANOTHER active booking cannot be added to an
+    // ONGOING/OVERDUE booking. Kits added to an active booking otherwise stay
+    // AVAILABLE until purposefully checked out. Only fires for active targets;
+    // DRAFT/RESERVED bookings still accept checked-out kits.
+    //
+    // Kits already represented on this booking are excluded: their CHECKED_OUT
+    // status can be owned by this same booking, and re-adding only attaches
+    // newly-added members (buildKitSlicesForBooking skips existing memberships).
+    // Mirrors the manage-kits "newly added kits only" guard.
+    if (
+      bookingInfo.status === BookingStatus.ONGOING ||
+      bookingInfo.status === BookingStatus.OVERDUE
+    ) {
+      // Kit ids that already have at least one membership on this booking.
+      const kitIdsAlreadyOnBooking = new Set(
+        existingAssetKitIds.size > 0
+          ? (
+              await db.assetKit.findMany({
+                where: {
+                  id: { in: [...existingAssetKitIds] },
+                  kitId: { in: kitIds },
+                  organizationId,
+                },
+                select: { kitId: true },
+              })
+            ).map((ak) => ak.kitId)
+          : []
+      );
+      const kitIdsToGuard = kitIds.filter(
+        (id) => !kitIdsAlreadyOnBooking.has(id)
+      );
+
+      const checkedOutKits =
+        kitIdsToGuard.length > 0
+          ? await db.kit.findMany({
+              where: {
+                id: { in: kitIdsToGuard },
+                organizationId,
+                status: KitStatus.CHECKED_OUT,
+              },
+              select: { id: true, name: true },
+            })
+          : [];
+
+      if (checkedOutKits.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed. Kits already checked out",
+          message: `The following kits are already checked out and cannot be added to the booking: ${checkedOutKits
+            .map((kit) => kit.name)
+            .join(", ")}`,
+          additionalData: { checkedOutKits, bookingId },
+          status: 400,
+          label: "Booking",
+          shouldBeCaptured: false,
+        });
+      }
+    }
 
     // Resolve the kit memberships into kit-driven slice specs (org-scoped),
     // skipping any AssetKit already on the booking. Routing members through
@@ -182,9 +259,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Add the kit(s) as kit-driven rows only: `assetIds: []` prevents duplicate
-    // standalone rows for the members, `kitSlices` carries the per-membership
-    // rows, and `kitIds` lets the ONGOING/OVERDUE status flip cascade to the
-    // kit(s) themselves.
+    // standalone rows for the members and `kitSlices` carries the per-membership
+    // rows. Added members stay AVAILABLE (progressive checkout) — no status flip
+    // happens here regardless of booking status. `kitIds` is still forwarded for
+    // note attribution / membership resolution.
     const booking = await updateBookingAssets({
       id: bookingId,
       organizationId,
@@ -241,8 +319,16 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  function isValidBooking(booking: any) {
-    return booking && ["RESERVED", "DRAFT"].includes(booking.status);
+  function isValidBooking(
+    booking: { status?: string | null } | null | undefined
+  ) {
+    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Kits added to
+    // an active booking stay AVAILABLE until purposefully checked out
+    // (progressive checkout).
+    return (
+      !!booking?.status &&
+      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
+    );
   }
 
   return (
@@ -254,8 +340,9 @@ export default function ExistingBooking() {
         <div className="mb-5">
           <h3>Add to Existing Booking</h3>
           <div>
-            You can only add an asset to bookings that are in Draft or Reserved
-            State.
+            You can add a kit to Draft, Reserved, Ongoing or Overdue bookings.
+            Kits added to an ongoing booking stay available until you check them
+            out.
           </div>
         </div>
         {ids?.map((item, i) => (
@@ -294,8 +381,10 @@ export default function ExistingBooking() {
             }
           />
           <div className="mt-2 text-gray-500">
-            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
-            <span className="font-medium text-gray-600">Reserved</span> bookings
+            <span className="font-medium text-gray-600">Draft</span>,{" "}
+            <span className="font-medium text-gray-600">Reserved</span>,{" "}
+            <span className="font-medium text-gray-600">Ongoing</span> and{" "}
+            <span className="font-medium text-gray-600">Overdue</span> bookings
             are visible
           </div>
         </div>
