@@ -17,6 +17,7 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.ove
 import {
   getBookingContextAssetStatus,
   isAssetPartiallyCheckedIn,
+  isBookingRowQtyFullyCheckedOut,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -256,14 +257,25 @@ export default function ListAssetContent({
     qtyBooked > 0 &&
     qtyCheckedOut > 0 &&
     // Upper guard: ONLY fires when SOME but not all booked units are out.
-    // When `qtyCheckedOut === qtyBooked` and nothing has been returned, the
-    // service-side post-batch flip sets `asset.status = CHECKED_OUT`, so the
-    // row falls through to `baseContextStatus` which renders the standard
-    // violet "Checked out" badge. Without this guard, the amber pending-
-    // return badge would shadow the fully-out state.
+    // The fully-out case (`qtyCheckedOut >= qtyBooked`) is handled by
+    // `isQtyFullyCheckedOut` below → CHECKED_OUT. Without this guard, the
+    // amber pending-return badge would shadow the fully-out state.
     qtyCheckedOut < qtyBooked &&
     qtyDispositioned === 0 &&
     isActiveBooking;
+  /**
+   * This row's own units are ALL progressively checked OUT with NO disposition
+   * yet → the slice is fully out and should read as the standard violet
+   * "Checked out". Resolved per-row (per `bookingAssetId`) via the SHARED
+   * helper so this badge and the status-sort's `isCheckedOut` predicate
+   * (`shape-booking-assets.ts`) use identical logic and can never disagree —
+   * the divergence that let a fully-checked-out kit slice read "Available"
+   * while its kit still sat at the top of a status sort.
+   */
+  const isQtyFullyCheckedOut = isBookingRowQtyFullyCheckedOut(
+    item,
+    booking.status
+  );
 
   /**
    * Workspace-availability lookup for this row's asset. `undefined` when
@@ -322,11 +334,16 @@ export default function ListAssetContent({
    *     as in-progress on the check-IN side.
    *  2. Qty partly reconciled (some disposition, more outstanding) →
    *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
-   *  3. Qty progressively checked OUT with NO returns yet →
-   *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
-   *     required") — the out-side equivalent of (2). Only reached when
-   *     `qtyDispositioned === 0`, so it can never shadow (1)/(2).
-   *  4. The base status from `getBookingContextAssetStatus`, which
+   *  3. Qty progressively checked OUT with NO returns yet, but only SOME
+   *     units out → `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber,
+   *     "action required") — the out-side equivalent of (2). Only reached
+   *     when `qtyDispositioned === 0`, so it can never shadow (1)/(2).
+   *  4. This slice's units ALL checked out, none returned →
+   *     `CHECKED_OUT` (violet, "Checked out"). Resolved per-row so a
+   *     fully-out kit slice reads correctly even when the global
+   *     `Asset.status` hasn't flipped (a parallel standalone slice is
+   *     still booked). Only reached when `qtyDispositioned === 0`.
+   *  5. The base status from `getBookingContextAssetStatus`, which
    *     already reflects INDIVIDUAL asset progressive-checkout state
    *     via the `partialCheckinDetails` map. `wasCheckedOut` (from
    *     main) is consumed separately by the `ReturnedBadge` branch on
@@ -338,6 +355,8 @@ export default function ListAssetContent({
     ? "PARTIALLY_CHECKED_OUT_QTY"
     : isQtyPartiallyCheckedOut
     ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
+    : isQtyFullyCheckedOut
+    ? AssetStatus.CHECKED_OUT
     : baseContextStatus;
 
   const isPartiallyCheckedIn =

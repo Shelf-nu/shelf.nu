@@ -206,11 +206,10 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       },
     },
     // Base fetch order. The rendered order is computed in-memory by the
-    // consuming route (sortBookingAssets / groupAndSortAssetsByKit); this DB
-    // order only acts as the stable tiebreaker fed into those sorts. Kept
-    // identical to the historical default (CHECKED_OUT first, then creation
-    // order) so the in-memory sorts receive the exact same input as before —
-    // preserving the booking page's default ordering 1:1.
+    // consuming route (groupAndSortAssetsByKit); this DB order only acts as
+    // the stable tiebreaker fed into that sort. Kept identical to the
+    // historical default (CHECKED_OUT first, then creation order) so the
+    // in-memory sort receives the exact same input as before.
     orderBy: [
       { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { asset: { createdAt: "asc" } }, // Then by creation order as fallback
@@ -260,6 +259,7 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
   title: "Name",
   category: "Category",
   location: "Location",
+  type: "Item type",
 } as const;
 
 export type BookingAssetSortingOption =

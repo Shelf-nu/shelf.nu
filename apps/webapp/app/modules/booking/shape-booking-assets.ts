@@ -9,11 +9,15 @@
  * are strings after the network / hydration); it never constructs Dates itself.
  *
  * @see {@link file://./helpers.ts} filterBookingAssets / groupAndSortAssetsByKit
- * @see {@link file://../../utils/booking-assets.ts} sortBookingAssets
+ * @see {@link file://../../utils/booking-assets.ts} isAssetCheckedOutInBooking
  * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
  */
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
-import { sortBookingAssets } from "~/utils/booking-assets";
+import {
+  isAssetCheckedOutInBooking,
+  isBookingRowQtyFullyCheckedOut,
+  type AssetWithStatus,
+} from "~/utils/booking-assets";
 import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
 
 /** A rendered pagination row: a grouped kit (with its assets) or a lone asset. */
@@ -39,6 +43,8 @@ export interface ShapeBookingAssetsParams<TAsset, TKit> {
   page: number;
   perPage: number;
   partialCheckinDetails: PartialCheckinDetailsType;
+  /** Parent booking status — drives booking-context checked-out resolution. */
+  bookingStatus: string;
 }
 
 /** Output of {@link shapeBookingAssets} — the view fields the route returns. */
@@ -68,6 +74,7 @@ export function shapeBookingAssets<
   page,
   perPage,
   partialCheckinDetails,
+  bookingStatus,
 }: ShapeBookingAssetsParams<TAsset, TKit>): ShapeBookingAssetsResult<
   TAsset,
   TKit
@@ -75,18 +82,33 @@ export function shapeBookingAssets<
   // 1. Search-filter (with kit re-expansion).
   const filtered = filterBookingAssets(rawAssets, search);
 
-  // 2. Status sort needs partial check-in date ordering; other fields are
-  //    handled entirely by groupAndSortAssetsByKit.
-  const isStatusSort = !orderBy || orderBy === "status";
-  const listAssets = isStatusSort
-    ? sortBookingAssets(filtered, partialCheckinDetails)
-    : filtered;
-
-  // 3. Group by kit + apply the sort to assets and kit groups.
+  // 2. Group by kit + sort. Status ordering is booking-context aware: an asset
+  //    counts as "checked out" (bottom bucket) when its per-booking status
+  //    resolves to CHECKED_OUT, OR when THIS row's own units are fully checked
+  //    out per-slice. The per-slice arm is essential for QUANTITY_TRACKED
+  //    assets that span a kit slice + a standalone slice: the GLOBAL status
+  //    never flips until every slice is out, so without it a fully-checked-out
+  //    kit slice would wrongly stay on top (and its kit wouldn't sink). This
+  //    keeps the sort position in lock-step with the row badge, and still
+  //    leaves QT DRAFT/RESERVED rows + partially-checked-in assets on top.
   const sortedAssets = groupAndSortAssetsByKit(
-    listAssets,
+    filtered,
     orderBy,
-    orderDirection
+    orderDirection,
+    {
+      isCheckedOut: (asset) => {
+        // Cast once to the permissive AssetWithStatus (open `any` index) so both
+        // predicate arms accept the loosely-typed enriched row.
+        const row = asset as AssetWithStatus;
+        return (
+          isAssetCheckedOutInBooking(
+            row,
+            partialCheckinDetails,
+            bookingStatus
+          ) || isBookingRowQtyFullyCheckedOut(row, bookingStatus)
+        );
+      },
+    }
   );
 
   // 4. Build pagination items (kits grouped, individual assets separate).
