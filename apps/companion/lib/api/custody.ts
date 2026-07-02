@@ -55,6 +55,9 @@ export const custodyApi = {
       {
         method: "POST",
         body: JSON.stringify({ assetId, teamMemberId, quantity, note }),
+        // why: non-idempotent — a timed-out-but-landed request must not be
+        // auto-retried, or the assignment double-applies.
+        retry: false,
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/team-members");
@@ -79,6 +82,9 @@ export const custodyApi = {
       {
         method: "POST",
         body: JSON.stringify({ assetId, teamMemberId, quantity, note }),
+        // why: non-idempotent — a timed-out-but-landed request must not be
+        // auto-retried, or the release double-applies.
+        retry: false,
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/team-members");

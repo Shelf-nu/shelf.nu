@@ -46,6 +46,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
  * Zod schema for the release-quantity-custody JSON body. Identical to the
@@ -70,6 +71,9 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     userId = user.id;
+    // Same limiter bucket as the other mobile custody mutations — a stuck
+    // retry loop or rapid taps shouldn't hammer a row-locking transaction.
+    await enforceUserRateLimit(user.id, "bulk");
 
     const organizationId = await requireOrganizationAccess(request, user.id);
 
@@ -206,12 +210,28 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.
-    const asset = await getMobileAssetForViewer({
-      assetId,
-      organizationId,
-      viewerUserId: user.id,
-      canSeeAllCustody,
-    });
+    // Best-effort: releaseQuantity has already committed, so a refresh
+    // failure must NOT surface as an action error — the client would show
+    // a failure (and could retry the non-idempotent release) for a release
+    // that actually succeeded. Null on failure; the app refetches anyway.
+    let asset = null;
+    try {
+      asset = await getMobileAssetForViewer({
+        assetId,
+        organizationId,
+        viewerUserId: user.id,
+        canSeeAllCustody,
+      });
+    } catch (refreshError) {
+      Logger.error(
+        new ShelfError({
+          cause: refreshError,
+          message: "Failed to refresh asset after quantity release",
+          label: "Assets",
+          additionalData: { assetId, userId: user.id },
+        })
+      );
+    }
 
     return data({ success: true, asset });
   } catch (cause) {

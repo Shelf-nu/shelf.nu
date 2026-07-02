@@ -46,6 +46,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
  * Zod schema for the assign-quantity-custody JSON body. Identical to the
@@ -70,6 +71,9 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     userId = user.id;
+    // Same limiter bucket as the other mobile custody mutations — a stuck
+    // retry loop or rapid taps shouldn't hammer a row-locking transaction.
+    await enforceUserRateLimit(user.id, "bulk");
 
     const organizationId = await requireOrganizationAccess(request, user.id);
 
@@ -199,21 +203,50 @@ export async function action({ request }: ActionFunctionArgs) {
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
 
+    // Everything past checkOutQuantity is best-effort: the mutation has
+    // already committed, so a failure here must NOT surface as an action
+    // error — the client would show a failure (and could retry a
+    // non-idempotent assign) for a checkout that actually succeeded.
+
     /** Check low-stock threshold and notify if breached (web parity) */
-    await checkAndNotifyLowStock({
-      assetId,
-      userId: user.id,
-      organizationId,
-    });
+    try {
+      await checkAndNotifyLowStock({
+        assetId,
+        userId: user.id,
+        organizationId,
+      });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: "Failed low-stock check after quantity checkout",
+          label: "Assets",
+          additionalData: { assetId, userId: user.id },
+        })
+      );
+    }
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.
-    const asset = await getMobileAssetForViewer({
-      assetId,
-      organizationId,
-      viewerUserId: user.id,
-      canSeeAllCustody,
-    });
+    // Null on failure — the app refetches the detail regardless.
+    let asset = null;
+    try {
+      asset = await getMobileAssetForViewer({
+        assetId,
+        organizationId,
+        viewerUserId: user.id,
+        canSeeAllCustody,
+      });
+    } catch (refreshError) {
+      Logger.error(
+        new ShelfError({
+          cause: refreshError,
+          message: "Failed to refresh asset after quantity checkout",
+          label: "Assets",
+          additionalData: { assetId, userId: user.id },
+        })
+      );
+    }
 
     return data({ success: true, asset });
   } catch (cause) {
