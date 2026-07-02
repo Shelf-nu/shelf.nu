@@ -85,7 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
      * Without it, a SELF_SERVICE user could assign custody to any
      * team member (hex-security r3202162994).
      */
-    await bulkCheckOutAssets({
+    const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId: user.id,
       role,
       assetIds,
@@ -96,7 +96,13 @@ export async function action({ request }: ActionFunctionArgs) {
       settings,
     });
 
-    return data({ success: true });
+    // Additive: the service silently skips QUANTITY_TRACKED assets on mixed
+    // selections (they need a per-asset quantity — use
+    // /api/mobile/custody/assign-quantity). Forward the count so the app can
+    // report it honestly, mirroring the web's assets.bulk-assign-custody.ts.
+    // An ALL-quantity-tracked selection throws in the service instead and
+    // surfaces through the error envelope.
+    return data({ success: true, skippedQuantityTracked });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

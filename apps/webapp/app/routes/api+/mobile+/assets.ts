@@ -137,8 +137,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
             orderBy: { createdAt: "asc" as const },
             select: {
               quantity: true,
+              // why: operator-vs-kit discriminator for `releasableQuantity`.
+              kitCustodyId: true,
               custodian: {
-                select: { id: true, name: true },
+                // why: `userId` lets the app recognize the caller's own row.
+                select: { id: true, name: true, userId: true },
               },
             },
           },

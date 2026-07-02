@@ -15,7 +15,13 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type Location as LocationType } from "@/lib/api";
+import {
+  api,
+  type AssetCustodyListEntry,
+  type Location as LocationType,
+  type TeamMember,
+} from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { useOrg } from "@/lib/org-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
@@ -30,6 +36,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -77,6 +84,13 @@ export default function AssetDetailScreen() {
     entity: "asset",
     action: "custody",
   });
+  // Self-service users may only release their OWN quantity-custody rows.
+  // The server enforces this with a 403 guard on the release endpoint; the
+  // client check only controls affordance visibility. Mirrors scanner.tsx.
+  const isSelfService = roles?.includes("SELF_SERVICE") ?? false;
+  // Current auth user — used to recognize the caller's own custody row via
+  // the server-provided custodian.userId (bearer-auth session user id).
+  const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
 
@@ -99,6 +113,8 @@ export default function AssetDetailScreen() {
     setIsActionLoading,
     handleAssignCustody,
     handleReleaseCustody,
+    performAssignQuantity,
+    performReleaseQuantity,
   } = useCustodyActions({ asset, currentOrg, fetchAsset });
 
   // Image upload
@@ -113,6 +129,15 @@ export default function AssetDetailScreen() {
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
+
+  // Quantity-custody steps (QUANTITY_TRACKED assets only). Non-null values
+  // double as the "sheet visible" flag AND carry the pending target, so the
+  // sheet and the submit handler can never disagree about who is affected.
+  const [assignQtyMember, setAssignQtyMember] = useState<TeamMember | null>(
+    null
+  );
+  const [releaseQtyEntry, setReleaseQtyEntry] =
+    useState<AssetCustodyListEntry | null>(null);
 
   // Notes
   const [noteText, setNoteText] = useState("");
@@ -267,6 +292,23 @@ export default function AssetDetailScreen() {
     isQtyTracked && asset.custodyList && asset.custodyList.length > 0
       ? asset.custodyList
       : null;
+  // Cap for the assign-quantity step. Prefer the server's custodyAvailable
+  // (web-parity cap that also excludes kit earmarks); fall back for older
+  // servers to the broader `available`, then the plain total — the server
+  // re-validates the real cap on submit either way.
+  const assignMax = isQtyTracked
+    ? breakdown?.custodyAvailable ?? breakdown?.available ?? asset.quantity ?? 0
+    : 0;
+  // Units releasable from the pending release target (operator rows only;
+  // kit-held units are excluded). 0 while no row is pending.
+  const releaseMax = releaseQtyEntry
+    ? releaseQtyEntry.releasableQuantity ?? releaseQtyEntry.quantity
+    : 0;
+  // Custody holders the server hid from this caller (privacy filtering for
+  // roles without view-all-custody). Shown as a muted "+N others" row.
+  const custodyOthersCount = isQtyTracked
+    ? asset.custodyListOthersCount ?? 0
+    : 0;
 
   return (
     <>
@@ -371,6 +413,8 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
+            isQtyTracked={isQtyTracked}
+            custodyAvailable={isQtyTracked ? assignMax : undefined}
           />
 
           {/* ── Details Card ───────────────────────────── */}
@@ -406,18 +450,49 @@ export default function AssetDetailScreen() {
               /* Many-aware custody — one row per holder. Each row is
                  self-describing: the custodian's name labels the row and the
                  held quantity is the value, so no row depends on a sibling for
-                 context (QUANTITY_TRACKED assets can have several holders). */
+                 context (QUANTITY_TRACKED assets can have several holders).
+                 Rows the caller can act on are tappable and open the
+                 release-quantity sheet; rows the caller can't act on (no
+                 custody permission, another member's row for self-service,
+                 or units held only via a kit) stay read-only. */
               custodyList.map((entry) => {
                 const qtyLabel = formatQuantity(
                   entry.quantity,
                   asset.unitOfMeasure
                 );
+                // Operator-releasable units. Older servers omit the field —
+                // treat the full holding as releasable (server re-validates).
+                const releasableQty =
+                  entry.releasableQuantity ?? entry.quantity;
+                // Units earmarked through a kit's custody: released only by
+                // releasing the kit itself, so they get a hint, not a button.
+                const kitHeldQty = Math.max(0, entry.quantity - releasableQty);
+                const canReleaseRow =
+                  canCustody &&
+                  releasableQty > 0 &&
+                  (!isSelfService || entry.custodian.userId === user?.id);
                 return (
                   <InfoRow
                     key={entry.custodian.id}
                     icon="person-outline"
                     label={entry.custodian.name}
-                    value={qtyLabel ?? "In custody"}
+                    value={
+                      kitHeldQty > 0
+                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
+                        : qtyLabel ?? "In custody"
+                    }
+                    onPress={
+                      canReleaseRow
+                        ? () => setReleaseQtyEntry(entry)
+                        : undefined
+                    }
+                    accessibilityLabel={
+                      canReleaseRow
+                        ? `Release custody from ${
+                            entry.custodian.name
+                          }, holds ${qtyLabel ?? entry.quantity}`
+                        : undefined
+                    }
                   />
                 );
               })
@@ -442,6 +517,28 @@ export default function AssetDetailScreen() {
                 />
               </>
             ) : null}
+            {/* Holders hidden from this caller (privacy filtering) — one calm
+                muted row so partial lists don't read as the full picture. */}
+            {custodyOthersCount > 0 && (
+              <View
+                style={styles.custodyOthersRow}
+                accessible
+                accessibilityLabel={`Plus ${custodyOthersCount} ${
+                  custodyOthersCount === 1 ? "other holds" : "others hold"
+                } this asset`}
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={16}
+                  color={colors.muted}
+                />
+                <Text style={styles.custodyOthersText}>
+                  +{custodyOthersCount}{" "}
+                  {custodyOthersCount === 1 ? "other holds" : "others hold"}{" "}
+                  this asset
+                </Text>
+              </View>
+            )}
             {asset.valuation != null && asset.valuation > 0 && (
               <InfoRow
                 icon="cash-outline"
@@ -603,7 +700,14 @@ export default function AssetDetailScreen() {
               // detail and the new custody state — not a stuck member list
               // with no visible feedback (read as "it didn't work").
               setShowCustodyPicker(false);
-              handleAssignCustody(member);
+              if (isQtyTracked) {
+                // QUANTITY_TRACKED: capture the member and ask how many
+                // units — the quantity sheet's submit is the confirm step.
+                setAssignQtyMember(member);
+              } else {
+                // INDIVIDUAL: unchanged Alert-confirm flow.
+                handleAssignCustody(member);
+              }
             }}
             onClose={() => setShowCustodyPicker(false)}
           />
@@ -614,10 +718,82 @@ export default function AssetDetailScreen() {
             onSelect={handleLocationSelect}
             onClose={() => setShowLocationPicker(false)}
           />
+          {/* Quantity steps — mounted only for QUANTITY_TRACKED assets so
+              INDIVIDUAL rendering stays byte-identical. */}
+          {isQtyTracked && (
+            <>
+              <QuantityInputSheet
+                visible={assignQtyMember != null}
+                title="Assign Quantity"
+                subtitle={
+                  assignQtyMember
+                    ? `Assign to ${memberDisplayName(assignQtyMember)}`
+                    : undefined
+                }
+                max={assignMax}
+                defaultValue={1}
+                unitOfMeasure={asset.unitOfMeasure}
+                confirmLabel="Assign"
+                onSubmit={(quantity) => {
+                  const member = assignQtyMember;
+                  setAssignQtyMember(null);
+                  if (member) void performAssignQuantity(member, quantity);
+                }}
+                onClose={() => setAssignQtyMember(null)}
+              />
+              <QuantityInputSheet
+                visible={releaseQtyEntry != null}
+                title="Release Quantity"
+                subtitle={
+                  releaseQtyEntry
+                    ? `Release how many of ${
+                        releaseQtyEntry.custodian.name
+                      }'s ${
+                        formatQuantity(releaseMax, asset.unitOfMeasure) ??
+                        String(releaseMax)
+                      }?`
+                    : undefined
+                }
+                max={releaseMax}
+                // Web parity: the release dialog pre-fills a full release.
+                defaultValue={releaseMax}
+                unitOfMeasure={asset.unitOfMeasure}
+                confirmLabel="Release"
+                destructive
+                onSubmit={(quantity) => {
+                  const entry = releaseQtyEntry;
+                  setReleaseQtyEntry(null);
+                  if (entry) {
+                    void performReleaseQuantity(entry.custodian.id, quantity);
+                  }
+                }}
+                onClose={() => setReleaseQtyEntry(null)}
+              />
+            </>
+          )}
         </>
       )}
     </>
   );
+}
+
+/**
+ * Human display name for a team member — the linked user's full name when
+ * present, falling back to the team-member record name. Matches the label
+ * the TeamMemberPicker row showed, so the quantity sheet's subtitle names
+ * exactly who was just tapped.
+ *
+ * @param member - The selected team member.
+ * @returns The display name.
+ */
+function memberDisplayName(member: TeamMember): string {
+  if (member.user) {
+    const fullName = [member.user.firstName, member.user.lastName]
+      .filter(Boolean)
+      .join(" ");
+    return fullName || member.name;
+  }
+  return member.name;
 }
 
 /**
@@ -800,6 +976,21 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   quantityStatLabel: {
     fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  // "+N others hold this asset" — matches InfoRow's row metrics but stays
+  // muted end-to-end (it is a note about hidden rows, not a data row).
+  custodyOthersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  custodyOthersText: {
+    fontSize: fontSize.base,
     color: colors.muted,
   },
 

@@ -49,8 +49,26 @@ export type ConsumptionType = "ONE_WAY" | "TWO_WAY";
  * the server's `MobileAssetResponse.custodyList`.
  */
 export type AssetCustodyListEntry = {
-  custodian: { id: string; name: string };
+  custodian: {
+    id: string;
+    name: string;
+    /**
+     * Auth user id linked to this custodian's team-member record; null for
+     * non-registered members. Lets the client identify its own row (e.g.
+     * self-service users may only release their own custody). Absent on
+     * older servers — treat as unknown, not as "someone else".
+     */
+    userId?: string | null;
+  };
+  /** Total units held by this custodian (operator-assigned + kit-allocated). */
   quantity: number;
+  /**
+   * Units releasable via the release-quantity endpoint (operator rows only).
+   * `quantity - releasableQuantity` = units held via a kit, which are only
+   * released by releasing the kit's own custody. Absent on older servers —
+   * fall back to `quantity` (the server still enforces the real cap).
+   */
+  releasableQuantity?: number;
 };
 
 /**
@@ -130,6 +148,13 @@ export type AssetQuantityBreakdown = {
   reserved: number;
   /** Units checked out on active bookings. */
   checkedOut: number;
+  /**
+   * Assign cap for the quantity-custody dialog. Mirrors the web overview
+   * loader: total - in kits - operator custody - checked out; reservations
+   * are deliberately NOT subtracted (they re-validate at their own checkout).
+   * Absent on older servers — fall back to `available`, then the plain total.
+   */
+  custodyAvailable?: number;
 };
 
 export type AssetDetail = {
@@ -181,6 +206,12 @@ export type AssetDetail = {
    * assets or QUANTITY_TRACKED assets with no activity. See type docs.
    */
   quantityBreakdown?: AssetQuantityBreakdown | null;
+  /**
+   * Number of custody holders hidden from the caller for privacy (e.g.
+   * self-service users only see their own rows). When > 0 the detail screen
+   * shows a muted "+N other(s) hold this asset" row. Absent on older servers.
+   */
+  custodyListOthersCount?: number;
 } & AssetQuantityFields;
 
 /**
@@ -356,6 +387,17 @@ export type CustodyResponse = {
   };
 };
 
+/**
+ * Response of the mobile assign-quantity / release-quantity custody endpoints
+ * (QUANTITY_TRACKED assets only). `asset` is the refreshed detail-shaped
+ * asset when the server includes it; the client refetches the detail after
+ * success regardless, so consumers must tolerate the field being absent.
+ */
+export type QuantityCustodyResponse = {
+  success: boolean;
+  asset?: AssetDetail;
+};
+
 export type UpdateLocationResponse = {
   asset: {
     id: string;
@@ -375,13 +417,20 @@ export type UpdateImageResponse = {
 
 /**
  * Response of the three mobile bulk endpoints (bulk-assign-custody,
- * bulk-release-custody, bulk-update-location). The underlying services are
- * all-or-nothing — the routes return only `{ success: true }`, never partial
- * counts. Client-side blockers (lib/batch-blockers.ts) guarantee only clean
- * batches are submitted.
+ * bulk-release-custody, bulk-update-location). Mixed selections skip
+ * QUANTITY_TRACKED assets server-side and report the count via
+ * `skippedQuantityTracked`; selections that are 100% quantity-tracked
+ * surface as an error envelope instead (never a skip count). For every
+ * other eligibility rule the client-side blockers (lib/batch-blockers.ts)
+ * keep batches clean before submit.
  */
 export type BulkActionResponse = {
   success: boolean;
+  /**
+   * Count of QUANTITY_TRACKED assets the server skipped (additive; absent on
+   * older servers). Always 0 for all-INDIVIDUAL batches.
+   */
+  skippedQuantityTracked?: number;
 };
 
 export type BookingStatus =

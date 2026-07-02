@@ -3,10 +3,15 @@ import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import {
+  filterMobileCustodyListForViewer,
+  viewerCanSeeLegacyCustody,
+} from "~/modules/api/mobile-custody-visibility.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
@@ -26,6 +31,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
     const { assetId } = getParams(params, z.object({ assetId: z.string() }));
+
+    // Custody visibility is permission-gated (web parity): viewers without
+    // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
+    // allow) must not receive other holders' custody. Resolve the flag once
+    // here; the filtering happens below, after shaping.
+    const { canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const asset = await db.asset.findUnique({
       where: {
@@ -69,10 +83,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: feeds the helper's many-aware `custodyList` (additive);
             // the detail screen's existing `custody` read is unchanged.
             quantity: true,
+            // why: discriminates operator rows (null) from kit-allocated rows
+            // so the shaper can compute `releasableQuantity` per holder.
+            kitCustodyId: true,
             custodian: {
               select: {
                 id: true,
                 name: true,
+                // why: powers the server-side custody-visibility filter below
+                // ("is this row the caller's own?"). Also web parity: the web
+                // asset page ships custodian.userId to the client
+                // (asset-custody-card.tsx:87 reads it) — additive here.
+                userId: true,
                 user: {
                   select: {
                     firstName: true,
@@ -163,7 +185,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       assetLocations: asset.assetLocations,
       custody: asset.custody.map((c) => ({
         quantity: c.quantity,
-        custodian: { id: c.custodian.id, name: c.custodian.name },
+        kitCustodyId: c.kitCustodyId,
+        custodian: {
+          id: c.custodian.id,
+          name: c.custodian.name,
+          userId: c.custodian.userId,
+        },
       })),
     });
 
@@ -178,6 +205,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       inCustody: number;
       reserved: number;
       checkedOut: number;
+      custodyAvailable: number;
     } | null = null;
     if (isQuantityTracked(asset)) {
       const rows = await getAssetQuantityRows(db, {
@@ -192,6 +220,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             inCustody: breakdown.inCustody,
             reserved: breakdown.reserved,
             checkedOut: breakdown.checkedOut,
+            // Assign cap for the quantity-custody dialog. Mirrors
+            // `checkOutQuantity`'s availability rule: total − in custody −
+            // checked out on active bookings; RESERVED is deliberately NOT
+            // subtracted (reservations re-validate at their own checkout).
+            // Floored at 0 so a transiently over-allocated asset can't
+            // render a negative cap.
+            custodyAvailable: Math.max(
+              0,
+              breakdown.total - breakdown.inCustody - breakdown.checkedOut
+            ),
           }
         : null;
     }
@@ -209,6 +247,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ...assetData
     } = asset;
 
+    // Custody visibility parity (server-side, since mobile clients are
+    // untrusted): when the caller lacks custody-view permission, filter
+    // `custodyList` to their OWN entries and report how many holders were
+    // hidden — mirroring the web's QuantityCustodyList filter + hidden-count
+    // (quantity-custody-list.tsx:121-126).
+    const { custodyList, custodyListOthersCount } =
+      filterMobileCustodyListForViewer({
+        custodyList: flattened.custodyList,
+        custodyRows: detailCustody,
+        viewerUserId: user.id,
+        canSeeAllCustody,
+      });
+
+    // Legacy single `custody`: the web HIDES its single-custodian card from
+    // viewers without custody-view permission unless they ARE the custodian —
+    // assets.$assetId.overview.tsx:1826-1836 passes
+    // hasPermission={userCanViewSpecificCustody(...)} and CustodyCard renders
+    // nothing when !hasPermission (asset-custody-card.tsx:63). Mirror that
+    // exactly: null the field when the caller may not see it.
+    const primaryCustody = detailCustody[0] ?? null;
+    const visibleCustody =
+      primaryCustody &&
+      viewerCanSeeLegacyCustody({
+        custodianUserId: primaryCustody.custodian.userId,
+        viewerUserId: user.id,
+        canSeeAllCustody,
+      })
+        ? primaryCustody
+        : null;
+
     return data({
       asset: {
         ...assetData,
@@ -217,11 +285,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         location: flattened.location,
         // why: re-attach the detail-shape custody (with createdAt +
         // custodian.user) — the helper's narrower shape drops both.
-        custody: detailCustody[0] ?? null,
-        // Many-aware custody list (additive) — every holder + their quantity,
-        // so the detail screen can show per-custodian quantities for
-        // QUANTITY_TRACKED assets. Legacy single `custody` above is unchanged.
-        custodyList: flattened.custodyList,
+        // Nulled when the caller lacks custody-view permission (see above).
+        custody: visibleCustody,
+        // Many-aware custody list (additive) — every visible holder + their
+        // quantity, so the detail screen can show per-custodian quantities
+        // for QUANTITY_TRACKED assets. Filtered to the caller's own entries
+        // when they lack custody-view permission.
+        custodyList,
+        // Additive: number of holders hidden from this caller (0 when the
+        // caller can see all custody) so the app can render "+N others".
+        custodyListOthersCount,
         // why: re-attach the wider category shape (id + color) the detail
         // endpoint loads — the helper only types {name}.
         category: detailCategory,

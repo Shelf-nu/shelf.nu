@@ -43,9 +43,28 @@ const baseAsset = {
   assetLocations: [],
   custody: [] as Array<{
     quantity: number;
-    custodian: { id: string; name: string };
+    kitCustodyId: string | null;
+    custodian: { id: string; name: string; userId: string | null };
   }>,
 };
+
+/**
+ * Builds a custody row in the widened `MOBILE_ASSET_SELECT` shape. Operator
+ * rows by default (`kitCustodyId: null`); pass `kitCustodyId` for
+ * kit-allocated rows, `userId` for custodians linked to an auth user.
+ */
+function custodyRow(
+  id: string,
+  name: string,
+  quantity: number,
+  opts: { kitCustodyId?: string | null; userId?: string | null } = {}
+) {
+  return {
+    quantity,
+    kitCustodyId: opts.kitCustodyId ?? null,
+    custodian: { id, name, userId: opts.userId ?? null },
+  };
+}
 
 describe("shapeMobileAssetResponse", () => {
   it("returns null for kit, kitId, location, and custody when all pivots are empty", () => {
@@ -73,13 +92,11 @@ describe("shapeMobileAssetResponse", () => {
   it("flattens custody[0] to a single-or-null object", () => {
     const result = shapeMobileAssetResponse({
       ...baseAsset,
-      custody: [
-        { quantity: 1, custodian: { id: "tm-789", name: "Alice Example" } },
-      ],
+      custody: [custodyRow("tm-789", "Alice Example", 1)],
     });
 
     expect(result.custody).toEqual({
-      custodian: { id: "tm-789", name: "Alice Example" },
+      custodian: { id: "tm-789", name: "Alice Example", userId: null },
     });
     expect(result.kit).toBeNull();
     expect(result.location).toBeNull();
@@ -101,16 +118,14 @@ describe("shapeMobileAssetResponse", () => {
       ...baseAsset,
       assetKits: [{ kit: { id: "kit-1", name: "Audio Kit" } }],
       assetLocations: [{ location: { id: "loc-1", name: "Warehouse" } }],
-      custody: [
-        { quantity: 1, custodian: { id: "tm-1", name: "Bob Custodian" } },
-      ],
+      custody: [custodyRow("tm-1", "Bob Custodian", 1)],
     });
 
     expect(result.kit).toEqual({ id: "kit-1", name: "Audio Kit" });
     expect(result.kitId).toBe("kit-1");
     expect(result.location).toEqual({ id: "loc-1", name: "Warehouse" });
     expect(result.custody).toEqual({
-      custodian: { id: "tm-1", name: "Bob Custodian" },
+      custodian: { id: "tm-1", name: "Bob Custodian", userId: null },
     });
 
     // Raw pivot arrays must not leak through — companion reads the flat
@@ -169,24 +184,60 @@ describe("shapeMobileAssetResponse", () => {
       quantity: 10,
       unitOfMeasure: "pcs",
       custody: [
-        { quantity: 3, custodian: { id: "tm-1", name: "Alice" } },
-        { quantity: 2, custodian: { id: "tm-2", name: "Bob" } },
+        custodyRow("tm-1", "Alice", 3, { userId: "user-alice" }),
+        custodyRow("tm-2", "Bob", 2),
       ],
     });
 
-    // Many-aware list keeps both entries with their quantities.
+    // Many-aware list keeps both entries with their quantities. Operator-only
+    // rows are fully releasable; `userId` passes through for own-row checks.
     expect(result.custodyList).toEqual([
-      { custodian: { id: "tm-1", name: "Alice" }, quantity: 3 },
-      { custodian: { id: "tm-2", name: "Bob" }, quantity: 2 },
+      {
+        custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
+        quantity: 3,
+        releasableQuantity: 3,
+      },
+      {
+        custodian: { id: "tm-2", name: "Bob", userId: null },
+        quantity: 2,
+        releasableQuantity: 2,
+      },
     ]);
 
     // Legacy single custody = first row's custodian only (quantity stripped).
     expect(result.custody).toEqual({
-      custodian: { id: "tm-1", name: "Alice" },
+      custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
     });
 
     // Quantity scalar passes through.
     expect(result.quantity).toBe(10);
     expect(result.type).toBe("QUANTITY_TRACKED");
+  });
+
+  it("sums kit-allocated rows into quantity but excludes them from releasableQuantity", () => {
+    // A holder with an operator row (3) AND a kit-allocated row (2) shows once
+    // with quantity 5, but only the operator portion is releasable via the
+    // release-quantity endpoint — kit-allocated units are released by
+    // releasing the kit's custody.
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      custody: [
+        custodyRow("tm-1", "Alice", 3, { userId: "user-alice" }),
+        custodyRow("tm-1", "Alice", 2, {
+          userId: "user-alice",
+          kitCustodyId: "kc-1",
+        }),
+      ],
+    });
+
+    expect(result.custodyList).toEqual([
+      {
+        custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
+        quantity: 5,
+        releasableQuantity: 3,
+      },
+    ]);
   });
 });
