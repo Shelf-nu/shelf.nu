@@ -10581,7 +10581,7 @@ export async function getExistingBookingDetails(
       throw new ShelfError({
         cause: null,
         message:
-          "Assets can only be added to Draft, Reserved, Ongoing or Overdue bookings.",
+          "Items can only be added to Draft, Reserved, Ongoing or Overdue bookings.",
         status: 400,
         label: "Booking",
         shouldBeCaptured: false,
@@ -10686,23 +10686,38 @@ export async function processBooking(
     }
 
     // Progressive-checkout guard (parity with the manage-assets route): assets
-    // that are physically CHECKED_OUT (on another active booking) cannot be
-    // added to an ONGOING/OVERDUE booking — there is nothing available to
-    // stage. New assets otherwise stay AVAILABLE. This only fires for active
-    // bookings; DRAFT/RESERVED targets still accept checked-out assets (they'll
-    // be available by the time that booking starts).
+    // that are physically CHECKED_OUT on ANOTHER active booking cannot be added
+    // to an ONGOING/OVERDUE booking — there is nothing available to stage. New
+    // assets otherwise stay AVAILABLE. This only fires for active bookings;
+    // DRAFT/RESERVED targets still accept checked-out assets (they'll be
+    // available by the time that booking starts).
+    //
+    // Assets ALREADY on this booking are excluded from the check: their
+    // CHECKED_OUT status can be owned by this same booking (progressive
+    // checkout), and re-submitting them is handled downstream by the
+    // duplicate / "add only the rest" flow — not by this guard.
     if (
       bookingInfo.status === BookingStatus.ONGOING ||
       bookingInfo.status === BookingStatus.OVERDUE
     ) {
-      const checkedOutAssets = await db.asset.findMany({
-        where: {
-          id: { in: finalAssetIds },
-          organizationId,
-          status: AssetStatus.CHECKED_OUT,
-        },
-        select: { id: true, title: true },
-      });
+      const existingAssetIds = new Set(
+        bookingInfo.bookingAssets.map((ba) => ba.assetId)
+      );
+      const newAssetIdsToCheck = finalAssetIds.filter(
+        (id) => !existingAssetIds.has(id)
+      );
+
+      const checkedOutAssets =
+        newAssetIdsToCheck.length > 0
+          ? await db.asset.findMany({
+              where: {
+                id: { in: newAssetIdsToCheck },
+                organizationId,
+                status: AssetStatus.CHECKED_OUT,
+              },
+              select: { id: true, title: true },
+            })
+          : [];
 
       if (checkedOutAssets.length > 0) {
         throw new ShelfError({

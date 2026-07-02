@@ -248,12 +248,14 @@ export default function ExistingBooking() {
   const unitLabel = asset?.unitOfMeasure || "units";
   const maxQuantity = assetAvailability?.available ?? undefined;
 
-  function isValidBooking(booking: any) {
+  function isValidBooking(
+    booking: { status?: string | null } | null | undefined
+  ) {
     // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
     // active booking keeps the asset AVAILABLE until it is purposefully checked
     // out (progressive checkout).
     return (
-      booking &&
+      !!booking?.status &&
       ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
     );
   }

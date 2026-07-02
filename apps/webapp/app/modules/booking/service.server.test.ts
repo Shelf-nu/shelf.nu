@@ -6902,25 +6902,39 @@ describe("processBooking — checked-out guard for active bookings", () => {
   ) {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
       (args?: any) => {
+        // Respect the `id: { in }` scope so the guard's narrowed query (which
+        // excludes assets already on the booking) is reflected accurately.
+        const requestedIds: string[] | undefined = args?.where?.id?.in;
+        const inScope = (id: string) =>
+          !requestedIds || requestedIds.includes(id);
+
         if (args?.where?.status === AssetStatus.CHECKED_OUT) {
           return Promise.resolve(
             rows
-              .filter((r) => r.status === AssetStatus.CHECKED_OUT)
+              .filter(
+                (r) => r.status === AssetStatus.CHECKED_OUT && inScope(r.id)
+              )
               .map((r) => ({ id: r.id, title: r.title ?? r.id }))
           );
         }
         return Promise.resolve(
-          rows.map((r) => ({ id: r.id, status: r.status, assetKits: [] }))
+          rows
+            .filter((r) => inScope(r.id))
+            .map((r) => ({ id: r.id, status: r.status, assetKits: [] }))
         );
       }
     );
   }
 
-  function mockBooking(status: BookingStatus) {
+  function mockBooking(status: BookingStatus, existingAssetIds: string[] = []) {
     (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "booking-1",
       status,
-      bookingAssets: [],
+      bookingAssets: existingAssetIds.map((assetId) => ({
+        assetId,
+        assetKitId: null,
+        asset: { id: assetId, title: assetId },
+      })),
     });
   }
 
@@ -6959,6 +6973,40 @@ describe("processBooking — checked-out guard for active bookings", () => {
       "org-1"
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("does NOT block an asset already on this ONGOING booking even if it is CHECKED_OUT", async () => {
+    // Regression: an asset checked out via THIS booking's progressive checkout
+    // must not trip the guard when re-submitted — the duplicate / "add only the
+    // rest" flow handles it downstream.
+    mockBooking(BookingStatus.ONGOING, ["asset-1"]);
+    mockAssets([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1"
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("guards only NEW checked-out assets, ignoring ones already on this booking", async () => {
+    // asset-1 is already on the (ONGOING) booking and checked out here → skipped.
+    // asset-2 is new and AVAILABLE → allowed. No throw.
+    mockBooking(BookingStatus.ONGOING, ["asset-1"]);
+    mockAssets([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.AVAILABLE },
+    ]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1", "asset-2"],
+      "org-1"
+    );
+    expect(finalAssetIds).toEqual(["asset-1", "asset-2"]);
   });
 });
 

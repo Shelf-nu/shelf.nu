@@ -152,7 +152,11 @@ function BookingSelect({
               />
             </div>
 
-            <div className="max-h-[320px] divide-y overflow-y-auto">
+            <div
+              className="max-h-[320px] divide-y overflow-y-auto"
+              role="listbox"
+              aria-label="Existing bookings"
+            >
               {filteredBookings.length === 0 ? (
                 <div className="p-4 text-center text-sm text-gray-500">
                   {isLoading

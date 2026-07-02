@@ -141,23 +141,61 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId
     );
 
+    // AssetKit ids already represented on this booking. We dedupe by AssetKit
+    // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
+    // booking both standalone AND kit-driven at once, so a standalone row must
+    // not block re-adding the kit-driven slice. `assetKitId` is non-null only
+    // on kit-driven rows.
+    const existingAssetKitIds = new Set(
+      bookingInfo.bookingAssets
+        .map((ba) => ba.assetKitId)
+        .filter((id): id is string => id != null)
+    );
+
     // Progressive-checkout guard (parity with the manage-kits route): a kit that
-    // is physically CHECKED_OUT (out on another active booking) cannot be added
-    // to an ONGOING/OVERDUE booking. Kits added to an active booking otherwise
-    // stay AVAILABLE until purposefully checked out. Only fires for active
-    // targets; DRAFT/RESERVED bookings still accept checked-out kits.
+    // is physically CHECKED_OUT on ANOTHER active booking cannot be added to an
+    // ONGOING/OVERDUE booking. Kits added to an active booking otherwise stay
+    // AVAILABLE until purposefully checked out. Only fires for active targets;
+    // DRAFT/RESERVED bookings still accept checked-out kits.
+    //
+    // Kits already represented on this booking are excluded: their CHECKED_OUT
+    // status can be owned by this same booking, and re-adding only attaches
+    // newly-added members (buildKitSlicesForBooking skips existing memberships).
+    // Mirrors the manage-kits "newly added kits only" guard.
     if (
       bookingInfo.status === BookingStatus.ONGOING ||
       bookingInfo.status === BookingStatus.OVERDUE
     ) {
-      const checkedOutKits = await db.kit.findMany({
-        where: {
-          id: { in: kitIds },
-          organizationId,
-          status: KitStatus.CHECKED_OUT,
-        },
-        select: { id: true, name: true },
-      });
+      // Kit ids that already have at least one membership on this booking.
+      const kitIdsAlreadyOnBooking = new Set(
+        existingAssetKitIds.size > 0
+          ? (
+              await db.assetKit.findMany({
+                where: {
+                  id: { in: [...existingAssetKitIds] },
+                  kitId: { in: kitIds },
+                  organizationId,
+                },
+                select: { kitId: true },
+              })
+            ).map((ak) => ak.kitId)
+          : []
+      );
+      const kitIdsToGuard = kitIds.filter(
+        (id) => !kitIdsAlreadyOnBooking.has(id)
+      );
+
+      const checkedOutKits =
+        kitIdsToGuard.length > 0
+          ? await db.kit.findMany({
+              where: {
+                id: { in: kitIdsToGuard },
+                organizationId,
+                status: KitStatus.CHECKED_OUT,
+              },
+              select: { id: true, name: true },
+            })
+          : [];
 
       if (checkedOutKits.length > 0) {
         throw new ShelfError({
@@ -173,17 +211,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
     }
-
-    // AssetKit ids already represented on this booking. We dedupe by AssetKit
-    // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
-    // booking both standalone AND kit-driven at once, so a standalone row must
-    // not block re-adding the kit-driven slice. `assetKitId` is non-null only
-    // on kit-driven rows.
-    const existingAssetKitIds = new Set(
-      bookingInfo.bookingAssets
-        .map((ba) => ba.assetKitId)
-        .filter((id): id is string => id != null)
-    );
 
     // Resolve the kit memberships into kit-driven slice specs (org-scoped),
     // skipping any AssetKit already on the booking. Routing members through
@@ -277,12 +304,14 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  function isValidBooking(booking: any) {
+  function isValidBooking(
+    booking: { status?: string | null } | null | undefined
+  ) {
     // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Kits added to
     // an active booking stay AVAILABLE until purposefully checked out
     // (progressive checkout).
     return (
-      booking &&
+      !!booking?.status &&
       ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
     );
   }
