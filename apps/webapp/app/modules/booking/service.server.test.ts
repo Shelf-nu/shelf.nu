@@ -6926,10 +6926,26 @@ describe("processBooking — checked-out guard for active bookings", () => {
     );
   }
 
-  function mockBooking(status: BookingStatus, existingAssetIds: string[] = []) {
+  // Owner auth for the checked-out-guard cases: validateBookingOwnership is a
+  // no-op for OWNER, keeping these focused on the CHECKED_OUT behavior.
+  const OWNER_AUTH = {
+    userId: "user-1",
+    role: OrganizationRoles.OWNER,
+  } as const;
+
+  function mockBooking(
+    status: BookingStatus,
+    existingAssetIds: string[] = [],
+    ownership: {
+      creatorId?: string | null;
+      custodianUserId?: string | null;
+    } = {}
+  ) {
     (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "booking-1",
       status,
+      creatorId: ownership.creatorId ?? "user-1",
+      custodianUserId: ownership.custodianUserId ?? null,
       bookingAssets: existingAssetIds.map((assetId) => ({
         assetId,
         assetKitId: null,
@@ -6945,8 +6961,37 @@ describe("processBooking — checked-out guard for active bookings", () => {
     ]);
 
     await expect(
-      processBooking("booking-1", ["asset-1"], "org-1")
+      processBooking("booking-1", ["asset-1"], "org-1", OWNER_AUTH)
     ).rejects.toThrow(/already checked out/i);
+  });
+
+  it("blocks a SELF_SERVICE user from adding to a booking they do not own", async () => {
+    // Cross-user IDOR guard: booking:create/update is org-wide for SELF_SERVICE.
+    mockBooking(BookingStatus.RESERVED, [], {
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+    mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+    await expect(
+      processBooking("booking-1", ["asset-1"], "org-1", {
+        userId: "attacker",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).rejects.toThrow(/not authorized/i);
+  });
+
+  it("allows a SELF_SERVICE user to add to a booking they own", async () => {
+    mockBooking(BookingStatus.RESERVED, [], { creatorId: "owner-user" });
+    mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1",
+      { userId: "owner-user", role: OrganizationRoles.SELF_SERVICE }
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
   });
 
   it("allows AVAILABLE assets to be added to an ONGOING booking (they stay available)", async () => {
@@ -6956,7 +7001,8 @@ describe("processBooking — checked-out guard for active bookings", () => {
     const { finalAssetIds } = await processBooking(
       "booking-1",
       ["asset-1"],
-      "org-1"
+      "org-1",
+      OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
   });
@@ -6970,7 +7016,8 @@ describe("processBooking — checked-out guard for active bookings", () => {
     const { finalAssetIds } = await processBooking(
       "booking-1",
       ["asset-1"],
-      "org-1"
+      "org-1",
+      OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
   });
@@ -6987,7 +7034,8 @@ describe("processBooking — checked-out guard for active bookings", () => {
     const { finalAssetIds } = await processBooking(
       "booking-1",
       ["asset-1"],
-      "org-1"
+      "org-1",
+      OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
   });
@@ -7004,7 +7052,8 @@ describe("processBooking — checked-out guard for active bookings", () => {
     const { finalAssetIds } = await processBooking(
       "booking-1",
       ["asset-1", "asset-2"],
-      "org-1"
+      "org-1",
+      OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1", "asset-2"]);
   });

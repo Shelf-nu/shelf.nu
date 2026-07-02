@@ -10548,6 +10548,10 @@ export async function getExistingBookingDetails(
       select: {
         id: true,
         status: true,
+        // Needed so callers can enforce per-user ownership (SELF_SERVICE/BASE
+        // may only add to bookings they created or are custodian of).
+        creatorId: true,
+        custodianUserId: true,
         bookingAssets: {
           include: {
             asset: { select: { id: true, title: true } },
@@ -10661,19 +10665,38 @@ export async function getAvailableAssetsIdsForBooking(
  * @param organizationId - The caller's validated organization ID. Forwarded to
  *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
  *   added to the booking (cross-org IDOR protection).
+ * @param auth - The acting user's id and org role. Used to enforce per-user
+ *   booking ownership: `booking:create/update` is granted org-wide to
+ *   SELF_SERVICE/BASE, so without this a non-owner could add items to another
+ *   user's booking (cross-user IDOR). ADMIN/OWNER are unrestricted.
  * @returns The resolved (org-scoped) asset IDs and the booking details
- * @throws {ShelfError} If no assets are available or the booking lookup fails
+ * @throws {ShelfError} If no assets are available, the booking lookup fails, or
+ *   the caller does not own the booking
  */
 export async function processBooking(
   bookingId: string,
   assetIds: string[],
-  organizationId: string
+  organizationId: string,
+  auth: { userId: string; role: OrganizationRoles }
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
       getAvailableAssetsIdsForBooking(assetIds, organizationId),
       getExistingBookingDetails(bookingId, organizationId),
     ]);
+
+    // Cross-user IDOR guard: SELF_SERVICE/BASE may only add to bookings they
+    // created or are custodian of. No-op for ADMIN/OWNER. Runs before any
+    // mutation-shaping logic below.
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingInfo.creatorId,
+        custodianUserId: bookingInfo.custodianUserId,
+      },
+      userId: auth.userId,
+      role: auth.role,
+      action: "add items to",
+    });
 
     if (!finalAssetIds.length) {
       throw new ShelfError({

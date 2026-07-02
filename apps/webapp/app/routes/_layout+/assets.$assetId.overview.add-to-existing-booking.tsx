@@ -116,7 +116,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -136,7 +136,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
       assetIds,
-      organizationId
+      organizationId,
+      { userId, role }
     );
 
     /**

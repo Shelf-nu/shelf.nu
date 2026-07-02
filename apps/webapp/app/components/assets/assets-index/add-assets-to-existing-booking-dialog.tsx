@@ -89,7 +89,15 @@ function BookingSelect({
       {/* Value submitted with the form; matches the `id` schema field. */}
       <input type="hidden" name="id" value={selectedId ?? ""} />
 
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <Popover
+        open={isOpen}
+        onOpenChange={(open) => {
+          // `disabled` on an `asChild` PopoverTrigger doesn't reliably block
+          // opening (Radix clones the child), so gate state changes here.
+          if (isLoading || disabled) return;
+          setIsOpen(open);
+        }}
+      >
         <PopoverTrigger asChild disabled={isLoading || disabled}>
           <button
             type="button"

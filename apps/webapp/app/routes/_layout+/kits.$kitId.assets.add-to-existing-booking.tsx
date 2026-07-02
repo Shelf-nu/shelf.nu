@@ -26,6 +26,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -107,7 +108,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -140,6 +141,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       organizationId
     );
+
+    // Cross-user IDOR guard: `booking:create` is granted org-wide to
+    // SELF_SERVICE/BASE, so without this a non-owner could add kits to another
+    // user's booking. No-op for ADMIN/OWNER. Mirrors the asset flow's guard in
+    // processBooking and the sibling adjust-asset-quantity route.
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingInfo.creatorId,
+        custodianUserId: bookingInfo.custodianUserId,
+      },
+      userId,
+      role,
+      action: "add kits to",
+    });
 
     // AssetKit ids already represented on this booking. We dedupe by AssetKit
     // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
