@@ -46,21 +46,28 @@ const baseReminderSchema = z.object({
 });
 
 /**
- * endsAt ordering check, shared by client and server schemas. Both dates are
- * parsed the same way within one parse, so relative ordering is zone-safe.
- * endsAt is interpreted as end-of-day server-side, so a same-day end date is
- * valid; only reject dates before the reminder's own day.
+ * CLIENT-ONLY endsAt ordering check, comparing CALENDAR DAYS rather than
+ * instants. The two inputs coerce differently: a type="date" string parses
+ * at UTC midnight while a datetime-local string parses in the browser's
+ * local zone — comparing the raw instants wrongly rejected valid same-day
+ * evening reminders for users west of UTC. The endsAt calendar day is the
+ * UTC date of the coerced value; the reminder's calendar day is its LOCAL
+ * date. The authoritative server check runs on the zone-resolved values in
+ * resolveReminderPayloadDates.
  */
-function endsAtOrderingRefinement(
+function clientEndsAtOrderingRefinement(
   data: z.infer<typeof baseReminderSchema>,
   ctx: z.RefinementCtx
 ) {
-  if (
-    data.repeat !== "never" &&
-    data.endsAt &&
-    data.endsAt.getTime() + 24 * 60 * 60 * 1000 - 1 <
-      data.alertDateTime.getTime()
-  ) {
+  if (data.repeat === "never" || !data.endsAt) return;
+
+  const endsDay = data.endsAt.toISOString().slice(0, 10);
+  const alert = data.alertDateTime;
+  const alertDay = `${alert.getFullYear()}-${String(
+    alert.getMonth() + 1
+  ).padStart(2, "0")}-${String(alert.getDate()).padStart(2, "0")}`;
+
+  if (endsDay < alertDay) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["endsAt"],
@@ -92,24 +99,23 @@ function clientFutureRefinement(
   }
 }
 
-/** Client-side schema (zorm): ordering + zone-correct future check. */
+/** Client-side schema (zorm): calendar-day ordering + zone-correct future check. */
 export const setReminderSchema = baseReminderSchema
-  .superRefine(endsAtOrderingRefinement)
+  .superRefine(clientEndsAtOrderingRefinement)
   .superRefine(clientFutureRefinement);
 
 /**
- * Server-side parse schemas: NO future refinement (the raw string would be
- * coerced in the server's zone, not the user's) — resolveReminderPayloadDates
- * enforces future-ness on the correctly-resolved instant instead.
+ * Server-side parse schemas: NO date refinements — server-side coercion runs
+ * in the process zone, not the user's, so both the future check and the
+ * endsAt ordering check are enforced by resolveReminderPayloadDates on the
+ * client-hint-resolved instants instead.
  */
-export const setReminderServerSchema = baseReminderSchema.superRefine(
-  endsAtOrderingRefinement
-);
+export const setReminderServerSchema = baseReminderSchema;
 
 /** Edit adds the reminder id; consumed by resolveRemindersActions. */
-export const editReminderServerSchema = baseReminderSchema
-  .extend({ id: z.string() })
-  .superRefine(endsAtOrderingRefinement);
+export const editReminderServerSchema = baseReminderSchema.extend({
+  id: z.string(),
+});
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
@@ -313,7 +319,7 @@ export default function SetOrEditReminderDialog({
               <label
                 htmlFor="reminder-repeat-trigger"
                 className={`mb-[6px] block text-sm font-medium ${
-                  canUseRecurringReminders ? "text-gray-700" : "text-gray-400"
+                  canUseRecurringReminders ? "text-gray-700" : "text-gray-500"
                 }`}
               >
                 Repeat
@@ -372,17 +378,32 @@ export default function SetOrEditReminderDialog({
                   Automatically send this reminder again on a schedule.
                 </p>
               ) : (
-                <p className="mt-1 text-gray-500">
-                  Recurring reminders are a premium feature.{" "}
-                  <Button
-                    variant="link"
-                    className="inline text-sm"
-                    to="/account-details/subscription"
-                  >
-                    Upgrade your plan
-                  </Button>{" "}
-                  to send reminders on a schedule.
-                </p>
+                <>
+                  <p className="mt-1 text-gray-500">
+                    Recurring reminders are a premium feature.{" "}
+                    <Button
+                      variant="link"
+                      className="inline text-sm"
+                      to="/account-details/subscription"
+                    >
+                      Upgrade your plan
+                    </Button>{" "}
+                    to send reminders on a schedule.
+                  </p>
+                  {/* why: the Ends-on input doesn't render in the locked
+                      state, but its stored value still round-trips through
+                      hidden inputs and can fail validation (e.g. moving the
+                      reminder date past the series' end date) — surface that
+                      error here or the submit blocks with no visible cause */}
+                  {validationErrors?.endsAt?.message ||
+                  zo.errors.endsAt()?.message ? (
+                    <p className="mt-1 text-sm text-error-500">
+                      {validationErrors?.endsAt?.message ||
+                        zo.errors.endsAt()?.message}{" "}
+                      (this reminder's end date is fixed on your current plan)
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
 

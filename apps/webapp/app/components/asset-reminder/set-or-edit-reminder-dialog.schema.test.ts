@@ -53,7 +53,7 @@ describe("setReminderSchema", () => {
     ).not.toThrow();
   });
 
-  it("rejects an end date before the reminder date", () => {
+  it("rejects an end date on an earlier CALENDAR DAY than the reminder (client)", () => {
     const result = setReminderSchema.safeParse(
       basePayload({ repeat: "monthly", endsAt: "2099-07-01" })
     );
@@ -61,6 +61,20 @@ describe("setReminderSchema", () => {
     if (!result.success) {
       expect(result.error.issues[0].path).toEqual(["endsAt"]);
     }
+  });
+
+  it("accepts a same-day end date with a LATE-evening reminder time (calendar compare, not instant compare)", () => {
+    // The old instant-based check (endsAt UTC-midnight + 24h vs local
+    // datetime) rejected this shape for users west of UTC.
+    expect(() =>
+      setReminderSchema.parse(
+        basePayload({
+          repeat: "weekly",
+          alertDateTime: "2099-07-15T23:30",
+          endsAt: "2099-07-15",
+        })
+      )
+    ).not.toThrow();
   });
 
   it("rejects a past alertDateTime at PARSE time on the CLIENT schema", () => {
@@ -73,14 +87,20 @@ describe("setReminderSchema", () => {
     }
   });
 
-  it("does NOT run the future check on the SERVER schema (zone-resolved check happens in resolveReminderPayloadDates)", () => {
-    // Server-side, z.coerce.date() reads the raw string in the process zone,
-    // so a future-check here would wrongly reject valid times for users west
-    // of UTC. The authoritative check runs on the resolved instant instead.
-    const result = setReminderServerSchema.safeParse(
-      basePayload({ alertDateTime: "2020-01-01T09:00" })
-    );
-    expect(result.success).toBe(true);
+  it("runs NO date refinements on the SERVER schemas (zone-resolved checks happen in resolveReminderPayloadDates)", () => {
+    // Server-side, z.coerce.date() reads raw strings in the process zone, so
+    // both the future check and the endsAt ordering check would misfire for
+    // users in other zones. Both run on the resolved instants instead.
+    expect(
+      setReminderServerSchema.safeParse(
+        basePayload({ alertDateTime: "2020-01-01T09:00" })
+      ).success
+    ).toBe(true);
+    expect(
+      setReminderServerSchema.safeParse(
+        basePayload({ repeat: "monthly", endsAt: "2099-07-01" })
+      ).success
+    ).toBe(true);
   });
 
   it("ignores endsAt ordering when repeat is never", () => {
@@ -91,7 +111,7 @@ describe("setReminderSchema", () => {
 });
 
 describe("editReminderServerSchema", () => {
-  it("requires the reminder id and keeps the ordering refinement", () => {
+  it("requires the reminder id", () => {
     const parsed = editReminderServerSchema.parse(
       basePayload({ id: "reminder-1", repeat: "yearly" })
     );
@@ -102,11 +122,5 @@ describe("editReminderServerSchema", () => {
       editReminderServerSchema.safeParse(basePayload({ repeat: "yearly" }))
         .success
     ).toBe(false);
-
-    expect(
-      editReminderServerSchema.safeParse(
-        basePayload({ id: "r-1", repeat: "monthly", endsAt: "2099-07-01" })
-      ).success
-    ).toBe(false); // ordering refinement still applies
   });
 });

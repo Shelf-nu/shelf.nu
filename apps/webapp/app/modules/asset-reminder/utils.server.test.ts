@@ -98,6 +98,40 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
     );
   });
 
+  it("rejects an end date before the reminder on the RESOLVED instants (field-level 400)", () => {
+    let thrown: any = null;
+    try {
+      resolveReminderPayloadDates({
+        request: requestWithZone("America/New_York"),
+        formData: formData({
+          alertDateTime: "2099-07-10T09:00",
+          endsAt: "2099-07-01",
+        }),
+        repeat: "monthly",
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown?.status).toBe(400);
+    expect(thrown?.additionalData.validationErrors.endsAt.message).toBe(
+      "End date must be on or after the reminder date"
+    );
+  });
+
+  it("accepts a same-day end date with a late-evening reminder for west-of-UTC users", () => {
+    // 23:30 New York on July 15 = 03:30Z July 16; end-of-day NY July 15 =
+    // 03:59:59.999Z July 16 — same-day is valid and must not be rejected.
+    const { recurrence } = resolveReminderPayloadDates({
+      request: requestWithZone("America/New_York"),
+      formData: formData({
+        alertDateTime: "2099-07-15T23:30",
+        endsAt: "2099-07-15",
+      }),
+      repeat: "weekly",
+    });
+    expect(recurrence!.endsAt!.toISOString()).toBe("2099-07-16T03:59:59.999Z");
+  });
+
   it("returns null recurrence for a one-shot (repeat = never)", () => {
     const { recurrence } = resolveReminderPayloadDates({
       request: requestWithZone("UTC"),

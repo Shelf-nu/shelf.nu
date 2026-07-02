@@ -258,9 +258,10 @@ export async function getPaginatedAndFilterableReminders({
       db.assetReminder.count({ where: finalWhere }),
     ]);
 
-    // why: divide by the cookie-resolved perPage, not the raw query param —
-    // perPageParam defaults to 0 without a ?per_page, making this Infinity
-    const totalPages = Math.ceil(totalReminders / perPage);
+    // why: divide by `take` — the clamped page size the query actually used
+    // (the raw per_page param defaults to 0 → Infinity, and an out-of-range
+    // cookie perPage wouldn't match the query either)
+    const totalPages = Math.ceil(totalReminders / take);
 
     return {
       reminders,
@@ -370,7 +371,11 @@ export async function editAssetReminder({
         reminder.recurrenceUnit !== effectiveRecurrence.unit ||
         reminder.recurrenceInterval !== effectiveRecurrence.interval ||
         (reminder.recurrenceEndsAt?.getTime() ?? null) !==
-          (effectiveRecurrence.endsAt?.getTime() ?? null);
+          (effectiveRecurrence.endsAt?.getTime() ?? null) ||
+        // why: moving the next fire date re-anchors the whole series — that
+        // is recurring behavior too, so it's gated. Message/recipient edits
+        // round-trip the prefilled date unchanged and still pass.
+        reminder.alertDateTime.getTime() !== alertDateTime.getTime();
 
       if (!isRecurringReminder(reminder) || recurrenceChanged) {
         throw new ShelfError({

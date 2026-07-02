@@ -86,11 +86,36 @@ export function resolveReminderPayloadDates({
   const preset = REMINDER_REPEAT_PRESETS[repeat];
 
   const rawEndsAt = formData.get("endsAt")?.toString();
-  const endsAt = rawEndsAt
+  const parsedEndsAt = rawEndsAt
     ? DateTime.fromFormat(rawEndsAt, "yyyy-MM-dd", { zone })
         .endOf("day")
         .toJSDate()
     : null;
+  const endsAt =
+    parsedEndsAt && !isNaN(parsedEndsAt.getTime()) ? parsedEndsAt : null;
+
+  /**
+   * Authoritative endsAt ordering check on the ZONE-RESOLVED values (both in
+   * the user's zone: endsAt as end-of-day, alertDateTime as the picked
+   * instant). The zod schemas can't do this correctly: type="date" coerces
+   * at UTC midnight while datetime-local coerces in the parser's zone, which
+   * wrongly rejected valid same-day evening reminders west of UTC.
+   */
+  if (endsAt && endsAt.getTime() < alertDateTime.getTime()) {
+    throw new ShelfError({
+      cause: null,
+      title: "Validation error",
+      message: "End date must be on or after the reminder date",
+      additionalData: {
+        [VALIDATION_ERROR]: {
+          endsAt: { message: "End date must be on or after the reminder date" },
+        },
+      },
+      label: "Asset Reminder",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   return {
     alertDateTime,
@@ -98,7 +123,7 @@ export function resolveReminderPayloadDates({
       unit: preset.unit,
       interval: preset.interval,
       timezone: zone,
-      endsAt: endsAt && !isNaN(endsAt.getTime()) ? endsAt : null,
+      endsAt,
     },
   };
 }
