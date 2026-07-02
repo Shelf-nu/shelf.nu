@@ -4,20 +4,12 @@ import { Form, useLoaderData, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
-  REMINDER_REPEAT_PRESETS,
   REMINDER_REPEAT_VALUES,
   resolveRecurrenceZone,
   type ReminderRepeatValue,
@@ -25,6 +17,7 @@ import {
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import ReminderRecurrenceFields from "./reminder-recurrence-fields";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
@@ -175,13 +168,21 @@ export default function SetOrEditReminderDialog({
   /**
    * Reset the Repeat selection whenever the dialog (re)opens — useState only
    * seeds once, so without this a changed-then-cancelled cadence would leak
-   * into the next open and could be submitted unintentionally.
+   * into the next open and could be submitted unintentionally. Uses the
+   * adjust-state-during-render pattern (not an effect) so the reset applies
+   * in the same render pass with no stale flash.
    */
-  useEffect(() => {
+  // why: react-doctor flags prop-seeded useState (no-derived-useState), but
+  // this is the React-docs "adjust state during render" pattern — `repeat`
+  // is user-editable state that must RESET on open, not derived state that
+  // could be computed inline. Accepted residual per CLAUDE.md.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setRepeat(initialRepeat);
     }
-  }, [open, initialRepeat]);
+  }
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
@@ -315,121 +316,19 @@ export default function SetOrEditReminderDialog({
               </p>
             </div>
 
-            <div className="mb-4">
-              <label
-                htmlFor="reminder-repeat-trigger"
-                className={`mb-[6px] block text-sm font-medium ${
-                  canUseRecurringReminders ? "text-gray-700" : "text-gray-500"
-                }`}
-              >
-                Repeat
-              </label>
-              {canUseRecurringReminders ? (
-                <Select
-                  name={zo.fields.repeat()}
-                  value={repeat}
-                  onValueChange={(value) =>
-                    setRepeat(value as ReminderRepeatValue)
-                  }
-                  disabled={disabled}
-                >
-                  <SelectTrigger id="reminder-repeat-trigger">
-                    <SelectValue placeholder="Never" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="never">Never</SelectItem>
-                    {Object.entries(REMINDER_REPEAT_PRESETS).map(
-                      ([value, preset]) => (
-                        <SelectItem key={value} value={value}>
-                          {preset.label}
-                        </SelectItem>
-                      )
-                    )}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <>
-                  {/* why hidden inputs: a disabled control submits nothing —
-                      carry the STORED cadence through so plain edits by
-                      downgraded workspaces neither throw nor strip it */}
-                  <input type="hidden" name="repeat" value={initialRepeat} />
-                  {endsAtDefault ? (
-                    <input type="hidden" name="endsAt" value={endsAtDefault} />
-                  ) : null}
-                  <Select value={initialRepeat} disabled>
-                    <SelectTrigger id="reminder-repeat-trigger">
-                      <SelectValue placeholder="Never" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="never">Never</SelectItem>
-                      {Object.entries(REMINDER_REPEAT_PRESETS).map(
-                        ([value, preset]) => (
-                          <SelectItem key={value} value={value}>
-                            {preset.label}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-              {canUseRecurringReminders ? (
-                <p className="mt-1 text-gray-500">
-                  Automatically send this reminder again on a schedule.
-                </p>
-              ) : (
-                <>
-                  <p className="mt-1 text-gray-500">
-                    Recurring reminders are a premium feature.{" "}
-                    <Button
-                      variant="link"
-                      className="inline text-sm"
-                      to="/account-details/subscription"
-                    >
-                      Upgrade your plan
-                    </Button>{" "}
-                    to send reminders on a schedule.
-                  </p>
-                  {/* why: the Ends-on input doesn't render in the locked
-                      state, but its stored value still round-trips through
-                      hidden inputs and can fail validation (e.g. moving the
-                      reminder date past the series' end date) — surface that
-                      error here or the submit blocks with no visible cause */}
-                  {validationErrors?.endsAt?.message ||
-                  zo.errors.endsAt()?.message ? (
-                    // why role="alert": this error isn't tied to a rendered
-                    // input (the Ends-on field is hidden in the locked state),
-                    // so screen readers need a live-region announcement when
-                    // it appears after a blocked submit
-                    <p role="alert" className="mt-1 text-sm text-error-500">
-                      {validationErrors?.endsAt?.message ||
-                        zo.errors.endsAt()?.message}{" "}
-                      (this reminder's end date is fixed on your current plan)
-                    </p>
-                  ) : null}
-                </>
-              )}
-            </div>
-
-            {canUseRecurringReminders && repeat !== "never" ? (
-              <div>
-                <Input
-                  defaultValue={endsAtDefault}
-                  type="date"
-                  name={zo.fields.endsAt()}
-                  error={
-                    validationErrors?.endsAt?.message ||
-                    zo.errors.endsAt()?.message
-                  }
-                  label="Ends on (optional)"
-                  disabled={disabled}
-                  className="mb-2"
-                />
-                <p className="text-gray-500">
-                  Leave empty to repeat until the reminder is deleted.
-                </p>
-              </div>
-            ) : null}
+            <ReminderRecurrenceFields
+              canUseRecurringReminders={canUseRecurringReminders}
+              disabled={disabled}
+              repeat={repeat}
+              onRepeatChange={setRepeat}
+              initialRepeat={initialRepeat}
+              endsAtDefault={endsAtDefault}
+              repeatFieldName={zo.fields.repeat()}
+              endsAtFieldName={zo.fields.endsAt()}
+              endsAtError={
+                validationErrors?.endsAt?.message || zo.errors.endsAt()?.message
+              }
+            />
           </div>
           <div>
             <Separator className="md:hidden" />
