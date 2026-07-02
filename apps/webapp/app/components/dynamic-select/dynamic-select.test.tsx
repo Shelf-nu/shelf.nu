@@ -811,5 +811,73 @@ describe("DynamicSelect", () => {
       });
       expect(screen.getByPlaceholderText("Search Category")).toHaveValue("da");
     });
+
+    it("keeps the selected label after the fetcher reset when the selection came from typeahead", async () => {
+      // A model found via typeahead lives only in the fetcher results, not the
+      // seed list. When resetSearchOnClose clears the fetcher on close, the
+      // item disappears from `items` — the trigger must still show it (from the
+      // selected-item cache) rather than falling back to the placeholder while
+      // the hidden input still posts the id.
+      const typeaheadItems = createTestItems(3);
+
+      // why: the mock hook must actually drop the item on reset, mirroring the
+      // real fetcher clearing its typeahead results — otherwise the
+      // cache-fallback path under test is never exercised.
+      const resetModelFiltersFetcher = vi.fn(() => {
+        mockUseModelFilters.mockReturnValue(
+          createMockUseModelFiltersReturn([], { resetModelFiltersFetcher })
+        );
+      });
+
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(typeaheadItems, {
+          resetModelFiltersFetcher,
+        })
+      );
+
+      const { rerender } = render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      // Select Item 2 while it's still in the fetcher results — closeOnSelect
+      // closes the popover, which triggers the fetcher reset.
+      await act(async () => {
+        await user.click(screen.getByText("Item 2"));
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(resetModelFiltersFetcher).toHaveBeenCalled();
+
+      // Re-render reflecting the now-empty fetcher results (Item 2 is gone).
+      rerender(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      // The trigger still shows the selected model, not the placeholder.
+      expect(screen.getByRole("button")).toHaveTextContent("Item 2");
+    });
   });
 });

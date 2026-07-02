@@ -907,7 +907,7 @@ export default function AddKitsToBooking() {
        */}
       <footer
         className={tw(
-          "item-center mt-auto flex shrink-0 border-t px-6 py-3",
+          "mt-auto flex shrink-0 items-center border-t px-6 py-3",
           activeTab === "kits" ? "justify-between" : "justify-end"
         )}
       >

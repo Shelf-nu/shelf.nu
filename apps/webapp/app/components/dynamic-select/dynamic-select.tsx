@@ -185,18 +185,42 @@ export default function DynamicSelect({
   } = useModelFilters({ model, selectionMode, ...hookProps });
 
   /**
-   * Reset the search on the closed transition when opted in. This fires for
-   * BOTH the programmatic close from `closeOnSelect` (handleItemChange calls
-   * `setIsPopoverOpen(false)` directly, so Radix's `onOpenChange` never
-   * fires) and Radix-driven closes (Escape, outside click) — an effect on
-   * `isPopoverOpen` covers both uniformly.
+   * Cache of the last-selected item so the trigger can still render its label
+   * after the model-filters fetcher is reset (see `resetSearchOnClose`). A
+   * model picked from typeahead only exists in the fetcher results, not in the
+   * loader's seed list — resetting the fetcher would otherwise drop it from
+   * `allItemsToRender`, and the trigger would fall back to the placeholder even
+   * though the hidden input still posts the selected id.
    */
+  const [selectedItemCache, setSelectedItemCache] = useState<
+    ModelFilterItem | undefined
+  >(undefined);
+
+  /**
+   * Hold the latest `resetModelFiltersFetcher` in a ref so the close-reset
+   * effect can call it without listing it as a dependency — it's recreated on
+   * every `useModelFilters` call, so depending on it directly would refire the
+   * effect on every render.
+   */
+  const resetFetcherRef = useRef(resetModelFiltersFetcher);
+  resetFetcherRef.current = resetModelFiltersFetcher;
+
+  /**
+   * Reset the search on the open→closed transition when opted in. This covers
+   * BOTH the programmatic close from `closeOnSelect` (handleItemChange calls
+   * `setIsPopoverOpen(false)` directly, so Radix's `onOpenChange` never fires)
+   * and Radix-driven closes (Escape, outside click). The `wasOpen` ref gates on
+   * the transition so it does not fire on the initial closed mount.
+   * `resetModelFiltersFetcher` already clears `searchQuery`, so we don't call
+   * `setSearchQuery` separately.
+   */
+  const wasPopoverOpenRef = useRef(false);
   useEffect(() => {
-    if (resetSearchOnClose && !isPopoverOpen) {
-      setSearchQuery("");
-      resetModelFiltersFetcher();
+    const justClosed = wasPopoverOpenRef.current && !isPopoverOpen;
+    wasPopoverOpenRef.current = isPopoverOpen;
+    if (resetSearchOnClose && justClosed) {
+      resetFetcherRef.current();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resetModelFiltersFetcher is recreated on every useModelFilters call (not memoized); including it would refire this effect on every render while the popover is closed.
   }, [isPopoverOpen, resetSearchOnClose]);
 
   const itemsWithCreated = useMemo(
@@ -243,6 +267,13 @@ export default function DynamicSelect({
     // Update local state
     setSelectedValue(isDeselecting ? undefined : id);
 
+    // Cache the picked item (while it's still present in the render list) so
+    // the trigger can render its label even after the fetcher is reset — a
+    // typeahead-only selection is otherwise dropped by resetSearchOnClose.
+    setSelectedItemCache(
+      isDeselecting ? undefined : allItemsToRender.find((i) => i.id === id)
+    );
+
     // Always update URL params and parent state
     handleSelectItemChange(id);
 
@@ -254,8 +285,16 @@ export default function DynamicSelect({
     }
   }
 
-  /** This is needed so we know what to show on the trigger */
-  const selectedItem = allItemsToRender.find((i) => i.id === selectedValue);
+  /**
+   * This is needed so we know what to show on the trigger. Falls back to the
+   * cached selected item when the current render list no longer contains it
+   * (e.g. a typeahead selection after the fetcher was reset). The id guard
+   * avoids showing a stale cache once `selectedValue` changes (e.g. a
+   * `defaultValue`-driven reset).
+   */
+  const selectedItem =
+    allItemsToRender.find((i) => i.id === selectedValue) ??
+    (selectedItemCache?.id === selectedValue ? selectedItemCache : undefined);
   const triggerValue = selectedItem
     ? typeof renderItem === "function"
       ? renderItem({ ...selectedItem, metadata: selectedItem })
