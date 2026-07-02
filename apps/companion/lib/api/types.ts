@@ -27,6 +27,59 @@ export type MeResponse = {
   organizations: Organization[];
 };
 
+/**
+ * Asset classification mirrored from the server's `AssetType` Prisma enum.
+ * - `INDIVIDUAL`      — one row = one physical item (the default; behaves
+ *                       exactly as the companion has always rendered).
+ * - `QUANTITY_TRACKED` — one row = N fungible units, which can be partly
+ *                       available / in custody / checked out at once and held
+ *                       by multiple custodians each with a quantity.
+ */
+export type AssetType = "INDIVIDUAL" | "QUANTITY_TRACKED";
+
+/**
+ * Consumption behaviour for QUANTITY_TRACKED assets, mirrored from the
+ * server's `ConsumptionType` Prisma enum. `null` for INDIVIDUAL assets.
+ */
+export type ConsumptionType = "ONE_WAY" | "TWO_WAY";
+
+/**
+ * One holder of a QUANTITY_TRACKED asset and the quantity they hold. A single
+ * asset row can appear here multiple times (one entry per custodian). Mirrors
+ * the server's `MobileAssetResponse.custodyList`.
+ */
+export type AssetCustodyListEntry = {
+  custodian: { id: string; name: string };
+  quantity: number;
+};
+
+/**
+ * Quantity-tracking fields shared by the list-item and detail asset shapes.
+ *
+ * All fields are OPTIONAL: a server that predates the quantity feature simply
+ * omits them, so consumers MUST guard on `type === "QUANTITY_TRACKED"` AND the
+ * presence of each field before reading it. INDIVIDUAL assets carry
+ * `type: "INDIVIDUAL"` with null quantity columns and render unchanged.
+ */
+export type AssetQuantityFields = {
+  /** Asset classification. Absent on pre-quantity servers. */
+  type?: AssetType;
+  /** Total units for a QUANTITY_TRACKED asset; null for INDIVIDUAL. */
+  quantity?: number | null;
+  /** Reorder threshold for a QUANTITY_TRACKED asset; null for INDIVIDUAL. */
+  minQuantity?: number | null;
+  /** Display unit (e.g. "pcs", "boxes", "liters"); null when unset. */
+  unitOfMeasure?: string | null;
+  /** Consumption behaviour; null for INDIVIDUAL assets. */
+  consumptionType?: ConsumptionType | null;
+  /**
+   * Every holder + the quantity they hold. Emitted on the list endpoint for
+   * all assets (empty array when no custody). May be absent on the detail
+   * endpoint / pre-quantity servers — consumers fall back to single custody.
+   */
+  custodyList?: AssetCustodyListEntry[];
+};
+
 export type AssetListItem = {
   id: string;
   title: string;
@@ -36,7 +89,7 @@ export type AssetListItem = {
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
   custody: { custodian: { id: string; name: string } } | null;
-};
+} & AssetQuantityFields;
 
 export type AssetsResponse = {
   assets: AssetListItem[];
@@ -55,6 +108,28 @@ export type AssetNote = {
     firstName: string | null;
     lastName: string | null;
   } | null;
+};
+
+/**
+ * Per-status quantity slices for a QUANTITY_TRACKED asset, returned only by the
+ * detail endpoint. Mirrors the server's `quantityBreakdown` shape (computed by
+ * the same `getQuantityData` helper the web badge uses).
+ *
+ * `null` when the asset is INDIVIDUAL, or when a QUANTITY_TRACKED asset has no
+ * custody/booking activity yet (the server's `getQuantityData` null contract).
+ * Consumers must handle `null` by falling back to the plain total quantity.
+ */
+export type AssetQuantityBreakdown = {
+  /** Total units. */
+  total: number;
+  /** Units neither in custody, reserved, nor checked out. */
+  available: number;
+  /** Units currently held in custody. */
+  inCustody: number;
+  /** Units reserved by upcoming bookings. */
+  reserved: number;
+  /** Units checked out on active bookings. */
+  checkedOut: number;
 };
 
 export type AssetDetail = {
@@ -100,7 +175,13 @@ export type AssetDetail = {
       active: boolean;
     };
   }[];
-};
+  /**
+   * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
+   * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL
+   * assets or QUANTITY_TRACKED assets with no activity. See type docs.
+   */
+  quantityBreakdown?: AssetQuantityBreakdown | null;
+} & AssetQuantityFields;
 
 /**
  * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset

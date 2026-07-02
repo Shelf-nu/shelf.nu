@@ -1,4 +1,8 @@
-import { AssetStatus, KitStatus, OrganizationRoles } from "@prisma/client";
+import {
+  type AssetType,
+  type ConsumptionType,
+  OrganizationRoles,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
@@ -298,6 +302,15 @@ export const MOBILE_ASSET_SELECT = {
   mainImage: true,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // Quantity fields (additive). INDIVIDUAL assets carry `type: "INDIVIDUAL"`
+  // and null quantity columns; QUANTITY_TRACKED assets surface the totals the
+  // companion will use to DISPLAY quantity. The shaper passes these through
+  // verbatim alongside the existing legacy fields.
+  type: true,
+  quantity: true,
+  minQuantity: true,
+  unitOfMeasure: true,
+  consumptionType: true,
   category: { select: { name: true } },
   // Kit linkage now lives on the `AssetKit` pivot. shapeMobileAssetResponse
   // flattens `assetKits[0]` to top-level `kit` + `kitId` so the in-App-Store
@@ -311,9 +324,17 @@ export const MOBILE_ASSET_SELECT = {
     select: { location: { select: { id: true, name: true } } },
   },
   // Custody is now 1:many; the shaper flattens `custody[0]` so companion's
-  // `asset.custody?.custodian` single-object read still works.
+  // `asset.custody?.custodian` single-object read still works. We also select
+  // `quantity` so the shaper can surface the many-aware `custodyList` (the
+  // legacy single `custody` stays in place too). Ordered by `createdAt` so
+  // both the flattened `custody[0]` and `custodyList` are deterministic
+  // (the relation is otherwise unordered).
   custody: {
-    select: { custodian: { select: { id: true, name: true } } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      quantity: true,
+      custodian: { select: { id: true, name: true } },
+    },
   },
 } as const;
 
@@ -416,6 +437,20 @@ export type MobileAssetResponse = {
   kit: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
   custody: { custodian: { id: string; name: string } } | null;
+  // Quantity fields (additive). Surfaced so the companion can DISPLAY
+  // quantity data; the existing legacy fields above are unchanged.
+  type: AssetType;
+  quantity: number | null;
+  minQuantity: number | null;
+  unitOfMeasure: string | null;
+  consumptionType: ConsumptionType | null;
+  // Many-aware custody list. `custody` (above) keeps the legacy single
+  // object for the in-App-Store build; `custodyList` carries every row with
+  // its quantity for QUANTITY_TRACKED assets that may have multiple holders.
+  custodyList: Array<{
+    custodian: { id: string; name: string };
+    quantity: number;
+  }>;
 };
 
 /**
@@ -448,17 +483,45 @@ export function shapeMobileAssetResponse(asset: {
   mainImage: string | null;
   availableToBook: boolean;
   category: { name: string } | null;
+  type: AssetType;
+  quantity: number | null;
+  minQuantity: number | null;
+  unitOfMeasure: string | null;
+  consumptionType: ConsumptionType | null;
   assetKits: Array<{ kit: { id: string; name: string } }>;
   assetLocations: Array<{ location: { id: string; name: string } }>;
-  custody: Array<{ custodian: { id: string; name: string } }>;
+  custody: Array<{
+    quantity: number;
+    custodian: { id: string; name: string };
+  }>;
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  // Aggregate custody rows by custodian so a holder with more than one row on
+  // the same asset (e.g. a kit-driven row plus a standalone row) shows once
+  // with their summed quantity rather than duplicated. Insertion order follows
+  // the `createdAt`-ordered select, so the list stays deterministic.
+  const custodyList: MobileAssetResponse["custodyList"] = [];
+  const custodyIndexById = new Map<string, number>();
+  for (const c of custody) {
+    const existingIndex = custodyIndexById.get(c.custodian.id);
+    if (existingIndex === undefined) {
+      custodyIndexById.set(c.custodian.id, custodyList.length);
+      custodyList.push({ custodian: c.custodian, quantity: c.quantity });
+    } else {
+      custodyList[existingIndex].quantity += c.quantity;
+    }
+  }
   return {
+    // `...rest` carries the new scalar quantity fields (type, quantity,
+    // minQuantity, unitOfMeasure, consumptionType) through verbatim.
     ...rest,
     kitId: kit?.id ?? null,
     kit,
     location: assetLocations[0]?.location ?? null,
-    custody: custody[0] ?? null,
+    // Legacy single-or-null custody (unchanged) for the in-App-Store build.
+    custody: custody[0] ? { custodian: custody[0].custodian } : null,
+    // Many-aware custody list (additive) — every holder + their summed quantity.
+    custodyList,
   };
 }

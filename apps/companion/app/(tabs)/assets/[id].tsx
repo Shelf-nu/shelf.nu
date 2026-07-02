@@ -36,6 +36,7 @@ import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { InfoRow } from "@/components/shared/info-row";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
@@ -245,6 +246,28 @@ export default function AssetDetailScreen() {
     (cf) => cf.customField.active !== false
   );
 
+  // ── Quantity display (additive, QUANTITY_TRACKED assets only) ────────
+  // Every value below is guarded so an INDIVIDUAL asset — or a pre-quantity
+  // server that omits these fields — renders exactly as before.
+  const isQtyTracked = isQuantityTracked(asset);
+  // Total quantity label ("10 pcs" / "10"). Null when absent.
+  const totalQuantityLabel = isQtyTracked
+    ? formatQuantity(asset.quantity, asset.unitOfMeasure)
+    : null;
+  // Per-status slices; null for INDIVIDUAL assets or QT assets with no
+  // activity (server's getQuantityData null contract) — we fall back to the
+  // plain total in that case.
+  const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
+  const unitSuffix = asset.unitOfMeasure?.trim()
+    ? ` ${asset.unitOfMeasure.trim()}`
+    : "";
+  // Many-aware custody rows. Empty/absent → fall back to the existing single
+  // `asset.custody` display below.
+  const custodyList =
+    isQtyTracked && asset.custodyList && asset.custodyList.length > 0
+      ? asset.custodyList
+      : null;
+
   return (
     <>
       <Stack.Screen options={{ title: asset.title }} />
@@ -290,6 +313,43 @@ export default function AssetDetailScreen() {
 
           {asset.description && (
             <Text style={styles.description}>{asset.description}</Text>
+          )}
+
+          {/* ── Quantity (QUANTITY_TRACKED assets only) ── */}
+          {isQtyTracked && totalQuantityLabel && (
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Quantity</Text>
+              <View style={styles.quantityCard}>
+                <View style={styles.quantityTotalRow}>
+                  <Text style={styles.quantityTotalValue}>
+                    {totalQuantityLabel}
+                  </Text>
+                  <Text style={styles.quantityTotalLabel}>total</Text>
+                </View>
+                {/* Per-status slices. When the breakdown is null (no activity)
+                    we show only the total above. */}
+                {breakdown && (
+                  <View style={styles.quantityBreakdownRow}>
+                    <QuantityStat
+                      label="Available"
+                      value={`${breakdown.available}${unitSuffix}`}
+                    />
+                    <QuantityStat
+                      label="In custody"
+                      value={`${breakdown.inCustody}${unitSuffix}`}
+                    />
+                    <QuantityStat
+                      label="Reserved"
+                      value={`${breakdown.reserved}${unitSuffix}`}
+                    />
+                    <QuantityStat
+                      label="Checked out"
+                      value={`${breakdown.checkedOut}${unitSuffix}`}
+                    />
+                  </View>
+                )}
+              </View>
+            </View>
           )}
 
           {/* ── Quick Actions ──────────────────────────── */}
@@ -342,7 +402,26 @@ export default function AssetDetailScreen() {
                 accessibilityLabel={`View kit ${asset.kit.name}`}
               />
             )}
-            {asset.custody && (
+            {custodyList ? (
+              /* Many-aware custody — one row per holder. Each row is
+                 self-describing: the custodian's name labels the row and the
+                 held quantity is the value, so no row depends on a sibling for
+                 context (QUANTITY_TRACKED assets can have several holders). */
+              custodyList.map((entry) => {
+                const qtyLabel = formatQuantity(
+                  entry.quantity,
+                  asset.unitOfMeasure
+                );
+                return (
+                  <InfoRow
+                    key={entry.custodian.id}
+                    icon="person-outline"
+                    label={entry.custodian.name}
+                    value={qtyLabel ?? "In custody"}
+                  />
+                );
+              })
+            ) : asset.custody ? (
               <>
                 <InfoRow
                   icon="person-outline"
@@ -362,7 +441,7 @@ export default function AssetDetailScreen() {
                   value={formatDate(asset.custody.createdAt)}
                 />
               </>
-            )}
+            ) : null}
             {asset.valuation != null && asset.valuation > 0 && (
               <InfoRow
                 icon="cash-outline"
@@ -541,6 +620,29 @@ export default function AssetDetailScreen() {
   );
 }
 
+/**
+ * QuantityStat — one labelled value in the QUANTITY_TRACKED breakdown grid
+ * (e.g. "Available · 6 pcs"). Module-scoped for stable render identity.
+ *
+ * @param props.label - The status label (e.g. "Available").
+ * @param props.value - The pre-formatted quantity string (e.g. "6 pcs").
+ */
+function QuantityStat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
+  // `accessible` groups the two Text nodes into one element so
+  // VoiceOver/TalkBack reads the combined "label value" once.
+  return (
+    <View
+      style={styles.quantityStat}
+      accessible
+      accessibilityLabel={`${label} ${value}`}
+    >
+      <Text style={styles.quantityStatValue}>{value}</Text>
+      <Text style={styles.quantityStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
 // ── Styles ─────────────────────────────────────────────
 
 const useStyles = createStyles((colors, shadows) => ({
@@ -652,6 +754,53 @@ const useStyles = createStyles((colors, shadows) => ({
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: spacing.sm,
+  },
+
+  // Quantity card (QUANTITY_TRACKED assets)
+  quantityCard: {
+    backgroundColor: colors.white,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+    ...shadows.sm,
+  },
+  quantityTotalRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.sm,
+  },
+  quantityTotalValue: {
+    fontSize: fontSize.xxxl,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  quantityTotalLabel: {
+    fontSize: fontSize.base,
+    color: colors.muted,
+  },
+  quantityBreakdownRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
+  },
+  // Two-up grid: each stat takes ~half the row so 4 stats wrap to 2x2.
+  quantityStat: {
+    width: "50%",
+    paddingVertical: spacing.xs,
+    gap: 2,
+  },
+  quantityStatValue: {
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  quantityStatLabel: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
 
   // Tags

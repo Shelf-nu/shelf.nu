@@ -25,7 +25,8 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 
 // why: a minimal valid `MOBILE_ASSET_SELECT` row used as the baseline for
 // every test. Individual tests override only the fields they care about so
-// the asserted output diffs stay readable.
+// the asserted output diffs stay readable. Quantity scalars default to the
+// INDIVIDUAL-asset shape (`type: "INDIVIDUAL"`, null quantity columns).
 const baseAsset = {
   id: "asset-123",
   title: "Test Asset",
@@ -33,9 +34,17 @@ const baseAsset = {
   mainImage: null,
   availableToBook: true,
   category: null,
+  type: "INDIVIDUAL" as const,
+  quantity: null,
+  minQuantity: null,
+  unitOfMeasure: null,
+  consumptionType: null,
   assetKits: [],
   assetLocations: [],
-  custody: [],
+  custody: [] as Array<{
+    quantity: number;
+    custodian: { id: string; name: string };
+  }>,
 };
 
 describe("shapeMobileAssetResponse", () => {
@@ -64,7 +73,9 @@ describe("shapeMobileAssetResponse", () => {
   it("flattens custody[0] to a single-or-null object", () => {
     const result = shapeMobileAssetResponse({
       ...baseAsset,
-      custody: [{ custodian: { id: "tm-789", name: "Alice Example" } }],
+      custody: [
+        { quantity: 1, custodian: { id: "tm-789", name: "Alice Example" } },
+      ],
     });
 
     expect(result.custody).toEqual({
@@ -90,7 +101,9 @@ describe("shapeMobileAssetResponse", () => {
       ...baseAsset,
       assetKits: [{ kit: { id: "kit-1", name: "Audio Kit" } }],
       assetLocations: [{ location: { id: "loc-1", name: "Warehouse" } }],
-      custody: [{ custodian: { id: "tm-1", name: "Bob Custodian" } }],
+      custody: [
+        { quantity: 1, custodian: { id: "tm-1", name: "Bob Custodian" } },
+      ],
     });
 
     expect(result.kit).toEqual({ id: "kit-1", name: "Audio Kit" });
@@ -122,5 +135,58 @@ describe("shapeMobileAssetResponse", () => {
     expect(result.mainImage).toBe("https://example.com/img.jpg");
     expect(result.availableToBook).toBe(false);
     expect(result.category).toEqual({ name: "Cameras" });
+  });
+
+  it("keeps legacy fields null AND surfaces the new quantity fields for an INDIVIDUAL asset with empty pivots", () => {
+    // The new additive fields must coexist with the legacy back-compat
+    // contract: a bare INDIVIDUAL asset still reports null kit/location/
+    // custody, plus the quantity scalars pass through and `custodyList` is
+    // an empty array (never undefined).
+    const result = shapeMobileAssetResponse(baseAsset);
+
+    // Legacy fields unchanged.
+    expect(result.kit).toBeNull();
+    expect(result.kitId).toBeNull();
+    expect(result.location).toBeNull();
+    expect(result.custody).toBeNull();
+
+    // New additive fields.
+    expect(result.type).toBe("INDIVIDUAL");
+    expect(result.quantity).toBeNull();
+    expect(result.minQuantity).toBeNull();
+    expect(result.unitOfMeasure).toBeNull();
+    expect(result.consumptionType).toBeNull();
+    expect(result.custodyList).toEqual([]);
+  });
+
+  it("surfaces the many-aware custodyList for a QUANTITY_TRACKED asset with multiple custody rows", () => {
+    // QUANTITY_TRACKED assets can have multiple holders. `custodyList` must
+    // carry every row with its quantity, while the legacy single `custody`
+    // collapses to the first row's custodian (no leaked `quantity`).
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+      custody: [
+        { quantity: 3, custodian: { id: "tm-1", name: "Alice" } },
+        { quantity: 2, custodian: { id: "tm-2", name: "Bob" } },
+      ],
+    });
+
+    // Many-aware list keeps both entries with their quantities.
+    expect(result.custodyList).toEqual([
+      { custodian: { id: "tm-1", name: "Alice" }, quantity: 3 },
+      { custodian: { id: "tm-2", name: "Bob" }, quantity: 2 },
+    ]);
+
+    // Legacy single custody = first row's custodian only (quantity stripped).
+    expect(result.custody).toEqual({
+      custodian: { id: "tm-1", name: "Alice" },
+    });
+
+    // Quantity scalar passes through.
+    expect(result.quantity).toBe(10);
+    expect(result.type).toBe("QUANTITY_TRACKED");
   });
 });
