@@ -261,17 +261,22 @@ export default function DynamicSelect({
     return [...specialItems, ...itemsToRender];
   }, [withValueItem, withoutValueItem, itemsToRender]);
 
-  function handleItemChange(id: string) {
+  function handleItemChange(id: string, knownItem?: ModelFilterItem) {
     const isDeselecting = allowClear && selectedValue === id;
 
     // Update local state
     setSelectedValue(isDeselecting ? undefined : id);
 
-    // Cache the picked item (while it's still present in the render list) so
-    // the trigger can render its label even after the fetcher is reset — a
-    // typeahead-only selection is otherwise dropped by resetSearchOnClose.
+    // Cache the picked item so the trigger can render its label even after the
+    // fetcher is reset — a typeahead-only or just-created selection is
+    // otherwise dropped by resetSearchOnClose. Callers that already hold the
+    // item object (e.g. inline creation) pass it as `knownItem`; the freshly
+    // created item is not yet in `allItemsToRender` in this tick, so the
+    // lookup would miss it.
     setSelectedItemCache(
-      isDeselecting ? undefined : allItemsToRender.find((i) => i.id === id)
+      isDeselecting
+        ? undefined
+        : knownItem ?? allItemsToRender.find((i) => i.id === id)
     );
 
     // Always update URL params and parent state
@@ -314,7 +319,10 @@ export default function DynamicSelect({
 
   const handleItemCreated = (item: ModelFilterItem) => {
     setCreatedItems((prev) => dedupeItems([item, ...prev]));
-    handleItemChange(item.id);
+    // Pass the created item so the selected-item cache holds it directly — it
+    // is not yet in `allItemsToRender` in this render, and the following
+    // `resetModelFiltersFetcher()` clears the fetcher results.
+    handleItemChange(item.id, item);
     setSearchQuery("");
     resetModelFiltersFetcher();
     setIsPopoverOpen(false);
