@@ -4,13 +4,17 @@ import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
+import { QrLabelCard } from "~/components/assets/qr-label-card";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveDisplayCode } from "~/modules/barcode/display";
+import { buildLabelSvg } from "~/modules/qr/label";
 import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
+import { svgToPngBlob } from "~/utils/svg-to-png";
 import { tw } from "~/utils/tw";
 import { waitForImagesToLoad } from "~/utils/wait-for-images";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
@@ -29,6 +33,8 @@ export interface CodeType {
   qrData?: {
     size: SizeKeys;
     src: string;
+    /** The scan URL the QR encodes — used to re-render as vector for download. */
+    url: string;
   };
   // Barcode specific
   barcodeData?: {
@@ -62,12 +68,7 @@ const LABEL_CONTAINER_STYLE: CSSProperties = {
   backgroundColor: "white",
 };
 
-/** QR labels are square; barcode labels have a minimum height instead. */
-const QR_LABEL_STYLE: CSSProperties = {
-  ...LABEL_CONTAINER_STYLE,
-  aspectRatio: "1 / 1",
-};
-
+/** Barcode labels have a minimum height (QR labels render via `<QrLabelCard>`). */
 const BARCODE_LABEL_STYLE: CSSProperties = {
   ...LABEL_CONTAINER_STYLE,
   minHeight: "300px",
@@ -99,6 +100,7 @@ interface CodePreviewProps {
       size: SizeKeys;
       id: string;
       src: string;
+      url: string;
     };
   };
   barcodes?: Array<{
@@ -110,6 +112,8 @@ interface CodePreviewProps {
   selectedBarcodeId?: string;
   onRefetchData?: () => void; // Callback to refetch data when barcode is added
   sequentialId?: string | null;
+  /** Per-asset display-code override, so the resolver matches list/bulk views. */
+  preferredBarcodeId?: string | null;
   showShelfBranding?: boolean;
 }
 
@@ -125,9 +129,10 @@ export const CodePreview = ({
   selectedBarcodeId,
   onRefetchData,
   sequentialId,
+  preferredBarcodeId,
   showShelfBranding,
 }: CodePreviewProps) => {
-  const captureDivRef = useRef<HTMLImageElement>(null);
+  const captureDivRef = useRef<HTMLDivElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
@@ -136,6 +141,28 @@ export const CodePreview = ({
     showShelfBranding,
     organization?.showShelfBranding
   );
+
+  // Identifier text under the QR — resolved with the SAME shared resolver as the
+  // list views and the bulk export, so single-item and bulk never diverge (e.g.
+  // for barcode-preference workspaces or per-asset display-code overrides).
+  const resolvedIdText = useMemo(() => {
+    const qrId = qrObj?.qr?.id;
+    if (!qrId) return "";
+    return (
+      resolveDisplayCode({
+        entity: {
+          sequentialId,
+          qrCodes: [{ id: qrId }],
+          barcodes,
+          preferredBarcodeId,
+        },
+        organization: {
+          qrIdDisplayPreference: organization?.qrIdDisplayPreference ?? "QR_ID",
+          barcodesEnabled: organization?.barcodesEnabled ?? false,
+        },
+      }).value || qrId
+    );
+  }, [qrObj, sequentialId, barcodes, preferredBarcodeId, organization]);
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
@@ -151,6 +178,7 @@ export const CodePreview = ({
         qrData: {
           size: qrObj.qr.size,
           src: qrObj.qr.src,
+          url: qrObj.qr.url,
         },
       });
     }
@@ -246,6 +274,32 @@ export const CodePreview = ({
   }, [item, selectedCode]);
 
   function downloadCode(e: MouseEvent<HTMLButtonElement>) {
+    // Vector path for the Shelf QR: render the label as SVG and rasterize at
+    // high resolution — genuinely sharp, unlike the legacy bitmap capture. One
+    // renderer with the bulk export. (Barcodes fall through to the DOM capture.)
+    if (selectedCode?.type === "qr" && selectedCode.qrData) {
+      e.preventDefault();
+      const idText = resolvedIdText || selectedCode.id;
+      void svgToPngBlob(
+        buildLabelSvg({
+          url: selectedCode.qrData.url,
+          title: item.name,
+          idText,
+          showBranding: resolvedShowShelfBranding,
+        })
+      )
+        .then((blob) => {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = fileName;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(link.href), 4e4);
+        })
+        // eslint-disable-next-line no-console
+        .catch(console.error);
+      return;
+    }
+
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
@@ -366,14 +420,18 @@ export const CodePreview = ({
       {/* Code Preview */}
       <div className="flex w-full justify-center pt-6">
         {selectedCode?.type === "qr" ? (
-          <QrLabel
+          <div
             ref={captureDivRef}
-            data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
-            title={item.name}
-            qrIdDisplayPreference={organization?.qrIdDisplayPreference}
-            sequentialId={sequentialId}
-            showShelfBranding={resolvedShowShelfBranding}
-          />
+            className="flex w-[260px] flex-col items-center rounded border bg-white p-4"
+          >
+            <QrLabelCard
+              url={selectedCode.qrData?.url ?? ""}
+              title={item.name}
+              idText={resolvedIdText || selectedCode.id}
+              showBranding={resolvedShowShelfBranding}
+              width="220px"
+            />
+          </div>
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
             ref={captureDivRef}
@@ -420,57 +478,6 @@ export const CodePreview = ({
     </div>
   );
 };
-
-// QR Label Component (existing)
-export type QrDef = {
-  id?: string;
-  size?: SizeKeys;
-  src?: string;
-};
-
-interface QrLabelProps {
-  data?: { qr?: QrDef };
-  title: string;
-  qrIdDisplayPreference?: string;
-  sequentialId?: string | null;
-  showShelfBranding?: boolean;
-}
-
-export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
-  function QrLabel(props, ref) {
-    const {
-      data,
-      title,
-      qrIdDisplayPreference,
-      sequentialId,
-      showShelfBranding = true,
-    } = props ?? {};
-    return (
-      <div style={QR_LABEL_STYLE} ref={ref}>
-        <div style={LABEL_TITLE_STYLE}>{title}</div>
-        <figure className="qr-code flex justify-center">
-          <img
-            src={data?.qr?.src}
-            alt={`${data?.qr?.size}-shelf-qr-code.png`}
-          />
-        </figure>
-        <div className="w-full text-center text-[12px]">
-          <div className="font-semibold">
-            {qrIdDisplayPreference === "SAM_ID" && sequentialId
-              ? sequentialId
-              : data?.qr?.id}
-          </div>
-          {showShelfBranding ? (
-            <div>
-              Powered by{" "}
-              <span className="font-semibold text-black">shelf.nu</span>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-);
 
 // Barcode Label Component (new)
 interface BarcodeLabelProps {

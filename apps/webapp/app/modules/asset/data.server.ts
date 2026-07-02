@@ -26,7 +26,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
-import { canImportAssets } from "~/utils/subscription.server";
+import { canExportAssets, canImportAssets } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
@@ -293,6 +293,7 @@ export async function simpleModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && canImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -579,6 +580,7 @@ export async function advancedModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && advCanImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
