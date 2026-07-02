@@ -77,7 +77,13 @@ import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getParams,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   wrapAssetWithCountForNote,
   wrapLinkForNote,
@@ -652,10 +658,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert dialog,
-     * so we have to redirect to manage-assets url
+     * so we have to redirect to manage-assets url. `redirectTo` is a
+     * client-supplied form value, so route it through `safeRedirect` to block
+     * open-redirects to another origin — falling back to the booking page.
      */
     if (redirectTo) {
-      return redirect(redirectTo);
+      return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }
 
     return redirect(`/bookings/${bookingId}`);

@@ -68,15 +68,22 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-vi.mock("~/utils/http.server", () => ({
-  getParams: vi.fn(),
-  parseData: vi.fn(),
-  json: vi.fn((data) => data),
-  error: vi.fn((reason) => reason),
-  // why: mirror the real `payload()` shape (`{ error: null, ...data }`) so
-  // the Models-tab loader tests can inspect the returned keys directly.
-  payload: vi.fn((data) => ({ error: null, ...data })),
-}));
+vi.mock("~/utils/http.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof httpServer>();
+  return {
+    getParams: vi.fn(),
+    parseData: vi.fn(),
+    json: vi.fn((data) => data),
+    error: vi.fn((reason) => reason),
+    // why: mirror the real `payload()` shape (`{ error: null, ...data }`) so
+    // the Models-tab loader tests can inspect the returned keys directly.
+    payload: vi.fn((data) => ({ error: null, ...data })),
+    // why: use the REAL safeRedirect so the redirect tests exercise the actual
+    // origin-allowlist sanitization the action now depends on (safeRedirect's
+    // own edge cases are unit-tested in http.server.test.ts).
+    safeRedirect: actual.safeRedirect,
+  };
+});
 
 // Mock request and context objects
 const mockContext = {
@@ -754,6 +761,81 @@ describe("manage-kits route validation", () => {
             },
           ],
         })
+      );
+    });
+  });
+
+  describe("redirectTo handling (confirm-from-unsaved-changes alert)", () => {
+    // A successful kit-add: kit1 (AVAILABLE) brings asset3, which is not yet on
+    // the booking, so the action reaches updateBookingAssets and then the
+    // redirect branch. beforeEach already resolves updateBookingAssets +
+    // createKitBookingNote, so only the kit inputs need setting per test.
+    const availableKit = [
+      {
+        id: "kit1",
+        name: "Kit 1",
+        status: KitStatus.AVAILABLE,
+        assetKits: [
+          { id: "ak-kit1-asset3", quantity: 1, asset: { id: "asset3" } },
+        ],
+        organizationId: "org123",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ] as any;
+
+    it("redirects to a same-origin redirectTo submitted through the alert", async () => {
+      const manageAssetsUrl =
+        "/bookings/booking123/overview/manage-assets?hideUnavailable=true";
+
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit1"],
+        removedKitIds: [],
+        redirectTo: manageAssetsUrl,
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue(availableKit);
+      vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+      expect((response as Response).headers.get("Location")).toBe(
+        manageAssetsUrl
+      );
+    });
+
+    it("sanitizes an off-origin redirectTo to the booking page (no open redirect)", async () => {
+      // A crafted POST could supply an attacker-controlled absolute URL in the
+      // client-side `redirectTo` field. The action must route it through
+      // safeRedirect, which rejects off-origin targets and falls back to the
+      // booking page instead of redirecting the user off-site.
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit1"],
+        removedKitIds: [],
+        redirectTo: "https://evil.example.com/phish",
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue(availableKit);
+      vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+      expect((response as Response).headers.get("Location")).toBe(
+        "/bookings/booking123"
       );
     });
   });

@@ -80,16 +80,23 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-vi.mock("~/utils/http.server", () => ({
-  getParams: vi.fn(),
-  parseData: vi.fn(),
-  json: vi.fn((data) => data),
-  getCurrentSearchParams: vi.fn(),
-  error: vi.fn((reason) => reason),
-  // Loader-only — mirrors the real `payload()` (`{ error: null, ...data }`)
-  // so the F2 loader tests can inspect the returned keys directly.
-  payload: vi.fn((data) => ({ error: null, ...data })),
-}));
+vi.mock("~/utils/http.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof httpServer>();
+  return {
+    getParams: vi.fn(),
+    parseData: vi.fn(),
+    json: vi.fn((data) => data),
+    getCurrentSearchParams: vi.fn(),
+    error: vi.fn((reason) => reason),
+    // why: mirror the real `payload()` shape (`{ error: null, ...data }`) so
+    // the Models-tab loader tests can inspect the returned keys directly.
+    payload: vi.fn((data) => ({ error: null, ...data })),
+    // why: use the REAL safeRedirect so the redirect tests exercise the actual
+    // origin-allowlist sanitization the action now depends on (safeRedirect's
+    // own edge cases are unit-tested in http.server.test.ts).
+    safeRedirect: actual.safeRedirect,
+  };
+});
 
 vi.mock("~/modules/asset/utils.server", () => ({
   getAssetsWhereInput: vi.fn(),
@@ -945,6 +952,34 @@ describe("manage-assets route validation", () => {
         assetIds: ["asset1", "asset2"],
         removedAssetIds: [],
         redirectTo: null,
+      });
+
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+      expect((response as Response).headers.get("Location")).toBe(
+        "/bookings/booking123"
+      );
+    });
+
+    it("sanitizes an off-origin redirectTo to the booking page (no open redirect)", async () => {
+      // A crafted POST could supply an attacker-controlled absolute URL in the
+      // client-side `redirectTo` field. The action must route it through
+      // safeRedirect, which rejects off-origin targets and falls back to the
+      // booking page instead of redirecting the user off-site.
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2"],
+        removedAssetIds: [],
+        redirectTo: "https://evil.example.com/phish",
       });
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
