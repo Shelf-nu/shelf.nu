@@ -153,13 +153,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                             from: true,
                             to: true,
                             description: true,
-                            // FK columns the consumer reads directly
-                            // (bookingWithRelations.kitId at line 87,
-                            // .custodianUserId at line 117 of the
-                            // useKitAvailabilityData hook). Without
-                            // these, both fields were undefined at
-                            // runtime — CodeRabbit review #2676.
-                            kitId: true,
+                            // FK column the consumer reads directly
+                            // (bookingWithRelations.custodianUserId in the
+                            // useKitAvailabilityData hook). Without it the
+                            // field was undefined at runtime — CodeRabbit
+                            // review #2676.
+                            //
+                            // NOTE: do NOT select `kitId` here — `Booking`
+                            // has no `kitId` scalar (a booking spans kits via
+                            // BookingAsset, not a direct FK). Selecting it
+                            // throws PrismaClientValidationError and 500s the
+                            // whole kits index (Sentry SHELF-WEBAPP-1P1). The
+                            // hook derives the resource id from the kit it's
+                            // iterating (`kitId: kit.id`), so the DB never
+                            // needs to supply it.
                             custodianUserId: true,
                             custodianTeamMember: true,
                             custodianUser: true,
