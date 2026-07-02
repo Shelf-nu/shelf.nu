@@ -5,16 +5,33 @@ import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
+import { isRecurringReminder } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   cancelAssetReminderScheduler,
+  recurringReminderJobOptions,
   scheduleAssetReminder,
 } from "./scheduler.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label = "Asset Reminder";
+
+/**
+ * Cadence payload for a recurring reminder. `null` = one-shot.
+ * Callers derive (unit, interval) from the dialog's Repeat preset and capture
+ * the timezone from client hints; the tier gate is enforced by the caller for
+ * create (assertUserCanUseRecurringReminders) and by editAssetReminder for
+ * edit (compare-to-stored, so downgraded orgs can still edit other fields).
+ */
+export type ReminderRecurrenceInput = {
+  unit: NonNullable<AssetReminder["recurrenceUnit"]>;
+  interval: number;
+  timezone: string | null;
+  endsAt: Date | null;
+} | null;
 
 export async function createAssetReminder({
   name,
@@ -24,6 +41,7 @@ export async function createAssetReminder({
   createdById,
   organizationId,
   teamMembers,
+  recurrence = null,
 }: Pick<
   AssetReminder,
   | "name"
@@ -32,9 +50,18 @@ export async function createAssetReminder({
   | "assetId"
   | "createdById"
   | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+> & {
+  teamMembers: TeamMember["id"][];
+  recurrence?: ReminderRecurrenceInput;
+}) {
   try {
-    await validateTeamMembersForReminder(teamMembers, organizationId);
+    await Promise.all([
+      // why: assetId is user-supplied (route param) — prove it belongs to the
+      // caller's org BEFORE creating, per org-scope-user-supplied-ids rule
+      // (the note write below validates too, but only after the row exists)
+      assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }),
+      validateTeamMembersForReminder(teamMembers, organizationId),
+    ]);
 
     const user = await getUserByID(createdById, {
       select: {
@@ -52,6 +79,10 @@ export async function createAssetReminder({
         assetId,
         createdById,
         organizationId,
+        recurrenceUnit: recurrence?.unit ?? null,
+        recurrenceInterval: recurrence?.interval ?? null,
+        recurrenceTimezone: recurrence?.timezone ?? null,
+        recurrenceEndsAt: recurrence?.endsAt ?? null,
         teamMembers: {
           connect: teamMembers.map((id) => ({ id })),
         },
@@ -83,6 +114,11 @@ export async function createAssetReminder({
           eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
         },
         when: alertDateTime,
+        // why: recurring jobs need retries + singleton dedupe or a transient
+        // failure kills the chain; one-shot jobs keep historical semantics
+        options: recurrence
+          ? recurringReminderJobOptions(assetReminder.id, alertDateTime)
+          : {},
       }),
     ]);
 
@@ -95,6 +131,7 @@ export async function createAssetReminder({
         : "Something went wrong while creating asset reminder.",
       label,
       additionalData: { assetId, organizationId, createdById },
+      shouldBeCaptured: isLikeShelfError(cause) ? cause.shouldBeCaptured : true,
     });
   }
 }
@@ -210,7 +247,9 @@ export async function getPaginatedAndFilterableReminders({
       db.assetReminder.count({ where: finalWhere }),
     ]);
 
-    const totalPages = Math.ceil(totalReminders / perPageParam);
+    // why: divide by the cookie-resolved perPage, not the raw query param —
+    // perPageParam defaults to 0 without a ?per_page, making this Infinity
+    const totalPages = Math.ceil(totalReminders / perPage);
 
     return {
       reminders,
@@ -236,10 +275,22 @@ export async function editAssetReminder({
   alertDateTime,
   organizationId,
   teamMembers,
+  recurrence = null,
+  canUseRecurringReminders,
 }: Pick<
   AssetReminder,
   "id" | "name" | "message" | "alertDateTime" | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+> & {
+  teamMembers: TeamMember["id"][];
+  recurrence?: ReminderRecurrenceInput;
+  /**
+   * Whether the org's tier allows recurring reminders. The gate only fires
+   * when this edit ADDS or CHANGES recurrence relative to the stored row —
+   * downgraded orgs can still edit other fields, turn recurrence off, or
+   * delete the reminder.
+   */
+  canUseRecurringReminders: boolean;
+}) {
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
@@ -249,7 +300,13 @@ export async function editAssetReminder({
     });
 
     const now = new Date();
-    if (now > reminder.alertDateTime) {
+    /**
+     * One-shot reminders become immutable after they fire (historical
+     * events). A RECURRING reminder stays editable even when its stored
+     * alertDateTime is briefly in the past (fire-to-fetch poll window) or
+     * the series ended — editing re-arms it with a new future date.
+     */
+    if (now > reminder.alertDateTime && !isRecurringReminder(reminder)) {
       throw new ShelfError({
         cause: null,
         message: "Edit is not allowed for this reminder.",
@@ -259,13 +316,37 @@ export async function editAssetReminder({
       });
     }
 
+    if (recurrence && !canUseRecurringReminders) {
+      const recurrenceChanged =
+        reminder.recurrenceUnit !== recurrence.unit ||
+        reminder.recurrenceInterval !== recurrence.interval ||
+        (reminder.recurrenceEndsAt?.getTime() ?? null) !==
+          (recurrence.endsAt?.getTime() ?? null);
+
+      if (!isRecurringReminder(reminder) || recurrenceChanged) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed",
+          message:
+            "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
+          label: "Tier",
+          additionalData: { id, organizationId },
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const updatedReminder = await db.assetReminder.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow on lines 247-249 (where id + organizationId)
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow above (where id + organizationId)
       where: { id: reminder.id },
       data: {
         name,
         message,
         alertDateTime,
+        recurrenceUnit: recurrence?.unit ?? null,
+        recurrenceInterval: recurrence?.interval ?? null,
+        recurrenceTimezone: recurrence?.timezone ?? null,
+        recurrenceEndsAt: recurrence?.endsAt ?? null,
         teamMembers: {
           set: [], // set empty so that if any team member is removed, the relation is removed
           connect: teamMembers.map((id) => ({ id })), // then connect
@@ -282,6 +363,7 @@ export async function editAssetReminder({
         eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
       },
       when,
+      options: recurrence ? recurringReminderJobOptions(reminder.id, when) : {},
     });
 
     return updatedReminder;
@@ -388,7 +470,9 @@ export async function getRemindersForOverviewPage({
       },
       take: 2,
       include: ASSET_REMINDER_INCLUDE_FIELDS,
-      orderBy: { alertDateTime: "desc" },
+      // why: asc = the NEXT two upcoming reminders (desc showed the two
+      // furthest-future ones; the home widget already uses asc)
+      orderBy: { alertDateTime: "asc" },
     });
 
     return reminders;

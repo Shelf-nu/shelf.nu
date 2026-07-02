@@ -1,37 +1,116 @@
-import { useEffect } from "react";
-import { Form, useNavigation, useLocation, useActionData } from "react-router";
+import { useEffect, useState } from "react";
+import { DateTime } from "luxon";
+import { Form, useLoaderData, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useDisabled } from "~/hooks/use-disabled";
+import {
+  REMINDER_REPEAT_PRESETS,
+  REMINDER_REPEAT_VALUES,
+  resolveRecurrenceZone,
+  type ReminderRepeatValue,
+} from "~/modules/asset-reminder/recurrence";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
-export const setReminderSchema = z.object({
+const baseReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),
   message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce
-    .date()
-    .min(new Date(), "Please select a date in the future"),
+  alertDateTime: z.coerce.date(),
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),
+  repeat: z.enum(REMINDER_REPEAT_VALUES).default("never"),
+  // why preprocess: an empty optional date input submits "" through the
+  // multipart form, and z.coerce.date() would turn "" into Invalid Date
+  endsAt: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.coerce.date().optional()
+  ),
   redirectTo: z.string().optional(),
 });
+
+/**
+ * Runtime refinements shared by the create and edit schemas.
+ * The future-check must run at parse time — the previous
+ * `.min(new Date())` evaluated new Date() once at module load, so on a
+ * long-running process "in the future" silently meant "after boot".
+ */
+function reminderRefinements(
+  data: z.infer<typeof baseReminderSchema>,
+  ctx: z.RefinementCtx
+) {
+  if (data.alertDateTime.getTime() <= Date.now()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["alertDateTime"],
+      message: "Please select a date in the future",
+    });
+  }
+
+  // endsAt is interpreted as end-of-day server-side, so a same-day end
+  // date is valid; only reject dates before the reminder's own day.
+  if (
+    data.repeat !== "never" &&
+    data.endsAt &&
+    data.endsAt.getTime() + 24 * 60 * 60 * 1000 - 1 <
+      data.alertDateTime.getTime()
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["endsAt"],
+      message: "End date must be on or after the reminder date",
+    });
+  }
+}
+
+export const setReminderSchema =
+  baseReminderSchema.superRefine(reminderRefinements);
+
+/** Edit adds the reminder id; consumed by resolveRemindersActions. */
+export const editReminderSchema = baseReminderSchema
+  .extend({ id: z.string() })
+  .superRefine(reminderRefinements);
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
   onClose: () => void;
-  reminder?: z.infer<typeof setReminderSchema> & { id: string };
+  reminder?: Omit<z.infer<typeof setReminderSchema>, "repeat" | "endsAt"> & {
+    id: string;
+    repeat?: ReminderRepeatValue;
+    endsAt?: Date | string | null;
+    recurrenceTimezone?: string | null;
+  };
   action?: string;
 };
+
+/**
+ * Reads the tier capability exposed by every route that renders this dialog
+ * (asset detail, global reminders index, asset reminders tab). Fails CLOSED
+ * (locked UI) if a future surface forgets to expose it — the server asserts
+ * independently either way.
+ */
+function useCanUseRecurringReminders(): boolean {
+  const data = useLoaderData() as
+    | { canUseRecurringReminders?: boolean }
+    | undefined;
+  return data?.canUseRecurringReminders ?? false;
+}
 
 export default function SetOrEditReminderDialog({
   open,
@@ -39,11 +118,11 @@ export default function SetOrEditReminderDialog({
   reminder,
   action,
 }: SetOrEditReminderDialogProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
 
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
+  const canUseRecurringReminders = useCanUseRecurringReminders();
 
   const redirectTo = `${pathname}${
     searchParams.size > 0
@@ -60,6 +139,8 @@ export default function SetOrEditReminderDialog({
   );
 
   const isEdit = !!reminder;
+  const initialRepeat: ReminderRepeatValue = reminder?.repeat ?? "never";
+  const [repeat, setRepeat] = useState<ReminderRepeatValue>(initialRepeat);
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
@@ -77,6 +158,16 @@ export default function SetOrEditReminderDialog({
     },
     [onClose, searchParams, setSearchParams]
   );
+
+  // why: recurrenceEndsAt is stored as end-of-day in the reminder's own
+  // timezone. Render the calendar date back in THAT zone (not UTC via
+  // toISOString) so the date shown matches what was picked and does not drift
+  // +1 day per save for west-of-UTC workspaces.
+  const endsAtDefault = reminder?.endsAt
+    ? DateTime.fromJSDate(new Date(reminder.endsAt))
+        .setZone(resolveRecurrenceZone(reminder.recurrenceTimezone ?? null))
+        .toFormat("yyyy-MM-dd")
+    : undefined;
 
   return (
     <DialogPortal>
@@ -157,7 +248,7 @@ export default function SetOrEditReminderDialog({
               </p>
             </div>
 
-            <div>
+            <div className="mb-4">
               <Input
                 defaultValue={
                   reminder?.alertDateTime
@@ -182,6 +273,103 @@ export default function SetOrEditReminderDialog({
                 We will send the reminder at this date/time.
               </p>
             </div>
+
+            <div className="mb-4">
+              <label
+                htmlFor="reminder-repeat-trigger"
+                className={`mb-[6px] block text-sm font-medium ${
+                  canUseRecurringReminders ? "text-gray-700" : "text-gray-400"
+                }`}
+              >
+                Repeat
+              </label>
+              {canUseRecurringReminders ? (
+                <Select
+                  name={zo.fields.repeat()}
+                  value={repeat}
+                  onValueChange={(value) =>
+                    setRepeat(value as ReminderRepeatValue)
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger id="reminder-repeat-trigger">
+                    <SelectValue placeholder="Never" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="never">Never</SelectItem>
+                    {Object.entries(REMINDER_REPEAT_PRESETS).map(
+                      ([value, preset]) => (
+                        <SelectItem key={value} value={value}>
+                          {preset.label}
+                        </SelectItem>
+                      )
+                    )}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <>
+                  {/* why hidden inputs: a disabled control submits nothing —
+                      carry the STORED cadence through so plain edits by
+                      downgraded workspaces neither throw nor strip it */}
+                  <input type="hidden" name="repeat" value={initialRepeat} />
+                  {endsAtDefault ? (
+                    <input type="hidden" name="endsAt" value={endsAtDefault} />
+                  ) : null}
+                  <Select value={initialRepeat} disabled>
+                    <SelectTrigger id="reminder-repeat-trigger">
+                      <SelectValue placeholder="Never" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="never">Never</SelectItem>
+                      {Object.entries(REMINDER_REPEAT_PRESETS).map(
+                        ([value, preset]) => (
+                          <SelectItem key={value} value={value}>
+                            {preset.label}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+              {canUseRecurringReminders ? (
+                <p className="mt-1 text-gray-500">
+                  Automatically send this reminder again on a schedule.
+                </p>
+              ) : (
+                <p className="mt-1 text-gray-500">
+                  Recurring reminders are a premium feature.{" "}
+                  <Button
+                    variant="link"
+                    className="inline text-sm"
+                    to="/account-details/subscription"
+                  >
+                    Upgrade your plan
+                  </Button>{" "}
+                  to send reminders on a schedule.
+                </p>
+              )}
+            </div>
+
+            {canUseRecurringReminders && repeat !== "never" ? (
+              <div>
+                <Input
+                  defaultValue={endsAtDefault}
+                  type="date"
+                  name={zo.fields.endsAt()}
+                  error={
+                    validationErrors?.endsAt?.message ||
+                    zo.errors.endsAt()?.message
+                  }
+                  label="Ends on (optional)"
+                  disabled={disabled}
+                  className="mb-2"
+                />
+                <p className="text-gray-500">
+                  Leave empty to repeat until the reminder is deleted.
+                </p>
+              </div>
+            ) : null}
           </div>
           <div>
             <Separator className="md:hidden" />

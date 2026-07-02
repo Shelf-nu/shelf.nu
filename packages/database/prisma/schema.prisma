@@ -1054,6 +1054,7 @@ model TierLimit {
   canExportAssets      Boolean  @default(false)
   canImportNRM         Boolean  @default(false)
   canHideShelfBranding Boolean  @default(false)
+  canUseRecurringReminders Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
   createdAt            DateTime @default(now())
@@ -1069,6 +1070,7 @@ model CustomTierLimit {
   canExportAssets      Boolean  @default(true)
   canImportNRM         Boolean  @default(true)
   canHideShelfBranding Boolean  @default(true)
+  canUseRecurringReminders Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
   isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -1817,12 +1819,34 @@ model AssetLocation {
   @@index([assetKitId])
 }
 
+// Units for reminder recurrence cadences ("every N <unit>"). Stored as
+// unit + interval (not presets) so future custom cadences need no migration.
+enum ReminderRecurrenceUnit {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
 model AssetReminder {
   id                       String       @id @default(cuid())
   name                     String
   message                  String
   alertDateTime            DateTime
   activeSchedulerReference String?
+
+  // Recurrence (null unit/interval = one-shot reminder, the default). For an
+  // active recurring reminder, alertDateTime always holds the NEXT occurrence:
+  // the worker advances it in place each time the reminder fires, keeping every
+  // "upcoming" surface and the status/edit/cancel guards correct without forks.
+  recurrenceUnit     ReminderRecurrenceUnit?
+  recurrenceInterval Int?
+  // IANA zone captured from client hints at create/edit so "every month at
+  // 09:00" stays wall-clock-stable across DST. Null = UTC math (legacy rows).
+  recurrenceTimezone String?
+  // Optional series end (inclusive). Null = repeat until deleted.
+  recurrenceEndsAt DateTime?
+
   organization             Organization @relation(fields: [organizationId], references: [id])
   organizationId           String
   asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
