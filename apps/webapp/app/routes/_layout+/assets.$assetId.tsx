@@ -1,5 +1,4 @@
 import { BarcodeType, OrganizationRoles } from "@prisma/client";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -28,6 +27,7 @@ import {
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
+import { resolveReminderPayloadDates } from "~/modules/asset-reminder/utils.server";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
   validateBarcodeValue,
@@ -35,12 +35,11 @@ import {
 } from "~/modules/barcode/validation";
 import { computeBookingAssetRemainingToCheckOut } from "~/modules/booking/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -56,6 +55,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  assertUserCanUseRecurringReminders,
+  canUseRecurringReminders,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -96,14 +99,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, role } = await requirePermission(
-      {
+    const { organizationId, userOrganizations, organizations, role } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.read,
-      }
-    );
+      });
 
     const asset = await getAsset({
       id,
@@ -248,11 +250,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
+    /** Drives the Repeat control in the set-reminder dialog. */
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
+
     return payload({
       asset: assetWithEffectiveBookingAssets,
       header,
       teamMembers,
       totalTeamMembers,
+      canUseRecurringReminders: canUseRecurringReminders(tierLimit),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -289,7 +298,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "add-barcode": PermissionAction.update,
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -348,25 +357,37 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "set-reminder": {
-        const { redirectTo, ...payload } = parseData(
-          formData,
-          setReminderSchema,
-          { shouldBeCaptured: false }
-        );
-        const hints = getHints(request);
+        const {
+          redirectTo,
+          repeat,
+          endsAt: _endsAt,
+          ...payload
+        } = parseData(formData, setReminderSchema, {
+          shouldBeCaptured: false,
+        });
 
-        const alertDateTime = DateTime.fromFormat(
-          formData.get("alertDateTime")!.toString()!,
-          DATE_TIME_FORMAT,
-          {
-            zone: hints.timeZone,
-          }
-        ).toJSDate();
+        const { alertDateTime, recurrence } = resolveReminderPayloadDates({
+          request,
+          formData,
+          repeat,
+        });
+
+        /**
+         * One-shot reminders stay free; only an actual recurrence request is
+         * tier-gated (server-side — the disabled UI control is not a gate).
+         */
+        if (recurrence) {
+          await assertUserCanUseRecurringReminders({
+            organizationId,
+            organizations,
+          });
+        }
 
         await createAssetReminder({
           ...payload,
           assetId: id,
           alertDateTime,
+          recurrence,
           organizationId,
           createdById: userId,
         });

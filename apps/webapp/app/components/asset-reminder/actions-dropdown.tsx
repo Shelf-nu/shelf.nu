@@ -10,6 +10,10 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
+import {
+  isRecurringReminder,
+  repeatValueFromRecurrence,
+} from "~/modules/asset-reminder/recurrence";
 import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import When from "../when/when";
@@ -25,7 +29,13 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const now = new Date();
-  const isPending = now < new Date(reminder.alertDateTime);
+  /**
+   * One-shot reminders are immutable once sent. Recurring reminders stay
+   * editable even when the stored date briefly sits in the past (fire-to-
+   * fetch window) or the series ended — editing re-arms the series.
+   */
+  const isPending =
+    now < new Date(reminder.alertDateTime) || isRecurringReminder(reminder);
 
   return (
     <DropdownMenu
@@ -70,6 +80,9 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
           message: reminder.message,
           alertDateTime: reminder.alertDateTime,
           teamMembers: reminder.teamMembers.map((tm) => tm.id),
+          repeat: repeatValueFromRecurrence(reminder),
+          endsAt: reminder.recurrenceEndsAt,
+          recurrenceTimezone: reminder.recurrenceTimezone,
         }}
         open={isEditDialogOpen}
         onClose={() => {

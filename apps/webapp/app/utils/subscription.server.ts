@@ -410,6 +410,64 @@ export async function assertUserCanInviteUsersToWorkspace({
 }
 /** End Team Features */
 
+/** Recurring Reminders */
+
+/**
+ * Determines whether the current organization's tier allows recurring
+ * (auto-repeating) asset reminders. One-shot reminders are free and are
+ * never gated by this.
+ *
+ * @param tierLimit - The tier limits of the organization OWNER (see
+ *                    getOrganizationTierLimit).
+ * @returns `true` if recurrence can be used or premium features are disabled.
+ */
+export const canUseRecurringReminders = (
+  tierLimit: { canUseRecurringReminders: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUseRecurringReminders;
+};
+
+/**
+ * Throws when the organization's tier does not include recurring reminders.
+ * Call this only when a mutation actually requests recurrence — creating or
+ * editing one-shot reminders must stay free.
+ *
+ * @throws {ShelfError} 403-style "Not allowed" upgrade nudge.
+ */
+export async function assertUserCanUseRecurringReminders({
+  organizationId,
+  organizations,
+}: {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!canUseRecurringReminders(tierLimit)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message:
+        "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
+      additionalData: { organizationId },
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+/** End Recurring Reminders */
+
 /** Audit Add-on */
 export const canUseAudits = (org: { auditsEnabled: boolean }) => {
   if (!premiumIsEnabled) return true;

@@ -1,13 +1,39 @@
 import type { Prisma, User } from "@prisma/client";
+import { DateTime } from "luxon";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import {
+  ADVANCE_CLOCK_EPSILON_MS,
+  advanceRecurringReminder,
+} from "./chain.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
+import { isRecurringReminder, resolveRecurrenceZone } from "./recurrence";
+import {
+  ASSETS_EVENT_TYPE_MAP,
+  recurringReminderJobOptions,
+  scheduleAssetReminder,
+} from "./scheduler.server";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
 import { createNote } from "../note/service.server";
+
+/**
+ * Marks a failure of the recurring-reminder advance step. The worker wrapper
+ * RETHROWS these (recurring jobs are sent with retryLimit 3, so pg-boss
+ * retries the job) while keeping the historical swallow-and-log behavior for
+ * everything else. Ordering guarantees retries cannot double-email: the
+ * advance step runs BEFORE any notification is sent.
+ */
+export class RecurringAdvanceError extends Error {
+  constructor(cause: unknown, reminderId: string) {
+    super(`Failed to advance recurring reminder ${reminderId}`);
+    this.name = "RecurringAdvanceError";
+    this.cause = cause;
+  }
+}
 
 const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
   teamMembers: {
@@ -64,6 +90,85 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       return;
     }
 
+    /**
+     * Stale-job guard: when the row tracks a DIFFERENT live job than the one
+     * firing, this job was superseded (an edit whose cancel silently failed,
+     * or a reconciliation re-arm) — firing it would double-notify or corrupt
+     * the chain. A null reference is permissive (unknown state: fire).
+     */
+    if (
+      reminder.activeSchedulerReference &&
+      job.id &&
+      reminder.activeSchedulerReference !== job.id
+    ) {
+      Logger.warn(
+        new ShelfError({
+          cause: null,
+          message:
+            "Skipping stale asset reminder job (superseded by a newer schedule).",
+          additionalData: {
+            ...job.data,
+            jobId: job.id,
+            activeSchedulerReference: reminder.activeSchedulerReference,
+          },
+          label: "Asset Scheduler",
+          shouldBeCaptured: false,
+        })
+      );
+      return;
+    }
+
+    /**
+     * Recurring series: advance the row to the next occurrence and schedule
+     * the next job BEFORE notifying. If this critical step fails the error
+     * escapes the wrapper as RecurringAdvanceError so pg-boss retries the
+     * job — no email has gone out yet, so a retry cannot double-send.
+     */
+    const now = new Date();
+    let nextOccurrence: Date | null = null;
+    let seriesPaused = false;
+
+    if (isRecurringReminder(reminder)) {
+      const dueNow =
+        reminder.alertDateTime.getTime() <=
+        now.getTime() + ADVANCE_CLOCK_EPSILON_MS;
+
+      try {
+        if (dueNow) {
+          // Normal fire: advance the row and schedule the next occurrence.
+          const { next, paused } = await advanceRecurringReminder({
+            reminder,
+            now,
+          });
+          nextOccurrence = next;
+          seriesPaused = paused;
+        } else {
+          // The row already points at a FUTURE occurrence while this job is
+          // firing. The stale-job guard above proved this job is still the
+          // row's active job (or the reference is null), so we are NOT looking
+          // at a concurrent edit — the advance committed on a prior attempt
+          // but scheduling the next job did not durably succeed (transient
+          // sendAfter failure). Re-arm it idempotently (the singletonKey
+          // dedupes if the job already exists) so the series is not orphaned
+          // until boot reconciliation.
+          await scheduleAssetReminder({
+            data: {
+              reminderId: reminder.id,
+              eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+            },
+            when: reminder.alertDateTime,
+            options: recurringReminderJobOptions(
+              reminder.id,
+              reminder.alertDateTime
+            ),
+          });
+          nextOccurrence = reminder.alertDateTime;
+        }
+      } catch (cause) {
+        throw new RecurringAdvanceError(cause, reminder.id);
+      }
+    }
+
     const usersToSendEmail = reminder.teamMembers
       .filter((tm) => !!tm.user)
       .map((teamMember) => teamMember.user! as UserToEmail);
@@ -109,6 +214,21 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       });
     }
 
+    /**
+     * Note text reflects the chain state so users can see why a series
+     * continues, ended, or stopped, straight from the asset activity.
+     */
+    let noteContent = `**System** has sent **${reminder.name.trim()}** reminder.`;
+    if (nextOccurrence) {
+      const zone = resolveRecurrenceZone(reminder.recurrenceTimezone);
+      const formattedNext = DateTime.fromJSDate(nextOccurrence)
+        .setZone(zone)
+        .toFormat("d LLL yyyy, HH:mm");
+      noteContent += ` Next reminder scheduled for ${formattedNext} (${zone}).`;
+    } else if (seriesPaused) {
+      noteContent += ` This recurring reminder was paused because the workspace plan no longer includes recurring reminders.`;
+    }
+
     /** Sending alert mails to all associated users. */
     await Promise.all([
       ...usersToSendEmail.map(async (user) => {
@@ -119,6 +239,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           workspaceName: reminder.organization.name,
           isOwner: user.isOwner,
           customEmailFooter: reminder.organization.customEmailFooter,
+          nextOccurrence,
         });
 
         sendEmail({
@@ -131,6 +252,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             workspaceName: reminder.organization.name,
             isOwner: user.isOwner,
             customEmailFooter: reminder.organization.customEmailFooter,
+            nextOccurrence,
           }),
           html,
         });
@@ -143,7 +265,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         organizationId: reminder.organizationId,
         userId: reminder.createdById,
         type: "UPDATE",
-        content: `**System** has sent **${reminder.name.trim()}** reminder.`,
+        content: noteContent,
       }),
     ]);
   },
@@ -170,6 +292,16 @@ export async function regierAssetWorkers() {
             label: "Asset Scheduler",
           })
         );
+
+        /**
+         * Recurring-chain advance failures must reach pg-boss so the job is
+         * retried (recurring jobs are sent with retryLimit 3). Everything
+         * else keeps the historical swallow-and-log (at-most-once) behavior
+         * so one-shot reminder semantics are unchanged.
+         */
+        if (cause instanceof RecurringAdvanceError) {
+          throw cause;
+        }
       }
     }
   );
