@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -68,6 +68,13 @@ type Props = ModelFilterProps & {
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
+  /**
+   * When true, clears the internal search query (and resets the
+   * model-filters fetcher) whenever the popover closes — so reopening the
+   * picker starts fresh. Default false to preserve behavior for the ~20
+   * other consumers that rely on persisted search across reopen.
+   */
+  resetSearchOnClose?: boolean;
   excludeItems?: string[];
   /** Allow undefined for deselection cases */
   onChange?: ((value: string | undefined) => void) | null /**
@@ -117,6 +124,7 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
+  resetSearchOnClose = false,
   excludeItems,
   onChange = null,
   allowClear,
@@ -176,6 +184,45 @@ export default function DynamicSelect({
     getAllEntries,
   } = useModelFilters({ model, selectionMode, ...hookProps });
 
+  /**
+   * Cache of the last-selected item so the trigger can still render its label
+   * after the model-filters fetcher is reset (see `resetSearchOnClose`). A
+   * model picked from typeahead only exists in the fetcher results, not in the
+   * loader's seed list — resetting the fetcher would otherwise drop it from
+   * `allItemsToRender`, and the trigger would fall back to the placeholder even
+   * though the hidden input still posts the selected id.
+   */
+  const [selectedItemCache, setSelectedItemCache] = useState<
+    ModelFilterItem | undefined
+  >(undefined);
+
+  /**
+   * Hold the latest `resetModelFiltersFetcher` in a ref so the close-reset
+   * effect can call it without listing it as a dependency — it's recreated on
+   * every `useModelFilters` call, so depending on it directly would refire the
+   * effect on every render.
+   */
+  const resetFetcherRef = useRef(resetModelFiltersFetcher);
+  resetFetcherRef.current = resetModelFiltersFetcher;
+
+  /**
+   * Reset the search on the open→closed transition when opted in. This covers
+   * BOTH the programmatic close from `closeOnSelect` (handleItemChange calls
+   * `setIsPopoverOpen(false)` directly, so Radix's `onOpenChange` never fires)
+   * and Radix-driven closes (Escape, outside click). The `wasOpen` ref gates on
+   * the transition so it does not fire on the initial closed mount.
+   * `resetModelFiltersFetcher` already clears `searchQuery`, so we don't call
+   * `setSearchQuery` separately.
+   */
+  const wasPopoverOpenRef = useRef(false);
+  useEffect(() => {
+    const justClosed = wasPopoverOpenRef.current && !isPopoverOpen;
+    wasPopoverOpenRef.current = isPopoverOpen;
+    if (resetSearchOnClose && justClosed) {
+      resetFetcherRef.current();
+    }
+  }, [isPopoverOpen, resetSearchOnClose]);
+
   const itemsWithCreated = useMemo(
     () => dedupeItems([...createdItems, ...items]),
     [createdItems, items]
@@ -214,11 +261,23 @@ export default function DynamicSelect({
     return [...specialItems, ...itemsToRender];
   }, [withValueItem, withoutValueItem, itemsToRender]);
 
-  function handleItemChange(id: string) {
+  function handleItemChange(id: string, knownItem?: ModelFilterItem) {
     const isDeselecting = allowClear && selectedValue === id;
 
     // Update local state
     setSelectedValue(isDeselecting ? undefined : id);
+
+    // Cache the picked item so the trigger can render its label even after the
+    // fetcher is reset — a typeahead-only or just-created selection is
+    // otherwise dropped by resetSearchOnClose. Callers that already hold the
+    // item object (e.g. inline creation) pass it as `knownItem`; the freshly
+    // created item is not yet in `allItemsToRender` in this tick, so the
+    // lookup would miss it.
+    setSelectedItemCache(
+      isDeselecting
+        ? undefined
+        : knownItem ?? allItemsToRender.find((i) => i.id === id)
+    );
 
     // Always update URL params and parent state
     handleSelectItemChange(id);
@@ -231,8 +290,16 @@ export default function DynamicSelect({
     }
   }
 
-  /** This is needed so we know what to show on the trigger */
-  const selectedItem = allItemsToRender.find((i) => i.id === selectedValue);
+  /**
+   * This is needed so we know what to show on the trigger. Falls back to the
+   * cached selected item when the current render list no longer contains it
+   * (e.g. a typeahead selection after the fetcher was reset). The id guard
+   * avoids showing a stale cache once `selectedValue` changes (e.g. a
+   * `defaultValue`-driven reset).
+   */
+  const selectedItem =
+    allItemsToRender.find((i) => i.id === selectedValue) ??
+    (selectedItemCache?.id === selectedValue ? selectedItemCache : undefined);
   const triggerValue = selectedItem
     ? typeof renderItem === "function"
       ? renderItem({ ...selectedItem, metadata: selectedItem })
@@ -252,7 +319,10 @@ export default function DynamicSelect({
 
   const handleItemCreated = (item: ModelFilterItem) => {
     setCreatedItems((prev) => dedupeItems([item, ...prev]));
-    handleItemChange(item.id);
+    // Pass the created item so the selected-item cache holds it directly — it
+    // is not yet in `allItemsToRender` in this render, and the following
+    // `resetModelFiltersFetcher()` clears the fetcher results.
+    handleItemChange(item.id, item);
     setSearchQuery("");
     resetModelFiltersFetcher();
     setIsPopoverOpen(false);

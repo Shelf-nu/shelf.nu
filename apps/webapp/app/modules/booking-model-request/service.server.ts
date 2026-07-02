@@ -195,6 +195,193 @@ export async function getAssetModelAvailability({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                          getBookingModelTabData                            */
+/* -------------------------------------------------------------------------- */
+
+/** The upper bound on how many `AssetModel` rows the picker fetches at once. */
+const MODEL_PICKER_LIMIT = 50;
+
+/**
+ * Shape of the booking record `getBookingModelTabData` needs. Callers pass
+ * their already-fetched `booking` through untouched — this is a projection,
+ * not a re-fetch. Deliberately excludes `bookingAssets`: the manage-assets
+ * route pre-filters those to standalone (non-kit) rows for its own picker,
+ * and coupling this shared helper to that filter would silently break the
+ * manage-kits route, which has no such pre-filter.
+ */
+type BookingForModelTab = {
+  id: string;
+  from: Date | null;
+  to: Date | null;
+  modelRequests: Array<{
+    assetModelId: string;
+    quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: Date | null;
+    assetModel: { name: string };
+  }>;
+};
+
+/** Per-model row shown in the Models tab's picker + summary list. */
+type BookingModelTabAssetModel = {
+  id: string;
+  name: string;
+  total: number;
+  available: number;
+  reservedConcrete: number;
+  reservedViaRequest: number;
+  inCustody: number;
+};
+
+/** Payload the "Book-by-Model / Models tab" UI needs from the loader. */
+export type BookingModelTabData = {
+  /** Whether the org has any `AssetModel` at all — hides the tab when false. */
+  showModelsTab: boolean;
+  /** Per-model availability for the current booking's window. */
+  assetModels: BookingModelTabAssetModel[];
+  /** `assetModels` reshaped for {@link DynamicSelect}'s seed list. */
+  initialAssetModels: Array<{
+    id: string;
+    name: string;
+    metadata: {
+      total: number;
+      available: number;
+      reservedConcrete: number;
+      reservedViaRequest: number;
+      inCustody: number;
+    };
+  }>;
+  /** Full-org model count (not the truncated `MODEL_PICKER_LIMIT` list). */
+  totalAssetModels: number;
+  /** This booking's existing model-level requests, outstanding + fulfilled. */
+  modelRequests: Array<{
+    assetModelId: string;
+    assetModelName: string;
+    quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: string | null;
+  }>;
+};
+
+/**
+ * Build the "Book-by-Model / Models tab" payload for a booking's
+ * manage-assets / manage-kits loaders.
+ *
+ * Always counts the org's `AssetModel`s so the UI knows whether to render
+ * the Models tab at all (hidden when the org has none). When there is at
+ * least one model, also fetches the first `MODEL_PICKER_LIMIT` (sorted by
+ * name) plus each one's availability in the booking's window, and projects
+ * the booking's existing model-level requests for the tab's "active /
+ * fulfilled" split.
+ *
+ * Does not mutate. Org-scoped: both the count and the model list are
+ * filtered to `organizationId`, and `organizationId` is forwarded into
+ * {@link getAssetModelAvailability}.
+ *
+ * @param organizationId - The caller's active organization. Required —
+ * scopes both the model count and list, preventing cross-org leakage.
+ * @param booking - The booking these models are being reserved against.
+ * Only `id`, `from`, `to`, and `modelRequests` are read.
+ * @returns The Models tab payload; see {@link BookingModelTabData}.
+ */
+export async function getBookingModelTabData({
+  organizationId,
+  booking,
+}: {
+  organizationId: string;
+  booking: BookingForModelTab;
+}): Promise<BookingModelTabData> {
+  try {
+    const assetModelsCount = await db.assetModel.count({
+      where: { organizationId },
+    });
+    const showModelsTab = assetModelsCount > 0;
+
+    let assetModels: BookingModelTabAssetModel[] = [];
+
+    if (showModelsTab) {
+      const rawModels = await db.assetModel.findMany({
+        where: { organizationId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: MODEL_PICKER_LIMIT,
+      });
+
+      const availabilities = await Promise.all(
+        rawModels.map((m) =>
+          getAssetModelAvailability({
+            assetModelId: m.id,
+            organizationId,
+            bookingId: booking.id,
+            from: booking.from,
+            to: booking.to,
+          })
+        )
+      );
+
+      assetModels = rawModels.map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        total: availabilities[i].total,
+        available: availabilities[i].available,
+        reservedConcrete: availabilities[i].reservedConcrete,
+        reservedViaRequest: availabilities[i].reservedViaRequest,
+        inCustody: availabilities[i].inCustody,
+      }));
+    }
+
+    // Ship all requests (outstanding + fulfilled). The Models tab UI splits
+    // them into "Active reservations" (editable, not yet fully fulfilled)
+    // and "Fulfilled" (historical, read-only) — the audit trail for "this
+    // booking started life as 3 × Dell" on an ONGOING booking.
+    const modelRequests = booking.modelRequests.map((req) => ({
+      assetModelId: req.assetModelId,
+      assetModelName: req.assetModel.name,
+      quantity: req.quantity,
+      fulfilledQuantity: req.fulfilledQuantity,
+      fulfilledAt:
+        req.fulfilledAt instanceof Date
+          ? req.fulfilledAt.toISOString()
+          : req.fulfilledAt,
+    }));
+
+    // Shape for `DynamicSelect`. The picker reads `initialAssetModels` as
+    // its seed list and `totalAssetModels` to decide whether to offer the
+    // "show all / search" affordance. Availability goes on `metadata` so
+    // the renderItem can show e.g. "5 / 5 available" inline per option.
+    const initialAssetModels = assetModels.map((m) => ({
+      id: m.id,
+      name: m.name,
+      metadata: {
+        total: m.total,
+        available: m.available,
+        reservedConcrete: m.reservedConcrete,
+        reservedViaRequest: m.reservedViaRequest,
+        inCustody: m.inCustody,
+      },
+    }));
+
+    return {
+      showModelsTab,
+      assetModels,
+      initialAssetModels,
+      totalAssetModels: assetModelsCount,
+      modelRequests,
+    };
+  } catch (cause) {
+    // Don't re-wrap a ShelfError already thrown by getAssetModelAvailability
+    // — that would bury its original status/message under a generic one.
+    if (cause instanceof ShelfError) throw cause;
+    throw new ShelfError({
+      cause,
+      label,
+      message: "Failed to build the Models tab payload for this booking.",
+      additionalData: { organizationId, bookingId: booking.id },
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         upsertBookingModelRequest                          */
 /* -------------------------------------------------------------------------- */
 
