@@ -403,12 +403,11 @@ export default function AssetDetailScreen() {
               />
             )}
             {custodyList ? (
-              /* Many-aware custody — one row per holder (name + quantity).
-                 Used for QUANTITY_TRACKED assets held by one or more
-                 custodians. */
-              custodyList.map((entry, index) => {
-                // Append the held quantity in parens when we can format it;
-                // fall back to just the name if the qty is missing/non-finite.
+              /* Many-aware custody — one row per holder. Each row is
+                 self-describing: the custodian's name labels the row and the
+                 held quantity is the value, so no row depends on a sibling for
+                 context (QUANTITY_TRACKED assets can have several holders). */
+              custodyList.map((entry) => {
                 const qtyLabel = formatQuantity(
                   entry.quantity,
                   asset.unitOfMeasure
@@ -417,12 +416,8 @@ export default function AssetDetailScreen() {
                   <InfoRow
                     key={entry.custodian.id}
                     icon="person-outline"
-                    label={index === 0 ? "In Custody Of" : ""}
-                    value={
-                      qtyLabel
-                        ? `${entry.custodian.name} (${qtyLabel})`
-                        : entry.custodian.name
-                    }
+                    label={entry.custodian.name}
+                    value={qtyLabel ?? "In custody"}
                   />
                 );
               })

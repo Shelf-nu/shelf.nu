@@ -61,6 +61,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           select: { location: { select: { id: true, name: true } } },
         },
         custody: {
+          // Oldest-first so the flattened single custody + custodyList are
+          // deterministic (the relation is otherwise unordered).
+          orderBy: { createdAt: "asc" as const },
           select: {
             createdAt: true,
             // why: feeds the helper's many-aware `custodyList` (additive);

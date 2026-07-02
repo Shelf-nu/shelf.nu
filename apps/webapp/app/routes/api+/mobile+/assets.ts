@@ -132,6 +132,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           // read keeps working. `quantity` feeds the helper's many-aware
           // `custodyList`.
           custody: {
+            // Oldest-first so the flattened single custody + custodyList are
+            // deterministic (the relation is otherwise unordered).
+            orderBy: { createdAt: "asc" as const },
             select: {
               quantity: true,
               custodian: {

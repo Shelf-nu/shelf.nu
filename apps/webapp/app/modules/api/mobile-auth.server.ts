@@ -326,8 +326,11 @@ export const MOBILE_ASSET_SELECT = {
   // Custody is now 1:many; the shaper flattens `custody[0]` so companion's
   // `asset.custody?.custodian` single-object read still works. We also select
   // `quantity` so the shaper can surface the many-aware `custodyList` (the
-  // legacy single `custody` stays in place too).
+  // legacy single `custody` stays in place too). Ordered by `createdAt` so
+  // both the flattened `custody[0]` and `custodyList` are deterministic
+  // (the relation is otherwise unordered).
   custody: {
+    orderBy: { createdAt: "asc" },
     select: {
       quantity: true,
       custodian: { select: { id: true, name: true } },
@@ -494,6 +497,21 @@ export function shapeMobileAssetResponse(asset: {
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  // Aggregate custody rows by custodian so a holder with more than one row on
+  // the same asset (e.g. a kit-driven row plus a standalone row) shows once
+  // with their summed quantity rather than duplicated. Insertion order follows
+  // the `createdAt`-ordered select, so the list stays deterministic.
+  const custodyList: MobileAssetResponse["custodyList"] = [];
+  const custodyIndexById = new Map<string, number>();
+  for (const c of custody) {
+    const existingIndex = custodyIndexById.get(c.custodian.id);
+    if (existingIndex === undefined) {
+      custodyIndexById.set(c.custodian.id, custodyList.length);
+      custodyList.push({ custodian: c.custodian, quantity: c.quantity });
+    } else {
+      custodyList[existingIndex].quantity += c.quantity;
+    }
+  }
   return {
     // `...rest` carries the new scalar quantity fields (type, quantity,
     // minQuantity, unitOfMeasure, consumptionType) through verbatim.
@@ -503,10 +521,7 @@ export function shapeMobileAssetResponse(asset: {
     location: assetLocations[0]?.location ?? null,
     // Legacy single-or-null custody (unchanged) for the in-App-Store build.
     custody: custody[0] ? { custodian: custody[0].custodian } : null,
-    // Many-aware custody list (additive) — every holder + its quantity.
-    custodyList: custody.map((c) => ({
-      custodian: c.custodian,
-      quantity: c.quantity,
-    })),
+    // Many-aware custody list (additive) — every holder + their summed quantity.
+    custodyList,
   };
 }
