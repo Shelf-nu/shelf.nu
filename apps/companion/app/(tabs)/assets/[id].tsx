@@ -629,8 +629,14 @@ export default function AssetDetailScreen() {
  */
 function QuantityStat({ label, value }: { label: string; value: string }) {
   const styles = useStyles();
+  // `accessible` groups the two Text nodes into one element so
+  // VoiceOver/TalkBack reads the combined "label value" once.
   return (
-    <View style={styles.quantityStat} accessibilityLabel={`${label} ${value}`}>
+    <View
+      style={styles.quantityStat}
+      accessible
+      accessibilityLabel={`${label} ${value}`}
+    >
       <Text style={styles.quantityStatValue}>{value}</Text>
       <Text style={styles.quantityStatLabel}>{label}</Text>
     </View>
