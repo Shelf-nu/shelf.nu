@@ -42,6 +42,7 @@ export function AssetReminderCards({
         const remainingTeamMembers =
           reminder.teamMembers.length - slicedTeamMembers.length;
         const isAlreadySent = new Date() > new Date(reminder.alertDateTime);
+        const recurrenceLabel = describeRecurrence(reminder);
 
         return (
           <div key={reminder.id} className="border-b px-4 py-3">
@@ -55,10 +56,10 @@ export function AssetReminderCards({
             <p className="mb-2">
               <DateS date={reminder.alertDateTime} includeTime />
             </p>
-            {describeRecurrence(reminder) ? (
+            {recurrenceLabel ? (
               <p className="mb-2 flex items-center gap-1 text-xs text-gray-500">
                 <RepeatIcon className="size-3" aria-hidden="true" />
-                {describeRecurrence(reminder)}
+                {recurrenceLabel}
               </p>
             ) : null}
 

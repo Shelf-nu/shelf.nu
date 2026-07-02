@@ -1,5 +1,4 @@
 import type { Prisma, User } from "@prisma/client";
-import { DateTime } from "luxon";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -11,7 +10,7 @@ import {
   advanceRecurringReminder,
 } from "./chain.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
-import { isRecurringReminder, resolveRecurrenceZone } from "./recurrence";
+import { formatOccurrenceInZone, isRecurringReminder } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   recurringReminderJobOptions,
@@ -127,6 +126,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     const now = new Date();
     let nextOccurrence: Date | null = null;
     let seriesPaused = false;
+    let seriesEnded = false;
 
     if (isRecurringReminder(reminder)) {
       const dueNow =
@@ -136,12 +136,13 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       try {
         if (dueNow) {
           // Normal fire: advance the row and schedule the next occurrence.
-          const { next, paused } = await advanceRecurringReminder({
+          const { next, paused, ended } = await advanceRecurringReminder({
             reminder,
             now,
           });
           nextOccurrence = next;
           seriesPaused = paused;
+          seriesEnded = ended;
         } else {
           // The row already points at a FUTURE occurrence while this job is
           // firing. The stale-job guard above proved this job is still the
@@ -220,11 +221,12 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      */
     let noteContent = `**System** has sent **${reminder.name.trim()}** reminder.`;
     if (nextOccurrence) {
-      const zone = resolveRecurrenceZone(reminder.recurrenceTimezone);
-      const formattedNext = DateTime.fromJSDate(nextOccurrence)
-        .setZone(zone)
-        .toFormat("d LLL yyyy, HH:mm");
-      noteContent += ` Next reminder scheduled for ${formattedNext} (${zone}).`;
+      noteContent += ` Next reminder scheduled for ${formatOccurrenceInZone(
+        nextOccurrence,
+        reminder.recurrenceTimezone
+      )}.`;
+    } else if (seriesEnded) {
+      noteContent += ` This was the last occurrence of this recurring reminder (end date reached).`;
     } else if (seriesPaused) {
       noteContent += ` This recurring reminder was paused because the workspace plan no longer includes recurring reminders.`;
     }

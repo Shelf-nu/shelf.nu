@@ -7,7 +7,7 @@ import { getParamsValues } from "~/utils/list";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
-import { isRecurringReminder } from "./recurrence";
+import { isRecurringReminder, rebaseEndOfDayToZone } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   cancelAssetReminderScheduler,
@@ -33,6 +33,17 @@ export type ReminderRecurrenceInput = {
   endsAt: Date | null;
 } | null;
 
+/**
+ * Creates a reminder (optionally recurring) for an asset and schedules its
+ * pg-boss job. Recurring jobs are sent with retry + singleton options so a
+ * transient failure cannot kill the chain.
+ *
+ * @returns The created AssetReminder.
+ * @throws {ShelfError} 400 when the asset or recipients don't belong to the
+ *         caller's organization or recipients are stale; wrapped errors for
+ *         db/scheduler failures. The tier gate for recurrence is asserted by
+ *         the calling action (assertUserCanUseRecurringReminders).
+ */
 export async function createAssetReminder({
   name,
   message,
@@ -268,6 +279,22 @@ export async function getPaginatedAndFilterableReminders({
   }
 }
 
+/**
+ * Edits a reminder, including its recurrence configuration.
+ *
+ * Recurrence timezone semantics: the series' timezone is captured when
+ * recurrence is FIRST enabled and preserved on subsequent edits, even when
+ * the editor is in another timezone. Otherwise a plain edit (message/
+ * recipients) from another zone would silently re-anchor the series'
+ * wall-clock schedule and shift future occurrences across DST boundaries.
+ * The submitted end date's CALENDAR day is re-anchored (end-of-day) into
+ * the stored zone for the same reason.
+ *
+ * @returns The updated AssetReminder.
+ * @throws {ShelfError} 400 stale recipients; not-found for wrong org;
+ *         "Edit is not allowed" for fired one-shots; 403 when the edit adds
+ *         or changes recurrence and the tier lacks the capability.
+ */
 export async function editAssetReminder({
   id,
   name,
@@ -316,12 +343,34 @@ export async function editAssetReminder({
       });
     }
 
-    if (recurrence && !canUseRecurringReminders) {
+    /**
+     * Preserve the series' stored timezone once recurrence exists (see the
+     * function JSDoc), re-anchoring the submitted end date's calendar day
+     * into that zone. Because the timezone is never taken from the request
+     * for an existing series, a downgraded org cannot mutate the schedule
+     * via the zone either.
+     */
+    const effectiveRecurrence =
+      recurrence && isRecurringReminder(reminder)
+        ? {
+            ...recurrence,
+            timezone: reminder.recurrenceTimezone,
+            endsAt: recurrence.endsAt
+              ? rebaseEndOfDayToZone(
+                  recurrence.endsAt,
+                  recurrence.timezone,
+                  reminder.recurrenceTimezone
+                )
+              : null,
+          }
+        : recurrence;
+
+    if (effectiveRecurrence && !canUseRecurringReminders) {
       const recurrenceChanged =
-        reminder.recurrenceUnit !== recurrence.unit ||
-        reminder.recurrenceInterval !== recurrence.interval ||
+        reminder.recurrenceUnit !== effectiveRecurrence.unit ||
+        reminder.recurrenceInterval !== effectiveRecurrence.interval ||
         (reminder.recurrenceEndsAt?.getTime() ?? null) !==
-          (recurrence.endsAt?.getTime() ?? null);
+          (effectiveRecurrence.endsAt?.getTime() ?? null);
 
       if (!isRecurringReminder(reminder) || recurrenceChanged) {
         throw new ShelfError({
@@ -331,6 +380,7 @@ export async function editAssetReminder({
             "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
           label: "Tier",
           additionalData: { id, organizationId },
+          status: 403,
           shouldBeCaptured: false,
         });
       }
@@ -343,10 +393,10 @@ export async function editAssetReminder({
         name,
         message,
         alertDateTime,
-        recurrenceUnit: recurrence?.unit ?? null,
-        recurrenceInterval: recurrence?.interval ?? null,
-        recurrenceTimezone: recurrence?.timezone ?? null,
-        recurrenceEndsAt: recurrence?.endsAt ?? null,
+        recurrenceUnit: effectiveRecurrence?.unit ?? null,
+        recurrenceInterval: effectiveRecurrence?.interval ?? null,
+        recurrenceTimezone: effectiveRecurrence?.timezone ?? null,
+        recurrenceEndsAt: effectiveRecurrence?.endsAt ?? null,
         teamMembers: {
           set: [], // set empty so that if any team member is removed, the relation is removed
           connect: teamMembers.map((id) => ({ id })), // then connect
@@ -363,7 +413,9 @@ export async function editAssetReminder({
         eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
       },
       when,
-      options: recurrence ? recurringReminderJobOptions(reminder.id, when) : {},
+      options: effectiveRecurrence
+        ? recurringReminderJobOptions(reminder.id, when)
+        : {},
     });
 
     return updatedReminder;

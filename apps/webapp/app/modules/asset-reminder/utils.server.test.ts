@@ -40,12 +40,12 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
   it("does not drift across edit cycles for a west-of-UTC workspace", () => {
     const zone = "America/New_York"; // UTC-4/-5
 
-    // STORE: user picks 2026-07-15 as the end date
+    // STORE: user picks 2099-07-15 as the end date
     const first = resolveReminderPayloadDates({
       request: requestWithZone(zone),
       formData: formData({
-        alertDateTime: "2026-07-10T09:00",
-        endsAt: "2026-07-15",
+        alertDateTime: "2099-07-10T09:00",
+        endsAt: "2099-07-15",
       }),
       repeat: "monthly",
     });
@@ -53,13 +53,13 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
 
     // DISPLAY: the dialog renders the calendar date back in the stored zone
     const shownDate = dialogEndsAtDefault(storedEndsAt, zone);
-    expect(shownDate).toBe("2026-07-15"); // NOT 2026-07-16
+    expect(shownDate).toBe("2099-07-15"); // NOT 2099-07-16
 
     // RE-SUBMIT unchanged: the parsed instant must equal the stored one
     const second = resolveReminderPayloadDates({
       request: requestWithZone(zone),
       formData: formData({
-        alertDateTime: "2026-07-10T09:00",
+        alertDateTime: "2099-07-10T09:00",
         endsAt: shownDate,
       }),
       repeat: "monthly",
@@ -71,19 +71,37 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
     const { recurrence } = resolveReminderPayloadDates({
       request: requestWithZone("America/New_York"),
       formData: formData({
-        alertDateTime: "2026-07-10T09:00",
-        endsAt: "2026-07-15",
+        alertDateTime: "2099-07-10T09:00",
+        endsAt: "2099-07-15",
       }),
       repeat: "weekly",
     });
-    // 2026-07-15 23:59:59.999 in New York (EDT, -04:00) = 2026-07-16T03:59:59.999Z
-    expect(recurrence!.endsAt!.toISOString()).toBe("2026-07-16T03:59:59.999Z");
+    // 2099-07-15 23:59:59.999 in New York (EDT, -04:00) = 2099-07-16T03:59:59.999Z
+    expect(recurrence!.endsAt!.toISOString()).toBe("2099-07-16T03:59:59.999Z");
+  });
+
+  it("rejects a past alertDateTime against the RESOLVED instant (field-level 400)", () => {
+    let thrown: any = null;
+    try {
+      resolveReminderPayloadDates({
+        request: requestWithZone("America/New_York"),
+        formData: formData({ alertDateTime: "2020-01-01T09:00" }),
+        repeat: "never",
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown.status).toBe(400);
+    expect(thrown.additionalData.validationErrors.alertDateTime.message).toBe(
+      "Please select a date in the future"
+    );
   });
 
   it("returns null recurrence for a one-shot (repeat = never)", () => {
     const { recurrence } = resolveReminderPayloadDates({
       request: requestWithZone("UTC"),
-      formData: formData({ alertDateTime: "2026-07-10T09:00" }),
+      formData: formData({ alertDateTime: "2099-07-10T09:00" }),
       repeat: "never",
     });
     expect(recurrence).toBeNull();
@@ -92,7 +110,7 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
   it("captures the workspace timezone on the recurrence payload", () => {
     const { recurrence } = resolveReminderPayloadDates({
       request: requestWithZone("Europe/Berlin"),
-      formData: formData({ alertDateTime: "2026-07-10T09:00" }),
+      formData: formData({ alertDateTime: "2099-07-10T09:00" }),
       repeat: "quarterly",
     });
     expect(recurrence!.timezone).toBe("Europe/Berlin");

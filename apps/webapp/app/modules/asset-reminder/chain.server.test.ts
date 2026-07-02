@@ -14,6 +14,7 @@ vitest.mock("~/database/db.server", () => ({
     assetReminder: {
       updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
       findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
     },
     organization: {
       findUnique: vitest.fn().mockResolvedValue({ userId: "owner-1" }),
@@ -72,6 +73,7 @@ function buildReminder(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vitest.clearAllMocks();
   (db.assetReminder.updateMany as any).mockResolvedValue({ count: 1 });
+  (db.assetReminder.findUnique as any).mockResolvedValue(null);
   (db.organization.findUnique as any).mockResolvedValue({ userId: "owner-1" });
   (getUserTierLimit as any).mockResolvedValue({
     canUseRecurringReminders: true,
@@ -88,7 +90,12 @@ describe("advanceRecurringReminder", () => {
       now: NOW,
     });
 
-    expect(result).toEqual({ next: null, advanced: false, paused: false });
+    expect(result).toEqual({
+      next: null,
+      advanced: false,
+      paused: false,
+      ended: false,
+    });
     expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
   });
@@ -144,7 +151,12 @@ describe("advanceRecurringReminder", () => {
       now: NOW,
     });
 
-    expect(result).toEqual({ next: null, advanced: false, paused: false });
+    expect(result).toEqual({
+      next: null,
+      advanced: false,
+      paused: false,
+      ended: true,
+    });
     expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
   });
@@ -224,6 +236,31 @@ describe("reconcileRecurringReminders", () => {
     expect(scanned).toBe(2);
     expect(rearmed).toBe(1);
     expect(scheduleAssetReminder).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arms the row's current occurrence when the CAS committed but scheduling failed", async () => {
+    const row = buildReminder({
+      id: "orphan-1",
+      alertDateTime: new Date("2026-07-02T09:00:00.000Z"),
+    });
+    (db.assetReminder.findMany as any).mockResolvedValue([row]);
+    // why: advance CAS commits, then the schedule for the NEXT occurrence
+    // throws; the refetched row now points at that future occurrence
+    (scheduleAssetReminder as any)
+      .mockRejectedValueOnce(new Error("pg-boss hiccup"))
+      .mockResolvedValueOnce(undefined);
+    (db.assetReminder.findUnique as any).mockResolvedValue({
+      alertDateTime: new Date("2026-08-02T09:00:00.000Z"),
+    });
+
+    const { rearmed } = await reconcileRecurringReminders({ now: NOW });
+
+    expect(rearmed).toBe(1);
+    expect(scheduleAssetReminder).toHaveBeenCalledTimes(2);
+    expect((scheduleAssetReminder as any).mock.calls[1][0]).toMatchObject({
+      when: new Date("2026-08-02T09:00:00.000Z"),
+      options: expect.objectContaining({ retryLimit: 3 }),
+    });
   });
 
   it("skips ended-but-not-yet-expired series quietly", async () => {

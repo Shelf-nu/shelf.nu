@@ -434,7 +434,10 @@ export const canUseRecurringReminders = (
  * Call this only when a mutation actually requests recurrence — creating or
  * editing one-shot reminders must stay free.
  *
- * @throws {ShelfError} 403-style "Not allowed" upgrade nudge.
+ * @param organizationId - The current organization id.
+ * @param organizations - The caller's organizations (from requirePermission);
+ *                        used to resolve the org OWNER whose tier applies.
+ * @throws {ShelfError} 403 "Not allowed" upgrade nudge.
  */
 export async function assertUserCanUseRecurringReminders({
   organizationId,
@@ -462,6 +465,7 @@ export async function assertUserCanUseRecurringReminders({
         "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
       additionalData: { organizationId },
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }

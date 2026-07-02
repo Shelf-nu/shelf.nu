@@ -7,7 +7,7 @@ import type {
 } from "react-router";
 import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { setReminderServerSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -362,7 +362,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           repeat,
           endsAt: _endsAt,
           ...payload
-        } = parseData(formData, setReminderSchema, {
+        } = parseData(formData, setReminderServerSchema, {
           shouldBeCaptured: false,
         });
 

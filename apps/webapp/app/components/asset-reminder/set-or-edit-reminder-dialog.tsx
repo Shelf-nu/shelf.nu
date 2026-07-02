@@ -46,25 +46,15 @@ const baseReminderSchema = z.object({
 });
 
 /**
- * Runtime refinements shared by the create and edit schemas.
- * The future-check must run at parse time — the previous
- * `.min(new Date())` evaluated new Date() once at module load, so on a
- * long-running process "in the future" silently meant "after boot".
+ * endsAt ordering check, shared by client and server schemas. Both dates are
+ * parsed the same way within one parse, so relative ordering is zone-safe.
+ * endsAt is interpreted as end-of-day server-side, so a same-day end date is
+ * valid; only reject dates before the reminder's own day.
  */
-function reminderRefinements(
+function endsAtOrderingRefinement(
   data: z.infer<typeof baseReminderSchema>,
   ctx: z.RefinementCtx
 ) {
-  if (data.alertDateTime.getTime() <= Date.now()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["alertDateTime"],
-      message: "Please select a date in the future",
-    });
-  }
-
-  // endsAt is interpreted as end-of-day server-side, so a same-day end
-  // date is valid; only reject dates before the reminder's own day.
   if (
     data.repeat !== "never" &&
     data.endsAt &&
@@ -79,13 +69,47 @@ function reminderRefinements(
   }
 }
 
-export const setReminderSchema =
-  baseReminderSchema.superRefine(reminderRefinements);
+/**
+ * CLIENT-ONLY future check. In the browser, z.coerce.date() parses the
+ * datetime-local string in the user's own zone, so comparing against
+ * Date.now() is correct. On the SERVER the same coercion runs in the
+ * process zone (UTC in prod) and would wrongly reject valid future times
+ * for users west of UTC — the authoritative server check happens in
+ * resolveReminderPayloadDates against the client-hint-resolved instant.
+ * (Evaluated at parse time; the previous `.min(new Date())` snapshotted
+ * boot time.)
+ */
+function clientFutureRefinement(
+  data: z.infer<typeof baseReminderSchema>,
+  ctx: z.RefinementCtx
+) {
+  if (data.alertDateTime.getTime() <= Date.now()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["alertDateTime"],
+      message: "Please select a date in the future",
+    });
+  }
+}
+
+/** Client-side schema (zorm): ordering + zone-correct future check. */
+export const setReminderSchema = baseReminderSchema
+  .superRefine(endsAtOrderingRefinement)
+  .superRefine(clientFutureRefinement);
+
+/**
+ * Server-side parse schemas: NO future refinement (the raw string would be
+ * coerced in the server's zone, not the user's) — resolveReminderPayloadDates
+ * enforces future-ness on the correctly-resolved instant instead.
+ */
+export const setReminderServerSchema = baseReminderSchema.superRefine(
+  endsAtOrderingRefinement
+);
 
 /** Edit adds the reminder id; consumed by resolveRemindersActions. */
-export const editReminderSchema = baseReminderSchema
+export const editReminderServerSchema = baseReminderSchema
   .extend({ id: z.string() })
-  .superRefine(reminderRefinements);
+  .superRefine(endsAtOrderingRefinement);
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
@@ -141,6 +165,17 @@ export default function SetOrEditReminderDialog({
   const isEdit = !!reminder;
   const initialRepeat: ReminderRepeatValue = reminder?.repeat ?? "never";
   const [repeat, setRepeat] = useState<ReminderRepeatValue>(initialRepeat);
+
+  /**
+   * Reset the Repeat selection whenever the dialog (re)opens — useState only
+   * seeds once, so without this a changed-then-cancelled cadence would leak
+   * into the next open and could be submitted unintentionally.
+   */
+  useEffect(() => {
+    if (open) {
+      setRepeat(initialRepeat);
+    }
+  }, [open, initialRepeat]);
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });

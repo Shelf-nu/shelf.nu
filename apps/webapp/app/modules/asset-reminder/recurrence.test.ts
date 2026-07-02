@@ -2,8 +2,10 @@
 import { ReminderRecurrenceUnit } from "@prisma/client";
 import {
   describeRecurrence,
+  formatOccurrenceInZone,
   getNextOccurrence,
   isRecurringReminder,
+  rebaseEndOfDayToZone,
   repeatValueFromRecurrence,
   resolveRecurrenceZone,
 } from "./recurrence";
@@ -231,5 +233,37 @@ describe("recurrence helpers", () => {
     expect(resolveRecurrenceZone("Europe/Berlin")).toBe("Europe/Berlin");
     expect(resolveRecurrenceZone("Not/AZone")).toBe("UTC");
     expect(resolveRecurrenceZone(null)).toBe("UTC");
+  });
+
+  it("formats occurrences in the series zone with an explicit label", () => {
+    expect(
+      formatOccurrenceInZone(
+        new Date("2026-10-15T07:00:00.000Z"),
+        "Europe/Berlin"
+      )
+    ).toBe("15 Oct 2026, 09:00 (Europe/Berlin)");
+    expect(
+      formatOccurrenceInZone(new Date("2026-10-15T07:00:00.000Z"), null)
+    ).toBe("15 Oct 2026, 07:00 (UTC)");
+  });
+
+  it("rebases an end-of-day instant to another zone keeping the calendar date", () => {
+    // 2026-07-15 end-of-day in America/New_York (EDT) = 2026-07-16T03:59:59.999Z
+    const nyEndOfDay = new Date("2026-07-16T03:59:59.999Z");
+    const rebased = rebaseEndOfDayToZone(
+      nyEndOfDay,
+      "America/New_York",
+      "Europe/Berlin"
+    );
+    // Same calendar day (July 15), end-of-day in Berlin (CEST) = 21:59:59.999Z
+    expect(rebased.toISOString()).toBe("2026-07-15T21:59:59.999Z");
+
+    // Same-zone rebase is an identity
+    const identity = rebaseEndOfDayToZone(
+      nyEndOfDay,
+      "America/New_York",
+      "America/New_York"
+    );
+    expect(identity.getTime()).toBe(nyEndOfDay.getTime());
   });
 });

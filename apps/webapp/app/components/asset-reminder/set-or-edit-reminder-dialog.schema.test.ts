@@ -6,8 +6,9 @@
  * Repeat select submits nothing at all.
  */
 import {
-  editReminderSchema,
+  editReminderServerSchema,
   setReminderSchema,
+  setReminderServerSchema,
 } from "./set-or-edit-reminder-dialog";
 
 const FUTURE = "2099-07-15T09:00";
@@ -62,7 +63,7 @@ describe("setReminderSchema", () => {
     }
   });
 
-  it("rejects a past alertDateTime at PARSE time (not module-load time)", () => {
+  it("rejects a past alertDateTime at PARSE time on the CLIENT schema", () => {
     const result = setReminderSchema.safeParse(
       basePayload({ alertDateTime: "2020-01-01T09:00" })
     );
@@ -72,6 +73,16 @@ describe("setReminderSchema", () => {
     }
   });
 
+  it("does NOT run the future check on the SERVER schema (zone-resolved check happens in resolveReminderPayloadDates)", () => {
+    // Server-side, z.coerce.date() reads the raw string in the process zone,
+    // so a future-check here would wrongly reject valid times for users west
+    // of UTC. The authoritative check runs on the resolved instant instead.
+    const result = setReminderServerSchema.safeParse(
+      basePayload({ alertDateTime: "2020-01-01T09:00" })
+    );
+    expect(result.success).toBe(true);
+  });
+
   it("ignores endsAt ordering when repeat is never", () => {
     expect(() =>
       setReminderSchema.parse(basePayload({ endsAt: "2000-01-01" }))
@@ -79,16 +90,23 @@ describe("setReminderSchema", () => {
   });
 });
 
-describe("editReminderSchema", () => {
-  it("requires the reminder id and keeps the shared refinements", () => {
-    const parsed = editReminderSchema.parse(
+describe("editReminderServerSchema", () => {
+  it("requires the reminder id and keeps the ordering refinement", () => {
+    const parsed = editReminderServerSchema.parse(
       basePayload({ id: "reminder-1", repeat: "yearly" })
     );
     expect(parsed.id).toBe("reminder-1");
     expect(parsed.repeat).toBe("yearly");
 
     expect(
-      editReminderSchema.safeParse(basePayload({ repeat: "yearly" })).success
+      editReminderServerSchema.safeParse(basePayload({ repeat: "yearly" }))
+        .success
     ).toBe(false);
+
+    expect(
+      editReminderServerSchema.safeParse(
+        basePayload({ id: "r-1", repeat: "monthly", endsAt: "2099-07-01" })
+      ).success
+    ).toBe(false); // ordering refinement still applies
   });
 });

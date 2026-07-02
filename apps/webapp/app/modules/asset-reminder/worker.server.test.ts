@@ -43,7 +43,12 @@ vitest.mock("./chain.server", () => ({
   ADVANCE_CLOCK_EPSILON_MS: 60 * 1000,
   advanceRecurringReminder: vitest
     .fn()
-    .mockResolvedValue({ next: null, advanced: false, paused: false }),
+    .mockResolvedValue({
+      next: null,
+      advanced: false,
+      paused: false,
+      ended: false,
+    }),
 }));
 
 // why: asserting the orphan-recovery branch re-arms the pending occurrence
@@ -142,6 +147,7 @@ beforeEach(() => {
     next: null,
     advanced: false,
     paused: false,
+    ended: false,
   });
 });
 
@@ -197,7 +203,12 @@ describe("REMINDER worker handler", () => {
     const callOrder: string[] = [];
     (advanceRecurringReminder as any).mockImplementation(() => {
       callOrder.push("advance");
-      return Promise.resolve({ next, advanced: true, paused: false });
+      return Promise.resolve({
+        next,
+        advanced: true,
+        paused: false,
+        ended: false,
+      });
     });
     (sendEmail as any).mockImplementation(() => {
       callOrder.push("email");
@@ -248,11 +259,35 @@ describe("REMINDER worker handler", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
+  it("notes the final occurrence when the series ends (end date reached)", async () => {
+    (advanceRecurringReminder as any).mockResolvedValue({
+      next: null,
+      advanced: false,
+      paused: false,
+      ended: true,
+    });
+    (db.assetReminder.findFirst as any).mockResolvedValue(
+      buildReminderRow({
+        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
+        recurrenceInterval: 1,
+      })
+    );
+
+    await handler(JOB);
+
+    expect(createNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("last occurrence"),
+      })
+    );
+  });
+
   it("notes the pause when the workspace tier lost recurrence", async () => {
     (advanceRecurringReminder as any).mockResolvedValue({
       next: null,
       advanced: false,
       paused: true,
+      ended: false,
     });
     (db.assetReminder.findFirst as any).mockResolvedValue(
       buildReminderRow({

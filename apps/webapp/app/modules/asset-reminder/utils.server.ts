@@ -2,11 +2,12 @@ import type { AssetReminder, Organization } from "@prisma/client";
 import { DateTime, IANAZone } from "luxon";
 import { redirect } from "react-router";
 import { z } from "zod";
-import { editReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { editReminderServerSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError, VALIDATION_ERROR } from "~/utils/error";
 import { payload, parseData, safeRedirect } from "~/utils/http.server";
 import { canUseRecurringReminders } from "~/utils/subscription.server";
 import {
@@ -32,9 +33,17 @@ type OrganizationsForTier = {
  * - The datetime-local string is wall-clock in the USER's zone (client-hint
  *   cookie); we parse it with luxon in a VALIDATED zone (tampered/unknown
  *   cookie values fall back to UTC instead of producing an Invalid Date).
+ * - The "date must be in the future" rule is enforced HERE, against the
+ *   correctly-resolved instant. The zod schemas deliberately skip it
+ *   server-side: z.coerce.date() would read the raw string in the server's
+ *   zone and wrongly reject valid future times for users west of UTC.
  * - The optional endsAt date (no time component) is interpreted as
  *   END-OF-DAY in that same zone so "ends on July 15" includes July 15's
  *   occurrence for users ahead of UTC.
+ *
+ * @throws {ShelfError} 400 with a field-level validation error (matching the
+ *         parseData shape so the form shows it on the input) when the
+ *         resolved alertDateTime is not in the future.
  */
 export function resolveReminderPayloadDates({
   request,
@@ -53,6 +62,22 @@ export function resolveReminderPayloadDates({
     DATE_TIME_FORMAT,
     { zone }
   ).toJSDate();
+
+  if (isNaN(alertDateTime.getTime()) || alertDateTime.getTime() <= Date.now()) {
+    throw new ShelfError({
+      cause: null,
+      title: "Validation error",
+      message: "Please select a date in the future",
+      additionalData: {
+        [VALIDATION_ERROR]: {
+          alertDateTime: { message: "Please select a date in the future" },
+        },
+      },
+      label: "Asset Reminder",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   if (repeat === "never") {
     return { alertDateTime, recurrence: null };
@@ -104,7 +129,7 @@ export async function resolveRemindersActions({
     case "edit-reminder": {
       const { redirectTo, ...payload } = parseData(
         formData,
-        editReminderSchema,
+        editReminderServerSchema,
         // Expected user-input validation (e.g. "Please select a date in the
         // future") — a 400, not a server error. The create path already opts
         // out; mirror it here (was noise: SHELF-WEBAPP-1ME).

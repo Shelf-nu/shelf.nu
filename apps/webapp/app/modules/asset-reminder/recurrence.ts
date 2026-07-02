@@ -147,9 +147,60 @@ export function describeRecurrence(
  * from the client-hint cookie (validated at write time), but zone databases
  * drift over multi-year series lifetimes, so fall back to UTC instead of
  * propagating an Invalid DateTime into the scheduler.
+ *
+ * @param timezone - The stored IANA zone (or null for legacy/one-shot rows).
+ * @returns A zone luxon accepts; UTC when the input is null or invalid.
  */
 export function resolveRecurrenceZone(timezone: string | null): string {
   return timezone && IANAZone.isValidZone(timezone) ? timezone : "UTC";
+}
+
+/**
+ * Formats an occurrence instant for user-facing text (emails, notes):
+ * "15 Oct 2026, 09:00 (Europe/Berlin)". Rendered in the series' own timezone
+ * with an explicit zone label so recipients in other zones aren't misled.
+ *
+ * @param date - The occurrence instant.
+ * @param timezone - The series' stored timezone (falls back to UTC).
+ * @returns The formatted date string including the zone label.
+ */
+export function formatOccurrenceInZone(
+  date: Date,
+  timezone: string | null
+): string {
+  const zone = resolveRecurrenceZone(timezone);
+  const formatted = DateTime.fromJSDate(date)
+    .setZone(zone)
+    .toFormat("d LLL yyyy, HH:mm");
+  return `${formatted} (${zone})`;
+}
+
+/**
+ * Re-anchors an end-of-day instant from one timezone to another while keeping
+ * the same CALENDAR date. Used when an existing recurring reminder is edited
+ * from a different timezone: the submitted endsAt was parsed as end-of-day in
+ * the editor's zone, but the series keeps its stored zone, so the end date
+ * must be end-of-day in THAT zone or the instant silently shifts (and the
+ * downgraded-tier change-detection would trip on plain edits).
+ *
+ * @param endsAt - The end-of-day instant parsed in `fromZone`.
+ * @param fromZone - The zone the instant was parsed in (editor's zone).
+ * @param toZone - The series' stored zone to re-anchor into.
+ * @returns The end-of-day instant of the same calendar date in `toZone`.
+ */
+export function rebaseEndOfDayToZone(
+  endsAt: Date,
+  fromZone: string | null,
+  toZone: string | null
+): Date {
+  const calendarDay = DateTime.fromJSDate(endsAt)
+    .setZone(resolveRecurrenceZone(fromZone))
+    .toFormat("yyyy-MM-dd");
+  return DateTime.fromFormat(calendarDay, "yyyy-MM-dd", {
+    zone: resolveRecurrenceZone(toZone),
+  })
+    .endOf("day")
+    .toJSDate();
 }
 
 /**

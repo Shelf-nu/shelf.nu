@@ -56,6 +56,11 @@ type AdvanceResult = {
   advanced: boolean;
   /** True when the org's tier no longer includes recurrence (series pauses). */
   paused: boolean;
+  /**
+   * True when the series ended naturally (the next occurrence would exceed
+   * recurrenceEndsAt) — lets the worker call out the final fire explicitly.
+   */
+  ended: boolean;
 };
 
 /**
@@ -123,7 +128,7 @@ export async function advanceRecurringReminder({
   now?: Date;
 }): Promise<AdvanceResult> {
   if (!isRecurringReminder(reminder)) {
-    return { next: null, advanced: false, paused: false };
+    return { next: null, advanced: false, paused: false, ended: false };
   }
 
   const next = getNextOccurrence({
@@ -137,11 +142,11 @@ export async function advanceRecurringReminder({
 
   /** Series ended (next occurrence would exceed recurrenceEndsAt). */
   if (!next) {
-    return { next: null, advanced: false, paused: false };
+    return { next: null, advanced: false, paused: false, ended: true };
   }
 
   if (!(await orgCanUseRecurringReminders(reminder.organizationId))) {
-    return { next: null, advanced: false, paused: true };
+    return { next: null, advanced: false, paused: true, ended: false };
   }
 
   /**
@@ -159,7 +164,7 @@ export async function advanceRecurringReminder({
   });
 
   if (count === 0) {
-    return { next: null, advanced: false, paused: false };
+    return { next: null, advanced: false, paused: false, ended: false };
   }
 
   await scheduleAssetReminder({
@@ -171,7 +176,7 @@ export async function advanceRecurringReminder({
     options: recurringReminderJobOptions(reminder.id, next),
   });
 
-  return { next, advanced: true, paused: false };
+  return { next, advanced: true, paused: false, ended: false };
 }
 
 /**
@@ -234,6 +239,46 @@ export async function reconcileRecurringReminders({
           label,
         })
       );
+
+      /**
+       * The CAS may have committed before scheduling failed, leaving the row
+       * pointing at a future occurrence with no queued job — a state this
+       * sweep would no longer match. Best-effort re-arm of the row's CURRENT
+       * occurrence (singletonKey makes it idempotent); if this also fails,
+       * the worker's orphan-recovery branch or the sweep after that
+       * occurrence goes stale (grace period) recovers the series.
+       */
+      try {
+        const current = await db.assetReminder.findUnique({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: system boot sweep, id comes from the org-scoped candidate query above
+          where: { id: reminder.id },
+          select: { alertDateTime: true },
+        });
+        if (current && current.alertDateTime.getTime() > now.getTime()) {
+          await scheduleAssetReminder({
+            data: {
+              reminderId: reminder.id,
+              eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+            },
+            when: current.alertDateTime,
+            options: recurringReminderJobOptions(
+              reminder.id,
+              current.alertDateTime
+            ),
+          });
+          rearmed += 1;
+        }
+      } catch (rearmCause) {
+        Logger.error(
+          new ShelfError({
+            cause: rearmCause,
+            message:
+              "Orphan re-arm after failed reconciliation also failed. The series recovers at the next sweep.",
+            additionalData: { reminderId: reminder.id },
+            label,
+          })
+        );
+      }
     }
   }
 

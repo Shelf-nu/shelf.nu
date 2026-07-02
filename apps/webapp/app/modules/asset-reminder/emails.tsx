@@ -9,14 +9,13 @@ import {
   Row,
   Text,
 } from "@react-email/components";
-import { DateTime } from "luxon";
 import colors from "tailwindcss/colors";
 import { CustomEmailFooter } from "~/emails/components/custom-footer";
 import { LogoForEmail } from "~/emails/logo";
 import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
-import { describeRecurrence, resolveRecurrenceZone } from "./recurrence";
+import { describeRecurrence, formatOccurrenceInZone } from "./recurrence";
 
 type AssetAlertEmailProps = {
   user: Pick<User, "email" | "firstName" | "lastName" | "displayName">;
@@ -42,12 +41,10 @@ function recurrenceLine(
   const cadence = describeRecurrence(reminder);
   if (!cadence || !nextOccurrence) return null;
 
-  const zone = resolveRecurrenceZone(reminder.recurrenceTimezone);
-  const formatted = DateTime.fromJSDate(nextOccurrence)
-    .setZone(zone)
-    .toFormat("d LLL yyyy, HH:mm");
-
-  return `${cadence} reminder. Next reminder: ${formatted} (${zone}).`;
+  return `${cadence} reminder. Next reminder: ${formatOccurrenceInZone(
+    nextOccurrence,
+    reminder.recurrenceTimezone
+  )}.`;
 }
 
 export function assetAlertEmailText({
