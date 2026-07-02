@@ -8,6 +8,7 @@ import {
 import { createTag } from "~/modules/tag/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
+import { parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -52,7 +53,13 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     const body = await request.json();
-    const { name } = CreateTagSchema.parse(body);
+    // parseData maps validation failures to a 400 ShelfError (a bare
+    // schema.parse would throw ZodError -> generic 500 + Sentry capture).
+    const { name } = parseData(body, CreateTagSchema, {
+      // Expected user-input validation, not a server fault.
+      shouldBeCaptured: false,
+      additionalData: { userId: user.id, organizationId },
+    });
 
     const tag = await createTag({
       name,

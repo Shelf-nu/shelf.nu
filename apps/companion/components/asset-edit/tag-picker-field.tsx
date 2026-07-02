@@ -13,7 +13,7 @@
  * @see {@link file://./picker-field.tsx PickerField} — the single-select sibling.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -86,6 +86,13 @@ export function TagPickerField({
   const [search, setSearch] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
+  // Mirror of the latest selection. The async create continuation must merge
+  // against this, not the render-time `selectedTags` closure — other tag rows
+  // stay tappable while the create request is in flight, and a stale array
+  // would silently revert any toggle made during that window.
+  const selectedTagsRef = useRef(selectedTags);
+  selectedTagsRef.current = selectedTags;
+
   const filteredTags = search
     ? tags.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
     : tags;
@@ -108,7 +115,12 @@ export function TagPickerField({
     try {
       const tag = await onCreateTag(trimmedSearch);
       if (tag) {
-        onChange([...selectedTags, tag]);
+        // Merge against the LATEST selection (ref), and drop any duplicate id
+        // defensively, so toggles made while the request was pending survive.
+        onChange([
+          ...selectedTagsRef.current.filter((t) => t.id !== tag.id),
+          tag,
+        ]);
         setSearch("");
       }
     } finally {

@@ -37,12 +37,17 @@ vi.mock("~/modules/tag/service.server", () => ({
   createTag: vi.fn(),
 }));
 
-// why: error utility — we mock to control error formatting in tests
+// why: error utility — we mock to control error formatting in tests.
+// badRequest must be provided too: parseData (http.server) imports it from
+// this module to build its 400 validation error.
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
     message: cause?.message || "Unknown error",
     status: cause?.status || 500,
   })),
+  badRequest: vi.fn((message: string, options: any) =>
+    Object.assign(new Error(message), { ...options, status: 400 })
+  ),
   ShelfError: class ShelfError extends Error {
     status: number;
     constructor(opts: any) {
@@ -121,12 +126,13 @@ describe("POST /api/mobile/tags/create", () => {
     expect(createTag).not.toHaveBeenCalled();
   });
 
-  it("rejects names shorter than 3 chars (web NewTagFormSchema parity)", async () => {
+  it("rejects names shorter than 3 chars as a 400 (web NewTagFormSchema parity)", async () => {
     const response = (await action(
       createActionArgs({ request: makeRequest({ name: "ab" }) })
     )) as unknown as Response;
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    // parseData maps validation failures to a 400 client error, not a 500.
+    expect(response.status).toBe(400);
     expect(createTag).not.toHaveBeenCalled();
   });
 
