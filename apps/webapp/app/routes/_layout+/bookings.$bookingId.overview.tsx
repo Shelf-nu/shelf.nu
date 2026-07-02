@@ -572,19 +572,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       };
     });
 
-    // Delegate filter → sort → group-by-kit → paginate to the shared pure
-    // shapeBookingAssets helper. The same function runs in clientLoader for
-    // subsequent navigations (no server round-trip).
-    const view = shapeBookingAssets({
-      rawAssets: enrichedAssetsForView,
-      rawKits,
-      search,
-      orderBy,
-      orderDirection,
-      page,
-      perPage,
-      partialCheckinDetails,
-    });
+    // NOTE: the filter → sort → group-by-kit → paginate step
+    // (`shapeBookingAssets`) is deferred to AFTER the per-slice checkout /
+    // disposition maps are computed below, so the status sort can decide
+    // "checked out" per-slice (a fully-checked-out kit slice must sink even
+    // when the multi-slice QT asset's GLOBAL status hasn't flipped). See the
+    // `enrichedAssetsForSort` construction further down.
 
     /**
      * Sum already-dispositioned units per qty-tracked asset for this
@@ -782,6 +775,44 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         checkedOutByBookingAsset.set(bookingAssetId, qty);
       }
     }
+
+    /**
+     * Attach the per-slice checkout / disposition counters onto each view row
+     * BEFORE sorting, so the status sort can decide "checked out" per-slice.
+     * A QUANTITY_TRACKED asset that spans a kit slice + a standalone slice
+     * never flips its GLOBAL `Asset.status` until every slice is out, so a
+     * fully-checked-out kit slice can only be recognised from these per-row
+     * counters. Carried on `rawAssets` in the loader payload too, so the
+     * clientLoader re-sort stays per-slice aware. Keyed by `bookingAssetId`.
+     */
+    const enrichedAssetsForSort = enrichedAssetsForView.map((asset) => {
+      const bookingAssetId = (asset as { bookingAssetId?: string })
+        .bookingAssetId;
+      return {
+        ...asset,
+        checkedOutQuantity: bookingAssetId
+          ? checkedOutByBookingAsset.get(bookingAssetId) ?? 0
+          : 0,
+        dispositionedQuantity: bookingAssetId
+          ? dispositionedByBookingAsset.get(bookingAssetId) ?? 0
+          : 0,
+      };
+    });
+
+    // Delegate filter → sort → group-by-kit → paginate to the shared pure
+    // shapeBookingAssets helper. The same function runs in clientLoader for
+    // subsequent navigations (no server round-trip).
+    const view = shapeBookingAssets({
+      rawAssets: enrichedAssetsForSort,
+      rawKits,
+      search,
+      orderBy,
+      orderDirection,
+      page,
+      perPage,
+      partialCheckinDetails,
+      bookingStatus: booking.status,
+    });
 
     /**
      * Per-asset remaining-to-checkout: folds the per-slice checked-out
@@ -1123,7 +1154,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // BookingAsset-slice projection (one entry per slice, with singular
         // `kitId`/`kit`/`location`) — exactly what `shapeBookingAssets`
         // expects from main's perf rewrite, adapted to our pivot model.
-        rawAssets: enrichedAssetsForView,
+        // Uses the `enrichedAssetsForSort` variant (carries per-slice
+        // `checkedOutQuantity`/`dispositionedQuantity`) so the clientLoader's
+        // re-sort stays per-slice aware, matching the server first paint.
+        rawAssets: enrichedAssetsForSort,
         rawKits,
         // Current search string so the search input pre-fills on first paint /
         // hard refresh (SearchForm reads `search` from loader data).
@@ -1185,6 +1219,7 @@ export async function clientLoader({
       page: paramsValues.page,
       perPage: serverData.perPage,
       partialCheckinDetails: serverData.partialCheckinDetails,
+      bookingStatus: serverData.booking.status,
     });
     return {
       ...serverData,

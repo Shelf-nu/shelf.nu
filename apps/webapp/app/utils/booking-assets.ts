@@ -498,44 +498,61 @@ export function isKitPartiallyCheckedIn(
 }
 
 /**
- * Sorts booking assets by priority:
- * 1. CHECKED_OUT assets (need to be checked in)
- * 2. PARTIALLY_CHECKED_IN assets (already checked in, ordered by most recent)
- * 3. AVAILABLE assets
+ * Minimal per-row shape needed to decide whether a booking's row (one
+ * `BookingAsset` slice) is fully checked out on its own. `bookedQuantity` /
+ * `checkedOutQuantity` / `dispositionedQuantity` are the per-slice counters the
+ * overview loader attaches (keyed by `bookingAssetId`), so a kit-driven slice
+ * and a standalone slice of the same asset are evaluated independently. Fields
+ * are typed `unknown` so the loosely-typed enriched rows (which carry open
+ * index signatures) pass without casts; they are narrowed inside the helper.
  */
-export function sortBookingAssets<T extends AssetWithStatus>(
-  assets: T[],
-  partialCheckinDetails: PartialCheckinDetailsType
-): T[] {
-  return assets.sort((a, b) => {
-    // Check if assets have partial check-in dates
-    const aPartialCheckin = partialCheckinDetails[a.id];
-    const bPartialCheckin = partialCheckinDetails[b.id];
+export type QtyCheckoutRow = {
+  type?: unknown;
+  bookedQuantity?: unknown;
+  checkedOutQuantity?: unknown;
+  dispositionedQuantity?: unknown;
+  // Open index so richer enriched rows (which carry their own index
+  // signatures) are accepted directly, without a weak-type mismatch.
+  [key: string]: unknown;
+};
 
-    // Priority order: CHECKED_OUT first, then PARTIALLY_CHECKED_IN, then AVAILABLE
-    const getStatusPriority = (asset: T, hasPartialCheckin: boolean) => {
-      if (asset.status === "CHECKED_OUT" && !hasPartialCheckin) return 1; // CHECKED_OUT
-      if (hasPartialCheckin) return 2; // PARTIALLY_CHECKED_IN
-      return 3; // AVAILABLE
-    };
+/** Coerce an unknown per-row counter to a finite number (0 when absent/NaN). */
+function toCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
 
-    const aPriority = getStatusPriority(a, !!aPartialCheckin);
-    const bPriority = getStatusPriority(b, !!bPartialCheckin);
-
-    // Sort by priority first
-    if (aPriority !== bPriority) {
-      return aPriority - bPriority;
-    }
-
-    // Within same priority, sort partial check-ins by most recent first
-    if (aPartialCheckin && bPartialCheckin) {
-      return (
-        new Date(bPartialCheckin.checkinDate).getTime() -
-        new Date(aPartialCheckin.checkinDate).getTime()
-      );
-    }
-
-    // Finally, sort by asset ID as fallback for consistency
-    return a.id.localeCompare(b.id);
-  });
+/**
+ * Whether THIS row's own units are ALL progressively checked out with nothing
+ * returned yet — i.e. the slice is fully out and should read as CHECKED_OUT.
+ *
+ * QUANTITY_TRACKED only: a QT asset can legitimately span multiple
+ * `BookingAsset` slices (a kit-driven slice + a standalone free-pool slice),
+ * so its GLOBAL `Asset.status` only flips to CHECKED_OUT once EVERY slice is
+ * out (`bookedTotal` sums across slices). A single fully-checked-out slice
+ * therefore can't be detected from the global status — it must be read from
+ * the per-slice counters. Shared by the row badge in `list-asset-content.tsx`
+ * and the status-sort's `isCheckedOut` predicate in
+ * {@link file://../modules/booking/shape-booking-assets.ts} so the badge and
+ * the sort position always agree.
+ *
+ * @param row - The per-slice row (type + per-row qty counters).
+ * @param bookingStatus - Parent booking status; only ONGOING/OVERDUE are active.
+ * @returns `true` when the slice is fully checked out with no disposition yet.
+ */
+export function isBookingRowQtyFullyCheckedOut(
+  row: QtyCheckoutRow,
+  bookingStatus: string
+): boolean {
+  const qtyBooked = toCount(row.bookedQuantity);
+  const qtyCheckedOut = toCount(row.checkedOutQuantity);
+  const qtyDispositioned = toCount(row.dispositionedQuantity);
+  const isActiveBooking =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+  return (
+    row.type === "QUANTITY_TRACKED" &&
+    qtyBooked > 0 &&
+    qtyCheckedOut >= qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking
+  );
 }
