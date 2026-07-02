@@ -397,7 +397,11 @@ export default function SetOrEditReminderDialog({
                       error here or the submit blocks with no visible cause */}
                   {validationErrors?.endsAt?.message ||
                   zo.errors.endsAt()?.message ? (
-                    <p className="mt-1 text-sm text-error-500">
+                    // why role="alert": this error isn't tied to a rendered
+                    // input (the Ends-on field is hidden in the locked state),
+                    // so screen readers need a live-region announcement when
+                    // it appears after a blocked submit
+                    <p role="alert" className="mt-1 text-sm text-error-500">
                       {validationErrors?.endsAt?.message ||
                         zo.errors.endsAt()?.message}{" "}
                       (this reminder's end date is fixed on your current plan)
