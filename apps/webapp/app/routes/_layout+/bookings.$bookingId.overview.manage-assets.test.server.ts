@@ -1,17 +1,19 @@
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createActionArgs } from "@mocks/remix";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import * as assetService from "~/modules/asset/service.server";
 import * as bookingService from "~/modules/booking/service.server";
+import * as modelRequestService from "~/modules/booking-model-request/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
 import * as rolesServer from "~/utils/roles.server";
 
-// Import the action function
-import { action } from "./bookings.$bookingId.overview.manage-assets";
+// Import the action + loader functions
+import { action, loader } from "./bookings.$bookingId.overview.manage-assets";
 import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
 
 // @vitest-environment node
@@ -38,6 +40,22 @@ vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
   removeAssets: vi.fn(),
+  // Loader-only — used by the F2 loader tests below.
+  getBooking: vi.fn(),
+  getKitIdsByAssets: vi.fn(),
+}));
+
+// Loader-only — `getPaginatedAndFilterableAssets` backs the Assets tab list.
+vi.mock("~/modules/asset/service.server", () => ({
+  getPaginatedAndFilterableAssets: vi.fn(),
+}));
+
+// why: mock the shared Models-tab payload helper as a unit so the loader
+// test isolates "does the loader wire the helper's output into the payload"
+// from the helper's own DB logic, which has its own unit test in
+// `booking-model-request/service.server.test.ts`.
+vi.mock("~/modules/booking-model-request/service.server", () => ({
+  getBookingModelTabData: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -68,6 +86,9 @@ vi.mock("~/utils/http.server", () => ({
   json: vi.fn((data) => data),
   getCurrentSearchParams: vi.fn(),
   error: vi.fn((reason) => reason),
+  // Loader-only — mirrors the real `payload()` (`{ error: null, ...data }`)
+  // so the F2 loader tests can inspect the returned keys directly.
+  payload: vi.fn((data) => ({ error: null, ...data })),
 }));
 
 vi.mock("~/modules/asset/utils.server", () => ({
@@ -877,6 +898,233 @@ describe("manage-assets route validation", () => {
           quantities: { "asset-pens": 12 },
         })
       );
+    });
+  });
+
+  /**
+   * The footer `<Form ref={formRef}>` used to render only on the Assets tab,
+   * so `UnsavedChangesAlert.onYes` (`submit(formRef.current)`) ran against a
+   * null ref while on the Models tab and silently no-opped: no redirect, no
+   * assets added. The form is now always mounted; a full Happy-DOM
+   * click-through (Models tab → alert → Yes → POST) isn't practical against
+   * this route (heavy component, many providers), so this covers the
+   * action-level contract the fix depends on: submitting the always-mounted
+   * form with a non-null `redirectTo` must redirect there instead of falling
+   * through to the default `/bookings/:id`.
+   */
+  describe("redirectTo handling (confirm-from-unsaved-changes alert)", () => {
+    it("redirects to the submitted redirectTo URL instead of the default booking page", async () => {
+      const manageKitsUrl =
+        "/bookings/booking123/overview/manage-kits?hideUnavailable=true";
+
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2"], // both already on the booking — isolates the redirect branch
+        removedAssetIds: [],
+        redirectTo: manageKitsUrl,
+      });
+
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+      expect((response as Response).headers.get("Location")).toBe(
+        manageKitsUrl
+      );
+    });
+
+    it("redirects to the default booking page when redirectTo is absent", async () => {
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2"],
+        removedAssetIds: [],
+        redirectTo: null,
+      });
+
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+      expect((response as Response).headers.get("Location")).toBe(
+        "/bookings/booking123"
+      );
+    });
+  });
+});
+
+/**
+ * The loader used to inline the "count AssetModels, fetch the first
+ * MODEL_PICKER_LIMIT, compute per-model availability, project modelRequests"
+ * block directly. It now delegates to the shared `getBookingModelTabData`
+ * helper so manage-assets and manage-kits compute Models-tab availability
+ * identically. This is a pure refactor — the loader's payload keys and shapes
+ * must stay byte-identical, so `getBookingModelTabData` is mocked here to
+ * isolate "does the loader wire the helper's output through" from the
+ * helper's own DB logic (covered separately by
+ * `booking-model-request/service.server.test.ts`).
+ */
+describe("manage-assets loader — Models tab payload", () => {
+  const mockContext = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const mockParams = { bookingId: "booking123" };
+
+  /** Minimal booking shape the loader needs — DRAFT so no status guard fires. */
+  const mockLoaderBooking = {
+    id: "booking123",
+    name: "Test Booking",
+    status: BookingStatus.DRAFT,
+    from: new Date("2026-01-01"),
+    to: new Date("2026-01-02"),
+    bookingAssets: [],
+    modelRequests: [],
+  } as any;
+
+  /** `getPaginatedAndFilterableAssets` return shape the loader destructures. */
+  const mockPaginatedAssets = {
+    search: null,
+    totalAssets: 0,
+    perPage: 20,
+    page: 1,
+    categories: [],
+    tags: [],
+    assets: [],
+    totalPages: 0,
+    totalCategories: 0,
+    totalTags: 0,
+    locations: [],
+    totalLocations: 0,
+  };
+
+  /** Known `getBookingModelTabData` output — the five keys F2 is about. */
+  const mockModelTabData = {
+    showModelsTab: true,
+    assetModels: [
+      {
+        id: "model1",
+        name: "Dell XPS",
+        total: 5,
+        available: 3,
+        reservedConcrete: 1,
+        reservedViaRequest: 1,
+        inCustody: 0,
+      },
+    ],
+    initialAssetModels: [
+      {
+        id: "model1",
+        name: "Dell XPS",
+        metadata: {
+          total: 5,
+          available: 3,
+          reservedConcrete: 1,
+          reservedViaRequest: 1,
+          inCustody: 0,
+        },
+      },
+    ],
+    totalAssetModels: 1,
+    modelRequests: [
+      {
+        assetModelId: "model1",
+        assetModelName: "Dell XPS",
+        quantity: 2,
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org123",
+      userOrganizations: [],
+      isSelfServiceOrBase: false,
+      organizations: [],
+      currentOrganization: {} as any,
+      role: {} as any,
+      canSeeAllBookings: false,
+      canSeeAllCustody: false,
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue(
+      mockPaginatedAssets as any
+    );
+    vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
+    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue(
+      mockModelTabData as any
+    );
+  });
+
+  it("wires the helper's output through to the loader payload, unchanged", async () => {
+    const result = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
+      organizationId: "org123",
+      booking: mockLoaderBooking,
+    });
+
+    // Byte-identical parity check: same five keys, same values, nothing
+    // dropped or reshaped on the way from helper → payload.
+    expect(result).toMatchObject({
+      showModelsTab: mockModelTabData.showModelsTab,
+      assetModels: mockModelTabData.assetModels,
+      initialAssetModels: mockModelTabData.initialAssetModels,
+      totalAssetModels: mockModelTabData.totalAssetModels,
+      modelRequests: mockModelTabData.modelRequests,
+    });
+  });
+
+  it("hides the Models tab when the helper reports no asset models", async () => {
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      modelRequests: [],
+    });
+
+    const result = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    expect(result).toMatchObject({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      modelRequests: [],
     });
   });
 });

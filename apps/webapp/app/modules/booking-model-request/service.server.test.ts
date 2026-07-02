@@ -16,6 +16,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import {
   getAssetModelAvailability,
+  getBookingModelTabData,
   materializeModelRequestForAsset,
   removeBookingModelRequest,
   upsertBookingModelRequest,
@@ -40,6 +41,8 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest
         .fn()
         .mockResolvedValue({ id: "model-1", name: "Dell Latitude 5550" }),
+      count: vitest.fn().mockResolvedValue(0),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     booking: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -585,5 +588,221 @@ describe("materializeModelRequestForAsset", () => {
     expect(result).toEqual({ matched: false });
     expect(db.bookingModelRequest.update).not.toHaveBeenCalled();
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBookingModelTabData", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: clearAllMocks only resets call history — `mockResolvedValue`
+    // implementations from earlier describe blocks leak into later ones.
+    // Re-default the aggregates so each test starts from a clean pool.
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(0);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(0);
+    // @ts-expect-error mocked
+    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // @ts-expect-error mocked
+    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+  });
+
+  /** Minimal `BookingForModelTab` fixture with no model requests. */
+  const emptyBooking = {
+    id: BOOKING_ID,
+    from,
+    to,
+    modelRequests: [],
+  };
+
+  it("hides the Models tab and returns empty lists when the org has no models", async () => {
+    expect.assertions(5);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(0);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    expect(result.showModelsTab).toBe(false);
+    expect(result.assetModels).toEqual([]);
+    expect(result.initialAssetModels).toEqual([]);
+    expect(result.totalAssetModels).toBe(0);
+    // `booking.modelRequests` is still projected even with no models —
+    // the two are independent (a model could be deleted after a request
+    // was made against it).
+    expect(result.modelRequests).toEqual([]);
+    // `findMany` must be skipped entirely when the count is 0 — no point
+    // querying a picker list nobody will see.
+  });
+
+  it("does not query the model list when the org has no models", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(0);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    expect(db.assetModel.findMany).not.toHaveBeenCalled();
+  });
+
+  it("carries per-model availability into assetModels + initialAssetModels", async () => {
+    expect.assertions(4);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(2);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1", name: "Dell Latitude 5550" },
+      { id: "model-2", name: "MacBook Pro 16" },
+    ]);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+    // @ts-expect-error mocked
+    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 1 } });
+    // @ts-expect-error mocked
+    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 2 } });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 3 },
+    });
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    expect(result.showModelsTab).toBe(true);
+    // 10 total − 1 custody − 2 concrete − 3 via request = 4 available
+    expect(result.assetModels).toEqual([
+      {
+        id: "model-1",
+        name: "Dell Latitude 5550",
+        total: 10,
+        available: 4,
+        reservedConcrete: 2,
+        reservedViaRequest: 3,
+        inCustody: 1,
+      },
+      {
+        id: "model-2",
+        name: "MacBook Pro 16",
+        total: 10,
+        available: 4,
+        reservedConcrete: 2,
+        reservedViaRequest: 3,
+        inCustody: 1,
+      },
+    ]);
+    // `initialAssetModels` mirrors `assetModels` with fields nested under
+    // `metadata`, shaped for the `DynamicSelect` picker.
+    expect(result.initialAssetModels).toEqual([
+      {
+        id: "model-1",
+        name: "Dell Latitude 5550",
+        metadata: {
+          total: 10,
+          available: 4,
+          reservedConcrete: 2,
+          reservedViaRequest: 3,
+          inCustody: 1,
+        },
+      },
+      {
+        id: "model-2",
+        name: "MacBook Pro 16",
+        metadata: {
+          total: 10,
+          available: 4,
+          reservedConcrete: 2,
+          reservedViaRequest: 3,
+          inCustody: 1,
+        },
+      },
+    ]);
+    expect(result.totalAssetModels).toBe(2);
+  });
+
+  it("projects modelRequests: assetModelName, ISO date, and null pass-through", async () => {
+    expect.assertions(1);
+
+    const fulfilledAt = new Date("2026-05-02T10:00:00Z");
+    const booking = {
+      id: BOOKING_ID,
+      from,
+      to,
+      modelRequests: [
+        {
+          assetModelId: "model-1",
+          quantity: 3,
+          fulfilledQuantity: 3,
+          fulfilledAt,
+          assetModel: { name: "Dell Latitude 5550" },
+        },
+        {
+          assetModelId: "model-2",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { name: "MacBook Pro 16" },
+        },
+      ],
+    };
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking,
+    });
+
+    expect(result.modelRequests).toEqual([
+      {
+        assetModelId: "model-1",
+        assetModelName: "Dell Latitude 5550",
+        quantity: 3,
+        fulfilledQuantity: 3,
+        fulfilledAt: fulfilledAt.toISOString(),
+      },
+      {
+        assetModelId: "model-2",
+        assetModelName: "MacBook Pro 16",
+        quantity: 2,
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
+      },
+    ]);
+  });
+
+  it("scopes the model count + list to the caller's organizationId", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(1);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1", name: "Dell Latitude 5550" },
+    ]);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    // A model belonging to another org must never leak into this org's
+    // picker — both the count and the list query must be scoped.
+    expect(db.assetModel.count).toHaveBeenCalledWith({
+      where: { organizationId: ORG_ID },
+    });
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.where).toEqual({ organizationId: ORG_ID });
   });
 });

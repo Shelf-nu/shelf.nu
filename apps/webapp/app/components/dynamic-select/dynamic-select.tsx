@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -68,6 +68,13 @@ type Props = ModelFilterProps & {
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
+  /**
+   * When true, clears the internal search query (and resets the
+   * model-filters fetcher) whenever the popover closes — so reopening the
+   * picker starts fresh. Default false to preserve behavior for the ~20
+   * other consumers that rely on persisted search across reopen.
+   */
+  resetSearchOnClose?: boolean;
   excludeItems?: string[];
   /** Allow undefined for deselection cases */
   onChange?: ((value: string | undefined) => void) | null /**
@@ -117,6 +124,7 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
+  resetSearchOnClose = false,
   excludeItems,
   onChange = null,
   allowClear,
@@ -175,6 +183,21 @@ export default function DynamicSelect({
     handleSelectItemChange,
     getAllEntries,
   } = useModelFilters({ model, selectionMode, ...hookProps });
+
+  /**
+   * Reset the search on the closed transition when opted in. This fires for
+   * BOTH the programmatic close from `closeOnSelect` (handleItemChange calls
+   * `setIsPopoverOpen(false)` directly, so Radix's `onOpenChange` never
+   * fires) and Radix-driven closes (Escape, outside click) — an effect on
+   * `isPopoverOpen` covers both uniformly.
+   */
+  useEffect(() => {
+    if (resetSearchOnClose && !isPopoverOpen) {
+      setSearchQuery("");
+      resetModelFiltersFetcher();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resetModelFiltersFetcher is recreated on every useModelFilters call (not memoized); including it would refire this effect on every render while the popover is closed.
+  }, [isPopoverOpen, resetSearchOnClose]);
 
   const itemsWithCreated = useMemo(
     () => dedupeItems([...createdItems, ...items]),
