@@ -716,6 +716,18 @@ export type Tag = {
 /** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
 export type TagsResponse = {
   tags: Tag[];
+  /**
+   * Server-computed: whether the caller may mint a new tag via
+   * `POST /api/mobile/tags/create` (admins/owners). Gates the picker's inline
+   * "create tag" affordance so self-service users never see a control that
+   * would 403. Optional so the app tolerates older servers (treated as false).
+   */
+  canCreate?: boolean;
+};
+
+/** Response payload for `POST /api/mobile/tags/create`. */
+export type CreateTagResponse = {
+  tag: Tag;
 };
 
 export type CreateAssetResponse = {

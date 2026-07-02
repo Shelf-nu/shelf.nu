@@ -46,7 +46,22 @@ type TagPickerFieldProps = {
   onToggle: (next: boolean) => void;
   /** Placeholder for the in-dropdown search input (shown when >5 tags). */
   searchPlaceholder?: string;
+  /**
+   * Whether the caller may create tags (server-computed `canCreate` from
+   * `GET /api/mobile/tags`). When true and `onCreateTag` is provided, typing
+   * a name with no exact match shows an inline "Create tag" row.
+   */
+  canCreate?: boolean;
+  /**
+   * Creates the tag (parent owns the API call + list refresh) and returns it,
+   * or null when creation failed (parent surfaces the error). On success the
+   * picker selects the new tag and clears the search.
+   */
+  onCreateTag?: (name: string) => Promise<Tag | null>;
 };
+
+/** Server-side minimum tag-name length (web `NewTagFormSchema` parity). */
+const MIN_TAG_NAME_LENGTH = 3;
 
 /**
  * Render the multi-select tag picker. See the file header for the controlled
@@ -63,14 +78,43 @@ export function TagPickerField({
   isOpen,
   onToggle,
   searchPlaceholder = "Search tags...",
+  canCreate = false,
+  onCreateTag,
 }: TagPickerFieldProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [search, setSearch] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
   const filteredTags = search
     ? tags.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
     : tags;
+
+  // Offer inline creation only for a typed name that (a) meets the server's
+  // minimum length and (b) doesn't already exist (case-insensitive) — an
+  // exact match should be selected, not duplicated.
+  const trimmedSearch = search.trim();
+  const showCreateRow =
+    canCreate &&
+    !!onCreateTag &&
+    trimmedSearch.length >= MIN_TAG_NAME_LENGTH &&
+    !tags.some((t) => t.name.toLowerCase() === trimmedSearch.toLowerCase());
+
+  // Create the typed tag, select it, and reset the search so the full list
+  // shows again (with the fresh tag now selected as a chip).
+  const createAndSelect = async () => {
+    if (!onCreateTag || isCreating) return;
+    setIsCreating(true);
+    try {
+      const tag = await onCreateTag(trimmedSearch);
+      if (tag) {
+        onChange([...selectedTags, tag]);
+        setSearch("");
+      }
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const removeTag = (id: string) =>
     onChange(selectedTags.filter((t) => t.id !== id));
@@ -136,7 +180,9 @@ export function TagPickerField({
 
       {isOpen && (
         <View style={styles.pickerDropdown}>
-          {tags.length > 5 && (
+          {/* The search box doubles as the new-tag name input for creators,
+              so it must show even when the list is short. */}
+          {(tags.length > 5 || (canCreate && !!onCreateTag)) && (
             <TextInput
               style={styles.pickerSearch}
               value={search}
@@ -145,6 +191,28 @@ export function TagPickerField({
               placeholderTextColor={colors.placeholderText}
               accessibilityLabel={searchPlaceholder}
             />
+          )}
+          {showCreateRow && (
+            <TouchableOpacity
+              style={styles.pickerCreate}
+              onPress={() => void createAndSelect()}
+              disabled={isCreating}
+              accessibilityRole="button"
+              accessibilityLabel={`Create tag ${trimmedSearch}`}
+            >
+              {isCreating ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons
+                  name="add-circle-outline"
+                  size={16}
+                  color={colors.primary}
+                />
+              )}
+              <Text style={styles.pickerCreateText}>
+                {`Create tag "${trimmedSearch}"`}
+              </Text>
+            </TouchableOpacity>
           )}
           {isLoading ? (
             <ActivityIndicator
@@ -281,6 +349,21 @@ const useStyles = createStyles((colors, shadows) => ({
     flex: 1,
     fontSize: fontSize.base,
     color: colors.foreground,
+  },
+  pickerCreate: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  pickerCreateText: {
+    flex: 1,
+    fontSize: fontSize.base,
+    color: colors.primary,
+    fontWeight: "500",
   },
   pickerClear: {
     paddingHorizontal: 14,
