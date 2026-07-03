@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
@@ -5,6 +6,7 @@ import { ShelfError } from "~/utils/error";
 import {
   assetQueryFragment,
   assetQueryJoins,
+  buildAdvancedAssetsQuery,
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
@@ -20,18 +22,42 @@ describe("parseSortingOptions", () => {
   it("allows sorting by updatedAt", () => {
     const { orderByClause } = parseSortingOptions(["updatedAt:desc"]);
 
-    expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+    // Explicit sorts carry a stable `"assetId" ASC` tiebreaker for deterministic
+    // pagination across rows tied on the sort key.
+    expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc, "assetId" ASC');
+  });
+
+  // The inner clause feeds `ROW_NUMBER() OVER (ORDER BY ...)` in the
+  // paginate-first rewrite: it must equal the full clause minus the leading
+  // "ORDER BY " token, for both explicit and default sorts.
+  it("exposes the inner order-by (no leading ORDER BY) for an explicit sort", () => {
+    const { orderByClause, orderByInner } = parseSortingOptions([
+      "updatedAt:desc",
+    ]);
+    expect(orderByInner).toBe('"assetUpdatedAt" desc, "assetId" ASC');
+    expect(orderByClause).toBe(`ORDER BY ${orderByInner}`);
+  });
+
+  it("exposes the inner order-by for the default (no-sort) fallback", () => {
+    const { orderByInner } = parseSortingOptions([]);
+    expect(orderByInner).toBe('"assetCreatedAt" DESC, "assetId" ASC');
   });
 
   describe("direction validation", () => {
     it("normalizes uppercase DESC to desc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:DESC"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+      // Explicit sorts get a stable `"assetId" ASC` tiebreaker so paging is
+      // deterministic across rows tied on the sort key.
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" desc, "assetId" ASC'
+      );
     });
 
     it("normalizes mixed-case Desc to desc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:Desc"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" desc, "assetId" ASC'
+      );
     });
 
     // Regression test for GHSA-69xv-wmgg-3qp3: SQL injection via direction.
@@ -73,12 +99,16 @@ describe("parseSortingOptions", () => {
 
     it("defaults missing direction to asc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" asc, "assetId" ASC'
+      );
     });
 
     it("defaults empty direction to asc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" asc, "assetId" ASC'
+      );
     });
   });
 
@@ -145,12 +175,12 @@ describe("parseSortingOptions", () => {
 
     it("uses direct sort for DATE fields", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:DATE"]);
-      expect(orderByClause).toBe("ORDER BY cf_x asc");
+      expect(orderByClause).toBe('ORDER BY cf_x asc, "assetId" ASC');
     });
 
     it("uses ::numeric cast for AMOUNT fields", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:AMOUNT"]);
-      expect(orderByClause).toBe("ORDER BY cf_x::numeric asc");
+      expect(orderByClause).toBe('ORDER BY cf_x::numeric asc, "assetId" ASC');
     });
 
     it("falls through to natural sort for unknown fieldType", () => {
@@ -884,5 +914,172 @@ describe("generateWhereClause - barcode value case normalization", () => {
 
     expect(result.values).toContain("ABC123");
     expect(result.values).not.toContain("abc123");
+  });
+});
+
+describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * The paginate-first rewrite drops the fanning `LEFT JOIN _AssetToTag + Tag`
+   * from the cheap phase, so any tag reference in the WHERE clause must be a
+   * self-contained per-asset EXISTS (not a bare `t.name`/`t.id` against an
+   * outer join alias). These tests lock that shape.
+   */
+  it("EXISTS-ifies the tag-name search (per-asset scoped, not a fanning join)", () => {
+    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
+
+    // The tag search must be an EXISTS over _AssetToTag JOIN Tag scoped to the
+    // current asset — never a bare `t.name ILIKE` disjunct against an outer
+    // join that would force a GROUP BY.
+    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
+    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
+    expect(sql).toContain('WHERE att."A" = a.id AND t.name ILIKE');
+  });
+
+  it("EXISTS-ifies a single-tag `contains` filter", () => {
+    const filter: Filter = {
+      name: "tags",
+      type: "array",
+      operator: "contains",
+      value: "tag-1",
+    };
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    // No bare `t.id = ` against an outer alias; must be a scoped EXISTS whose
+    // `t.id =` predicate lives inside a per-asset subquery.
+    expect(sql).toContain('SELECT 1 FROM "_AssetToTag" att');
+    expect(sql).toContain('JOIN "Tag" t ON att."B" = t.id');
+    expect(sql).toContain('WHERE att."A" = a.id AND t.id =');
+  });
+
+  it("EXISTS-ifies a multi-tag `containsAny` filter", () => {
+    const filter: Filter = {
+      name: "tags",
+      type: "array",
+      operator: "containsAny",
+      value: "tag-1,tag-2",
+    };
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    expect(sql).toContain('WHERE att."A" = a.id AND t.id = ANY');
+  });
+});
+
+describe("buildAdvancedAssetsQuery", () => {
+  /** Joins the raw SQL segments; interpolated values render as `?`. */
+  function getQuerySqlString(sql: Prisma.Sql): string {
+    return sql.strings.join("?");
+  }
+
+  /**
+   * Assembles the query through the real builder + fragments, mirroring the
+   * service call site so these assertions lock the shipped shape.
+   */
+  function build(overrides?: {
+    sortBy?: string[];
+    parsedFilters?: Filter[];
+    withBookings?: boolean;
+    withBarcodes?: boolean;
+    search?: string | null;
+  }): Prisma.Sql {
+    const sortBy = overrides?.sortBy ?? [];
+    const parsedFilters = overrides?.parsedFilters ?? [];
+    const search = overrides?.search ?? null;
+    const whereClause = generateWhereClause("org-1", search, parsedFilters);
+    const { orderByInner, customFieldSortings } = parseSortingOptions(sortBy);
+    return buildAdvancedAssetsQuery({
+      whereClause,
+      orderByInner,
+      customFieldSortings,
+      sortBy,
+      parsedFilters,
+      withBookings: overrides?.withBookings ?? false,
+      withBarcodes: overrides?.withBarcodes ?? false,
+      paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
+      hasSearch: Boolean(search),
+    });
+  }
+
+  it("emits the three-CTE + lateral paginate-first skeleton", () => {
+    const sql = getQuerySqlString(build());
+
+    expect(sql).toContain("WITH asset_query AS");
+    expect(sql).toContain("sorted_asset_query AS");
+    expect(sql).toContain("count_query AS");
+    expect(sql).toContain("COUNT(*)::integer AS total_count");
+    // Heavy projection runs once per page row via a correlated lateral.
+    expect(sql).toContain("LEFT JOIN LATERAL");
+    expect(sql).toContain('WHERE a.id = saq."assetId"');
+  });
+
+  it("freezes the sort into an integer ROW_NUMBER rank and replays it", () => {
+    const sql = getQuerySqlString(build());
+
+    // Default sort feeds the window; the array is ordered by the frozen rank.
+    expect(sql).toContain(
+      'ROW_NUMBER() OVER (ORDER BY "assetCreatedAt" DESC, "assetId" ASC)'
+    );
+    expect(sql).toContain('AS "__sortRank"');
+    expect(sql).toContain('ORDER BY saq."__sortRank"');
+  });
+
+  it("keeps the slim cheap phase to id + light sort keys (no heavy projection)", () => {
+    const sql = getQuerySqlString(build());
+
+    // Base sort keys are always selected directly off the scan.
+    expect(sql).toContain('a.value AS "assetValue"');
+    expect(sql).toContain('a.quantity AS "assetQuantity"');
+  });
+
+  it("gates a name-sort column in the cheap phase on the active sort", () => {
+    // The heavy projection always selects `k.name AS "kitName"` (for display),
+    // so isolate the CHEAP phase (everything before `sorted_asset_query`) to
+    // assert the gating: default sort omits the name joins/selects there — the
+    // residual-O(N) fix — and sorting by one brings it back.
+    const cheap = (overrides?: Parameters<typeof build>[0]) => {
+      const sql = getQuerySqlString(build(overrides));
+      return sql.slice(0, sql.indexOf("sorted_asset_query"));
+    };
+    const def = cheap({ sortBy: [] });
+    expect(def).not.toContain('k.name AS "kitName"');
+    expect(def).not.toContain('l.name AS "locationName"');
+
+    expect(cheap({ sortBy: ["kit:asc"] })).toContain('k.name AS "kitName"');
+    expect(cheap({ sortBy: ["location:asc"] })).toContain(
+      'l.name AS "locationName"'
+    );
+  });
+
+  it("keeps Category/Location joins for text search even without a name sort", () => {
+    // The search predicate references c.name / l.name in the WHERE, so a search
+    // must resolve those joins (independent of any sort). `c.name ILIKE` only
+    // appears when a search is active, so it is the reliable signal.
+    expect(getQuerySqlString(build({ search: "widget" }))).toContain(
+      "c.name ILIKE"
+    );
+    expect(getQuerySqlString(build({ sortBy: [] }))).not.toContain(
+      "c.name ILIKE"
+    );
+  });
+
+  it("injects the barcode sort-key selects only when a barcode sort is active", () => {
+    // withBarcodes:false ⇒ the heavy phase omits barcode scalars, so any
+    // `AS barcode_Code128` must come from the cheap phase's sort-key select.
+    const withBarcodeSort = getQuerySqlString(
+      build({ sortBy: ["barcode_Code128:asc"], withBarcodes: false })
+    );
+    expect(withBarcodeSort).toContain("AS barcode_Code128");
+
+    const withoutBarcodeSort = getQuerySqlString(
+      build({ sortBy: [], withBarcodes: false })
+    );
+    expect(withoutBarcodeSort).not.toContain("AS barcode_Code128");
+  });
+
+  it("selects a.value (never valuation) — respects the @map column", () => {
+    const sql = getQuerySqlString(build());
+    expect(sql).toContain('a.value AS "assetValue"');
+    expect(sql).not.toContain("a.valuation");
   });
 });

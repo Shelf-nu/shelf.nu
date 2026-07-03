@@ -71,7 +71,18 @@ export function generateWhereClause(
           a."sequentialId" ILIKE ${`%${term}%`} OR
           c.name ILIKE ${`%${term}%`} OR
           l.name ILIKE ${`%${term}%`} OR
-          t.name ILIKE ${`%${term}%`} OR
+          EXISTS (
+            -- Tag-name search. Rewritten from the fanning join on
+            -- _AssetToTag + Tag with t.name ILIKE (which was the sole reason
+            -- the outer query needed a GROUP BY) to a per-asset EXISTS, so
+            -- the slim pagination phase can drop the tag joins and the GROUP
+            -- BY entirely. Any-tag-match semantics are preserved: the asset
+            -- matches iff at least one of its tags' names ILIKE the term
+            -- (EXISTS dedups the same way GROUP BY did).
+            SELECT 1 FROM public."_AssetToTag" att
+            JOIN public."Tag" t ON att."B" = t.id
+            WHERE att."A" = a.id AND t.name ILIKE ${`%${term}%`}
+          ) OR
           EXISTS (
             -- Custodian search. Custody moved to the custody_agg LATERAL
             -- (multi-custodian), so there is no top-level tm/u join to
@@ -1312,8 +1323,15 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           WHERE att."A" = a.id
         )`;
       }
-      // Single tag filtering using the existing join
-      return Prisma.sql`${whereClause} AND t.id = ${filter.value}`;
+      // Single tag filtering via a per-asset EXISTS. Byte-identical to the
+      // previous `t.id = value` against the fanning tag join (the join was an
+      // inner semantic and GROUP BY deduped it) — but self-contained, so the
+      // slim pagination phase needs no outer `t`/`att` join.
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM "_AssetToTag" att
+        JOIN "Tag" t ON att."B" = t.id
+        WHERE att."A" = a.id AND t.id = ${filter.value}
+      )`;
     }
     case "containsAll": {
       // ALL tags must be present
@@ -1366,7 +1384,11 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         );
         return Prisma.sql`${whereClause} AND (
           NOT EXISTS (SELECT 1 FROM "_AssetToTag" att WHERE att."A" = a.id)
-          OR t.id = ANY(ARRAY[${valuesArray}]::text[])
+          OR EXISTS (
+            SELECT 1 FROM "_AssetToTag" att
+            JOIN "Tag" t ON att."B" = t.id
+            WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
+          )
         )`;
       }
 
@@ -1374,7 +1396,13 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         values.map((v) => Prisma.sql`${v}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND t.id = ANY(ARRAY[${valuesArray}]::text[])`;
+      // Any-tag EXISTS (see the `contains` branch) — keeps the slim phase free
+      // of the fanning tag join while preserving match semantics.
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM "_AssetToTag" att
+        JOIN "Tag" t ON att."B" = t.id
+        WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
+      )`;
     }
 
     case "excludeAny": {
@@ -1547,10 +1575,13 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
  * warning — the caller falls back to the default sort. See GHSA-69xv-wmgg-3qp3.
  *
  * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
- * @returns Object containing SQL order by clause and custom field sorting info
+ * @returns Object containing the full SQL `ORDER BY` clause, the same clause
+ *   without the leading `ORDER BY ` token (`orderByInner`, for embedding in a
+ *   `ROW_NUMBER() OVER (ORDER BY ...)` window), and custom field sorting info.
  */
 export function parseSortingOptions(sortBy: string[]): {
   orderByClause: string;
+  orderByInner: string;
   customFieldSortings: CustomFieldSorting[];
 } {
   const fields = sortBy.map((s) => {
@@ -1693,12 +1724,23 @@ export function parseSortingOptions(sortBy: string[]): {
       '"assetCreatedAt" DESC', // Primary: Newest assets first
       '"assetId" ASC' // Secondary: Stable sort for identical timestamps
     );
+  } else {
+    // Explicit sorts have no unique tiebreaker of their own, so rows tied on the
+    // sort key (e.g. same category name, same total value, or a mostly-NULL
+    // column) land in an arbitrary physical order that can shift between page
+    // loads — a latent nondeterministic-pagination bug. Append a stable id
+    // tiebreaker (mirrors the default sort's secondary key) so the paged slice
+    // and the integer ROW_NUMBER rank are reproducible across requests.
+    orderByParts.push('"assetId" ASC');
   }
 
+  // The inner clause (no leading "ORDER BY ") is what feeds the integer-rank
+  // window in the paginate-first rewrite: ROW_NUMBER() OVER (ORDER BY <inner>).
+  const orderByInner: string = orderByParts.join(", ");
   // Always generate an ORDER BY clause for predictable results
-  const orderByClause: string = `ORDER BY ${orderByParts.join(", ")}`;
+  const orderByClause: string = `ORDER BY ${orderByInner}`;
 
-  return { orderByClause, customFieldSortings };
+  return { orderByClause, orderByInner, customFieldSortings };
 }
 
 /**
@@ -1787,6 +1829,15 @@ export type AssetQueryOptions = {
 export type AssetReturnOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
+  /**
+   * When provided, the emitted `json_agg` orders its elements by this SQL
+   * expression: `json_agg(jsonb_build_object(...) ORDER BY <orderBy>)`. The
+   * paginate-first rewrite passes the integer sort rank (`saq."__sortRank"`)
+   * so the output array matches the paginated `ORDER BY` order exactly, without
+   * re-evaluating the (possibly tiebreaker-less) sort expressions. Omit it and
+   * the array order is unspecified (legacy single-CTE behavior).
+   */
+  orderBy?: Prisma.Sql;
 };
 
 // Convert to functions that accept options
@@ -2101,7 +2152,7 @@ export const assetQueryJoins = Prisma.sql`
     FROM public."AssetKit" ak
     JOIN public."Kit" k ON ak."kitId" = k.id
     WHERE ak."assetId" = a.id
-    ORDER BY ak."createdAt" ASC
+    ORDER BY ak."createdAt" ASC, ak.id ASC
     LIMIT 1
   ) k ON TRUE
   -- Full kit membership aggregated as a jsonb array, so the asset-index
@@ -2113,7 +2164,7 @@ export const assetQueryJoins = Prisma.sql`
     SELECT COALESCE(
       jsonb_agg(
         jsonb_build_object('id', k2.id, 'name', k2.name, 'status', k2.status)
-        ORDER BY ak2."createdAt" ASC
+        ORDER BY ak2."createdAt" ASC, ak2.id ASC
       ),
       '[]'::jsonb
     ) AS kits
@@ -2131,7 +2182,7 @@ export const assetQueryJoins = Prisma.sql`
     FROM public."AssetLocation" al
     JOIN public."Location" l ON al."locationId" = l.id
     WHERE al."assetId" = a.id
-    ORDER BY al."createdAt" ASC
+    ORDER BY al."createdAt" ASC, al.id ASC
     LIMIT 1
   ) l ON TRUE
   -- Full placement list aggregated as a jsonb array, mirror of
@@ -2151,7 +2202,7 @@ export const assetQueryJoins = Prisma.sql`
             WHERE lc2."parentId" = l2.id
           )
         )
-        ORDER BY al2."createdAt" ASC
+        ORDER BY al2."createdAt" ASC, al2.id ASC
       ),
       '[]'::jsonb
     ) AS locations
@@ -2212,7 +2263,7 @@ export const assetQueryJoins = Prisma.sql`
  * @returns Prisma.Sql fragment that safely handles no results
  */
 export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
-  const { withBookings = false, withBarcodes = false } = options;
+  const { withBookings = false, withBarcodes = false, orderBy } = options;
 
   const bookingsField = withBookings
     ? Prisma.sql`,
@@ -2223,6 +2274,11 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
     ? Prisma.sql`,
         'barcodes', COALESCE(aq.barcodes, '[]'::jsonb)`
     : Prisma.sql``;
+
+  // Optional deterministic array ordering. `json_agg(... ORDER BY <expr>)`
+  // sorts the aggregated elements; without it the array order is whatever the
+  // input relation yields. The rewrite passes the integer sort rank here.
+  const aggOrderBy = orderBy ? Prisma.sql` ORDER BY ${orderBy}` : Prisma.empty;
 
   return Prisma.sql`
     COALESCE(
@@ -2267,12 +2323,427 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
-        )
+        )${aggOrderBy}
       ) FILTER (WHERE aq."assetId" IS NOT NULL),
       '[]'
     ) AS assets
   `;
 };
+
+/**
+ * Sort-key building blocks for the slim (cheap) pagination phase.
+ *
+ * The paginate-first rewrite splits the advanced index into a cheap phase
+ * (id + sort keys only, no GROUP BY, one row per matching asset) and a heavy
+ * phase (the full projection, run once per page row via LEFT JOIN LATERAL).
+ * The heavy phase keeps its own inline copies of these expressions inside
+ * {@link assetQueryFragment} / {@link assetQueryJoins} — because ordering is
+ * frozen into an integer rank in the cheap phase, the two phases do NOT need
+ * to be byte-identical, so duplicating the SQL here is safe and keeps the
+ * heavy fragments untouched.
+ *
+ * @see {@link buildAdvancedAssetsQuery}
+ */
+
+/**
+ * qrId scalar subquery — the first QR id linked to the asset. Used as a sort
+ * key (`ORDER BY "qrId"`) only when a qrId sort is active.
+ */
+const QR_ID_SUBQUERY = Prisma.sql`(
+        SELECT q.id
+        FROM public."Qr" q
+        WHERE q."assetId" = a.id
+        LIMIT 1
+      )`;
+
+/**
+ * The five per-type barcode scalar subqueries, aliased as the identifiers the
+ * `barcode_<Type>` sort terms reference. Injected into the cheap phase only
+ * when a barcode sort is active. Never part of the output (sort-only).
+ */
+const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'Code128' LIMIT 1
+      ) AS barcode_Code128,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'Code39' LIMIT 1
+      ) AS barcode_Code39,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'DataMatrix' LIMIT 1
+      ) AS barcode_DataMatrix,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'ExternalQR' LIMIT 1
+      ) AS barcode_ExternalQR,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'EAN13' LIMIT 1
+      ) AS barcode_EAN13`;
+
+/**
+ * The custody CASE expression (direct custody wins; booking-derived synthetic
+ * custody for CHECKED_OUT assets otherwise; NULL). Verbatim copy of the heavy
+ * projection's custody CASE, including the NRM-name guard (CONCAT vs btm.name,
+ * never COALESCE(CONCAT(...))). Emitted `AS custody` in the cheap phase only
+ * when a custody sort is active — the `custody->>'name'` sort term needs it.
+ */
+const CUSTODY_SORT_CASE = Prisma.sql`CASE
+        WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody
+        WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+          jsonb_build_array(
+            jsonb_build_object(
+              'name', CASE
+                WHEN bu.id IS NOT NULL
+                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                ELSE btm.name
+              END,
+              'custodian', jsonb_build_object(
+                'name', CASE
+                  WHEN bu.id IS NOT NULL
+                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                  ELSE btm.name
+                END,
+                'user', CASE
+                  WHEN bu.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', bu.id,
+                      'firstName', bu."firstName",
+                      'lastName', bu."lastName",
+                      'profilePicture', bu."profilePicture",
+                      'email', bu.email
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          )
+        ELSE NULL
+      END`;
+
+/**
+ * Cheap-phase base joins, split per alias so the slim CTE only pays for the
+ * joins a given request actually needs. Each is a 1:1 join or LATERAL
+ * primary-pick (no fan-out), a verbatim mirror of the corresponding join in
+ * {@link assetQueryJoins}. Gated in {@link buildAdvancedAssetsQuery} on whether
+ * the active sort references the joined name (kit/category/assetModel/location)
+ * and — for category/location — whether a text search is active (the search
+ * predicate references `c.name` / `l.name`). why: joining all four for every
+ * matching asset even under the default `createdAt` sort was the residual O(N)
+ * cost that kept the rewrite ~2× instead of ~10× faster.
+ */
+const CHEAP_KIT_JOIN = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT k.id, k.name, k.status
+      FROM public."AssetKit" ak
+      JOIN public."Kit" k ON ak."kitId" = k.id
+      WHERE ak."assetId" = a.id
+      ORDER BY ak."createdAt" ASC, ak.id ASC
+      LIMIT 1
+    ) k ON TRUE`;
+const CHEAP_CATEGORY_JOIN = Prisma.sql`
+    LEFT JOIN public."Category" c ON a."categoryId" = c.id`;
+const CHEAP_ASSET_MODEL_JOIN = Prisma.sql`
+    LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id`;
+const CHEAP_LOCATION_JOIN = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT l.id, l.name, l."parentId"
+      FROM public."AssetLocation" al
+      JOIN public."Location" l ON al."locationId" = l.id
+      WHERE al."assetId" = a.id
+      ORDER BY al."createdAt" ASC, al.id ASC
+      LIMIT 1
+    ) l ON TRUE`;
+
+/**
+ * Cheap-phase custody joins: the per-asset custody aggregation (`custody_agg`)
+ * plus the active-booking LATERAL (`b`) and its custodian joins (`bu`/`btm`).
+ * Injected only when a custody FILTER or a custody SORT is active — the custody
+ * WHERE predicates reference `jsonb_array_length(custody_agg.custody)` and the
+ * custody sort key references the full CASE (which needs `b`/`bu`/`btm`).
+ * Verbatim mirror of the custody joins in {@link assetQueryJoins}.
+ */
+const CHEAP_CUSTODY_JOINS = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'name', tm.name,
+            'quantity', cu.quantity,
+            'custodian', jsonb_build_object(
+              'name', tm.name,
+              'user', CASE
+                WHEN u.id IS NOT NULL THEN
+                  jsonb_build_object(
+                    'id', u.id,
+                    'firstName', u."firstName",
+                    'lastName', u."lastName",
+                    'profilePicture', u."profilePicture",
+                    'email', u.email
+                  )
+                ELSE NULL
+              END
+            )
+          )
+        ),
+        '[]'::jsonb
+      ) AS custody
+      FROM public."Custody" cu
+      LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
+      LEFT JOIN public."User" u ON tm."userId" = u.id
+      WHERE cu."assetId" = a.id
+    ) custody_agg ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT b.*
+      FROM public."Booking" b
+      JOIN public."BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
+      WHERE b.status IN ('ONGOING', 'OVERDUE')
+      LIMIT 1
+    ) b ON TRUE
+    LEFT JOIN public."User" bu ON b."custodianUserId" = bu.id
+    LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
+`;
+
+/**
+ * Detects which sort-only subquery selects the cheap phase must emit so that
+ * every alias the `ORDER BY` references also exists in the slim SELECT. Missing
+ * an active sort's alias is a `column does not exist` 500, so over-inclusion is
+ * the safe direction (an unused select never breaks the query).
+ *
+ * @param sortBy - Raw `sortBy` specs (`field:direction[:fieldType]`).
+ * @returns Flags for the qrId, custody, and barcode sort-key families.
+ */
+function detectActiveSortKeys(sortBy: string[]): {
+  qrId: boolean;
+  custody: boolean;
+  barcode: boolean;
+  kitName: boolean;
+  categoryName: boolean;
+  assetModelName: boolean;
+  locationName: boolean;
+} {
+  let qrId = false;
+  let custody = false;
+  let barcode = false;
+  let kitName = false;
+  let categoryName = false;
+  let assetModelName = false;
+  let locationName = false;
+  for (const spec of sortBy) {
+    const name = spec.split(":")[0] ?? "";
+    if (name === "qrId") qrId = true;
+    else if (name === "custody") custody = true;
+    else if (name.startsWith("barcode_")) barcode = true;
+    // Joined-name sort keys (mirror the parseSortingOptions field-name branches):
+    // "kit" -> kitName, "category" -> categoryName, etc.
+    else if (name === "kit") kitName = true;
+    else if (name === "category") categoryName = true;
+    else if (name === "assetModel") assetModelName = true;
+    else if (name === "location") locationName = true;
+  }
+  return {
+    qrId,
+    custody,
+    barcode,
+    kitName,
+    categoryName,
+    assetModelName,
+    locationName,
+  };
+}
+
+/** Parameters for {@link buildAdvancedAssetsQuery}. */
+export type BuildAdvancedAssetsQueryParams = {
+  /** WHERE clause from {@link generateWhereClause} (org scope + filters). */
+  whereClause: Prisma.Sql;
+  /** Inner `ORDER BY` body (no leading `ORDER BY `) from {@link parseSortingOptions}. */
+  orderByInner: string;
+  /** Validated custom-field sortings from {@link parseSortingOptions}. */
+  customFieldSortings: CustomFieldSorting[];
+  /** Raw `sortBy` specs, used to detect active qrId/custody/barcode sort keys. */
+  sortBy: string[];
+  /** Parsed filters, used to detect whether a custody filter is active. */
+  parsedFilters: Filter[];
+  /** Include the bookings jsonb aggregation (availability calendar / column). */
+  withBookings: boolean;
+  /** Include the barcodes jsonb aggregation. */
+  withBarcodes: boolean;
+  /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
+  paginationClause: Prisma.Sql;
+  /**
+   * Whether a free-text search is active. The search predicate references
+   * `c.name` / `l.name`, so the cheap phase must join Category + Location even
+   * when no category/location sort is active.
+   */
+  hasSearch: boolean;
+};
+
+/**
+ * Assembles the advanced asset-index query using the paginate-first design.
+ *
+ * Shape (three CTEs + a lateral heavy phase):
+ * 1. `asset_query` — SLIM: `a.id` + sort keys only, one row per matching asset,
+ *    NO `GROUP BY` (the tag search/filter is EXISTS-ified in
+ *    {@link generateWhereClause}, so no fanning tag join remains).
+ * 2. `sorted_asset_query` — `ROW_NUMBER()` freezes the sort into an integer
+ *    `__sortRank`, then `LIMIT/OFFSET` slices the page.
+ * 3. `count_query` — `COUNT(*)` over the slim set (full filtered total).
+ * The final SELECT runs the ENTIRE heavy projection once per page row via
+ * `LEFT JOIN LATERAL`, and `json_agg` orders by the integer `__sortRank` — the
+ * sort expressions are never re-evaluated, so ties (no unique tiebreaker for
+ * explicit sorts) stay consistent between the paged slice and the array order.
+ *
+ * @param params - See {@link BuildAdvancedAssetsQueryParams}.
+ * @returns The complete `Prisma.Sql` query returning one row
+ *   `{ total_count: number, assets: AdvancedIndexAsset[] }`.
+ */
+export function buildAdvancedAssetsQuery({
+  whereClause,
+  orderByInner,
+  customFieldSortings,
+  sortBy,
+  parsedFilters,
+  withBookings,
+  withBarcodes,
+  paginationClause,
+  hasSearch,
+}: BuildAdvancedAssetsQueryParams): Prisma.Sql {
+  const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+
+  const {
+    qrId: qrIdSort,
+    custody: custodySort,
+    barcode: barcodeSort,
+    kitName: kitNameSort,
+    categoryName: categoryNameSort,
+    assetModelName: assetModelNameSort,
+    locationName: locationNameSort,
+  } = detectActiveSortKeys(sortBy);
+
+  // Custody joins are needed when EITHER a custody filter (WHERE references
+  // custody_agg.custody) OR a custody sort (ORDER BY references the CASE) is
+  // active. The custody CASE select itself is only needed for the sort.
+  const custodyFilterActive = parsedFilters.some((f) => f.name === "custody");
+  const custodyJoinsActive = custodyFilterActive || custodySort;
+
+  // Base name-joins are gated so the slim phase stays O(1) joins under the
+  // common default sort. Category/Location are also needed for text search
+  // (its WHERE references c.name / l.name); the SELECT alias is only needed
+  // when the matching name sort is active (search reads c.name/l.name directly).
+  const needKitJoin = kitNameSort;
+  const needCategoryJoin = categoryNameSort || hasSearch;
+  const needAssetModelJoin = assetModelNameSort;
+  const needLocationJoin = locationNameSort || hasSearch;
+
+  const kitNameSelect = kitNameSort
+    ? Prisma.sql`,
+      k.name AS "kitName"`
+    : Prisma.empty;
+  const categoryNameSelect = categoryNameSort
+    ? Prisma.sql`,
+      c.name AS "categoryName"`
+    : Prisma.empty;
+  const assetModelNameSelect = assetModelNameSort
+    ? Prisma.sql`,
+      am.name AS "assetModelName"`
+    : Prisma.empty;
+  const locationNameSelect = locationNameSort
+    ? Prisma.sql`,
+      l.name AS "locationName"`
+    : Prisma.empty;
+
+  const qrIdSortSelect = qrIdSort
+    ? Prisma.sql`,
+      ${QR_ID_SUBQUERY} AS "qrId"`
+    : Prisma.empty;
+  const custodySortSelect = custodySort
+    ? Prisma.sql`,
+      ${CUSTODY_SORT_CASE} AS custody`
+    : Prisma.empty;
+  const barcodeSortSelects = barcodeSort
+    ? Prisma.sql`,
+      ${BARCODE_SORT_KEY_SELECTS}`
+    : Prisma.empty;
+  const custodyJoins = custodyJoinsActive ? CHEAP_CUSTODY_JOINS : Prisma.empty;
+
+  const kitJoin = needKitJoin ? CHEAP_KIT_JOIN : Prisma.empty;
+  const categoryJoin = needCategoryJoin ? CHEAP_CATEGORY_JOIN : Prisma.empty;
+  const assetModelJoin = needAssetModelJoin
+    ? CHEAP_ASSET_MODEL_JOIN
+    : Prisma.empty;
+  const locationJoin = needLocationJoin ? CHEAP_LOCATION_JOIN : Prisma.empty;
+  const baseJoins = Prisma.sql`
+    FROM public."Asset" a
+    ${kitJoin}
+    ${categoryJoin}
+    ${assetModelJoin}
+    ${locationJoin}`;
+
+  // Hoisted out of the return template's interpolation on purpose: a nested
+  // `Prisma.sql\`...\`` inside a `${}` inside the outer template tripped
+  // esbuild's transform into silently dropping this whole function from the
+  // bundle (tsc/vitest were fine, but the production build lost it).
+  const rankOrderBy = Prisma.sql`saq."__sortRank"`;
+
+  return Prisma.sql`
+      WITH asset_query AS (
+        -- SLIM cheap phase: id + sort keys, one row per matching asset, no
+        -- GROUP BY. Cost is O(N) rows of LIGHT columns, not the heavy
+        -- projection — that runs once per page row in the lateral below.
+        SELECT
+          a.id AS "assetId",
+          a."createdAt" AS "assetCreatedAt",
+          a."updatedAt" AS "assetUpdatedAt",
+          a.value AS "assetValue",
+          a.quantity AS "assetQuantity",
+          a.title AS "assetTitle",
+          a."sequentialId" AS "assetSequentialId",
+          a.status AS "assetStatus",
+          a.type AS "assetType",
+          a.description AS "assetDescription",
+          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
+        ${baseJoins}
+        ${custodyJoins}
+        ${whereClause}
+      ),
+      sorted_asset_query AS (
+        -- Freeze the sort into a stable integer rank, then slice the page.
+        SELECT
+          "assetId",
+          ROW_NUMBER() OVER (ORDER BY ${Prisma.raw(
+            orderByInner
+          )}) AS "__sortRank"
+        FROM asset_query
+        ORDER BY "__sortRank"
+        ${paginationClause}
+      ),
+      count_query AS (
+        -- Full filtered total (pagination-independent) over the slim CTE.
+        SELECT COUNT(*)::integer AS total_count
+        FROM asset_query
+      )
+      SELECT
+        (SELECT total_count FROM count_query) AS total_count,
+        ${assetReturnFragment({
+          withBookings,
+          withBarcodes,
+          orderBy: rankOrderBy,
+        })}
+      FROM sorted_asset_query saq
+      LEFT JOIN LATERAL (
+        -- Heavy projection, run once per page row (WHERE a.id = the paged id).
+        ${assetQueryFragment({
+          withBookings,
+          withBarcodes,
+          withCustomFieldDefinitions: false,
+        })}
+        ${assetQueryJoins}
+        WHERE a.id = saq."assetId"
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+      ) aq ON TRUE;
+    `;
+}
 
 export async function parseFiltersWithHierarchy(
   filtersString: string,
