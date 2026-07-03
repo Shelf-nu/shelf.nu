@@ -498,44 +498,165 @@ export function isKitPartiallyCheckedIn(
 }
 
 /**
- * Sorts booking assets by priority:
- * 1. CHECKED_OUT assets (need to be checked in)
- * 2. PARTIALLY_CHECKED_IN assets (already checked in, ordered by most recent)
- * 3. AVAILABLE assets
+ * Minimal per-row shape needed to decide whether a booking's row (one
+ * `BookingAsset` slice) is fully checked out on its own. `bookedQuantity` /
+ * `checkedOutQuantity` / `dispositionedQuantity` are the per-slice counters the
+ * overview loader attaches (keyed by `bookingAssetId`), so a kit-driven slice
+ * and a standalone slice of the same asset are evaluated independently.
+ *
+ * Fields are typed `unknown` (narrowed inside the helpers) rather than `number`
+ * so the loosely-typed enriched rows the callers hold pass without casts. No
+ * index signature — callers with extra fields still structurally match these
+ * optional fields, and keeping it index-free avoids leaking an `any`/`unknown`
+ * open index into the resolver's public signature.
  */
-export function sortBookingAssets<T extends AssetWithStatus>(
-  assets: T[],
-  partialCheckinDetails: PartialCheckinDetailsType
-): T[] {
-  return assets.sort((a, b) => {
-    // Check if assets have partial check-in dates
-    const aPartialCheckin = partialCheckinDetails[a.id];
-    const bPartialCheckin = partialCheckinDetails[b.id];
+export type QtyCheckoutRow = {
+  type?: unknown;
+  bookedQuantity?: unknown;
+  checkedOutQuantity?: unknown;
+  dispositionedQuantity?: unknown;
+};
 
-    // Priority order: CHECKED_OUT first, then PARTIALLY_CHECKED_IN, then AVAILABLE
-    const getStatusPriority = (asset: T, hasPartialCheckin: boolean) => {
-      if (asset.status === "CHECKED_OUT" && !hasPartialCheckin) return 1; // CHECKED_OUT
-      if (hasPartialCheckin) return 2; // PARTIALLY_CHECKED_IN
-      return 3; // AVAILABLE
-    };
+/** Coerce an unknown per-row counter to a finite number (0 when absent/NaN). */
+function toCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
 
-    const aPriority = getStatusPriority(a, !!aPartialCheckin);
-    const bPriority = getStatusPriority(b, !!bPartialCheckin);
+/**
+ * Whether THIS row's own units are ALL progressively checked out with nothing
+ * returned yet — i.e. the slice is fully out and should read as CHECKED_OUT.
+ *
+ * QUANTITY_TRACKED only: a QT asset can legitimately span multiple
+ * `BookingAsset` slices (a kit-driven slice + a standalone free-pool slice),
+ * so its GLOBAL `Asset.status` only flips to CHECKED_OUT once EVERY slice is
+ * out (`bookedTotal` sums across slices). A single fully-checked-out slice
+ * therefore can't be detected from the global status — it must be read from
+ * the per-slice counters. Shared by the row badge in `list-asset-content.tsx`
+ * and the status-sort's `isCheckedOut` predicate in
+ * {@link file://../modules/booking/shape-booking-assets.ts} so the badge and
+ * the sort position always agree.
+ *
+ * @param row - The per-slice row (type + per-row qty counters).
+ * @param bookingStatus - Parent booking status; only ONGOING/OVERDUE are active.
+ * @returns `true` when the slice is fully checked out with no disposition yet.
+ */
+export function isBookingRowQtyFullyCheckedOut(
+  row: QtyCheckoutRow,
+  bookingStatus: string
+): boolean {
+  const qtyBooked = toCount(row.bookedQuantity);
+  const qtyCheckedOut = toCount(row.checkedOutQuantity);
+  const qtyDispositioned = toCount(row.dispositionedQuantity);
+  const isActiveBooking =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+  return (
+    row.type === "QUANTITY_TRACKED" &&
+    qtyBooked > 0 &&
+    qtyCheckedOut >= qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking
+  );
+}
 
-    // Sort by priority first
-    if (aPriority !== bPriority) {
-      return aPriority - bPriority;
-    }
+/**
+ * Input row for {@link resolveBookingRowQtyState}: the identity/status fields
+ * {@link getBookingContextAssetStatus} needs plus the per-slice qty counters.
+ * Index-signature-free and `any`-free, so callers pass their enriched rows
+ * (which structurally satisfy these fields) without an `any`-indexed cast.
+ */
+export type BookingRowStatusInput = {
+  id: string;
+  status: string;
+} & QtyCheckoutRow;
 
-    // Within same priority, sort partial check-ins by most recent first
-    if (aPartialCheckin && bPartialCheckin) {
-      return (
-        new Date(bPartialCheckin.checkinDate).getTime() -
-        new Date(aPartialCheckin.checkinDate).getTime()
-      );
-    }
+/** Resolved booking-row status plus the intermediate QT flags. */
+export type BookingRowQtyState = {
+  /** The badge status for this row (what `AssetStatusBadge` renders). */
+  contextStatus: ExtendedAssetStatus;
+  /** QT row fully reconciled (disposition ≥ booked) on an active booking. */
+  isQtyFullyCheckedIn: boolean;
+  /** QT row partly reconciled (some disposition, units still outstanding). */
+  isQtyPartiallyCheckedIn: boolean;
+  /** QT row with some (not all) units out and nothing returned yet. */
+  isQtyPartiallyCheckedOut: boolean;
+  /** QT row with ALL of its own units out and nothing returned yet. */
+  isQtyFullyCheckedOut: boolean;
+};
 
-    // Finally, sort by asset ID as fallback for consistency
-    return a.id.localeCompare(b.id);
-  });
+/**
+ * Resolve one booking row's (slice's) badge status and the intermediate QT
+ * flags. SINGLE source of truth shared by the row badge
+ * (`list-asset-content.tsx`) and the status-sort predicate
+ * (`shape-booking-assets.ts`) so the status a user sees on a row and the
+ * bucket that row sorts into can never disagree.
+ *
+ * Priority (most specific signal wins):
+ *  1. QT fully reconciled for this row → `PARTIALLY_CHECKED_IN`.
+ *  2. QT partly reconciled (returns underway) → `PARTIALLY_CHECKED_OUT_QTY`.
+ *  3. QT some units out, none returned yet → `..._QTY_PENDING_RETURN`.
+ *  4. QT all of THIS slice's units out, none returned → `CHECKED_OUT`.
+ *  5. Otherwise the global booking-context status
+ *     ({@link getBookingContextAssetStatus}) — covers INDIVIDUAL assets and QT
+ *     rows with no per-row activity (e.g. checked out via another booking).
+ *
+ * The per-row (per-`bookingAssetId`) quantity arms gate BEFORE the global
+ * fallback, so a QT row with a partial return underway reads as its actionable
+ * partial state and is NOT mis-bucketed as fully checked out just because the
+ * asset's global status is `CHECKED_OUT` in a different active booking.
+ *
+ * @param row - The enriched row (id/status/type + per-row qty counters).
+ * @param partialCheckinDetails - Per-booking partial check-in records by id.
+ * @param bookingStatus - The parent booking's status.
+ * @returns The resolved badge status and the QT flags used to derive it.
+ */
+export function resolveBookingRowQtyState(
+  row: BookingRowStatusInput,
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
+): BookingRowQtyState {
+  const qtyBooked = toCount(row.bookedQuantity);
+  const qtyCheckedOut = toCount(row.checkedOutQuantity);
+  const qtyDispositioned = toCount(row.dispositionedQuantity);
+  const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+  const isActiveBooking =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+  const isQt = row.type === "QUANTITY_TRACKED";
+
+  const isQtyFullyCheckedIn =
+    isQt && qtyBooked > 0 && qtyDispositioned >= qtyBooked && isActiveBooking;
+  const isQtyPartiallyCheckedIn =
+    isQt &&
+    qtyBooked > 0 &&
+    qtyDispositioned > 0 &&
+    qtyRemaining > 0 &&
+    isActiveBooking;
+  const isQtyPartiallyCheckedOut =
+    isQt &&
+    qtyBooked > 0 &&
+    qtyCheckedOut > 0 &&
+    qtyCheckedOut < qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking;
+  const isQtyFullyCheckedOut = isBookingRowQtyFullyCheckedOut(
+    row,
+    bookingStatus
+  );
+
+  const contextStatus: ExtendedAssetStatus = isQtyFullyCheckedIn
+    ? "PARTIALLY_CHECKED_IN"
+    : isQtyPartiallyCheckedIn
+    ? "PARTIALLY_CHECKED_OUT_QTY"
+    : isQtyPartiallyCheckedOut
+    ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
+    : isQtyFullyCheckedOut
+    ? AssetStatus.CHECKED_OUT
+    : getBookingContextAssetStatus(row, partialCheckinDetails, bookingStatus);
+
+  return {
+    contextStatus,
+    isQtyFullyCheckedIn,
+    isQtyPartiallyCheckedIn,
+    isQtyPartiallyCheckedOut,
+    isQtyFullyCheckedOut,
+  };
 }

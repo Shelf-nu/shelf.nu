@@ -844,6 +844,46 @@ describe("assetQueryFragment", () => {
       expect(sql).not.toContain("_CategoryToCustomField");
     });
   });
+
+  describe("withBookings option (availability view)", () => {
+    /**
+     * The availability calendar folds the per-(asset, booking) BookingAsset
+     * pivot rows into one bar and needs each slice's `assetKitId`, booked
+     * `quantity`, and resolved kit name. Typecheck cannot validate the raw SQL
+     * (`Prisma.sql` is just a string to TS), so a wrong-column refactor would
+     * only surface as a 500 — per .claude/rules/raw-sql-respects-prisma-map
+     * item 4, guard the column/join names with a cheap string assertion.
+     * (No @map trap here: BookingAsset.quantity/assetKitId and Kit.name are
+     * unmapped, so the Prisma field names equal the DB column names.)
+     */
+    it("projects per-slice pivot columns and resolves kit name via joins", () => {
+      const fragment = assetQueryFragment({ withBookings: true });
+      const sql = getFragmentSqlString(fragment);
+
+      // Per-slice pivot metadata the fold reads (booked units, kit membership).
+      expect(sql).toContain('atb."assetKitId"');
+      expect(sql).toContain('atb."quantity"');
+      // Kit name resolved through org-scoped AssetKit -> Kit joins, using
+      // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
+      expect(sql).toContain("'kitName', bk_kit.name");
+      expect(sql).toContain('LEFT JOIN public."AssetKit" bk_ak');
+      // Org-scoped so a cross-org assetKitId resolves to NULL, never a leak.
+      expect(sql).toContain('bk_ak."organizationId" = a."organizationId"');
+      expect(sql).toContain(
+        'LEFT JOIN public."Kit" bk_kit ON bk_ak."kitId" = bk_kit.id'
+      );
+    });
+
+    it("omits the bookings subquery entirely when withBookings is false", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // Default (table views) must not pay for the availability-only subquery.
+      expect(sql).not.toContain("AS bookings");
+      expect(sql).not.toContain('atb."assetKitId"');
+      expect(sql).not.toContain("'kitName', bk_kit.name");
+    });
+  });
 });
 
 describe("generateWhereClause - barcode value case normalization", () => {
