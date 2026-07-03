@@ -234,7 +234,7 @@ export default function renderEventCard({ event }: EventCardProps) {
                   >
                     {sliceCount}
                   </span>
-                ) : null
+                ) : null}
               </span>
             ) : null}
             <ExternalLinkIcon
