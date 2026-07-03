@@ -1865,7 +1865,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             END,
             'assetKitId', atb."assetKitId",
             'quantity', atb."quantity",
-            'kitName', k.name
+            'kitName', bk_kit.name
           )
         ),
         '[]'::jsonb
@@ -1876,11 +1876,15 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
       LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
-      -- AssetKit -> Kit resolves the per-slice kit name. Implicitly org-scoped:
-      -- atb rows are asset-scoped (atb."assetId" = a.id below) and a.id is
-      -- org-filtered by the outer query, so ak/k always share the asset's org.
-      LEFT JOIN public."AssetKit" ak ON atb."assetKitId" = ak.id
-      LEFT JOIN public."Kit" k ON ak."kitId" = k.id
+      -- Booking-slice kit attribution. Org-scoped (bk_ak."organizationId" =
+      -- a."organizationId") so a tampered / cross-org assetKitId resolves to
+      -- NULL instead of leaking another workspace's kit name — mirrors the
+      -- simple-mode helper. Distinct aliases (bk_ak/bk_kit) so this correlated
+      -- subquery does not shadow the outer query's ak/k (the asset's own kit).
+      LEFT JOIN public."AssetKit" bk_ak
+        ON atb."assetKitId" = bk_ak.id
+        AND bk_ak."organizationId" = a."organizationId"
+      LEFT JOIN public."Kit" bk_kit ON bk_ak."kitId" = bk_kit.id
       WHERE
         atb."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')

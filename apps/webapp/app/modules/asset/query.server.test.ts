@@ -833,12 +833,15 @@ describe("assetQueryFragment", () => {
       // Per-slice pivot metadata the fold reads (booked units, kit membership).
       expect(sql).toContain('atb."assetKitId"');
       expect(sql).toContain('atb."quantity"');
-      // Kit name resolved through the AssetKit -> Kit joins.
-      expect(sql).toContain("'kitName', k.name");
+      // Kit name resolved through org-scoped AssetKit -> Kit joins, using
+      // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
+      expect(sql).toContain("'kitName', bk_kit.name");
+      expect(sql).toContain('LEFT JOIN public."AssetKit" bk_ak');
+      // Org-scoped so a cross-org assetKitId resolves to NULL, never a leak.
+      expect(sql).toContain('bk_ak."organizationId" = a."organizationId"');
       expect(sql).toContain(
-        'LEFT JOIN public."AssetKit" ak ON atb."assetKitId" = ak.id'
+        'LEFT JOIN public."Kit" bk_kit ON bk_ak."kitId" = bk_kit.id'
       );
-      expect(sql).toContain('LEFT JOIN public."Kit" k ON ak."kitId" = k.id');
     });
 
     it("omits the bookings subquery entirely when withBookings is false", () => {
@@ -848,7 +851,7 @@ describe("assetQueryFragment", () => {
       // Default (table views) must not pay for the availability-only subquery.
       expect(sql).not.toContain("AS bookings");
       expect(sql).not.toContain('atb."assetKitId"');
-      expect(sql).not.toContain("'kitName', k.name");
+      expect(sql).not.toContain("'kitName', bk_kit.name");
     });
   });
 });

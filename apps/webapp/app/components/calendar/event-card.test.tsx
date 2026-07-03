@@ -174,9 +174,15 @@ describe("EventCardContent — per-slice breakdown gating", () => {
   });
 });
 
+// Capitalized alias so the shared renderer is instantiated as a JSX element
+// rather than called as a function — the direct-call form trips react-doctor's
+// no-render-in-render rule (which ignores eslint-disable comments; only a
+// refactor silences it). `makeEventArg` returns the `{ event }` props shape.
+const RenderedEventCard = renderEventCard;
+
 describe("renderEventCard — kit glyph gating", () => {
   it("hides the glyph for the booking-calendar shape (no slices)", () => {
-    render(<>{renderEventCard(makeEventArg(makeBooking()))}</>);
+    render(<RenderedEventCard {...makeEventArg(makeBooking())} />);
 
     expect(screen.queryByTitle(/Reserved .* times on this booking/)).toBeNull();
     expect(screen.queryByTitle("Booked via a kit")).toBeNull();
@@ -184,17 +190,15 @@ describe("renderEventCard — kit glyph gating", () => {
 
   it("hides the glyph for a single standalone slice", () => {
     render(
-      <>
-        {renderEventCard(
-          makeEventArg(
-            makeBooking({
-              slices: [{ assetKitId: null, kitName: null, quantity: 1 }],
-              sliceCount: 1,
-              bookedTotal: 1,
-            })
-          )
+      <RenderedEventCard
+        {...makeEventArg(
+          makeBooking({
+            slices: [{ assetKitId: null, kitName: null, quantity: 1 }],
+            sliceCount: 1,
+            bookedTotal: 1,
+          })
         )}
-      </>
+      />
     );
 
     expect(screen.queryByTitle("Booked via a kit")).toBeNull();
@@ -203,17 +207,15 @@ describe("renderEventCard — kit glyph gating", () => {
 
   it("renders the glyph with a slice count for standalone + kit slices", () => {
     render(
-      <>
-        {renderEventCard(
-          makeEventArg(
-            makeBooking({
-              slices: [STANDALONE, KIT_SLICE],
-              sliceCount: 2,
-              bookedTotal: 5,
-            })
-          )
+      <RenderedEventCard
+        {...makeEventArg(
+          makeBooking({
+            slices: [STANDALONE, KIT_SLICE],
+            sliceCount: 2,
+            bookedTotal: 5,
+          })
         )}
-      </>
+      />
     );
 
     const glyph = screen.getByTitle("Reserved 2 times on this booking");

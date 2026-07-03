@@ -92,10 +92,14 @@ type MutableBookingAssetSlice = {
  * org-scoped read and mutates the slices in place. Standalone slices
  * (assetKitId === null) are left untouched. Availability view only.
  *
+ * Kit names are supplementary UI data, so the availability loader wraps this
+ * call and degrades gracefully (logs + continues) if the read fails — the raw
+ * Prisma error propagates here and is handled at the call site rather than
+ * being rethrown as a ShelfError.
+ *
  * @param args.assets - Loaded assets, each optionally carrying `bookingAssets`.
  * @param args.organizationId - Active org; scopes the AssetKit read (defense in
  *   depth per org-scope-user-supplied-ids).
- * @throws {ShelfError} If the AssetKit read fails.
  */
 export async function attachKitNamesToBookingAssets({
   assets,
@@ -319,12 +323,28 @@ export async function simpleModeLoader({
   // structural cast — `bookingAssets` is an availability-only extraInclude not
   // in the base asset type (same pattern the availability hook uses).
   if (view === "availability") {
-    await attachKitNamesToBookingAssets({
-      assets: assets as unknown as Array<{
-        bookingAssets?: MutableBookingAssetSlice[];
-      }>,
-      organizationId,
-    });
+    // Kit-name attribution is supplementary UI data — mirror the graceful
+    // degradation of the image-refresh above so a transient AssetKit read
+    // failure logs and continues instead of 500-ing the whole availability
+    // page. The calendar simply falls back to "via a kit" without the name.
+    try {
+      await attachKitNamesToBookingAssets({
+        assets: assets as unknown as Array<{
+          bookingAssets?: MutableBookingAssetSlice[];
+        }>,
+        organizationId,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to attach kit names to booking assets",
+          label: "Assets",
+          additionalData: { organizationId, assetCount: assets.length },
+          shouldBeCaptured: true,
+        })
+      );
+    }
   }
 
   const userName = resolveUserDisplayName(user);
