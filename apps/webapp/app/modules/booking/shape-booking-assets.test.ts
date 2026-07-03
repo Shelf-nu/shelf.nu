@@ -23,7 +23,7 @@ const baseParams = {
   orderDirection: "desc" as const,
   page: 1,
   perPage: 20,
-  partialCheckinDetails: {} as any,
+  partialCheckinDetails: {},
   bookingStatus: "ONGOING",
 };
 

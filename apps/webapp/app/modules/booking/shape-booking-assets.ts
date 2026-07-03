@@ -14,10 +14,7 @@
  */
 import { AssetStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
-import {
-  resolveBookingRowQtyState,
-  type AssetWithStatus,
-} from "~/utils/booking-assets";
+import { resolveBookingRowQtyState } from "~/utils/booking-assets";
 import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
 
 /** A rendered pagination row: a grouped kit (with its assets) or a lone asset. */
@@ -95,13 +92,8 @@ export function shapeBookingAssets<
     orderDirection,
     {
       isCheckedOut: (asset) =>
-        // Cast to the permissive AssetWithStatus (open `any` index) so the
-        // loosely-typed enriched row is accepted.
-        resolveBookingRowQtyState(
-          asset as AssetWithStatus,
-          partialCheckinDetails,
-          bookingStatus
-        ).contextStatus === AssetStatus.CHECKED_OUT,
+        resolveBookingRowQtyState(asset, partialCheckinDetails, bookingStatus)
+          .contextStatus === AssetStatus.CHECKED_OUT,
     }
   );
 

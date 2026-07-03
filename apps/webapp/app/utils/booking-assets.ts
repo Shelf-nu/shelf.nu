@@ -502,18 +502,19 @@ export function isKitPartiallyCheckedIn(
  * `BookingAsset` slice) is fully checked out on its own. `bookedQuantity` /
  * `checkedOutQuantity` / `dispositionedQuantity` are the per-slice counters the
  * overview loader attaches (keyed by `bookingAssetId`), so a kit-driven slice
- * and a standalone slice of the same asset are evaluated independently. Fields
- * are typed `unknown` so the loosely-typed enriched rows (which carry open
- * index signatures) pass without casts; they are narrowed inside the helper.
+ * and a standalone slice of the same asset are evaluated independently.
+ *
+ * Fields are typed `unknown` (narrowed inside the helpers) rather than `number`
+ * so the loosely-typed enriched rows the callers hold pass without casts. No
+ * index signature — callers with extra fields still structurally match these
+ * optional fields, and keeping it index-free avoids leaking an `any`/`unknown`
+ * open index into the resolver's public signature.
  */
 export type QtyCheckoutRow = {
   type?: unknown;
   bookedQuantity?: unknown;
   checkedOutQuantity?: unknown;
   dispositionedQuantity?: unknown;
-  // Open index so richer enriched rows (which carry their own index
-  // signatures) are accepted directly, without a weak-type mismatch.
-  [key: string]: unknown;
 };
 
 /** Coerce an unknown per-row counter to a finite number (0 when absent/NaN). */
@@ -557,6 +558,17 @@ export function isBookingRowQtyFullyCheckedOut(
   );
 }
 
+/**
+ * Input row for {@link resolveBookingRowQtyState}: the identity/status fields
+ * {@link getBookingContextAssetStatus} needs plus the per-slice qty counters.
+ * Index-signature-free and `any`-free, so callers pass their enriched rows
+ * (which structurally satisfy these fields) without an `any`-indexed cast.
+ */
+export type BookingRowStatusInput = {
+  id: string;
+  status: string;
+} & QtyCheckoutRow;
+
 /** Resolved booking-row status plus the intermediate QT flags. */
 export type BookingRowQtyState = {
   /** The badge status for this row (what `AssetStatusBadge` renders). */
@@ -598,7 +610,7 @@ export type BookingRowQtyState = {
  * @returns The resolved badge status and the QT flags used to derive it.
  */
 export function resolveBookingRowQtyState(
-  row: AssetWithStatus,
+  row: BookingRowStatusInput,
   partialCheckinDetails: PartialCheckinDetailsType,
   bookingStatus: string
 ): BookingRowQtyState {
