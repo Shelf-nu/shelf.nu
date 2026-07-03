@@ -59,6 +59,35 @@ describe("shapeBookingAssets", () => {
     expect(items.map((i) => i.id)).toEqual(["partial", "fully-out"]);
   });
 
+  it("keeps a QT row with a partial return underway on top, even when its global status is CHECKED_OUT", () => {
+    // A QT asset can be globally CHECKED_OUT (e.g. units out in another active
+    // booking) while THIS booking has a return underway. The badge shows the
+    // actionable partial state, so the status sort must NOT sink it with the
+    // fully-checked-out rows — the shared resolver keeps sort and badge aligned.
+    const rawAssets = [
+      asset({
+        id: "partial",
+        title: "Partial",
+        status: "CHECKED_OUT", // global (checked out elsewhere)
+        type: "QUANTITY_TRACKED",
+        bookedQuantity: 22,
+        checkedOutQuantity: 22,
+        dispositionedQuantity: 5, // returns underway -> still actionable
+      }),
+      asset({ id: "done", title: "Done", status: "CHECKED_OUT" }), // fully out
+    ];
+    const { items } = shapeBookingAssets({
+      ...baseParams,
+      rawAssets,
+      orderBy: "status",
+      orderDirection: "desc",
+      bookingStatus: "ONGOING",
+    });
+    // Without the shared resolver the QT row would sink via its global
+    // CHECKED_OUT status; with it, only the fully-checked-out "done" sinks.
+    expect(items.map((i) => i.id)).toEqual(["partial", "done"]);
+  });
+
   it("filters by search (and counts reflect the filtered set)", () => {
     const rawAssets = [
       asset({ id: "a1", title: "MacBook" }),

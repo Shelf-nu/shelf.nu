@@ -556,3 +556,95 @@ export function isBookingRowQtyFullyCheckedOut(
     isActiveBooking
   );
 }
+
+/** Resolved booking-row status plus the intermediate QT flags. */
+export type BookingRowQtyState = {
+  /** The badge status for this row (what `AssetStatusBadge` renders). */
+  contextStatus: ExtendedAssetStatus;
+  /** QT row fully reconciled (disposition ≥ booked) on an active booking. */
+  isQtyFullyCheckedIn: boolean;
+  /** QT row partly reconciled (some disposition, units still outstanding). */
+  isQtyPartiallyCheckedIn: boolean;
+  /** QT row with some (not all) units out and nothing returned yet. */
+  isQtyPartiallyCheckedOut: boolean;
+  /** QT row with ALL of its own units out and nothing returned yet. */
+  isQtyFullyCheckedOut: boolean;
+};
+
+/**
+ * Resolve one booking row's (slice's) badge status and the intermediate QT
+ * flags. SINGLE source of truth shared by the row badge
+ * (`list-asset-content.tsx`) and the status-sort predicate
+ * (`shape-booking-assets.ts`) so the status a user sees on a row and the
+ * bucket that row sorts into can never disagree.
+ *
+ * Priority (most specific signal wins):
+ *  1. QT fully reconciled for this row → `PARTIALLY_CHECKED_IN`.
+ *  2. QT partly reconciled (returns underway) → `PARTIALLY_CHECKED_OUT_QTY`.
+ *  3. QT some units out, none returned yet → `..._QTY_PENDING_RETURN`.
+ *  4. QT all of THIS slice's units out, none returned → `CHECKED_OUT`.
+ *  5. Otherwise the global booking-context status
+ *     ({@link getBookingContextAssetStatus}) — covers INDIVIDUAL assets and QT
+ *     rows with no per-row activity (e.g. checked out via another booking).
+ *
+ * The per-row (per-`bookingAssetId`) quantity arms gate BEFORE the global
+ * fallback, so a QT row with a partial return underway reads as its actionable
+ * partial state and is NOT mis-bucketed as fully checked out just because the
+ * asset's global status is `CHECKED_OUT` in a different active booking.
+ *
+ * @param row - The enriched row (id/status/type + per-row qty counters).
+ * @param partialCheckinDetails - Per-booking partial check-in records by id.
+ * @param bookingStatus - The parent booking's status.
+ * @returns The resolved badge status and the QT flags used to derive it.
+ */
+export function resolveBookingRowQtyState(
+  row: AssetWithStatus,
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
+): BookingRowQtyState {
+  const qtyBooked = toCount(row.bookedQuantity);
+  const qtyCheckedOut = toCount(row.checkedOutQuantity);
+  const qtyDispositioned = toCount(row.dispositionedQuantity);
+  const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+  const isActiveBooking =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+  const isQt = row.type === "QUANTITY_TRACKED";
+
+  const isQtyFullyCheckedIn =
+    isQt && qtyBooked > 0 && qtyDispositioned >= qtyBooked && isActiveBooking;
+  const isQtyPartiallyCheckedIn =
+    isQt &&
+    qtyBooked > 0 &&
+    qtyDispositioned > 0 &&
+    qtyRemaining > 0 &&
+    isActiveBooking;
+  const isQtyPartiallyCheckedOut =
+    isQt &&
+    qtyBooked > 0 &&
+    qtyCheckedOut > 0 &&
+    qtyCheckedOut < qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking;
+  const isQtyFullyCheckedOut = isBookingRowQtyFullyCheckedOut(
+    row,
+    bookingStatus
+  );
+
+  const contextStatus: ExtendedAssetStatus = isQtyFullyCheckedIn
+    ? "PARTIALLY_CHECKED_IN"
+    : isQtyPartiallyCheckedIn
+    ? "PARTIALLY_CHECKED_OUT_QTY"
+    : isQtyPartiallyCheckedOut
+    ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
+    : isQtyFullyCheckedOut
+    ? AssetStatus.CHECKED_OUT
+    : getBookingContextAssetStatus(row, partialCheckinDetails, bookingStatus);
+
+  return {
+    contextStatus,
+    isQtyFullyCheckedIn,
+    isQtyPartiallyCheckedIn,
+    isQtyPartiallyCheckedOut,
+    isQtyFullyCheckedOut,
+  };
+}

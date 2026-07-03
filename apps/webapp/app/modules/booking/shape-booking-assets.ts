@@ -9,13 +9,13 @@
  * are strings after the network / hydration); it never constructs Dates itself.
  *
  * @see {@link file://./helpers.ts} filterBookingAssets / groupAndSortAssetsByKit
- * @see {@link file://../../utils/booking-assets.ts} isAssetCheckedOutInBooking
+ * @see {@link file://../../utils/booking-assets.ts} resolveBookingRowQtyState
  * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
  */
+import { AssetStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import {
-  isAssetCheckedOutInBooking,
-  isBookingRowQtyFullyCheckedOut,
+  resolveBookingRowQtyState,
   type AssetWithStatus,
 } from "~/utils/booking-assets";
 import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
@@ -82,32 +82,26 @@ export function shapeBookingAssets<
   // 1. Search-filter (with kit re-expansion).
   const filtered = filterBookingAssets(rawAssets, search);
 
-  // 2. Group by kit + sort. Status ordering is booking-context aware: an asset
-  //    counts as "checked out" (bottom bucket) when its per-booking status
-  //    resolves to CHECKED_OUT, OR when THIS row's own units are fully checked
-  //    out per-slice. The per-slice arm is essential for QUANTITY_TRACKED
-  //    assets that span a kit slice + a standalone slice: the GLOBAL status
-  //    never flips until every slice is out, so without it a fully-checked-out
-  //    kit slice would wrongly stay on top (and its kit wouldn't sink). This
-  //    keeps the sort position in lock-step with the row badge, and still
-  //    leaves QT DRAFT/RESERVED rows + partially-checked-in assets on top.
+  // 2. Group by kit + sort. A row counts as "checked out" (bottom bucket) when
+  //    its RESOLVED badge status is CHECKED_OUT — computed by the SAME shared
+  //    resolver the row badge uses, so the badge a user sees and the bucket the
+  //    row sorts into can never disagree. This covers per-slice QT correctly:
+  //    a fully-checked-out kit slice sinks even though the multi-slice asset's
+  //    GLOBAL status hasn't flipped, while a QT row with a partial return
+  //    underway (or DRAFT/RESERVED) stays on top as its actionable state.
   const sortedAssets = groupAndSortAssetsByKit(
     filtered,
     orderBy,
     orderDirection,
     {
-      isCheckedOut: (asset) => {
-        // Cast once to the permissive AssetWithStatus (open `any` index) so both
-        // predicate arms accept the loosely-typed enriched row.
-        const row = asset as AssetWithStatus;
-        return (
-          isAssetCheckedOutInBooking(
-            row,
-            partialCheckinDetails,
-            bookingStatus
-          ) || isBookingRowQtyFullyCheckedOut(row, bookingStatus)
-        );
-      },
+      isCheckedOut: (asset) =>
+        // Cast to the permissive AssetWithStatus (open `any` index) so the
+        // loosely-typed enriched row is accepted.
+        resolveBookingRowQtyState(
+          asset as AssetWithStatus,
+          partialCheckinDetails,
+          bookingStatus
+        ).contextStatus === AssetStatus.CHECKED_OUT,
     }
   );
 

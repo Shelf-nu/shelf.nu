@@ -777,13 +777,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Attach the per-slice checkout / disposition counters onto each view row
+     * Attach the per-slice checkout / disposition data onto each view row
      * BEFORE sorting, so the status sort can decide "checked out" per-slice.
      * A QUANTITY_TRACKED asset that spans a kit slice + a standalone slice
      * never flips its GLOBAL `Asset.status` until every slice is out, so a
      * fully-checked-out kit slice can only be recognised from these per-row
      * counters. Carried on `rawAssets` in the loader payload too, so the
-     * clientLoader re-sort stays per-slice aware. Keyed by `bookingAssetId`.
+     * clientLoader re-sort keeps them on cache-hit reshapes (which return
+     * `view.items` straight from `rawAssets`, bypassing `enrichedItems`).
+     * `dispositionBreakdown` is included alongside the counters so the QT
+     * return tooltip survives client-side search/sort/pagination. Keyed by
+     * `bookingAssetId`.
      */
     const enrichedAssetsForSort = enrichedAssetsForView.map((asset) => {
       const bookingAssetId = (asset as { bookingAssetId?: string })
@@ -796,6 +800,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         dispositionedQuantity: bookingAssetId
           ? dispositionedByBookingAsset.get(bookingAssetId) ?? 0
           : 0,
+        dispositionBreakdown:
+          (bookingAssetId && breakdownByBookingAsset.get(bookingAssetId)) ||
+          emptyBreakdown(),
       };
     });
 

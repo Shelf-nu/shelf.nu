@@ -54,24 +54,28 @@ function compareSortDescriptors(
   orderDirection: "asc" | "desc"
 ): number {
   const dirMul = orderDirection === "asc" ? 1 : -1;
-  const byName = () => a.name.localeCompare(b.name);
+  // Case-insensitive comparator so the A→Z tiebreak matches the documented
+  // contract regardless of runtime/locale default sensitivity.
+  const compareText = (left: string, right: string) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" });
+  const byName = () => compareText(a.name, b.name);
 
   switch (orderBy) {
     case "title":
-      return dirMul * a.name.localeCompare(b.name);
+      return dirMul * compareText(a.name, b.name);
 
     case "category": {
       if (!a.category && b.category) return 1;
       if (a.category && !b.category) return -1;
       if (!a.category && !b.category) return byName();
-      return dirMul * a.category!.localeCompare(b.category!) || byName();
+      return dirMul * compareText(a.category!, b.category!) || byName();
     }
 
     case "location": {
       if (!a.location && b.location) return 1;
       if (a.location && !b.location) return -1;
       if (!a.location && !b.location) return byName();
-      return dirMul * a.location!.localeCompare(b.location!) || byName();
+      return dirMul * compareText(a.location!, b.location!) || byName();
     }
 
     case "type": {
