@@ -64,6 +64,111 @@ const INITIAL_FEEDBACK_STATE: FeedbackState = {
   fileError: null,
 };
 
+const TYPE_OPTIONS = [
+  { value: "issue", label: "Issue", Icon: TriangleAlertIcon },
+  { value: "idea", label: "Idea", Icon: LightbulbIcon },
+] as const;
+
+/** Issue/Idea selector rendered as two toggle buttons */
+function TypeToggle({
+  value,
+  onChange,
+}: {
+  value: "issue" | "idea";
+  onChange: (value: "issue" | "idea") => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-2 text-sm font-medium text-gray-700">Type</legend>
+      <div className="flex gap-2">
+        {TYPE_OPTIONS.map(({ value: option, label, Icon }) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={tw(
+              "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
+              value === option
+                ? "border-primary-400 bg-primary-50 text-primary-700"
+                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            )}
+            aria-pressed={value === option}
+          >
+            <Icon className="size-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Optional screenshot picker with preview and remove affordance */
+function ScreenshotField({
+  previewUrl,
+  screenshot,
+  fileError,
+  fileInputRef,
+  onFileChange,
+  onRemove,
+}: {
+  previewUrl: string | null;
+  screenshot: File | null;
+  fileError: string | null;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium text-gray-700">
+        Screenshot <span className="font-normal text-gray-500">(optional)</span>
+      </p>
+
+      {previewUrl && screenshot ? (
+        <div className="relative inline-block">
+          <img
+            src={previewUrl}
+            alt="Screenshot preview"
+            className="h-24 rounded-lg border border-gray-200 object-cover"
+          />
+          <button
+            type="button"
+            onClick={onRemove}
+            className="absolute -right-2 -top-2 rounded-full border border-gray-200 bg-white p-0.5 shadow-sm hover:bg-gray-50"
+            aria-label="Remove screenshot"
+          >
+            <XIcon className="size-3.5 text-gray-500" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50"
+        >
+          <ImageIcon className="size-4" />
+          Attach a screenshot
+        </button>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        name="screenshot"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={onFileChange}
+        className="hidden"
+        aria-label="Upload screenshot"
+      />
+
+      {fileError ? (
+        <p className="mt-1 text-sm text-error-600">{fileError}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** Small inline banner used for the server-error and error-report notices */
 function InlineBanner({
   tone,
@@ -301,45 +406,12 @@ export default function FeedbackModal({
               {/* Category toggle. Hidden for error reports: those are always
               issues, so there is nothing to choose. */}
               <div className={errorContext ? "hidden" : undefined}>
-                <fieldset>
-                  <legend className="mb-2 text-sm font-medium text-gray-700">
-                    Type
-                  </legend>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        dispatch({ type: "set_feedback_type", value: "issue" })
-                      }
-                      className={tw(
-                        "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
-                        feedbackType === "issue"
-                          ? "border-primary-400 bg-primary-50 text-primary-700"
-                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                      )}
-                      aria-pressed={feedbackType === "issue"}
-                    >
-                      <TriangleAlertIcon className="size-4" />
-                      Issue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        dispatch({ type: "set_feedback_type", value: "idea" })
-                      }
-                      className={tw(
-                        "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
-                        feedbackType === "idea"
-                          ? "border-primary-400 bg-primary-50 text-primary-700"
-                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                      )}
-                      aria-pressed={feedbackType === "idea"}
-                    >
-                      <LightbulbIcon className="size-4" />
-                      Idea
-                    </button>
-                  </div>
-                </fieldset>
+                <TypeToggle
+                  value={feedbackType}
+                  onChange={(value) =>
+                    dispatch({ type: "set_feedback_type", value })
+                  }
+                />
                 <input
                   type="hidden"
                   name={zo.fields.type()}
@@ -411,53 +483,14 @@ export default function FeedbackModal({
               />
 
               {/* Screenshot upload */}
-              <div>
-                <p className="mb-2 text-sm font-medium text-gray-700">
-                  Screenshot{" "}
-                  <span className="font-normal text-gray-500">(optional)</span>
-                </p>
-
-                {previewUrl && screenshot ? (
-                  <div className="relative inline-block">
-                    <img
-                      src={previewUrl}
-                      alt="Screenshot preview"
-                      className="h-24 rounded-lg border border-gray-200 object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={removeScreenshot}
-                      className="absolute -right-2 -top-2 rounded-full border border-gray-200 bg-white p-0.5 shadow-sm hover:bg-gray-50"
-                      aria-label="Remove screenshot"
-                    >
-                      <XIcon className="size-3.5 text-gray-500" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50"
-                  >
-                    <ImageIcon className="size-4" />
-                    Attach a screenshot
-                  </button>
-                )}
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  name="screenshot"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  aria-label="Upload screenshot"
-                />
-
-                {fileError ? (
-                  <p className="mt-1 text-sm text-error-600">{fileError}</p>
-                ) : null}
-              </div>
+              <ScreenshotField
+                previewUrl={previewUrl}
+                screenshot={screenshot}
+                fileError={fileError}
+                fileInputRef={fileInputRef}
+                onFileChange={handleFileChange}
+                onRemove={removeScreenshot}
+              />
 
               {/* The error variant discloses this in its banner instead */}
               {!errorContext ? (
