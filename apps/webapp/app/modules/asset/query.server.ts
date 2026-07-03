@@ -1853,7 +1853,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 )
               ELSE NULL
             END,
-            'creator', CASE 
+            'creator', CASE
               WHEN bk."creatorId" IS NOT NULL THEN
                 jsonb_build_object(
                   'id', cr.id,
@@ -1862,7 +1862,10 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'profilePicture', cr."profilePicture"
                 )
               ELSE NULL
-            END
+            END,
+            'assetKitId', atb."assetKitId",
+            'quantity', atb."quantity",
+            'kitName', k.name
           )
         ),
         '[]'::jsonb
@@ -1873,7 +1876,12 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
       LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
-      WHERE 
+      -- AssetKit -> Kit resolves the per-slice kit name. Implicitly org-scoped:
+      -- atb rows are asset-scoped (atb."assetId" = a.id below) and a.id is
+      -- org-filtered by the outer query, so ak/k always share the asset's org.
+      LEFT JOIN public."AssetKit" ak ON atb."assetKitId" = ak.id
+      LEFT JOIN public."Kit" k ON ak."kitId" = k.id
+      WHERE
         atb."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ) AS bookings`

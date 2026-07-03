@@ -76,6 +76,62 @@ Search assets based on asset fields. Separate your keywords by a comma(,) to sea
 - Barcodes values
 `;
 
+/** Minimal structural shape of one BookingAsset pivot row returned under the
+ * availability `extraInclude`. Only the fields this helper reads/writes. */
+type MutableBookingAssetSlice = {
+  assetKitId: string | null;
+  kitId?: string | null;
+  kitName?: string | null;
+};
+
+/**
+ * Attaches the kit name (and kit id) onto every kit-driven BookingAsset slice.
+ *
+ * `BookingAsset.assetKitId` is a bare FK with no Prisma relation accessor, so
+ * the kit name cannot be nested-selected. This resolves all names in ONE
+ * org-scoped read and mutates the slices in place. Standalone slices
+ * (assetKitId === null) are left untouched. Availability view only.
+ *
+ * @param args.assets - Loaded assets, each optionally carrying `bookingAssets`.
+ * @param args.organizationId - Active org; scopes the AssetKit read (defense in
+ *   depth per org-scope-user-supplied-ids).
+ * @throws {ShelfError} If the AssetKit read fails.
+ */
+export async function attachKitNamesToBookingAssets({
+  assets,
+  organizationId,
+}: {
+  assets: Array<{ bookingAssets?: MutableBookingAssetSlice[] }>;
+  organizationId: string;
+}): Promise<void> {
+  const assetKitIds = Array.from(
+    new Set(
+      assets.flatMap((a) =>
+        (a.bookingAssets ?? [])
+          .map((ba) => ba.assetKitId)
+          .filter((id): id is string => id !== null)
+      )
+    )
+  );
+  if (assetKitIds.length === 0) return;
+
+  const assetKits = await db.assetKit.findMany({
+    where: { id: { in: assetKitIds }, organizationId },
+    select: { id: true, kit: { select: { id: true, name: true } } },
+  });
+  const byId = new Map(assetKits.map((ak) => [ak.id, ak.kit]));
+
+  for (const a of assets) {
+    for (const ba of a.bookingAssets ?? []) {
+      if (ba.assetKitId) {
+        const kit = byId.get(ba.assetKitId);
+        ba.kitId = kit?.id ?? null;
+        ba.kitName = kit?.name ?? null;
+      }
+    }
+  }
+}
+
 export async function simpleModeLoader({
   request,
   userId,
@@ -255,6 +311,20 @@ export async function simpleModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // Availability view only: resolve kit names for kit-driven booking slices so
+  // the calendar can show per-slice attribution. `assetKitId`/`quantity` are
+  // already present (BookingAsset scalars via the include). One `as unknown as`
+  // structural cast — `bookingAssets` is an availability-only extraInclude not
+  // in the base asset type (same pattern the availability hook uses).
+  if (view === "availability") {
+    await attachKitNamesToBookingAssets({
+      assets: assets as unknown as Array<{
+        bookingAssets?: MutableBookingAssetSlice[];
+      }>,
+      organizationId,
+    });
   }
 
   const userName = resolveUserDisplayName(user);
