@@ -64,79 +64,86 @@ export function useAssetAvailabilityData(items: Items) {
 
     const events = safeItems
       .map((asset) => {
-        if (!("bookingAssets" in asset) || !asset.bookingAssets) {
-          return [];
-        }
+        // The availability calendar is fed by two loaders with two booking
+        // shapes: simple mode (`data.server.ts`) includes the `BookingAsset`
+        // pivot relation → `asset.bookingAssets: { booking }[]`, while advanced
+        // mode (`query.server.ts` raw SQL) aggregates the pivot into a flat
+        // `asset.bookings: AdvancedAssetBooking[]`. Normalize both to a flat
+        // booking list so events render in either mode — otherwise advanced
+        // mode renders the asset rows but no bookings on the timeline.
+        const bookings: AdvancedAssetBooking[] =
+          "bookingAssets" in asset && asset.bookingAssets
+            ? (
+                asset.bookingAssets as unknown as {
+                  booking: AdvancedAssetBooking;
+                }[]
+              ).map((ba) => ba.booking)
+            : "bookings" in asset && asset.bookings
+            ? (asset.bookings as unknown as AdvancedAssetBooking[])
+            : [];
 
-        return [
-          ...(
-            asset.bookingAssets as unknown as {
-              booking: AdvancedAssetBooking;
-            }[]
-          ).map((ba) => {
-            const booking = ba.booking;
-            const custodianName = booking?.custodianUser
-              ? resolveUserDisplayName(booking.custodianUser)
-              : booking.custodianTeamMember?.name;
+        return bookings.map((booking) => {
+          const custodianName = booking?.custodianUser
+            ? resolveUserDisplayName(booking.custodianUser)
+            : booking.custodianTeamMember?.name;
 
-            let title = booking.name;
-            if (canSeeAllCustody) {
-              title += ` | ${custodianName}`;
-            }
+          let title = booking.name;
+          if (canSeeAllCustody) {
+            title += ` | ${custodianName}`;
+          }
 
-            return {
-              title,
-              resourceId: asset.id,
-              start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
-              end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
-              classNames: [
-                `bookingId-${booking.id}`,
-                ...getStatusClasses(
-                  booking.status,
-                  isOneDayEvent(new Date(booking.from), new Date(booking.to)),
-                  "px-1"
-                ),
-              ],
-              extendedProps: {
-                url: `/bookings/${booking.id}`,
-                id: booking.id,
-                name: booking.name,
-                status: booking.status,
-                title: booking.name,
-                description: booking.description,
-                start: booking.from,
-                end: booking.to,
-                custodian: {
-                  name: custodianName,
-                  user: booking.custodianUser
-                    ? {
-                        id: booking.custodianUser?.id,
-                        firstName: booking.custodianUser?.firstName,
-                        lastName: booking.custodianUser?.lastName,
-                        profilePicture: booking.custodianUser?.profilePicture,
-                      }
-                    : undefined,
-                },
-                creator: booking.creator
+          return {
+            title,
+            resourceId: asset.id,
+            start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
+            end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
+            classNames: [
+              `bookingId-${booking.id}`,
+              ...getStatusClasses(
+                booking.status,
+                isOneDayEvent(new Date(booking.from), new Date(booking.to)),
+                "px-1"
+              ),
+            ],
+            extendedProps: {
+              url: `/bookings/${booking.id}`,
+              id: booking.id,
+              name: booking.name,
+              status: booking.status,
+              title: booking.name,
+              description: booking.description,
+              start: booking.from,
+              end: booking.to,
+              custodian: {
+                name: custodianName,
+                user: booking.custodianUser
                   ? {
-                      name: booking.creator
-                        ? resolveUserDisplayName(booking.creator)
-                        : "Unknown",
-                      user: booking.creator
-                        ? {
-                            id: booking.creator.id,
-                            firstName: booking.creator.firstName,
-                            lastName: booking.creator.lastName,
-                            profilePicture: booking.creator.profilePicture,
-                          }
-                        : null,
+                      id: booking.custodianUser?.id,
+                      firstName: booking.custodianUser?.firstName,
+                      lastName: booking.custodianUser?.lastName,
+                      profilePicture: booking.custodianUser?.profilePicture,
                     }
                   : undefined,
-                tags: booking.tags,
               },
-            };
-          }),
-        ];
+              creator: booking.creator
+                ? {
+                    name: booking.creator
+                      ? resolveUserDisplayName(booking.creator)
+                      : "Unknown",
+                    user: booking.creator
+                      ? {
+                          id: booking.creator.id,
+                          firstName: booking.creator.firstName,
+                          lastName: booking.creator.lastName,
+                          profilePicture: booking.creator.profilePicture,
+                        }
+                      : null,
+                  }
+                : undefined,
+              tags: booking.tags,
+            },
+          };
+        });
       })
       .flat();
 
