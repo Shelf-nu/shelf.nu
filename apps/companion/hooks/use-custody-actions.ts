@@ -14,6 +14,24 @@ interface UseCustodyActionsReturn {
   setIsActionLoading: React.Dispatch<React.SetStateAction<boolean>>;
   handleAssignCustody: (member: TeamMember) => void;
   handleReleaseCustody: () => void;
+  /**
+   * Assign `quantity` units of a QUANTITY_TRACKED asset to `member`.
+   * No Alert confirm step: the QuantityInputSheet's explicit submit IS the
+   * confirmation (a second Alert would be double-confirmation).
+   */
+  performAssignQuantity: (
+    member: TeamMember,
+    quantity: number
+  ) => Promise<void>;
+  /**
+   * Release `quantity` units of a QUANTITY_TRACKED asset from the custodian
+   * identified by `custodianId` (team-member id). Confirmed by the sheet,
+   * same as `performAssignQuantity`.
+   */
+  performReleaseQuantity: (
+    custodianId: string,
+    quantity: number
+  ) => Promise<void>;
 }
 
 export function useCustodyActions({
@@ -90,10 +108,69 @@ export function useCustodyActions({
     );
   };
 
+  // ── Quantity-custody actions (QUANTITY_TRACKED assets only) ──────────
+  // Same success/error shape as performAssign/performRelease above, but the
+  // Alert confirm step is replaced by the QuantityInputSheet's explicit
+  // submit (the sheet already shows amount + custodian + unit). On success
+  // the detail refetch (fetchAsset) refreshes quantityBreakdown, custodyList,
+  // and status in one shot.
+
+  const performAssignQuantity = async (
+    member: TeamMember,
+    quantity: number
+  ) => {
+    if (!currentOrg || !asset) return;
+    setIsActionLoading(true);
+    try {
+      const { error: err } = await api.assignQuantityCustody(
+        currentOrg.id,
+        asset.id,
+        member.id,
+        quantity
+      );
+      if (err) Alert.alert("Error", err);
+      else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await fetchAsset();
+      }
+    } catch {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const performReleaseQuantity = async (
+    custodianId: string,
+    quantity: number
+  ) => {
+    if (!currentOrg || !asset) return;
+    setIsActionLoading(true);
+    try {
+      const { error: err } = await api.releaseQuantityCustody(
+        currentOrg.id,
+        asset.id,
+        custodianId,
+        quantity
+      );
+      if (err) Alert.alert("Error", err);
+      else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await fetchAsset();
+      }
+    } catch {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   return {
     isActionLoading,
     setIsActionLoading,
     handleAssignCustody,
     handleReleaseCustody,
+    performAssignQuantity,
+    performReleaseQuantity,
   };
 }
