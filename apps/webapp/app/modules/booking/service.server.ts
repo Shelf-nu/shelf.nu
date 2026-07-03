@@ -10776,6 +10776,105 @@ export async function processBooking(
 }
 
 /**
+ * Guards the "add kits to an existing booking" flow: a kit that is physically
+ * CHECKED_OUT on ANOTHER active booking cannot be added to an ONGOING/OVERDUE
+ * booking — there is nothing available to stage. Kits added to an active booking
+ * otherwise stay AVAILABLE until purposefully checked out (progressive
+ * checkout). This is the kit counterpart of the asset guard inside
+ * {@link processBooking}.
+ *
+ * No-op for DRAFT/RESERVED targets — they accept checked-out kits, which become
+ * available by the time the booking starts.
+ *
+ * Kits already represented on the target booking are excluded: their
+ * CHECKED_OUT status can be owned by this same booking, and re-adding only
+ * attaches newly-added members ({@link buildKitSlicesForBooking} skips existing
+ * memberships).
+ *
+ * NOTE: the manage-kits route keeps its own richer, partial-checkin-aware guard
+ * ({@link isKitPartiallyCheckedIn}) because it operates on kits already loaded
+ * with their memberships/status and must permit re-checkout of kits that are
+ * partially checked in within that booking — semantics that don't apply when
+ * adding genuinely-new kits here.
+ *
+ * @param params.kitIds - Org-scoped kit ids the caller wants to add.
+ * @param params.existingAssetKitIds - AssetKit ids already on the target
+ *   booking (from its `bookingAssets[].assetKitId`), used to skip kits that are
+ *   already represented.
+ * @param params.bookingStatus - Current status of the target booking.
+ * @param params.bookingId - Target booking id (for the error payload).
+ * @param params.organizationId - Caller's validated organization id; scopes
+ *   every query so foreign-org kits/memberships can't influence the check.
+ * @throws {ShelfError} 400 if any newly-added kit is checked out elsewhere.
+ */
+export async function assertKitsAddableToActiveBooking({
+  kitIds,
+  existingAssetKitIds,
+  bookingStatus,
+  bookingId,
+  organizationId,
+}: {
+  kitIds: string[];
+  existingAssetKitIds: Set<string>;
+  bookingStatus: BookingStatus;
+  bookingId: string;
+  organizationId: string;
+}): Promise<void> {
+  // Only active bookings gate on checked-out status.
+  if (
+    bookingStatus !== BookingStatus.ONGOING &&
+    bookingStatus !== BookingStatus.OVERDUE
+  ) {
+    return;
+  }
+
+  // Kit ids that already have at least one membership on this booking — their
+  // checked-out status can belong to this same booking, so they're excluded.
+  const kitIdsAlreadyOnBooking = new Set(
+    existingAssetKitIds.size > 0
+      ? (
+          await db.assetKit.findMany({
+            where: {
+              id: { in: [...existingAssetKitIds] },
+              kitId: { in: kitIds },
+              organizationId,
+            },
+            select: { kitId: true },
+          })
+        ).map((ak) => ak.kitId)
+      : []
+  );
+
+  const kitIdsToGuard = kitIds.filter((id) => !kitIdsAlreadyOnBooking.has(id));
+  if (kitIdsToGuard.length === 0) {
+    return;
+  }
+
+  const checkedOutKits = await db.kit.findMany({
+    where: {
+      id: { in: kitIdsToGuard },
+      organizationId,
+      status: KitStatus.CHECKED_OUT,
+    },
+    select: { id: true, name: true },
+  });
+
+  if (checkedOutKits.length > 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed. Kits already checked out",
+      message: `The following kits are already checked out and cannot be added to the booking: ${checkedOutKits
+        .map((kit) => kit.name)
+        .join(", ")}`,
+      additionalData: { checkedOutKits, bookingId },
+      status: 400,
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Shared function to load booking data for both assets and kits routes for add-to-existing-booking
  * @param params - Parameters required for loading bookings
  * @returns Formatted booking data response

@@ -24,9 +24,15 @@ import { openShelfWebUrl, pushIntoTab } from "./navigation";
  *
  * The claimed paths are kept in sync with the iOS AASA `components` list and
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
- * are never delivered to the app and keep opening the web. A claimed prefix that
- * nests deeper than the app can render (e.g. `/assets/:id/edit`) is opened in
- * the in-app web view instead of landing on the wrong native screen.
+ * are never delivered to the app and keep opening the web.
+ *
+ * Division of labour with `app/+native-intent.ts`: HTTPS universal links are
+ * rewritten there to native routes and handled by expo-router itself (a
+ * claimed path that nests deeper than the app renders, e.g.
+ * `/assets/:id/overview`, maps to the resource detail). This hook only
+ * handles (a) custom-scheme links, which have no native path mapping
+ * guarantees, and (b) `/qr/:id` links, which need an async API resolve.
+ * Acting on other HTTPS links here would double-navigate.
  */
 
 type ParsedLink =
@@ -36,10 +42,6 @@ type ParsedLink =
   | { type: "audit"; id: string }
   | { type: "qr"; id: string }
   | { type: "scanner" }
-  // A claimed HTTPS prefix matched but the path nests deeper than the native
-  // app can render (e.g. /assets/:id/edit) — open the original URL in the web
-  // view rather than a wrong native screen.
-  | { type: "web"; url: string }
   | { type: "unknown" };
 
 function parseDeepLink(url: string): ParsedLink {
@@ -58,24 +60,11 @@ function parseDeepLink(url: string): ParsedLink {
 
     if (segments.length === 0) return { type: "unknown" };
 
+    // A path that nests deeper than `resource/id` (e.g. /assets/:id/overview,
+    // the canonical web asset URL) resolves to the resource detail — that is
+    // what the tapper wants, and it matches the +native-intent rewrite so warm
+    // and cold starts behave identically.
     const [resource, id] = segments;
-
-    // Over-claim guard: the OS delivers every nested path under a claimed prefix
-    // (e.g. /assets/:id/edit, /bookings/:id/overview/checkin-assets), but the
-    // native app only renders the resource detail and the OS path patterns can't
-    // be scoped to a single segment. So for an HTTPS link that nests deeper than
-    // `resource/id`, open the original URL in the in-app web view (loop-safe via
-    // openShelfWebUrl, NOT Linking.openURL which App Links would re-intercept)
-    // rather than landing on the wrong native screen.
-    const CLAIMED_HTTPS_PREFIXES = ["qr", "assets", "bookings", "audits"];
-    if (
-      isHttp &&
-      id &&
-      segments.length > 2 &&
-      CLAIMED_HTTPS_PREFIXES.includes(resource)
-    ) {
-      return { type: "web", url };
-    }
 
     switch (resource) {
       case "assets":
@@ -143,8 +132,19 @@ async function resolveQrAndNavigate(qrId: string) {
  */
 export function useDeepLinkHandler() {
   useEffect(() => {
+    /**
+     * True for URLs that expo-router already routes natively via the
+     * `app/+native-intent.ts` rewrite. Acting on those here too would
+     * double-navigate; the exception is `/qr/:id`, which needs an async API
+     * resolve that a path rewrite cannot express.
+     */
+    function isNativelyRouted(url: string, link: ParsedLink) {
+      return /^https?:/i.test(url) && link.type !== "qr";
+    }
+
     function handleUrl(event: { url: string }) {
       const link = parseDeepLink(event.url);
+      if (isNativelyRouted(event.url, link)) return;
       navigateToLink(link);
     }
 
@@ -169,24 +169,20 @@ export function useDeepLinkHandler() {
         case "scanner":
           pushIntoTab("/(tabs)/scanner");
           break;
-        case "web":
-          // Claimed prefix nested deeper than the app renders: open the real
-          // web page in the in-app browser (loop-safe) instead of a wrong
-          // native screen.
-          void openShelfWebUrl(link.url);
-          break;
         case "unknown":
           // Ignore unrecognized links — nothing to navigate to.
           break;
       }
     }
 
-    // Handle the URL that launched the app (cold start)
+    // Handle the URL that launched the app (cold start). HTTPS links are
+    // already routed by expo-router via the +native-intent rewrite — only
+    // custom-scheme links and /qr resolution need JS navigation here.
     Linking.getInitialURL().then((url) => {
       if (url) {
         const link = parseDeepLink(url);
-        // Skip navigation for unrecognized links.
-        if (link.type !== "unknown") {
+        // Skip natively-routed and unrecognized links.
+        if (link.type !== "unknown" && !isNativelyRouted(url, link)) {
           // Small delay to let navigation mount
           setTimeout(() => navigateToLink(link), 500);
         }

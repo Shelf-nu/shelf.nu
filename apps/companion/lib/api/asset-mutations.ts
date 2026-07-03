@@ -11,10 +11,11 @@
  */
 
 import { apiFetch, apiUpload } from "./client";
-import { cachedApiFetch } from "./cache";
+import { cachedApiFetch, invalidateResponseCache } from "./cache";
 import type {
   CategoriesResponse,
   TagsResponse,
+  CreateTagResponse,
   CreateAssetResponse,
   CustomFieldsResponse,
   CustomFieldValue,
@@ -32,6 +33,27 @@ export const assetMutationsApi = {
   /** Get tags assignable to assets (for the create-asset tag picker) */
   tags: (orgId: string) =>
     cachedApiFetch<TagsResponse>(`/api/mobile/tags?orgId=${orgId}`),
+
+  /**
+   * Create a new tag inline from the tag picker (admins/owners only — the
+   * server enforces `tag.create`; the picker hides the affordance via the
+   * `canCreate` flag on {@link TagsResponse}). Invalidates the cached tag
+   * list on success so the next picker load includes the new tag.
+   *
+   * @param orgId - the active organization
+   * @param name - the tag name (server requires 3+ chars, web parity)
+   */
+  createTag: async (orgId: string, name: string) => {
+    const result = await apiFetch<CreateTagResponse>(
+      `/api/mobile/tags/create?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }
+    );
+    if (!result.error) invalidateResponseCache("/api/mobile/tags");
+    return result;
+  },
 
   /**
    * Get the active custom field definitions for the org, optionally filtered
