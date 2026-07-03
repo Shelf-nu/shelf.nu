@@ -27,7 +27,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       search,
       userId,
-      statuses: ["DRAFT", "RESERVED"],
+      // Include active bookings so the bulk "add to existing booking" dialog can
+      // target ONGOING/OVERDUE bookings too (added assets stay AVAILABLE —
+      // progressive checkout), not just DRAFT/RESERVED ones.
+      statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
       takeAll: true,
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });
