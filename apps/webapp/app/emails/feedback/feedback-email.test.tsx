@@ -164,6 +164,19 @@ describe("feedbackEmailHtml", () => {
     expect(html).toContain("https://evil.example/sso-login");
     expect(html).not.toContain('href="https://evil.example/sso-login"');
   });
+
+  it("is not fooled by prefix-matching hosts or userinfo tricks", async () => {
+    // Both values start with the literal SERVER_URL string but parse to a
+    // different origin, so a prefix check would wrongly link them
+    for (const url of [
+      "https://app.shelf.nu.evil.com/phish",
+      "https://app.shelf.nu@evil.com/phish",
+      "not a url at all",
+    ]) {
+      const html = await feedbackEmailHtml({ ...BASE_PROPS, currentUrl: url });
+      expect(html).not.toContain(`href="${url}"`);
+    }
+  });
 });
 
 describe("sendFeedbackEmail", () => {

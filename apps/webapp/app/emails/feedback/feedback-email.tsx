@@ -106,6 +106,20 @@ function formatUserAgent(userAgent: string) {
   return os ? `${browser} on ${os}` : browser;
 }
 
+/**
+ * Whether a client-supplied URL parses to OUR app origin. Validated by
+ * parsed origin, never by prefix: a prefix check would match
+ * "https://app.shelf.nu.evil.com" or the "https://app.shelf.nu@evil.com"
+ * userinfo trick (same rationale as safeRedirect in ~/utils/http.server.ts).
+ */
+function isAppOriginUrl(value: string) {
+  try {
+    return new URL(value).origin === new URL(SERVER_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Rows for the auto-captured context section, in display order */
 function getContextRows({
   currentUrl,
@@ -121,11 +135,10 @@ function getContextRows({
     /* The URL is client-supplied: only make it clickable when it points at
      * our own app, so a crafted submission can't plant a phishing link in
      * the support inbox. Off-origin values still show as plain text. */
-    const isAppUrl = currentUrl.startsWith(SERVER_URL);
     rows.push({
       label: "Page",
       value: currentUrl,
-      ...(isAppUrl ? { href: currentUrl } : {}),
+      ...(isAppOriginUrl(currentUrl) ? { href: currentUrl } : {}),
     });
   }
   if (appVersion) {
