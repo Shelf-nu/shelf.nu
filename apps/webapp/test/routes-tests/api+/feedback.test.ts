@@ -88,7 +88,7 @@ describe("/api/feedback", () => {
     });
 
     (getSelectedOrganization as any).mockResolvedValue({
-      currentOrganization: { name: "Acme Corp" },
+      currentOrganization: { id: "org-1", name: "Acme Corp" },
       organizationId: "org-1",
     });
 
@@ -126,11 +126,75 @@ describe("/api/feedback", () => {
       expect(sendFeedbackEmail).toHaveBeenCalledWith({
         userName: "Jane Doe",
         userEmail: "jane@example.com",
+        userId: "user-1",
         organizationName: "Acme Corp",
+        organizationId: "org-1",
         type: "issue",
         message: "Something is broken in the app",
         screenshotUrl: null,
+        currentUrl: undefined,
+        viewport: undefined,
+        userAgent: null,
+        appVersion: "test",
+        errorContext: null,
       });
+    });
+
+    it("should resize screenshots to a readable size, not a thumbnail", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      // Regression guard: without resizeOptions, cropImage falls back to a
+      // 150x150 avatar-thumbnail crop and screenshots arrive unreadable.
+      // Both dimensions are bounded (fit "inside") so a very tall capture
+      // can't exceed WebP's dimension limit and crash the submission.
+      expect(parseFileFormData).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resizeOptions: {
+            width: 1920,
+            height: 1920,
+            fit: "inside",
+            withoutEnlargement: true,
+          },
+        })
+      );
+    });
+
+    it("should forward the auto-captured context and error details", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl: "https://app.shelf.nu/kits",
+        viewport: "1512x824 @2x",
+        traceId: "trace_789",
+        sentryEventId: "evt_abc",
+        errorStatus: "500",
+        errorTitle: "Kit error",
+        errorMessage: "Something went wrong while fetching the kit",
+      });
+      request.headers.set("user-agent", "Mozilla/5.0 (Macintosh)");
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentUrl: "https://app.shelf.nu/kits",
+          viewport: "1512x824 @2x",
+          userAgent: "Mozilla/5.0 (Macintosh)",
+          appVersion: "test",
+          errorContext: {
+            traceId: "trace_789",
+            sentryEventId: "evt_abc",
+            errorStatus: "500",
+            errorTitle: "Kit error",
+            errorMessage: "Something went wrong while fetching the kit",
+          },
+        })
+      );
     });
 
     it("should use the selected organization, not an arbitrary one", async () => {

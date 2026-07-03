@@ -12,7 +12,12 @@ import {
 import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { useDisabled } from "~/hooks/use-disabled";
-import { feedbackSchema } from "~/modules/feedback/schema";
+import type { FeedbackErrorContext } from "~/modules/feedback/schema";
+import {
+  FEEDBACK_ERROR_CONTEXT_FIELDS,
+  FEEDBACK_FIELD_LIMITS,
+  feedbackSchema,
+} from "~/modules/feedback/schema";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -24,6 +29,12 @@ import { Button } from "../shared/button";
 type FeedbackModalProps = {
   open: boolean;
   onClose: () => void;
+  /**
+   * When set, the modal acts as an error-report form: the type toggle is
+   * hidden (it is always an issue) and the error details travel along as
+   * hidden fields so support can correlate the report with Sentry/logs.
+   */
+  errorContext?: FeedbackErrorContext | null;
 };
 
 /** Local state for the feedback modal. Grouped in a reducer to keep
@@ -53,6 +64,29 @@ const INITIAL_FEEDBACK_STATE: FeedbackState = {
   fileError: null,
 };
 
+/** Small inline banner used for the server-error and error-report notices */
+function InlineBanner({
+  tone,
+  children,
+}: {
+  tone: "info" | "error";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={tw(
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
+        tone === "error"
+          ? "border-error-300 bg-error-50 text-error-700"
+          : "border-gray-200 bg-gray-50 text-gray-600"
+      )}
+    >
+      <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 function feedbackReducer(
   state: FeedbackState,
   action: FeedbackAction
@@ -80,7 +114,11 @@ function feedbackReducer(
   }
 }
 
-export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
+export default function FeedbackModal({
+  open,
+  onClose,
+  errorContext,
+}: FeedbackModalProps) {
   const fetcher = useFetcher<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
   const zo = useZorm("Feedback", feedbackSchema);
@@ -99,6 +137,24 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
       ? fetcher.data.error.message
       : null;
 
+  /* Auto-captured page context, sent as hidden fields so support can
+   * reproduce reports. The window guards are load-bearing: this body also
+   * runs during SSR (e.g. server-rendered error pages) even though the
+   * portal output only exists client-side. Values are clamped to the schema
+   * max lengths, otherwise an oversized URL would fail validation on a
+   * hidden field and silently block the submission. */
+  const currentUrl =
+    typeof window === "undefined"
+      ? ""
+      : window.location.href.slice(0, FEEDBACK_FIELD_LIMITS.currentUrl);
+  const viewport =
+    typeof window === "undefined"
+      ? ""
+      : `${window.innerWidth}x${window.innerHeight} @${window.devicePixelRatio}x`.slice(
+          0,
+          FEEDBACK_FIELD_LIMITS.viewport
+        );
+
   const handleClose = useCallback(() => {
     if (autoCloseTimerRef.current) {
       clearTimeout(autoCloseTimerRef.current);
@@ -108,9 +164,21 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
     onClose();
   }, [onClose]);
 
+  /* Tracks which fetcher response the success view was already shown for.
+   * Without it, reopening a still-mounted modal after a successful send
+   * replays the stale success data: the user would only ever see the
+   * "Thank you" screen again and could never file a second report. */
+  const handledSuccessDataRef = useRef<unknown>(null);
+
   useEffect(
     function handleSuccess() {
-      if (fetcher.data && !fetcher.data.error && fetcher.state === "idle") {
+      if (
+        fetcher.data &&
+        !fetcher.data.error &&
+        fetcher.state === "idle" &&
+        handledSuccessDataRef.current !== fetcher.data
+      ) {
+        handledSuccessDataRef.current = fetcher.data;
         dispatch({ type: "show_success" });
         autoCloseTimerRef.current = setTimeout(() => {
           autoCloseTimerRef.current = null;
@@ -184,10 +252,12 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
         title={
           <div className="-mb-3 w-full pb-4">
             <h3 className="text-lg font-semibold text-gray-900">
-              Share feedback
+              {errorContext ? "Report this issue" : "Share feedback"}
             </h3>
             <p className="text-sm text-gray-600">
-              What would you like to share?
+              {errorContext
+                ? "Tell us what happened. The technical details are included automatically."
+                : "What would you like to share?"}
             </p>
           </div>
         }
@@ -225,14 +295,12 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
             <div className="space-y-4 px-6 py-4">
               {/* General server error */}
               {generalError ? (
-                <div className="flex items-start gap-2 rounded-lg border border-error-300 bg-error-50 px-3 py-2 text-sm text-error-700">
-                  <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
-                  <span>{generalError}</span>
-                </div>
+                <InlineBanner tone="error">{generalError}</InlineBanner>
               ) : null}
 
-              {/* Category toggle */}
-              <div>
+              {/* Category toggle. Hidden for error reports: those are always
+              issues, so there is nothing to choose. */}
+              <div className={errorContext ? "hidden" : undefined}>
                 <fieldset>
                   <legend className="mb-2 text-sm font-medium text-gray-700">
                     Type
@@ -279,13 +347,57 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                 />
               </div>
 
+              {/* Context captured automatically so support can reproduce
+              reports without asking the user follow-up questions. Values are
+              clamped to the schema limits so validation can't fail on a
+              field the user can neither see nor fix. */}
+              <input
+                type="hidden"
+                name={zo.fields.currentUrl()}
+                value={currentUrl}
+              />
+              <input
+                type="hidden"
+                name={zo.fields.viewport()}
+                value={viewport}
+              />
+              {errorContext
+                ? FEEDBACK_ERROR_CONTEXT_FIELDS.map((field) => {
+                    const value = errorContext[field];
+                    return value ? (
+                      <input
+                        key={field}
+                        type="hidden"
+                        name={zo.fields[field]()}
+                        value={value.slice(0, FEEDBACK_FIELD_LIMITS[field])}
+                      />
+                    ) : null;
+                  })
+                : null}
+
+              {/* Reassure the user that the technical details travel along,
+              so they only need to describe what they were doing */}
+              {errorContext ? (
+                <InlineBanner tone="info">
+                  The error details
+                  {errorContext.traceId
+                    ? ` (trace id ${errorContext.traceId})`
+                    : errorContext.sentryEventId
+                    ? ` (error id ${errorContext.sentryEventId})`
+                    : ""}{" "}
+                  are attached to your report automatically.
+                </InlineBanner>
+              ) : null}
+
               {/* Message textarea */}
               <Input
                 inputType="textarea"
                 label="Message"
                 name={zo.fields.message()}
                 placeholder={
-                  feedbackType === "issue"
+                  errorContext
+                    ? "What were you trying to do when this error happened?"
+                    : feedbackType === "issue"
                     ? "Tell us about the issue you're experiencing..."
                     : "Share your idea for improving Shelf..."
                 }
@@ -346,6 +458,14 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                   <p className="mt-1 text-sm text-error-600">{fileError}</p>
                 ) : null}
               </div>
+
+              {/* The error variant discloses this in its banner instead */}
+              {!errorContext ? (
+                <p className="text-xs text-gray-500">
+                  Your current page and browser details are included
+                  automatically to help us debug.
+                </p>
+              ) : null}
             </div>
 
             {/* Footer */}

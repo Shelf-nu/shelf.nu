@@ -1,12 +1,19 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import * as Sentry from "@sentry/react-router";
-import { useLocation, useRouteError } from "react-router";
+import { isRouteErrorResponse, useLocation, useRouteError } from "react-router";
 
+import { useUserData } from "~/hooks/use-user-data";
 import { isRouteError } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import Error404Handler from "./error-404-handler";
 import { parse404ErrorData } from "./utils";
 import { Button } from "../shared/button";
+
+/* Lazy: root.tsx uses ErrorContent as the app-wide ErrorBoundary, so a
+ * static import would pull the feedback modal (crisp-sdk-web, react-zorm,
+ * the dialog) into the root chunk shipped to every visitor. The chunk only
+ * loads when someone actually clicks "Report this issue". */
+const FeedbackModal = lazy(() => import("../feedback/feedback-modal"));
 
 type ErrorContentProps = { className?: string };
 
@@ -29,16 +36,32 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   const loc = useLocation();
   const response = useRouteError();
 
+  /* Present when the authenticated app layout rendered (child-route errors).
+   * That is also the only case where /api/feedback can accept a report, so
+   * the "Report this issue" button is gated on it. */
+  const user = useUserData();
+  const [reportOpen, setReportOpen] = useState(false);
+
   let title = "Oops, something went wrong";
   let message =
     "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
   let traceId;
+  let errorStatus;
 
   if (isRouteError(response)) {
     message = response.data.error.message;
     title = response.data.error.title || "Oops, something went wrong";
     traceId = response.data.error.traceId;
   }
+
+  if (isRouteErrorResponse(response)) {
+    errorStatus = String(response.status);
+  }
+
+  /* For client-side crashes the rendered message is a generic fallback, so
+   * attach the real error message to the report instead */
+  const reportErrorMessage =
+    response instanceof Error ? response.message : message;
 
   const error404 = parse404ErrorData(response);
 
@@ -105,8 +128,35 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
           <Button to={loc.pathname} reloadDocument>
             Reload page
           </Button>
+          {user ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setReportOpen(true)}
+            >
+              Report this issue
+            </Button>
+          ) : null}
         </div>
       </div>
+
+      {/* Mounted only while open: keeps the modal's hooks/effects off
+      every error render and resets its state on each reopen */}
+      {user && reportOpen ? (
+        <Suspense fallback={null}>
+          <FeedbackModal
+            open={reportOpen}
+            onClose={() => setReportOpen(false)}
+            errorContext={{
+              traceId,
+              sentryEventId: sentryEventId ?? undefined,
+              errorStatus,
+              errorTitle: title,
+              errorMessage: reportErrorMessage,
+            }}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 };
