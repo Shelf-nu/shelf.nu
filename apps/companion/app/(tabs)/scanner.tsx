@@ -1182,7 +1182,7 @@ function ScannerContent() {
           const [assetResult, kitResult] = await Promise.all([
             assetIds.length > 0
               ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-              : Promise.resolve({ error: null }),
+              : Promise.resolve({ data: null, error: null }),
             kitIds.length > 0
               ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
               : Promise.resolve({ error: null }),
@@ -1195,7 +1195,23 @@ function ScannerContent() {
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            Alert.alert("Done", `Assigned ${confirmLabel} to ${displayName}.`);
+            // Honest partial success: mixed batches skip QUANTITY_TRACKED
+            // assets server-side (their custody is per-unit), so say both
+            // numbers instead of implying everything was assigned. Absent
+            // field (older server) or all-INDIVIDUAL batches read 0 and the
+            // alert body is unchanged. All-QT batches error out server-side
+            // and never reach this branch.
+            const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+            const skippedNote =
+              skipped > 0
+                ? `\n\n${skipped} quantity-tracked asset${
+                    skipped === 1 ? "" : "s"
+                  } skipped. Assign quantities from the asset's detail screen.`
+                : "";
+            Alert.alert(
+              "Done",
+              `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
+            );
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -1212,7 +1228,7 @@ function ScannerContent() {
     const [assetResult, kitResult] = await Promise.all([
       assetIds.length > 0
         ? api.bulkReleaseCustody(currentOrg.id, assetIds)
-        : Promise.resolve({ error: null }),
+        : Promise.resolve({ data: null, error: null }),
       kitIds.length > 0
         ? api.bulkReleaseKitCustody(currentOrg.id, kitIds)
         : Promise.resolve({ error: null }),
@@ -1225,7 +1241,19 @@ function ScannerContent() {
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      Alert.alert("Done", `Released custody of ${releasedLabel}.`);
+      // Honest partial success — mirrors performBulkAssign: the server skips
+      // QUANTITY_TRACKED assets in mixed batches and reports the count.
+      const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+      const skippedNote =
+        skipped > 0
+          ? `\n\n${skipped} quantity-tracked asset${
+              skipped === 1 ? "" : "s"
+            } skipped. Release quantities from the asset's detail screen.`
+          : "";
+      Alert.alert(
+        "Done",
+        `Released custody of ${releasedLabel}.${skippedNote}`
+      );
       setScannedItems([]);
       lastScanRef.current = "";
     }

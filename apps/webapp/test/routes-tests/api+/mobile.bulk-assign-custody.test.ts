@@ -33,9 +33,13 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   getMobileUserContext: vitest.fn(),
 }));
 
-// why: external service — we mock the custody assignment without hitting the database
+// why: external service — we mock the custody assignment without hitting the
+// database. Resolves the real service's return shape — the route now
+// destructures `skippedQuantityTracked` off it.
 vitest.mock("~/modules/asset/service.server", () => ({
-  bulkCheckOutAssets: vitest.fn().mockResolvedValue(undefined),
+  bulkCheckOutAssets: vitest
+    .fn()
+    .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -133,6 +137,8 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     expect(result instanceof Response).toBe(true);
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
+    // Additive skip count — 0 for an all-INDIVIDUAL selection
+    expect(body.skippedQuantityTracked).toBe(0);
 
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -144,6 +150,27 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
         role: "ADMIN",
       })
     );
+  });
+
+  it("forwards the service's skippedQuantityTracked count to the client", async () => {
+    // Mixed selections silently skip QUANTITY_TRACKED assets in the service;
+    // the route must forward the count so the app can report it honestly.
+    (bulkCheckOutAssets as any).mockResolvedValueOnce({
+      success: true,
+      skippedQuantityTracked: 2,
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", "qt-asset-1", "qt-asset-2"],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+    expect(body.success).toBe(true);
+    expect(body.skippedQuantityTracked).toBe(2);
   });
 
   it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202162994)", async () => {

@@ -106,6 +106,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
           thumbnailImage: true,
           // why: powers the scan-to-booking "not available to book" blocker.
           availableToBook: true,
+          // Quantity fields (additive) — mirror `MOBILE_ASSET_SELECT` so the
+          // helper's now-required quantity scalars are satisfied and the
+          // companion list can DISPLAY quantity. Null for INDIVIDUAL assets.
+          type: true,
+          quantity: true,
+          minQuantity: true,
+          unitOfMeasure: true,
+          consumptionType: true,
           // Keep `id` (list extra); helper only types `{ name }` but
           // structurally accepts the wider shape.
           category: { select: { id: true, name: true } },
@@ -121,11 +129,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
           },
           // Custody is now 1:many (Phase 2/4); helper flattens `custody[0]`
           // so the companion's single-or-null `asset.custody?.custodian`
-          // read keeps working.
+          // read keeps working. `quantity` feeds the helper's many-aware
+          // `custodyList`.
           custody: {
+            // Oldest-first so the flattened single custody + custodyList are
+            // deterministic (the relation is otherwise unordered).
+            orderBy: { createdAt: "asc" as const },
             select: {
+              quantity: true,
+              // why: operator-vs-kit discriminator for `releasableQuantity`.
+              kitCustodyId: true,
               custodian: {
-                select: { id: true, name: true },
+                // why: `userId` lets the app recognize the caller's own row.
+                select: { id: true, name: true, userId: true },
               },
             },
           },
