@@ -43,6 +43,7 @@ import {
   addScannedAssetsToBooking,
   processBooking,
   getExistingBookingDetails,
+  assertKitsAddableToActiveBooking,
   getOngoingBookingForAsset,
   bulkArchiveBookings,
   bulkCancelBookings,
@@ -7056,6 +7057,92 @@ describe("processBooking — checked-out guard for active bookings", () => {
       OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1", "asset-2"]);
+  });
+});
+
+describe("assertKitsAddableToActiveBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** Kits already on the booking, resolved from existingAssetKitIds. */
+  function mockKitsAlreadyOnBooking(kitIds: string[]) {
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      kitIds.map((kitId) => ({ kitId }))
+    );
+  }
+
+  /** Kits returned by the CHECKED_OUT query. */
+  function mockCheckedOutKits(kits: Array<{ id: string; name: string }>) {
+    (db.kit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(kits);
+  }
+
+  it.each([BookingStatus.DRAFT, BookingStatus.RESERVED])(
+    "is a no-op for a %s booking (no queries, no throw)",
+    async (bookingStatus) => {
+      await assertKitsAddableToActiveBooking({
+        kitIds: ["kit-1"],
+        existingAssetKitIds: new Set(["ak-1"]),
+        bookingStatus,
+        bookingId: "booking-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.assetKit.findMany).not.toHaveBeenCalled();
+      expect(db.kit.findMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([BookingStatus.ONGOING, BookingStatus.OVERDUE])(
+    "throws for a kit checked out elsewhere when target is %s",
+    async (bookingStatus) => {
+      mockKitsAlreadyOnBooking([]); // nothing already on booking
+      mockCheckedOutKits([{ id: "kit-1", name: "Kit 1" }]);
+
+      await expect(
+        assertKitsAddableToActiveBooking({
+          kitIds: ["kit-1"],
+          existingAssetKitIds: new Set(["ak-1"]),
+          bookingStatus,
+          bookingId: "booking-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow(/already checked out/i);
+    }
+  );
+
+  it("does NOT throw for a checked-out kit that is already on this booking", async () => {
+    // kit-1 already has a membership on the booking → excluded from the guard,
+    // so its CHECKED_OUT status (owned by this booking) is ignored.
+    mockKitsAlreadyOnBooking(["kit-1"]);
+
+    await assertKitsAddableToActiveBooking({
+      kitIds: ["kit-1"],
+      existingAssetKitIds: new Set(["ak-1"]),
+      bookingStatus: BookingStatus.ONGOING,
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    // Short-circuits before the checked-out query once all kits are excluded.
+    expect(db.kit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("does NOT throw when the newly-added kits are all available", async () => {
+    mockKitsAlreadyOnBooking([]);
+    mockCheckedOutKits([]); // none checked out
+
+    await assertKitsAddableToActiveBooking({
+      kitIds: ["kit-1", "kit-2"],
+      existingAssetKitIds: new Set(),
+      bookingStatus: BookingStatus.ONGOING,
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    // With no existing memberships, the assetKit lookup is skipped entirely.
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+    expect(db.kit.findMany).toHaveBeenCalled();
   });
 });
 

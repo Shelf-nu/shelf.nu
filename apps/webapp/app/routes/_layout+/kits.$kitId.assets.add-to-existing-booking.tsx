@@ -1,4 +1,4 @@
-import { BookingStatus, KitStatus, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -13,9 +13,9 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
-import { db } from "~/database/db.server";
 
 import {
+  assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
   getExistingBookingDetails,
   loadBookingsData,
@@ -167,65 +167,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .filter((id): id is string => id != null)
     );
 
-    // Progressive-checkout guard (parity with the manage-kits route): a kit that
-    // is physically CHECKED_OUT on ANOTHER active booking cannot be added to an
-    // ONGOING/OVERDUE booking. Kits added to an active booking otherwise stay
-    // AVAILABLE until purposefully checked out. Only fires for active targets;
-    // DRAFT/RESERVED bookings still accept checked-out kits.
-    //
-    // Kits already represented on this booking are excluded: their CHECKED_OUT
-    // status can be owned by this same booking, and re-adding only attaches
-    // newly-added members (buildKitSlicesForBooking skips existing memberships).
-    // Mirrors the manage-kits "newly added kits only" guard.
-    if (
-      bookingInfo.status === BookingStatus.ONGOING ||
-      bookingInfo.status === BookingStatus.OVERDUE
-    ) {
-      // Kit ids that already have at least one membership on this booking.
-      const kitIdsAlreadyOnBooking = new Set(
-        existingAssetKitIds.size > 0
-          ? (
-              await db.assetKit.findMany({
-                where: {
-                  id: { in: [...existingAssetKitIds] },
-                  kitId: { in: kitIds },
-                  organizationId,
-                },
-                select: { kitId: true },
-              })
-            ).map((ak) => ak.kitId)
-          : []
-      );
-      const kitIdsToGuard = kitIds.filter(
-        (id) => !kitIdsAlreadyOnBooking.has(id)
-      );
-
-      const checkedOutKits =
-        kitIdsToGuard.length > 0
-          ? await db.kit.findMany({
-              where: {
-                id: { in: kitIdsToGuard },
-                organizationId,
-                status: KitStatus.CHECKED_OUT,
-              },
-              select: { id: true, name: true },
-            })
-          : [];
-
-      if (checkedOutKits.length > 0) {
-        throw new ShelfError({
-          cause: null,
-          title: "Not allowed. Kits already checked out",
-          message: `The following kits are already checked out and cannot be added to the booking: ${checkedOutKits
-            .map((kit) => kit.name)
-            .join(", ")}`,
-          additionalData: { checkedOutKits, bookingId },
-          status: 400,
-          label: "Booking",
-          shouldBeCaptured: false,
-        });
-      }
-    }
+    // Progressive-checkout guard: a kit checked out on another active booking
+    // cannot be added to an ONGOING/OVERDUE booking. No-op for DRAFT/RESERVED;
+    // excludes kits already on this booking. Shared with future callers and
+    // covered by service-layer tests. See the helper's JSDoc for why the
+    // manage-kits route keeps its own partial-checkin-aware variant.
+    await assertKitsAddableToActiveBooking({
+      kitIds,
+      existingAssetKitIds,
+      bookingStatus: bookingInfo.status,
+      bookingId,
+      organizationId,
+    });
 
     // Resolve the kit memberships into kit-driven slice specs (org-scoped),
     // skipping any AssetKit already on the booking. Routing members through
