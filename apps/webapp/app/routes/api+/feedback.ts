@@ -19,6 +19,34 @@ import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
  */
 const SCREENSHOT_MAX_DIMENSION = 1920;
 
+/**
+ * Query params with secret-looking names are redacted before the page URL
+ * reaches the support email. Mirrors SENSITIVE_KEY_PATTERN in
+ * server/instrument.server.ts (which is private to that module), plus `otp`
+ * which shows up in URLs. Deliberately no bare `code`/`key`: those would
+ * false-positive on legitimate filter params like `barcode`.
+ */
+const SENSITIVE_QUERY_PARAM =
+  /token|password|secret|verifier|cookie|authorization|credential|jwt|api[-_]?key|otp/i;
+
+/** Redacts secret-looking query param values; passes unparseable input through */
+function redactSensitiveSearchParams(href: string | undefined) {
+  if (!href) {
+    return href;
+  }
+  try {
+    const url = new URL(href);
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_PARAM.test(key)) {
+        url.searchParams.set(key, "redacted");
+      }
+    }
+    return url.toString();
+  } catch {
+    return href;
+  }
+}
+
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -88,7 +116,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       type,
       message,
       screenshotUrl,
-      currentUrl,
+      currentUrl: redactSensitiveSearchParams(currentUrl),
       viewport,
       // The user agent is read server-side so it can't drift from the
       // browser that actually submitted the report

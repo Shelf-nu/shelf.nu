@@ -78,7 +78,10 @@ function buildRouteError() {
 
 describe("ErrorContent report-an-issue", () => {
   beforeEach(() => {
-    mockFeedbackModal.mockClear();
+    // Reset both calls and any per-test implementation (e.g. the throwing
+    // one in the chunk-crash test), then restore the render-nothing default
+    mockFeedbackModal.mockReset();
+    mockFeedbackModal.mockImplementation(() => null);
     mockRouteError = buildRouteError();
     mockUser = { id: "user_123" };
   });
@@ -125,5 +128,32 @@ describe("ErrorContent report-an-issue", () => {
       screen.getByText(/Something went wrong while fetching the kit/)
     ).toBeTruthy();
     expect(screen.getByText(/trace_789/)).toBeTruthy();
+  });
+
+  it("hides the report UI instead of blanking the page when the modal crashes", async () => {
+    // ErrorContent IS the app-wide boundary: a modal chunk-load failure must
+    // not escape it. The local boundary hides the report UI instead.
+    // why: silence React's expected error-boundary console noise
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    mockFeedbackModal.mockImplementation(() => {
+      throw new Error("Failed to fetch dynamically imported module");
+    });
+
+    renderErrorContent();
+    fireEvent.click(screen.getByRole("button", { name: /report this issue/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /report this issue/i })
+      ).toBeNull()
+    );
+    // The error page itself survives
+    expect(
+      screen.getByText(/Something went wrong while fetching the kit/)
+    ).toBeTruthy();
+
+    consoleError.mockRestore();
   });
 });

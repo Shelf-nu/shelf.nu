@@ -164,6 +164,24 @@ describe("/api/feedback", () => {
       );
     });
 
+    it("should redact secret-looking query params from the page URL", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl:
+          "https://app.shelf.nu/reset-password?token=supersecret&search=laptop",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentUrl:
+            "https://app.shelf.nu/reset-password?token=redacted&search=laptop",
+        })
+      );
+    });
+
     it("should forward the auto-captured context and error details", async () => {
       const request = createFeedbackRequest({
         type: "issue",
