@@ -6959,35 +6959,15 @@ export async function updateBookingAssets({
       ]);
 
       /**
-       *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
+       * Progressive checkout: assets added to an ONGOING/OVERDUE booking are
+       * NOT auto-flipped to CHECKED_OUT. They join the booking as line items
+       * and stay AVAILABLE until purposefully checked out via the
+       * progressive-checkout flow ({@link partialCheckoutBooking}). This keeps
+       * an active booking flexible — you can stage assets onto it without
+       * committing them to the field. See the checked-out guard in the add
+       * routes (manage-assets / manage-kits) which still blocks adding an asset
+       * that is physically checked out on ANOTHER booking.
        */
-      if (
-        b.status === BookingStatus.ONGOING ||
-        b.status === BookingStatus.OVERDUE
-      ) {
-        await tx.asset.updateMany({
-          where: { id: { in: addedAssetIds }, organizationId },
-          data: { status: AssetStatus.CHECKED_OUT },
-        });
-
-        /**
-         * Also update kit status to CHECKED_OUT for any kits that contain these assets
-         */
-        if (kitIds && kitIds.length > 0) {
-          await tx.kit.updateMany({
-            where: {
-              id: { in: kitIds },
-              organizationId,
-              // Only flip kits that actually received a newly-checked-out asset.
-              // Prevents an over-broad kitIds list from clobbering the status of
-              // still-available kits already on the booking. Asset-Kit membership
-              // is via the AssetKit pivot (no direct Kit.assets relation).
-              assetKits: { some: { assetId: { in: validAssetIds } } },
-            },
-            data: { status: KitStatus.CHECKED_OUT },
-          });
-        }
-      }
 
       // Activity events — one BOOKING_ASSETS_ADDED per asset added, inside the tx.
       // Must be atomic with asset addition for audit trail consistency.
@@ -10127,7 +10107,7 @@ async function createNotesForScannedAssetsAndKits({
  * @param tx - Prisma transaction client (must be a real `$transaction` tx)
  * @param args.assetIds - IDs of directly-scanned (standalone) assets to add
  * @param args.kitSlices - Kit-driven slice specs (one per AssetKit membership)
- * @param args.kitIds - Optional kit IDs (only used to propagate kit status sync when booking is active)
+ * @param args.kitIds - Optional kit IDs. Retained on the contract for callers; no longer read here (assets are added AVAILABLE — progressive checkout — so there is no kit status to sync at add time).
  * @param args.bookingId - Booking being modified
  * @param args.organizationId - Organization scope for the booking + assets
  * @param args.userId - User performing the scan (attributed on materialized logs)
@@ -10138,7 +10118,6 @@ async function addScannedAssetsToBookingWithinTx(
   tx: any,
   {
     assetIds,
-    kitIds,
     bookingId,
     organizationId,
     userId,
@@ -10147,7 +10126,12 @@ async function addScannedAssetsToBookingWithinTx(
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
-    kitIds: string[];
+    /**
+     * Optional kit IDs. Retained on the contract for callers, but no longer
+     * read here: assets are added AVAILABLE (progressive checkout), so there is
+     * no kit status to sync at add time.
+     */
+    kitIds?: string[];
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     userId: string;
@@ -10437,26 +10421,12 @@ async function addScannedAssetsToBookingWithinTx(
     );
   }
 
-  /** When booking is active, newly added items must be flagged checked out */
-  const isActiveBooking =
-    booking.status === BookingStatus.ONGOING ||
-    booking.status === BookingStatus.OVERDUE;
-
-  if (isActiveBooking) {
-    if (allScannedAssetIds.length > 0) {
-      await tx.asset.updateMany({
-        where: { id: { in: allScannedAssetIds }, organizationId },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
-    }
-
-    if (kitIds.length > 0) {
-      await tx.kit.updateMany({
-        where: { id: { in: kitIds }, organizationId },
-        data: { status: KitStatus.CHECKED_OUT },
-      });
-    }
-  }
+  /**
+   * Progressive checkout: scanning assets into an ONGOING/OVERDUE booking adds
+   * them as line items but leaves them AVAILABLE — consistent with every other
+   * add surface. They are checked out purposefully via the progressive-checkout
+   * flow ({@link partialCheckoutBooking}), never as a side-effect of scanning.
+   */
 
   return booking;
 }
@@ -10578,6 +10548,10 @@ export async function getExistingBookingDetails(
       select: {
         id: true,
         status: true,
+        // Needed so callers can enforce per-user ownership (SELF_SERVICE/BASE
+        // may only add to bookings they created or are custodian of).
+        creatorId: true,
+        custodianUserId: true,
         bookingAssets: {
           include: {
             asset: { select: { id: true, title: true } },
@@ -10596,10 +10570,22 @@ export async function getExistingBookingDetails(
       });
     }
 
-    if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
+    // Bookings that accept new items: DRAFT/RESERVED (not yet started) plus
+    // ONGOING/OVERDUE (active — progressive checkout). Added items stay
+    // AVAILABLE until purposefully checked out; the CHECKED_OUT guard for
+    // active bookings lives in the callers/processBooking. COMPLETE, ARCHIVED
+    // and CANCELLED bookings are terminal and reject additions.
+    const addableStatuses: BookingStatus[] = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ];
+    if (!addableStatuses.includes(booking.status!)) {
       throw new ShelfError({
         cause: null,
-        message: "Booking is not in Draft or Reserved status.",
+        message:
+          "Items can only be added to Draft, Reserved, Ongoing or Overdue bookings.",
         status: 400,
         label: "Booking",
         shouldBeCaptured: false,
@@ -10679,19 +10665,38 @@ export async function getAvailableAssetsIdsForBooking(
  * @param organizationId - The caller's validated organization ID. Forwarded to
  *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
  *   added to the booking (cross-org IDOR protection).
+ * @param auth - The acting user's id and org role. Used to enforce per-user
+ *   booking ownership: `booking:create/update` is granted org-wide to
+ *   SELF_SERVICE/BASE, so without this a non-owner could add items to another
+ *   user's booking (cross-user IDOR). ADMIN/OWNER are unrestricted.
  * @returns The resolved (org-scoped) asset IDs and the booking details
- * @throws {ShelfError} If no assets are available or the booking lookup fails
+ * @throws {ShelfError} If no assets are available, the booking lookup fails, or
+ *   the caller does not own the booking
  */
 export async function processBooking(
   bookingId: string,
   assetIds: string[],
-  organizationId: string
+  organizationId: string,
+  auth: { userId: string; role: OrganizationRoles }
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
       getAvailableAssetsIdsForBooking(assetIds, organizationId),
       getExistingBookingDetails(bookingId, organizationId),
     ]);
+
+    // Cross-user IDOR guard: SELF_SERVICE/BASE may only add to bookings they
+    // created or are custodian of. No-op for ADMIN/OWNER. Runs before any
+    // mutation-shaping logic below.
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingInfo.creatorId,
+        custodianUserId: bookingInfo.custodianUserId,
+      },
+      userId: auth.userId,
+      role: auth.role,
+      action: "add items to",
+    });
 
     if (!finalAssetIds.length) {
       throw new ShelfError({
@@ -10701,6 +10706,55 @@ export async function processBooking(
         label: "Booking",
         shouldBeCaptured: false,
       });
+    }
+
+    // Progressive-checkout guard (parity with the manage-assets route): assets
+    // that are physically CHECKED_OUT on ANOTHER active booking cannot be added
+    // to an ONGOING/OVERDUE booking — there is nothing available to stage. New
+    // assets otherwise stay AVAILABLE. This only fires for active bookings;
+    // DRAFT/RESERVED targets still accept checked-out assets (they'll be
+    // available by the time that booking starts).
+    //
+    // Assets ALREADY on this booking are excluded from the check: their
+    // CHECKED_OUT status can be owned by this same booking (progressive
+    // checkout), and re-submitting them is handled downstream by the
+    // duplicate / "add only the rest" flow — not by this guard.
+    if (
+      bookingInfo.status === BookingStatus.ONGOING ||
+      bookingInfo.status === BookingStatus.OVERDUE
+    ) {
+      const existingAssetIds = new Set(
+        bookingInfo.bookingAssets.map((ba) => ba.assetId)
+      );
+      const newAssetIdsToCheck = finalAssetIds.filter(
+        (id) => !existingAssetIds.has(id)
+      );
+
+      const checkedOutAssets =
+        newAssetIdsToCheck.length > 0
+          ? await db.asset.findMany({
+              where: {
+                id: { in: newAssetIdsToCheck },
+                organizationId,
+                status: AssetStatus.CHECKED_OUT,
+              },
+              select: { id: true, title: true },
+            })
+          : [];
+
+      if (checkedOutAssets.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed. Assets already checked out",
+          message: `The following assets are already checked out and cannot be added to the booking: ${checkedOutAssets
+            .map((asset) => asset.title)
+            .join(", ")}`,
+          additionalData: { checkedOutAssets, bookingId },
+          status: 400,
+          label: "Booking",
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     return {
@@ -10744,14 +10798,16 @@ export async function loadBookingsData({
   const { page, search } = getParamsValues(searchParams);
   const perPage = 20;
 
-  // Fetch bookings with filters
+  // Fetch bookings with filters. Includes ONGOING/OVERDUE so assets/kits can be
+  // added to active bookings (they stay AVAILABLE — progressive checkout), not
+  // just to not-yet-started DRAFT/RESERVED ones.
   const { bookings, bookingCount } = await getBookings({
     organizationId,
     page,
     perPage,
     search,
     userId,
-    statuses: ["DRAFT", "RESERVED"],
+    statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
     // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
     ...(isSelfServiceOrBase && {
       custodianUserId: userId,

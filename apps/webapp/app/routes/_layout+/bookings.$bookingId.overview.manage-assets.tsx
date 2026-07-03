@@ -81,7 +81,7 @@ import {
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { getAssetModelAvailability } from "~/modules/booking-model-request/service.server";
+import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -97,6 +97,7 @@ import {
   getCurrentSearchParams,
   getParams,
   parseData,
+  safeRedirect,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -111,6 +112,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export type AssetWithBooking = Asset & {
   bookingAssets: { booking: Booking }[];
@@ -373,110 +375,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     /**
-     * Book-by-Model — Models tab payload.
-     *
-     * We always count the org's AssetModels so the UI knows whether to
-     * render the "Models" tab at all (hidden when the org has none).
-     * When there is at least one model we also fetch the list for the
-     * picker plus the per-model availability in the current booking's
-     * window. Capping at `MODEL_PICKER_LIMIT` keeps the loader cheap
-     * for large orgs; if an org has more models we paginate by just
-     * showing the first batch sorted by name.
-     *
-     * TODO: add a paginated "search models" API once an org actually
-     * bumps into the MODEL_PICKER_LIMIT cap.
+     * Book-by-Model — Models tab payload. Shared with the manage-kits
+     * loader via `getBookingModelTabData` so both surfaces compute
+     * model availability identically (see the helper's JSDoc for the
+     * "total − inCustody − reserved" formula).
      */
-    const MODEL_PICKER_LIMIT = 50;
-    const assetModelsCount = await db.assetModel.count({
-      where: { organizationId },
+    const modelTabData = await getBookingModelTabData({
+      organizationId,
+      booking,
     });
-    const showModelsTab = assetModelsCount > 0;
-
-    let assetModels: {
-      id: string;
-      name: string;
-      total: number;
-      available: number;
-      reservedConcrete: number;
-      reservedViaRequest: number;
-      inCustody: number;
-    }[] = [];
-
-    if (showModelsTab) {
-      const rawModels = await db.assetModel.findMany({
-        where: { organizationId },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
-        take: MODEL_PICKER_LIMIT,
-      });
-
-      const availabilities = await Promise.all(
-        rawModels.map((m) =>
-          getAssetModelAvailability({
-            assetModelId: m.id,
-            organizationId,
-            bookingId: booking.id,
-            from: booking.from,
-            to: booking.to,
-          })
-        )
-      );
-
-      assetModels = rawModels.map((m, i) => ({
-        id: m.id,
-        name: m.name,
-        total: availabilities[i].total,
-        available: availabilities[i].available,
-        reservedConcrete: availabilities[i].reservedConcrete,
-        reservedViaRequest: availabilities[i].reservedViaRequest,
-        inCustody: availabilities[i].inCustody,
-      }));
-    }
-
-    /**
-     * Flatten the booking's existing model requests for the UI. The
-     * inner `assetModel` relation is included via
-     * `BOOKING_WITH_ASSETS_INCLUDE`, so we just project the fields the
-     * Models tab needs and leave the rest on the booking record.
-     */
-    // Ship all requests (outstanding + fulfilled). The Models tab UI
-    // splits them into "Active reservations" (editable, not yet fully
-    // fulfilled) and "Fulfilled" (historical, read-only). Fulfilled
-    // rows are the audit trail for "this booking started life as 3 ×
-    // Dell" on an ONGOING booking.
-    const modelRequests = booking.modelRequests.map((req) => ({
-      assetModelId: req.assetModelId,
-      assetModelName: req.assetModel.name,
-      quantity: req.quantity,
-      fulfilledQuantity: req.fulfilledQuantity,
-      fulfilledAt:
-        req.fulfilledAt instanceof Date
-          ? req.fulfilledAt.toISOString()
-          : req.fulfilledAt,
-    }));
-
-    /**
-     * Shape for {@link DynamicSelect}. The picker reads
-     * `initialAssetModels` as its seed list and `totalAssetModels`
-     * to decide whether to offer the "show all / search" affordance.
-     * Availability goes on `metadata` so the renderItem can show
-     * e.g. "5 / 5 available" inline per option.
-     *
-     * Full-org `totalAssetModels` is the right denominator (not the
-     * truncated first-50 list) so the picker can present "searching
-     * 80 of 120 models" correctly.
-     */
-    const initialAssetModels = assetModels.map((m) => ({
-      id: m.id,
-      name: m.name,
-      metadata: {
-        total: m.total,
-        available: m.available,
-        reservedConcrete: m.reservedConcrete,
-        reservedViaRequest: m.reservedViaRequest,
-        inCustody: m.inCustody,
-      },
-    }));
 
     return payload({
       header: {
@@ -505,11 +412,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       bookingKitIds,
-      showModelsTab,
-      assetModels,
-      initialAssetModels,
-      totalAssetModels: assetModelsCount,
-      modelRequests,
+      ...modelTabData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -1070,10 +973,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert,
-     * so we have to redirect to manage-kits url
+     * so we have to redirect to manage-kits url. `redirectTo` is a
+     * client-supplied form value, so route it through `safeRedirect` to block
+     * open-redirects to another origin — falling back to the booking page.
      */
     if (redirectTo) {
-      return redirect(redirectTo);
+      return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }
 
     return redirect(`/bookings/${bookingId}`);
@@ -1490,49 +1395,66 @@ export default function AddAssetsToNewBooking() {
       ) : null}
 
       {/*
-       * Footer of the modal. Only rendered on the Assets tab — the
-       * Models tab submits each model reservation inline via the
-       * model-requests API route, so there's nothing to "Confirm" here.
+       * Footer of the modal. The `<Form ref={formRef}>` (and every hidden
+       * input in it) is ALWAYS mounted, regardless of `activeTab` — it used
+       * to render only on the Assets tab, which left `formRef.current` null
+       * while on the Models tab. Switching Assets → Models → Kits then
+       * opened the "Unsaved changes" alert, but its `onYes` handler submits
+       * `formRef.current` directly (see below), so against a null ref that
+       * submit silently no-opped: no assets were added and no redirect to
+       * manage-kits happened. Only the visible "N selected" text and the
+       * Confirm button stay Assets-tab-only: the Models tab has no
+       * standalone save of its own (each reservation posts inline via the
+       * model-requests API route), and a visible/enabled Confirm there
+       * could post asset changes without the `redirectTo` the alert needs.
        */}
-      {activeTab === "assets" ? (
-        <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
+      <footer
+        className={tw(
+          "mt-auto flex shrink-0 items-center border-t px-6 py-3",
+          activeTab === "assets" ? "justify-between" : "justify-end"
+        )}
+      >
+        {activeTab === "assets" ? (
           <p>
             {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
             selected
           </p>
+        ) : null}
 
-          <div className="flex gap-3">
-            <Button variant="secondary" to={".."}>
-              Close
-            </Button>
-            <Form method="post" ref={formRef}>
-              {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
-              {removedAssets.map((asset, i) => (
-                <input
-                  key={asset.id}
-                  type="hidden"
-                  name={`removedAssetIds[${i}]`}
-                  value={asset.id}
-                />
-              ))}
-              {/* These are the ids selected by the user and stored in the atom */}
-              {selectedBulkItems.map((asset, i) => (
-                <input
-                  key={asset.id}
-                  type="hidden"
-                  name={`assetIds[${i}]`}
-                  value={asset.id}
-                />
-              ))}
-              {/* JSON-encoded quantities for QUANTITY_TRACKED assets */}
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post" ref={formRef}>
+            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+            {removedAssets.map((asset, i) => (
               <input
+                key={asset.id}
                 type="hidden"
-                name="quantities"
-                value={JSON.stringify(quantities)}
+                name={`removedAssetIds[${i}]`}
+                value={asset.id}
               />
-              {hasUnsavedChanges && isAlertOpen ? (
-                <input name="redirectTo" value={manageKitsUrl} type="hidden" />
-              ) : null}
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
+            {selectedBulkItems.map((asset, i) => (
+              <input
+                key={asset.id}
+                type="hidden"
+                name={`assetIds[${i}]`}
+                value={asset.id}
+              />
+            ))}
+            {/* JSON-encoded quantities for QUANTITY_TRACKED assets */}
+            <input
+              type="hidden"
+              name="quantities"
+              value={JSON.stringify(quantities)}
+            />
+            {hasUnsavedChanges && isAlertOpen ? (
+              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+            ) : null}
+            {/* Omitted entirely (not just hidden) on the Models tab — see the comment above the footer. */}
+            {activeTab === "assets" ? (
               <Button
                 type="submit"
                 name="intent"
@@ -1541,16 +1463,10 @@ export default function AddAssetsToNewBooking() {
               >
                 Confirm
               </Button>
-            </Form>
-          </div>
-        </footer>
-      ) : (
-        <footer className="item-center mt-auto flex shrink-0 justify-end border-t px-6 py-3">
-          <Button type="button" variant="secondary" to={".."}>
-            Close
-          </Button>
-        </footer>
-      )}
+            ) : null}
+          </Form>
+        </div>
+      </footer>
 
       <UnsavedChangesAlert
         open={isAlertOpen}

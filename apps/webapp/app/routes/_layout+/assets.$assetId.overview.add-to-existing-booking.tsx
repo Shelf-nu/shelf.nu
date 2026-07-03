@@ -116,7 +116,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -136,7 +136,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
       assetIds,
-      organizationId
+      organizationId,
+      { userId, role }
     );
 
     /**
@@ -248,8 +249,16 @@ export default function ExistingBooking() {
   const unitLabel = asset?.unitOfMeasure || "units";
   const maxQuantity = assetAvailability?.available ?? undefined;
 
-  function isValidBooking(booking: any) {
-    return booking && ["RESERVED", "DRAFT"].includes(booking.status);
+  function isValidBooking(
+    booking: { status?: string | null } | null | undefined
+  ) {
+    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
+    // active booking keeps the asset AVAILABLE until it is purposefully checked
+    // out (progressive checkout).
+    return (
+      !!booking?.status &&
+      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
+    );
   }
 
   return (
@@ -261,8 +270,9 @@ export default function ExistingBooking() {
         <div className="mb-5">
           <h3>Add to Existing Booking</h3>
           <div>
-            You can only add an asset to bookings that are in Draft or Reserved
-            State.
+            You can add an asset to Draft, Reserved, Ongoing or Overdue
+            bookings. Assets added to an ongoing booking stay available until
+            you check them out.
           </div>
         </div>
         {ids?.map((item, i) => (
@@ -308,8 +318,10 @@ export default function ExistingBooking() {
             }
           />
           <div className="mt-2 text-gray-500">
-            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
-            <span className="font-medium text-gray-600">Reserved</span> bookings
+            <span className="font-medium text-gray-600">Draft</span>,{" "}
+            <span className="font-medium text-gray-600">Reserved</span>,{" "}
+            <span className="font-medium text-gray-600">Ongoing</span> and{" "}
+            <span className="font-medium text-gray-600">Overdue</span> bookings
             are visible
           </div>
         </div>
