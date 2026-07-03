@@ -223,14 +223,18 @@ export default function renderEventCard({ event }: EventCardProps) {
               <span
                 className="inline-flex items-center gap-0.5"
                 title={glyphLabel}
+                role="img"
                 aria-label={glyphLabel}
               >
                 <Boxes className="size-3" aria-hidden="true" />
                 {sliceCount > 1 ? (
-                  <span className="text-xs font-medium tabular-nums">
+                  <span
+                    className="text-xs font-medium tabular-nums"
+                    aria-hidden="true"
+                  >
                     {sliceCount}
                   </span>
-                ) : null}
+                ) : null
               </span>
             ) : null}
             <ExternalLinkIcon
