@@ -132,8 +132,9 @@ export default function ImportUsersDialog({
                   You must use <b>, (comma)</b> as a delimiter in your CSV file.
                 </li>
                 <li>
-                  Only valid roles are <b>ADMIN</b>, <b>BASE</b> and{" "}
-                  <b>SELF_SERVICE</b>. Role column is case-sensitive.
+                  Only valid roles are <b>ADMIN</b>, <b>BASE</b>,{" "}
+                  <b>SELF_SERVICE</b> and <b>BOOKING_MANAGER</b>. Role column is
+                  case-sensitive.
                 </li>
                 <li>
                   Each row represents a new user to be invited. Ensure the email

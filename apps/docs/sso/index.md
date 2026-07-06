@@ -27,7 +27,7 @@ Any existing **standard (non-SSO) accounts** that use the SSO domain — for exa
 
 ### 4. Plan your group-to-role mapping [#](#4-plan-group-mapping)
 
-Shelf decides which role a user gets by matching the groups they belong to in your identity provider. You map those groups to Shelf roles (Administrator, Self service, Base) in the workspace settings.
+Shelf decides which role a user gets by matching the groups they belong to in your identity provider. You map those groups to Shelf roles (Administrator, Self service, Base) in the workspace settings. The Booking manager role cannot currently be assigned via SSO group mapping; assign it manually from Settings > Team (that user must not be SSO-managed, or the mapping will overwrite the role on next login).
 
 > [!NOTE]
 > You only need to map the **roles you actually use** — a single group mapping is enough for SSO to work. You do not need to create a group for every role. See your provider guide below for whether to use group **names** or group **IDs**.

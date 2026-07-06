@@ -188,13 +188,16 @@ export function useSidebarNavItems() {
     {
       type: "label",
       title: "Organization",
-      hidden: isBaseOrSelfService,
+      // Also hidden for booking managers: the /settings layout loader gates
+      // on generalSettings.read, which their matrix denies (issue #1800) —
+      // their teamMember.read serves the booking-form custodian pickers.
+      hidden: isBaseOrSelfService || isBookingManager,
     },
     {
       type: "parent",
       title: "Team",
       Icon: UsersRoundIcon,
-      hidden: isBaseOrSelfService,
+      hidden: isBaseOrSelfService || isBookingManager,
       children: [
         {
           title: "Users",

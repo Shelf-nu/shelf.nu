@@ -81,7 +81,11 @@ const ROLE_PERMISSIONS: Record<
  */
 export function userCanSeeOrgWideAudits(roles: string[] | undefined): boolean {
   if (!roles?.length) return false;
-  return roles.some((role) => role === "OWNER" || role === "ADMIN");
+  // BOOKING_MANAGER mirrors the server's non-scoped branch (it is not
+  // SELF_SERVICE/BASE), so it sees org-wide audits like admins do.
+  return roles.some(
+    (role) => role === "OWNER" || role === "ADMIN" || role === "BOOKING_MANAGER"
+  );
 }
 
 /**

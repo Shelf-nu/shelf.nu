@@ -49,11 +49,12 @@ export function ExplicitCheckinSettings({
           }}
         >
           <FormRow
-            rowLabel="Require explicit check-in for Admins"
+            rowLabel="Require explicit check-in for Admins & Booking managers"
             subHeading={
               <div>
-                When enabled, administrators must use the scanner-based explicit
-                check-in flow instead of the one-click quick check-in.
+                When enabled, administrators and booking managers must use the
+                scanner-based explicit check-in flow instead of the one-click
+                quick check-in.
               </div>
             }
             className="border-b-0 pb-[10px] pt-0"
@@ -63,13 +64,13 @@ export function ExplicitCheckinSettings({
                 name={zo.fields.requireExplicitCheckinForAdmin()}
                 disabled={!isOwner}
                 defaultChecked={defaultValues.requireExplicitCheckinForAdmin}
-                title="Require explicit check-in for Admins"
+                title="Require explicit check-in for Admins & Booking managers"
               />
               <label
                 htmlFor={`requireExplicitCheckinForAdmin-${zo.fields.requireExplicitCheckinForAdmin()}`}
                 className="hidden text-gray-500"
               >
-                Require explicit check-in for Admins
+                Require explicit check-in for Admins & Booking managers
               </label>
             </div>
           </FormRow>

@@ -149,6 +149,17 @@ export function UpdateForm({
             />
             <span className="text-sm">Base</span>
           </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="targetBookingManager"
+              defaultChecked={targetRoles.includes(
+                OrganizationRoles.BOOKING_MANAGER
+              )}
+              className="rounded"
+            />
+            <span className="text-sm">Booking manager</span>
+          </label>
           <p className="text-xs text-gray-500">
             Leave all unchecked to make the update visible to all users
           </p>

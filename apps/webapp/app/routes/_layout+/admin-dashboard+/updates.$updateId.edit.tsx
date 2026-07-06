@@ -61,6 +61,8 @@ export const action = async ({
     if (formData.get("targetSelfService"))
       targetRoles.push(OrganizationRoles.SELF_SERVICE);
     if (formData.get("targetBase")) targetRoles.push(OrganizationRoles.BASE);
+    if (formData.get("targetBookingManager"))
+      targetRoles.push(OrganizationRoles.BOOKING_MANAGER);
 
     const payload = parseData(
       formData,
