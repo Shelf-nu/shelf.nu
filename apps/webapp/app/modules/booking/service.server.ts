@@ -31,6 +31,7 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import {
@@ -4640,7 +4641,12 @@ function buildQtyPerAssetCheckoutFragment(
     // Per-slice phrasing — dialog checkouts carry the exact BookingAsset id.
     if (s.bookingAssetId) {
       const sliceLabel = s.assetKitId
-        ? `in kit ${s.kitName ?? "kit"}`
+        ? // SECURITY: `kitName` is free-form user input (Kit.name) spliced into
+          // note text that is rendered through Markdoc. Strip Markdoc delimiters
+          // so a kit named e.g. `X{% link to="javascript:..." /%}` cannot inject
+          // a live tag (stored XSS). Sanitize-at-write — see
+          // .claude/rules/sanitize-note-content-markdoc.md.
+          `in kit ${stripMarkdocDelimiters(s.kitName ?? "kit") || "kit"}`
         : "standalone";
       // The unit rides on the slice total via `formatUnitCount` ("22 boxes");
       // the checked-out count stays a bare number so the phrase reads

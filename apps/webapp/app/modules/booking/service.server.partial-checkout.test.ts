@@ -1419,6 +1419,56 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       // The over-claim never reaches persistence.
       expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
     });
+
+    it("strips Markdoc delimiters from a malicious Kit.name so it cannot inject a live tag into the checkout note (stored XSS guard)", async () => {
+      // Kit.name is free-form user input and the note is rendered through
+      // Markdoc; an unsanitized name could smuggle a `{% link %}` tag (stored
+      // XSS). The per-slice label must strip Markdoc delimiters.
+      const evilKitName =
+        'Kittington{% link to="javascript:alert(1)" text="x" /%}';
+      const booking = makeGlovesBooking();
+      // Poison the kit slice's (index 1 = ba-kit) kit name.
+      booking.bookingAssets[1].asset.assetKits = [
+        { id: "ak-kittington", kitId: "kit-1", kit: { name: evilKitName } },
+      ];
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      // In-tx kit-info read: no complete kit named, so the note's items body is
+      // the per-slice fragment (which carries the kit label under test).
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) => {
+          const ids = args?.where?.id?.in ?? [];
+          return Promise.resolve(
+            ids.map((id) => ({
+              id,
+              title: "Gloves",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+              assetKits: [],
+            }))
+          );
+        }
+      );
+
+      // Check out 50 of the 100-box KIT slice → the note labels it "in kit …".
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 50 },
+        ],
+      });
+
+      const note = partialCheckoutNoteContent();
+      expect(note).toBeDefined();
+      // Delimiters stripped → the payload renders as inert text, not a tag.
+      expect(note).not.toContain("Kittington{%");
+      // Trusted asset links point at `/assets/…`, so a `{% link to="javascript`
+      // sequence could only come from the injected, unsanitized kit name.
+      expect(note).not.toContain('{% link to="javascript');
+      // Still labelled as a kit slice (with the sanitized name).
+      expect(note).toContain("in kit");
+    });
   });
 
   it("multi-asset mixed (INDIVIDUAL + qty) routes each through its own path", async () => {
