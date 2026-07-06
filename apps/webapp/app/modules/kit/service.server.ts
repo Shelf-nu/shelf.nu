@@ -1245,7 +1245,13 @@ export async function getAssetsForKits({
         take,
         where: finalQuery,
         select: KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
-        orderBy: { [orderBy]: orderDirection },
+        // Stable `id` tiebreaker for deterministic skip/take paging when rows
+        // tie on the sort key (see the matching comment in
+        // asset/service.server.ts). Skipped when already sorting by id.
+        orderBy: [
+          { [orderBy]: orderDirection },
+          ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
+        ],
       }),
       db.asset.count({ where: finalQuery }),
     ]);

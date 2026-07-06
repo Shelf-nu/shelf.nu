@@ -24,6 +24,14 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 
+/**
+ * Slim booking shape returned by `/api/bookings/get-all` (see
+ * `getMinimalBookings`). Only the fields this picker renders — deliberately not
+ * the full Prisma `Booking`, so nobody reads a column the endpoint no longer
+ * sends.
+ */
+type PickerBooking = Pick<Booking, "id" | "name" | "status" | "from" | "to">;
+
 export const addAssetsToExistingBookingSchema = z.object({
   id: z
     .string({ required_error: "Please select booking." })
@@ -39,8 +47,8 @@ export const addAssetsToExistingBookingSchema = z.object({
  * check-marked selection, date range per row) but is fed directly from the
  * `/api/bookings/get-all` fetch instead of route-loader data — the assets-index
  * loader does not (and should not, for perf) carry booking data. `get-all`
- * returns every open booking (`takeAll`), so filtering is done client-side for
- * instant results.
+ * returns every open booking (slim projection), so filtering is done
+ * client-side for instant results.
  *
  * @see {@link file://./../../../routes/_layout+/assets.$assetId.overview.add-to-existing-booking.tsx}
  *   the singular-asset flow this is styled to match.
@@ -52,7 +60,7 @@ function BookingSelect({
   errorMessage,
 }: {
   /** All open bookings returned by `/api/bookings/get-all`. */
-  bookings: Booking[];
+  bookings: PickerBooking[];
   /** Whether the bookings fetch is still in flight. */
   isLoading: boolean;
   /** Disable the trigger (e.g. while the form is submitting). */
@@ -239,7 +247,7 @@ export default function AddAssetsToExistingBookingDialog() {
     data: bookingsData,
     isLoading: isFetchingBookings,
     error: _bookingsError,
-  } = useApiQuery<{ error: null; bookings: Booking[] }>({
+  } = useApiQuery<{ error: null; bookings: PickerBooking[] }>({
     api: "/api/bookings/get-all",
     enabled: isDialogOpen,
   });

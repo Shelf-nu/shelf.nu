@@ -45,6 +45,8 @@ import {
   getExistingBookingDetails,
   assertKitsAddableToActiveBooking,
   getOngoingBookingForAsset,
+  getMinimalBookings,
+  bookingDraftVisibilityClause,
   bulkArchiveBookings,
   bulkCancelBookings,
   // Phase 3c helpers
@@ -7345,5 +7347,98 @@ describe("booking notes + events — qty-tracked axis", () => {
         content: expect.stringContaining("removed 80 units of"),
       })
     );
+  });
+});
+
+describe("bookingDraftVisibilityClause", () => {
+  it("shows non-DRAFT bookings to everyone and DRAFTs only to their creator", () => {
+    // The permission-sensitive rule shared by getBookings and
+    // getMinimalBookings. Locking its shape here so the two list queries
+    // cannot silently diverge on who can see a draft.
+    expect(bookingDraftVisibilityClause("user-1")).toEqual({
+      OR: [
+        { status: { not: "DRAFT" } },
+        { AND: [{ status: "DRAFT" }, { creatorId: "user-1" }] },
+      ],
+    });
+  });
+});
+
+describe("getMinimalBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("selects only the picker fields and applies the id sort tiebreaker", async () => {
+    // why: assert the slim projection + deterministic order, not DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({
+      organizationId: "org-1",
+      userId: "user-1",
+      statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    const arg = findMany.mock.calls[0][0];
+
+    // Slim select: exactly the columns the add-to-booking picker renders.
+    expect(arg.select).toEqual({
+      id: true,
+      name: true,
+      status: true,
+      from: true,
+      to: true,
+    });
+    // No heavy include, and no count query (only one findMany, no db.booking.count).
+    expect(arg.include).toBeUndefined();
+    expect(db.booking.count).not.toHaveBeenCalled();
+    // `from` primary + `id` tiebreaker => deterministic, unpaginated order.
+    expect(arg.orderBy).toEqual([{ from: "asc" }, { id: "asc" }]);
+    // Carries the shared DRAFT-visibility rule, scoped to the org + viewer.
+    expect(arg.where.organizationId).toBe("org-1");
+    expect(arg.where.AND).toEqual([bookingDraftVisibilityClause("user-1")]);
+    expect(arg.where.status).toEqual({
+      in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    });
+  });
+
+  it("defaults to excluding archived & cancelled when no statuses are given", async () => {
+    // why: stub the query so we can assert the default status where-clause
+    // getMinimalBookings builds, not real DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({ organizationId: "org-1", userId: "user-1" });
+
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.status).toEqual({
+      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+    });
+    // No custodian scope unless asked for.
+    expect(arg.where.custodianUserId).toBeUndefined();
+  });
+
+  it("scopes to a custodian when custodianUserId is provided (self-service)", async () => {
+    // why: stub the query so we can assert the custodian where-clause
+    // getMinimalBookings adds for self-service callers, not real DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({
+      organizationId: "org-1",
+      userId: "user-1",
+      custodianUserId: "user-1",
+    });
+
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.custodianUserId).toBe("user-1");
   });
 });

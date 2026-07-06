@@ -1,8 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
-import { getBookings } from "~/modules/booking/service.server";
+import { getMinimalBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
-import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -21,17 +20,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { page, search } = getParamsValues(getCurrentSearchParams(request));
-    const { bookings } = await getBookings({
+    // The "add to existing booking" dialog renders only a name + date range and
+    // filters client-side, so fetch the slim projection (no per-booking asset /
+    // kit / custodian tree, no count query) instead of the full index shape.
+    const { bookings } = await getMinimalBookings({
       organizationId,
-      page,
-      search,
       userId,
-      // Include active bookings so the bulk "add to existing booking" dialog can
-      // target ONGOING/OVERDUE bookings too (added assets stay AVAILABLE —
-      // progressive checkout), not just DRAFT/RESERVED ones.
+      // Include active bookings so the dialog can target ONGOING/OVERDUE
+      // bookings too (added assets stay AVAILABLE — progressive checkout), not
+      // just DRAFT/RESERVED ones.
       statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
-      takeAll: true,
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });
 
