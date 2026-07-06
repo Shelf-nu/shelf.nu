@@ -72,10 +72,12 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     vi.clearAllMocks();
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
+      canSeeAllBookings: true,
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
       name: "Field Shoot",
+      custodianUserId: "user-456",
     });
     dbMock.bookingNote.findMany.mockResolvedValue([
       {

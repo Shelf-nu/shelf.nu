@@ -18,7 +18,8 @@ export type UserFriendlyRoles =
   | "Administrator"
   | "Owner"
   | "Base"
-  | "Self service";
+  | "Self service"
+  | "Booking manager";
 export const meta = () => [{ title: appendToMetaTitle("Team settings") }];
 
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
@@ -41,11 +42,17 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   }
 };
 
-export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+// Record<OrganizationRoles, ...> (not Record<string, ...>) so adding the
+// next role is a compile error here instead of a blank cell in the team list.
+export const organizationRolesMap: Record<
+  OrganizationRoles,
+  UserFriendlyRoles
+> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.OWNER]: "Owner",
   [OrganizationRoles.BASE]: "Base",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
+  [OrganizationRoles.BOOKING_MANAGER]: "Booking manager",
 };
 
 export default function TeamSettings() {

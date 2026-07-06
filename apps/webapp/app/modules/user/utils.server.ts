@@ -216,9 +216,9 @@ export async function resolveUserAction(
       );
 
       /** Find the Role based on its user friendly name */
-      const role = Object.keys(organizationRolesMap).find(
-        (key) => organizationRolesMap[key] === userFriendlyRole
-      ) as OrganizationRoles | undefined;
+      const role = (
+        Object.keys(organizationRolesMap) as OrganizationRoles[]
+      ).find((key) => organizationRolesMap[key] === userFriendlyRole);
 
       if (!role) {
         throw new ShelfError({

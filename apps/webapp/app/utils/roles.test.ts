@@ -56,4 +56,27 @@ describe("isDemotion", () => {
       true
     );
   });
+
+  it("treats ADMIN -> BOOKING_MANAGER as a demotion (triggers entity transfer)", () => {
+    // A booking manager cannot own or manage catalog entities, so the
+    // change-role flow must move the demoted admin's created entities.
+    expect(
+      isDemotion(OrganizationRoles.ADMIN, OrganizationRoles.BOOKING_MANAGER)
+    ).toBe(true);
+  });
+
+  it("treats BOOKING_MANAGER as a peer of BASE/SELF_SERVICE (lateral moves)", () => {
+    expect(
+      isDemotion(
+        OrganizationRoles.SELF_SERVICE,
+        OrganizationRoles.BOOKING_MANAGER
+      )
+    ).toBe(false);
+    expect(
+      isDemotion(OrganizationRoles.BOOKING_MANAGER, OrganizationRoles.BASE)
+    ).toBe(false);
+    expect(
+      isDemotion(OrganizationRoles.BOOKING_MANAGER, OrganizationRoles.ADMIN)
+    ).toBe(false);
+  });
 });

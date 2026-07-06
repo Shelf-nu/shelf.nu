@@ -157,6 +157,74 @@ export const Role2PermissionMap: {
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
+  /**
+   * The booking-counter operator (issue #1800): manages bookings end to end
+   * (including check-out/check-in on ANY booking via the booking
+   * authorization spine), views everything booking-adjacent, administers
+   * nothing. Rows not present in #1800's draft matrix are marked; #1800's
+   * custodyAgreement/receipts rows were dropped (those entities no longer
+   * exist in this enum).
+   */
+  [OrganizationRoles.BOOKING_MANAGER]: {
+    [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
+    [PermissionEntity.booking]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.checkout,
+      PermissionAction.checkin,
+      PermissionAction.delete,
+      PermissionAction.archive,
+      PermissionAction.manageAssets,
+      PermissionAction.cancel,
+      PermissionAction.export,
+    ],
+    // not in #1800 (entity added later): booking managers comment on bookings
+    [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    // not in #1800: BASE/SELF_SERVICE parity floor — a role meant to "view
+    // everything" should not rank below BASE on audits; trim if undesired
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
+    [PermissionEntity.qr]: [PermissionAction.read],
+    [PermissionEntity.category]: [PermissionAction.read],
+    [PermissionEntity.customField]: [PermissionAction.read],
+    [PermissionEntity.location]: [PermissionAction.read],
+    // not in #1800: read-only, matches the location read grant above
+    [PermissionEntity.locationNote]: [PermissionAction.read],
+    [PermissionEntity.tag]: [PermissionAction.read],
+    [PermissionEntity.teamMember]: [PermissionAction.read],
+    [PermissionEntity.teamMemberProfile]: [PermissionAction.read],
+    [PermissionEntity.workspace]: [],
+    [PermissionEntity.dashboard]: [],
+    [PermissionEntity.generalSettings]: [],
+    // not in #1800: the booking form's working-hours validation reads this
+    [PermissionEntity.workingHours]: [PermissionAction.read],
+    [PermissionEntity.subscription]: [],
+    [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.note]: [PermissionAction.read],
+    [PermissionEntity.scan]: [PermissionAction.read],
+    [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.assetReminders]: [],
+    // not in #1800 (entity added later): admin-facing notes stay hidden
+    [PermissionEntity.teamMemberNote]: [],
+    // not in #1800: booking managers fulfil model-request bookings
+    [PermissionEntity.assetModel]: [PermissionAction.read],
+    [PermissionEntity.emailSettings]: [],
+    // not in #1800: own account pages — every role has these
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
+    [PermissionEntity.update]: [PermissionAction.read],
+    [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+  },
   [OrganizationRoles.ADMIN]: {
     [PermissionEntity.asset]: [
       PermissionAction.create,

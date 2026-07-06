@@ -17,6 +17,8 @@ export function useUserRoleHelper() {
   const isSelfService =
     roles?.includes(OrganizationRoles.SELF_SERVICE) || false;
   const isBase = roles?.includes(OrganizationRoles.BASE) || false;
+  const isBookingManager =
+    roles?.includes(OrganizationRoles.BOOKING_MANAGER) || false;
 
   /** A lot of actions share the same permissions for base & self service */
   const isBaseOrSelfService = isBase || isSelfService;
@@ -28,6 +30,7 @@ export function useUserRoleHelper() {
     isAdministratorOrOwner,
     isSelfService,
     isBase,
+    isBookingManager,
     isBaseOrSelfService,
   };
 }

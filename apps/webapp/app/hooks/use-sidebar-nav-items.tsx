@@ -68,7 +68,7 @@ export type NavItem =
 export function useSidebarNavItems() {
   const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
     useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isBookingManager } = useUserRoleHelper();
   const currentOrganization = useCurrentOrganization();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
 
@@ -110,7 +110,8 @@ export function useSidebarNavItems() {
       title: "Home",
       to: "/home",
       Icon: HomeIcon,
-      hidden: isBaseOrSelfService,
+      // Booking managers have no dashboard permission (issue #1800)
+      hidden: isBaseOrSelfService || isBookingManager,
     },
     {
       type: "child",
@@ -173,7 +174,8 @@ export function useSidebarNavItems() {
       type: "child",
       title: "Reminders",
       Icon: AlarmClockIcon,
-      hidden: isBaseOrSelfService,
+      // Booking managers have no assetReminders permission (issue #1800)
+      hidden: isBaseOrSelfService || isBookingManager,
       to: "/reminders",
     },
     {
@@ -214,7 +216,8 @@ export function useSidebarNavItems() {
       type: "parent",
       title: "Workspace settings",
       Icon: SettingsIcon,
-      hidden: isBaseOrSelfService,
+      // Booking managers administer nothing (issue #1800)
+      hidden: isBaseOrSelfService || isBookingManager,
       children: [
         {
           title: "General",

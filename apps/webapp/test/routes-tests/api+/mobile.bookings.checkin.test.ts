@@ -35,6 +35,12 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: external service — we mock the booking checkin to avoid database calls
+// why: the authorization spine fetches the booking's custodian before
+// processing; resolve it to the session user so the guard passes
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
+}));
+
 vi.mock("~/modules/booking/service.server", () => ({
   checkinBooking: vi.fn(),
 }));
@@ -63,6 +69,7 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -102,6 +109,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
     // Default: admin role + explicit check-in NOT required (quick check-in OK).
     (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (db.booking.findFirst as any).mockResolvedValue({
+      custodianUserId: "user-1",
+    });
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: false,
       requireExplicitCheckinForSelfService: false,
@@ -159,6 +169,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
     // Admin in a workspace that mandates explicit (scan/select) check-in for
     // admins — quick "check in all" must be refused, mirroring the web policy.
     (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (db.booking.findFirst as any).mockResolvedValue({
+      custodianUserId: "user-1",
+    });
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: true,
       requireExplicitCheckinForSelfService: false,

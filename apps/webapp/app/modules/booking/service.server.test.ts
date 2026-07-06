@@ -458,7 +458,16 @@ describe("createBooking", () => {
         },
       },
       include: {
-        custodianUser: true,
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+            email: true,
+          },
+        },
         custodianTeamMember: true,
         organization: true,
         tags: {
@@ -558,7 +567,16 @@ describe("createBooking", () => {
         },
       },
       include: {
-        custodianUser: true,
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+            email: true,
+          },
+        },
         custodianTeamMember: true,
         organization: true,
         tags: {
@@ -763,6 +781,7 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
+      status: BookingStatus.ONGOING,
       bookingAssets: [
         {
           asset: { id: "asset-1", assetKits: [] },
@@ -812,6 +831,7 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
+      status: BookingStatus.ONGOING,
       assets: [
         { id: "asset-1", kitId: null },
         { id: "asset-2", kitId: null },
@@ -2292,8 +2312,8 @@ describe("checkoutBooking", () => {
     );
   });
 
-  it("should handle checkout for non-reserved booking", async () => {
-    expect.assertions(1);
+  it("rejects checkout for a non-reserved booking (status guard)", async () => {
+    expect.assertions(2);
 
     const mockBooking = {
       ...mockBookingData,
@@ -2302,14 +2322,11 @@ describe("checkoutBooking", () => {
     };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue({
-      ...mockBooking,
-      status: BookingStatus.ONGOING,
-    });
 
-    const result = await checkoutBooking(mockCheckoutParams);
-    expect(result).toBeDefined();
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      "can't be checked out in its current status"
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   /**
@@ -3215,20 +3232,17 @@ describe("checkinBooking", () => {
     });
   });
 
-  it("should handle checkin for non-ongoing booking", async () => {
-    expect.assertions(1);
+  it("rejects checkin for a non-ongoing booking (status guard)", async () => {
+    expect.assertions(2);
 
     const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue({
-      ...mockBooking,
-      status: BookingStatus.COMPLETE,
-    });
 
-    const result = await checkinBooking(mockCheckinParams);
-    expect(result).toBeDefined();
+    await expect(checkinBooking(mockCheckinParams)).rejects.toThrow(
+      "can't be checked in in its current status"
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("should schedule auto-archive when enabled", async () => {

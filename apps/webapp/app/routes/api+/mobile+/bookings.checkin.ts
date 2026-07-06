@@ -51,7 +51,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const explicitCheckinRequired =
-      (role === OrganizationRoles.ADMIN &&
+      // Booking managers follow the admin policy (web parity).
+      ((role === OrganizationRoles.ADMIN ||
+        role === OrganizationRoles.BOOKING_MANAGER) &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
       (role === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService);

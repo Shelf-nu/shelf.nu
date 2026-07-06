@@ -33,6 +33,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   // why: the route premium-gates with assertMobileCanUseBookings; mock it so
   // the gate is a no-op in these tests (mirrors the sibling booking tests).
   assertMobileCanUseBookings: vi.fn(),
+  // why: the authorization spine resolves the caller's role
+  getMobileUserContext: vi.fn(),
+}));
+
+// why: the authorization spine fetches the booking's custodian first
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
 }));
 
 // why: external service — we mock the partial checkout to avoid database calls
@@ -53,10 +60,12 @@ vi.mock("~/utils/error", () => ({
 }));
 
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -99,6 +108,10 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (db.booking.findFirst as any).mockResolvedValue({
+      custodianUserId: "user-1",
+    });
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
   });
 
   it("accepts legacy { bookingId, assetIds } payload with INDIVIDUAL semantics", async () => {

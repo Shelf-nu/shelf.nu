@@ -66,7 +66,7 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
   ];
 
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isBookingManager } = useUserRoleHelper();
   /** If user is self service, remove the extra items */
   if (isBaseOrSelfService) {
     items = items.filter(
@@ -74,6 +74,23 @@ export default function SettingsPage() {
         ![
           "custom-fields",
           "team",
+          "general",
+          "bookings",
+          "emails",
+          "asset-models",
+        ].includes(item.to)
+    );
+  }
+
+  /**
+   * Booking managers hold teamMember read (issue #1800) so the Team tab
+   * stays; every admin tab would 403 against their empty settings rows.
+   */
+  if (isBookingManager) {
+    items = items.filter(
+      (item) =>
+        ![
+          "custom-fields",
           "general",
           "bookings",
           "emails",

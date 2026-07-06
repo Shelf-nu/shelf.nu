@@ -146,6 +146,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isAdministrator,
     isOwner,
     isSelfService,
+    isBookingManager,
   } = useUserRoleHelper();
 
   const zo = useZorm(
@@ -433,7 +434,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={
                   !isOwner &&
-                  ((isAdministrator &&
+                  (((isAdministrator || isBookingManager) &&
                     bookingSettings.requireExplicitCheckinForAdmin) ||
                     (isSelfService &&
                       bookingSettings.requireExplicitCheckinForSelfService))

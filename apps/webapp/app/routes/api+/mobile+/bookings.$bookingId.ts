@@ -208,7 +208,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
-      (role === OrganizationRoles.ADMIN &&
+      ((role === OrganizationRoles.ADMIN ||
+        role === OrganizationRoles.BOOKING_MANAGER) &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
       (role === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)

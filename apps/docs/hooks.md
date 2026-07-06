@@ -183,6 +183,7 @@ The useUserRoleHelper function returns an object(roles) and helper boolean attri
 - `isAdministratorOrOwner`: A boolean value indicating whether the user has either the 'ADMIN' or 'OWNER'role.
 - `isSelfService`: A boolean value indicating whether the user has the 'SELF_SERVICE' role.
 - `isBase`: A boolean value indicating whether the user has the 'BASE' role.
+- `isBookingManager`: A boolean value indicating whether the user has the 'BOOKING_MANAGER' role.
 - `isBaseOrSelfService`: A boolean value indicating whether the user has either the BASE or 'SELF_SERVICE' role.
 
 **Usage:**

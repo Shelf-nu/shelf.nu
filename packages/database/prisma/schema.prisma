@@ -1013,6 +1013,11 @@ enum OrganizationRoles {
   BASE
   OWNER
   SELF_SERVICE
+  // Operational role for people who run the booking counter: full booking
+  // processing (incl. check-out/check-in on ANY booking), read+custody on
+  // assets/kits, read-only reference data, zero administration. See the
+  // Role2PermissionMap entry and issue #1800.
+  BOOKING_MANAGER
 }
 
 model SsoDetails {

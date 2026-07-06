@@ -43,6 +43,15 @@ const ROLE_PERMISSIONS: Record<
     audit: ["read", "update"],
     kit: ["read", "custody"],
   },
+  // Mirrors the webapp Role2PermissionMap entry (issue #1800). Booking
+  // detail buttons are server-flag-driven, so this activates scanner-action
+  // parity at the next binary release; older binaries fail closed.
+  BOOKING_MANAGER: {
+    asset: ["read", "custody"],
+    booking: ["read", "create", "update", "checkout", "checkin"],
+    audit: ["read", "update"],
+    kit: ["read", "custody"],
+  },
   BASE: {
     asset: ["read"],
     booking: ["read"],

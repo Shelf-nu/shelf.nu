@@ -1661,7 +1661,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "checkIn": {
         // Enforce explicit check-in requirement based on role and settings
         if (
-          role === OrganizationRoles.ADMIN &&
+          // Booking managers are admin-class operationally, so the admin
+          // explicit-check-in policy applies to them too (unlike OWNER).
+          (role === OrganizationRoles.ADMIN ||
+            role === OrganizationRoles.BOOKING_MANAGER) &&
           bookingSettings.requireExplicitCheckinForAdmin
         ) {
           throw new ShelfError({

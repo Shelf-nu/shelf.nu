@@ -134,7 +134,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // And the booking lookup must have been scoped to the attacker's org
     expect(db.booking.findFirst).toHaveBeenCalledWith({
       where: { id: "victim-booking", organizationId: "org-attacker" },
-      select: { id: true },
+      select: { id: true, custodianUserId: true },
     });
   });
 
@@ -158,6 +158,9 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // Booking IS in the requester's org
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      // session user is the custodian: passes the visibility guard without
+      // see-all rights (mirrors the overview loader rule)
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -183,6 +186,9 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   it("requests `bookingNote.create` permission on POST", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      // session user is the custodian: passes the visibility guard without
+      // see-all rights (mirrors the overview loader rule)
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -211,6 +217,9 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // delete notes they shouldn't be able to touch.
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      // session user is the custodian: passes the visibility guard without
+      // see-all rights (mirrors the overview loader rule)
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -236,6 +245,9 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   it("deletes a note and forwards organizationId to the service on the happy path", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      // session user is the custodian: passes the visibility guard without
+      // see-all rights (mirrors the overview loader rule)
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",

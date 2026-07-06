@@ -31,6 +31,9 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
   assertMobileCanUseBookings: vi.fn(),
+  // why: the authorization spine resolves the caller's role for the
+  // custodian check; ADMIN passes for any booking
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: external service — we mock the booking checkout to avoid database calls
@@ -57,6 +60,7 @@ vi.mock("~/utils/error", () => ({
 }));
 
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
@@ -105,8 +109,10 @@ describe("POST /api/mobile/bookings/checkout", () => {
     (db.booking.findFirst as any).mockResolvedValue({
       from: BOOKING_FROM,
       to: BOOKING_TO,
+      custodianUserId: "user-1",
     });
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
   });
 
   it("should checkout a booking and pass its window so the conflict guard fires", async () => {

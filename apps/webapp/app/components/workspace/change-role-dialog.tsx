@@ -28,6 +28,7 @@ const roleOptions: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.BASE]: "Base",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
+  [OrganizationRoles.BOOKING_MANAGER]: "Booking manager",
 };
 
 interface EntityCounts {
