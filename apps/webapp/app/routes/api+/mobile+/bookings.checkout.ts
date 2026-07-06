@@ -3,11 +3,13 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  getMobileUserContext,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
+import { assertBookingProcessAccess } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -56,7 +58,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // foreign-org id 404s.
     const existingBooking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      select: { from: true, to: true, custodianUserId: true },
     });
 
     if (!existingBooking) {
@@ -65,6 +67,17 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
+
+    // Authorization spine (web parity): SELF_SERVICE may only process
+    // bookings they are custodian of; the permission action alone is
+    // org-wide. Mobile must never be more permissive than the web.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    assertBookingProcessAccess({
+      booking: existingBooking,
+      userId: user.id,
+      role,
+      action: "check out",
+    });
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native

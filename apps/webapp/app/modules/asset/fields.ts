@@ -1,4 +1,5 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
+import { CUSTODIAN_USER_SAFE_SELECT } from "~/modules/booking/constants";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {
@@ -140,7 +141,7 @@ export const getAssetOverviewFields = (
             name: true,
             from: true,
             custodianTeamMember: true,
-            custodianUser: true,
+            custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           },
         },
       },

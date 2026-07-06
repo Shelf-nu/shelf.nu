@@ -34,6 +34,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
+import { CUSTODIAN_USER_SAFE_SELECT } from "~/modules/booking/constants";
 import { getBookings } from "~/modules/booking/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
@@ -206,7 +207,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["ONGOING", "OVERDUE"],
         extraInclude: {
           custodianTeamMember: true,
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -223,7 +224,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         bookingTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         extraInclude: {
           custodianTeamMember: true,
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -237,7 +238,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["OVERDUE"],
         extraInclude: {
           custodianTeamMember: true,
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -251,7 +252,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["ONGOING"],
         extraInclude: {
           custodianTeamMember: true,
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           _count: { select: { bookingAssets: true } },
         },
       }),

@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -10,6 +11,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { assertBookingProcessAccess } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -81,6 +83,26 @@ export async function action({ request }: ActionFunctionArgs) {
       ...getClientHint(request),
       ...(timeZone ? { timeZone } : {}),
     };
+
+    // Authorization spine (web parity): SELF_SERVICE may only process
+    // bookings they are custodian of. Org-scoped fetch, so foreign-org ids
+    // 404 before this runs.
+    const bookingToProcess = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { custodianUserId: true },
+    });
+    if (!bookingToProcess) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+    assertBookingProcessAccess({
+      booking: bookingToProcess,
+      userId: user.id,
+      role,
+      action: "check in",
+    });
 
     const booking = await checkinBooking({
       id: bookingId,

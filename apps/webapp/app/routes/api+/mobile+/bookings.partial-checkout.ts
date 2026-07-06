@@ -1,12 +1,15 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  getMobileUserContext,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import { assertBookingProcessAccess } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -81,6 +84,27 @@ export async function action({ request }: ActionFunctionArgs) {
       ...getClientHint(request),
       ...(timeZone ? { timeZone } : {}),
     };
+
+    // Authorization spine (parity with the partial-CHECKIN endpoint and the
+    // web scanner routes): SELF_SERVICE may only process bookings they are
+    // custodian of; the permission action alone is org-wide.
+    const bookingToProcess = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { custodianUserId: true },
+    });
+    if (!bookingToProcess) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    assertBookingProcessAccess({
+      booking: bookingToProcess,
+      userId: user.id,
+      role,
+      action: "check out",
+    });
 
     const result = await partialCheckoutBooking({
       id: bookingId,

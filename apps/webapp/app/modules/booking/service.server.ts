@@ -86,6 +86,7 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
+  CUSTODIAN_USER_SAFE_SELECT,
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
@@ -2197,6 +2198,25 @@ export async function checkoutBooking({
      * (other booking checkouts, direct custody assignments, quantity
      * adjustments) that could oversubscribe the same physical pool.
      */
+    // Reject ineligible booking statuses BEFORE any mutation (mirrors the
+    // partialCheckoutBooking guard). A FULL checkout starts a RESERVED
+    // booking; continuing an ONGOING/OVERDUE booking flows through the
+    // partial/remaining-assets paths, which carry their own status guards.
+    // Both the web action and the mobile endpoint call this service
+    // directly, so without this guard a direct POST against a
+    // DRAFT/ONGOING/COMPLETE/CANCELLED/ARCHIVED booking would flip asset
+    // statuses and re-run the whole checkout side-effect chain.
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message:
+          "This booking can't be checked out in its current status. Only reserved bookings can be checked out.",
+        shouldBeCaptured: false,
+      });
+    }
+
     const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
       isQuantityTracked(ba.asset)
     );
@@ -3610,6 +3630,25 @@ export async function checkinBooking({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // Reject ineligible booking statuses BEFORE any mutation (mirrors the
+    // partialCheckoutBooking guard). Only checked-out bookings can be
+    // checked in; a direct POST against a DRAFT/RESERVED/COMPLETE booking
+    // would otherwise force it straight to COMPLETE and corrupt asset
+    // statuses.
+    if (
+      bookingFound.status !== BookingStatus.ONGOING &&
+      bookingFound.status !== BookingStatus.OVERDUE
+    ) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message:
+          "This booking can't be checked in in its current status. Only ongoing or overdue bookings can be checked in.",
+        shouldBeCaptured: false,
+      });
+    }
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.COMPLETE,
@@ -5265,7 +5304,7 @@ export async function partialCheckinBooking({
         where: { id },
         include: {
           bookingAssets: true,
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           custodianTeamMember: true,
           _count: { select: { bookingAssets: true } },
         },
@@ -5278,7 +5317,7 @@ export async function partialCheckinBooking({
           data: { status: BookingStatus.COMPLETE },
           include: {
             bookingAssets: true,
-            custodianUser: true,
+            custodianUser: CUSTODIAN_USER_SAFE_SELECT,
             custodianTeamMember: true,
             _count: { select: { bookingAssets: true } },
           },
@@ -6499,7 +6538,7 @@ export async function partialCheckoutBooking({
         where: { id },
         include: {
           bookingAssets: { include: { asset: true } },
-          custodianUser: true,
+          custodianUser: CUSTODIAN_USER_SAFE_SELECT,
           custodianTeamMember: true,
           _count: { select: { bookingAssets: true } },
         },
@@ -9099,7 +9138,7 @@ export async function getBookingsForCalendar(params: {
       tags,
       extraInclude: {
         custodianTeamMember: true,
-        custodianUser: true,
+        custodianUser: CUSTODIAN_USER_SAFE_SELECT,
         creator: {
           select: {
             id: true,

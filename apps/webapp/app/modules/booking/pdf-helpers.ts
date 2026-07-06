@@ -45,7 +45,16 @@ export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
     include: {
       custodianTeamMember: true;
-      custodianUser: true;
+      custodianUser: {
+        select: {
+          id: true;
+          firstName: true;
+          lastName: true;
+          displayName: true;
+          profilePicture: true;
+          email: true;
+        };
+      };
       tags: typeof TAG_WITH_COLOR_SELECT;
     };
   }>;

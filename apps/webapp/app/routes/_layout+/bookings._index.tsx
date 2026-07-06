@@ -574,7 +574,16 @@ const ListBookingsContent = ({
       };
       from: true;
       to: true;
-      custodianUser: true;
+      custodianUser: {
+        select: {
+          id: true;
+          firstName: true;
+          lastName: true;
+          displayName: true;
+          profilePicture: true;
+          email: true;
+        };
+      };
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
       // Included via `extraInclude` in the loader above so the

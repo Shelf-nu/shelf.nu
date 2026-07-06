@@ -20,6 +20,7 @@ import {
   deleteBookingNote,
 } from "~/modules/booking-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assertBookingVisibility } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -51,7 +52,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Parent route already enforces booking.read permission
     // Only check bookingNote.read permission here
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -65,6 +66,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
       }),
     ]);
+
+    // Same visibility rule as the overview loader: without see-all rights,
+    // only the booking's custodian may view its activity. Without this, the
+    // tab (and its data payload) is reachable by direct URL for any booking
+    // in the org.
+    assertBookingVisibility({ booking, userId, canSeeAllBookings });
 
     const header: HeaderData = {
       title: `${booking.name}'s activity`,
@@ -101,7 +108,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const requiredAction =
       method === "DELETE" ? PermissionAction.delete : PermissionAction.create;
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -119,7 +126,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true },
+      select: { id: true, custodianUserId: true },
     });
 
     if (!booking) {
@@ -132,6 +139,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // Visibility parity with the loader: users who cannot view a booking
+    // must not be able to write or delete notes on it either.
+    assertBookingVisibility({ booking, userId, canSeeAllBookings });
 
     switch (method) {
       case "POST": {

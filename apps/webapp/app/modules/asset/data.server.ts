@@ -6,6 +6,7 @@ import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { CUSTODIAN_USER_SAFE_SELECT } from "~/modules/booking/constants";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -241,7 +242,7 @@ export async function simpleModeLoader({
                       to: true,
                       description: true,
                       custodianTeamMember: true,
-                      custodianUser: true,
+                      custodianUser: CUSTODIAN_USER_SAFE_SELECT,
                       tags: TAG_WITH_COLOR_SELECT,
                       creator: {
                         select: {

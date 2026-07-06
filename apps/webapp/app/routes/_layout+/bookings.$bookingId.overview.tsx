@@ -80,7 +80,10 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  assertBookingProcessAccess,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -1361,6 +1364,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
+
+    /**
+     * Authorization spine for booking processing: every check-out/check-in
+     * intent must prove the caller may process THIS booking, not just that
+     * their role holds the permission action. The loader's visibility 403
+     * does not protect actions (they are directly POST-able), and
+     * SELF_SERVICE holds checkout/checkin org-wide in the permission matrix
+     * while only being allowed to process bookings they are custodian of.
+     * Status eligibility is enforced separately in the service layer.
+     */
+    const PROCESS_INTENTS = [
+      "checkOut",
+      "checkOutRemaining",
+      "checkIn",
+      "partial-checkin",
+      "partial-checkout",
+    ] as const;
+    if ((PROCESS_INTENTS as readonly string[]).includes(intent)) {
+      const bookingToProcess = await db.booking.findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { custodianUserId: true },
+      });
+      assertBookingProcessAccess({
+        booking: bookingToProcess,
+        userId,
+        role,
+        action:
+          intent === "checkIn" || intent === "partial-checkin"
+            ? "check in"
+            : "check out",
+      });
+    }
 
     /**
      * Handle delete before fetching booking info.

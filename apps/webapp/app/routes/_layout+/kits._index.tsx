@@ -39,6 +39,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { CUSTODIAN_USER_SAFE_SELECT } from "~/modules/booking/constants";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -169,7 +170,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                             // needs to supply it.
                             custodianUserId: true,
                             custodianTeamMember: true,
-                            custodianUser: true,
+                            custodianUser: CUSTODIAN_USER_SAFE_SELECT,
                           },
                         },
                       },

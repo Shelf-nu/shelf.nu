@@ -55,6 +55,7 @@ import {
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assertBookingProcessAccess } from "~/utils/booking-authorization.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -136,7 +137,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         request,
         entity: PermissionEntity.booking,
-        action: PermissionAction.update,
+        // Mirrors the action: this scanner fulfils AND checks out.
+        action: PermissionAction.checkout,
       }
     );
 
@@ -147,6 +149,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+    });
+
+    // Authorization spine (see the action): custodian-only for SELF_SERVICE.
+    assertBookingProcessAccess({
+      booking,
+      userId,
+      role,
+      action: "check out",
     });
 
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
@@ -262,11 +272,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    // This route performs the RESERVED -> ONGOING checkout transition, so it
+    // is gated on the checkout action (update alone would let roles that can
+    // edit bookings but not check them out reach a checkout side effect).
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
-      action: PermissionAction.update,
+      action: PermissionAction.checkout,
     });
 
     const formData = await request.formData();
@@ -283,7 +296,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      select: { from: true, to: true, custodianUserId: true },
+    });
+
+    // Authorization spine: prove the caller may process THIS booking
+    // (SELF_SERVICE custodian-only), not just that their role can check out.
+    assertBookingProcessAccess({
+      booking: basicBookingInfo,
+      userId,
+      role,
+      action: "check out",
     });
 
     await fulfilModelRequestsAndCheckout({

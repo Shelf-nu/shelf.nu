@@ -1,10 +1,29 @@
 import type { Prisma } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
+/**
+ * Safe field set whenever a booking payload carries its custodian's User.
+ * The full User row must never ride along: it includes billing/auth fields
+ * (Stripe customerId, hasUnpaidInvoice, sso flags) that no booking surface
+ * needs. Everything display-side resolves names via resolveUserDisplayName
+ * (displayName/firstName/lastName); email feeds notifications/CSV/PDF;
+ * profilePicture feeds avatars (web + companion).
+ */
+export const CUSTODIAN_USER_SAFE_SELECT = {
+  select: {
+    id: true,
+    firstName: true,
+    lastName: true,
+    displayName: true,
+    profilePicture: true,
+    email: true,
+  },
+} satisfies Prisma.UserDefaultArgs;
+
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
-  custodianUser: true,
+  custodianUser: CUSTODIAN_USER_SAFE_SELECT,
   // Include creator details so the notification resolver can add the
   // booking creator as a recipient when the org setting is enabled
   creator: {
@@ -101,7 +120,7 @@ export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
-  custodianUser: true,
+  custodianUser: CUSTODIAN_USER_SAFE_SELECT,
   tags: TAG_WITH_COLOR_SELECT,
 } as Prisma.BookingInclude;
 

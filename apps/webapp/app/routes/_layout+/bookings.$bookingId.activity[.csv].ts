@@ -1,6 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { assertBookingVisibility } from "~/utils/booking-authorization.server";
 import { exportBookingNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { buildContentDisposition, error, getParams } from "~/utils/http.server";
@@ -19,7 +20,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -35,8 +36,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const booking = await db.booking.findFirstOrThrow({
       where: { id: bookingId, organizationId },
-      select: { name: true },
+      select: { name: true, custodianUserId: true },
     });
+
+    // Same visibility rule as the activity tab and overview loaders — the
+    // CSV must not expose an activity log the tab itself would 403 on.
+    assertBookingVisibility({ booking, userId, canSeeAllBookings });
 
     const csv = await exportBookingNotesToCsv({
       request,

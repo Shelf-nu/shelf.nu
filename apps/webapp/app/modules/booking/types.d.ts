@@ -20,7 +20,16 @@ export type BookingWithIncludes = Prisma.BookingGetPayload<{
   include: {
     bookingAssets: true;
     custodianTeamMember: true;
-    custodianUser: true;
+    custodianUser: {
+      select: {
+        id: true;
+        firstName: true;
+        lastName: true;
+        displayName: true;
+        profilePicture: true;
+        email: true;
+      };
+    };
   };
 }>;
 
@@ -45,7 +54,16 @@ export type BookingWithCustodians = Prisma.BookingGetPayload<{
     bookingAssets: true;
     from: true;
     to: true;
-    custodianUser: true;
+    custodianUser: {
+      select: {
+        id: true;
+        firstName: true;
+        lastName: true;
+        displayName: true;
+        profilePicture: true;
+        email: true;
+      };
+    };
     custodianTeamMember: true;
   };
 }>;

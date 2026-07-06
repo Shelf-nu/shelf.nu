@@ -29,6 +29,7 @@ import {
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assertBookingProcessAccess } from "~/utils/booking-authorization.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -395,11 +396,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.checkin,
+    });
+
+    // Same direct-POST protection as the checkout twin: the loader's
+    // eligibility/custodian guard does not protect the action, and
+    // PermissionAction.checkin is granted to SELF_SERVICE org-wide.
+    const bookingToProcess = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId, organizationId },
+      select: { custodianUserId: true },
+    });
+    assertBookingProcessAccess({
+      booking: bookingToProcess,
+      userId,
+      role,
+      action: "check in",
     });
 
     const formData = await request.formData();
