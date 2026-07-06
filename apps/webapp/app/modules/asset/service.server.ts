@@ -1052,7 +1052,15 @@ export async function getAssets(params: {
             }),
             ...extraInclude,
           },
-          orderBy: { [orderBy]: orderDirection },
+          // Stable `id` tiebreaker for deterministic skip/take paging when
+          // rows tie on the sort key (bulk-imported assets share createdAt
+          // down to the millisecond). Mirrors the tiebreaker the advanced
+          // index uses (parseSortingOptions in query.server.ts). Skipped when
+          // the caller already sorts by id.
+          orderBy: [
+            { [orderBy]: orderDirection },
+            ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
+          ],
         }),
         db.asset.count({ where: assetWhere }),
       ]);

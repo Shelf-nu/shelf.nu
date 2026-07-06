@@ -747,6 +747,13 @@ model Scan {
   // Indexes for foreign keys
   @@index([qrId])
   @@index([userId])
+  // Serves getScanByQrId (last-scan card on asset overview + kit detail):
+  // WHERE rawQrId = ? ORDER BY createdAt DESC LIMIT 1. Scan is a global,
+  // append-only table (public QR hits + companion scans, never pruned), so
+  // without this index every page view pays a full sequential scan of all
+  // tenants' scan history. rawQrId seeks the QR; createdAt lets the top-1
+  // sort early-terminate (Postgres walks the btree backwards for DESC).
+  @@index([rawQrId, createdAt])
 }
 
 model Location {
@@ -1532,6 +1539,13 @@ model Booking {
   // Speeds up status filtering when joining from Asset → Booking
   // (e.g. fetching ONGOING/OVERDUE bookings for asset custodian display)
   @@index([status])
+  // Serves the bookings index default view (getBookings): WHERE
+  // organizationId = ? ORDER BY "from" ASC LIMIT n. Column order (org first,
+  // then the sort key, then id as the pagination tiebreaker) lets Postgres
+  // seek the org and read the page straight off the index instead of
+  // scanning + sorting every booking in the workspace. Same pattern as
+  // Asset_organizationId_createdAt_id_idx.
+  @@index([organizationId, from, id])
 }
 
 model BookingSettings {
@@ -1606,7 +1620,14 @@ model PartialBookingCheckout {
   // unit count submitted for the matching `bookingAssetId`. Empty default
   // keeps legacy rows (written before Wave B) readable without a backfill.
   quantities    Int[]    @default([])
-  checkoutCount Int // Number of assets checked out (for quick reference)
+  // BookingAsset (slice) IDs per entry in `assetIds` (positional alignment
+  // with `assetIds`/`quantities`). Disambiguates a QUANTITY_TRACKED asset that
+  // is booked as multiple slices (e.g. standalone + kit member). An empty
+  // string `""` element means "no specific slice known → greedy attribution";
+  // Prisma `String[]` cannot hold `null`, so `""` is the sentinel. Empty
+  // default keeps legacy rows readable without a backfill.
+  bookingAssetIds String[] @default([])
+  checkoutCount   Int // Number of assets checked out (for quick reference)
 
   // Metadata
   checkoutTimestamp DateTime @default(now()) @db.Timestamptz(3)

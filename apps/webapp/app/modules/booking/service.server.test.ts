@@ -45,12 +45,15 @@ import {
   getExistingBookingDetails,
   assertKitsAddableToActiveBooking,
   getOngoingBookingForAsset,
+  getMinimalBookings,
+  bookingDraftVisibilityClause,
   bulkArchiveBookings,
   bulkCancelBookings,
   // Phase 3c helpers
   computeBookingAssetRemaining,
   computeBookingAssetSliceRemaining,
   attributeDispositionsByBookingAsset,
+  attributeCategorizedDispositionsByBookingAsset,
   isBookingFullyCheckedIn,
   // Test helper functions
   getActionTextFromTransition,
@@ -5680,11 +5683,11 @@ describe("computeBookingAssetSliceRemaining", () => {
 });
 
 describe("attributeDispositionsByBookingAsset (legacy NULL + tagged mix)", () => {
-  it("attributes tagged logs exactly and greedy-fills NULL logs (kit-driven first)", () => {
+  it("attributes tagged logs exactly and greedy-fills NULL logs (standalone first)", () => {
     // Two slices of the same asset: a kit-driven slice (50) and a
     // standalone slice (33). One NEW log is tagged to the standalone
     // slice (20); one LEGACY log has no bookingAssetId (40) and must be
-    // greedy-filled — kit-driven slice first.
+    // greedy-filled — standalone slice first.
     const result = attributeDispositionsByBookingAsset({
       bookingAssetRows: [
         { id: "ba-standalone", quantity: 33, assetKitId: null },
@@ -5696,10 +5699,50 @@ describe("attributeDispositionsByBookingAsset (legacy NULL + tagged mix)", () =>
       ],
     });
 
-    // Kit-driven slice fills the 40-unit legacy pool first (capacity 50).
-    expect(result.get("ba-kit")).toBe(40);
-    // Standalone slice keeps only its exactly-tagged 20.
-    expect(result.get("ba-standalone")).toBe(20);
+    // Standalone slice takes its exactly-tagged 20 first, then the greedy
+    // pass fills its remaining capacity (33 − 20 = 13) before touching the
+    // kit → 20 + 13 = 33.
+    expect(result.get("ba-standalone")).toBe(33);
+    // Kit-driven slice absorbs the remaining legacy pool (40 − 13 = 27).
+    expect(result.get("ba-kit")).toBe(27);
+  });
+});
+
+describe("attributeCategorizedDispositionsByBookingAsset (legacy NULL + tagged mix)", () => {
+  it("attributes tagged logs exactly and greedy-fills NULL logs standalone-first", () => {
+    // Two slices of the same asset: a kit-driven slice (50) and a
+    // standalone slice (33). One NEW log is tagged to the standalone slice
+    // (RETURN 20); one LEGACY log has no bookingAssetId (RETURN 40) and must
+    // be greedy-filled standalone-first — consistent with the check-out
+    // fallback in `attributeDispositionsByBookingAsset` so both surfaces
+    // credit the same slice for identical untagged data.
+    const result = attributeCategorizedDispositionsByBookingAsset({
+      bookingAssetRows: [
+        { id: "ba-standalone", quantity: 33, assetKitId: null },
+        { id: "ba-kit", quantity: 50, assetKitId: "ak-1" },
+      ],
+      consumptionLogs: [
+        { bookingAssetId: "ba-standalone", category: "RETURN", quantity: 20 },
+        { bookingAssetId: null, category: "RETURN", quantity: 40 },
+      ],
+    });
+
+    // Standalone slice takes its exactly-tagged 20 first, then the greedy
+    // pass fills its remaining capacity (33 − 20 = 13) before touching the
+    // kit → 20 + 13 = 33 returned.
+    expect(result.get("ba-standalone")).toEqual({
+      returned: 33,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
+    // Kit-driven slice absorbs the remaining legacy pool (40 − 13 = 27).
+    expect(result.get("ba-kit")).toEqual({
+      returned: 27,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
   });
 });
 
@@ -7345,5 +7388,98 @@ describe("booking notes + events — qty-tracked axis", () => {
         content: expect.stringContaining("removed 80 units of"),
       })
     );
+  });
+});
+
+describe("bookingDraftVisibilityClause", () => {
+  it("shows non-DRAFT bookings to everyone and DRAFTs only to their creator", () => {
+    // The permission-sensitive rule shared by getBookings and
+    // getMinimalBookings. Locking its shape here so the two list queries
+    // cannot silently diverge on who can see a draft.
+    expect(bookingDraftVisibilityClause("user-1")).toEqual({
+      OR: [
+        { status: { not: "DRAFT" } },
+        { AND: [{ status: "DRAFT" }, { creatorId: "user-1" }] },
+      ],
+    });
+  });
+});
+
+describe("getMinimalBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("selects only the picker fields and applies the id sort tiebreaker", async () => {
+    // why: assert the slim projection + deterministic order, not DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({
+      organizationId: "org-1",
+      userId: "user-1",
+      statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    const arg = findMany.mock.calls[0][0];
+
+    // Slim select: exactly the columns the add-to-booking picker renders.
+    expect(arg.select).toEqual({
+      id: true,
+      name: true,
+      status: true,
+      from: true,
+      to: true,
+    });
+    // No heavy include, and no count query (only one findMany, no db.booking.count).
+    expect(arg.include).toBeUndefined();
+    expect(db.booking.count).not.toHaveBeenCalled();
+    // `from` primary + `id` tiebreaker => deterministic, unpaginated order.
+    expect(arg.orderBy).toEqual([{ from: "asc" }, { id: "asc" }]);
+    // Carries the shared DRAFT-visibility rule, scoped to the org + viewer.
+    expect(arg.where.organizationId).toBe("org-1");
+    expect(arg.where.AND).toEqual([bookingDraftVisibilityClause("user-1")]);
+    expect(arg.where.status).toEqual({
+      in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    });
+  });
+
+  it("defaults to excluding archived & cancelled when no statuses are given", async () => {
+    // why: stub the query so we can assert the default status where-clause
+    // getMinimalBookings builds, not real DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({ organizationId: "org-1", userId: "user-1" });
+
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.status).toEqual({
+      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+    });
+    // No custodian scope unless asked for.
+    expect(arg.where.custodianUserId).toBeUndefined();
+  });
+
+  it("scopes to a custodian when custodianUserId is provided (self-service)", async () => {
+    // why: stub the query so we can assert the custodian where-clause
+    // getMinimalBookings adds for self-service callers, not real DB behavior.
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+
+    await getMinimalBookings({
+      organizationId: "org-1",
+      userId: "user-1",
+      custodianUserId: "user-1",
+    });
+
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.custodianUserId).toBe("user-1");
   });
 });

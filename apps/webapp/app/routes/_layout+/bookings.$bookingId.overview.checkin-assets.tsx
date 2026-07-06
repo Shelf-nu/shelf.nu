@@ -135,7 +135,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Per-row attribution: ConsumptionLog now carries `bookingAssetId`,
      * letting us split a (booking, asset)'s dispositions across its
      * multiple BookingAsset slices (kit-driven + standalone). Legacy
-     * NULL-bookingAssetId rows get greedy-attributed (kit-driven first)
+     * NULL-bookingAssetId rows get greedy-attributed (standalone first)
      * by `attributeDispositionsByBookingAsset`.
      */
     const dispositionLogs =

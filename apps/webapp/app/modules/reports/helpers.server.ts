@@ -1010,7 +1010,9 @@ async function fetchOverdueRows(
 
   const bookings = await db.booking.findMany({
     where,
-    orderBy: { to: "asc" }, // Most overdue first (earliest scheduled end)
+    // Most overdue first (earliest scheduled end); `id` tiebreaker keeps
+    // skip/take paging deterministic for bookings sharing the same `to`.
+    orderBy: [{ to: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1408,7 +1410,9 @@ async function fetchIdleAssetRows(
         },
       },
     },
-    orderBy: { updatedAt: "asc" }, // Least recently updated first
+    // Least recently updated first; `id` tiebreaker keeps skip/take paging
+    // deterministic for assets sharing an `updatedAt` (bulk operations).
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1802,7 +1806,9 @@ async function fetchCustodyRows(
   // `refreshExpiredAssetImages` below without an extra round-trip.
   const custodyRecords = await db.custody.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -3042,7 +3048,9 @@ async function fetchInventoryRows(
   // extra round-trip.
   const assets = await db.asset.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -3791,7 +3799,9 @@ export async function assetActivityReport(
     const [events, totalCount] = await Promise.all([
       db.activityEvent.findMany({
         where,
-        orderBy: { occurredAt: "desc" },
+        // `id` tiebreaker keeps skip/take paging deterministic for events
+        // sharing an `occurredAt` (bulk mutations emit same-instant events).
+        orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
