@@ -987,9 +987,10 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
     const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
 
     // No bare `t.id = ` against an outer alias; must be a scoped EXISTS whose
-    // `t.id =` predicate lives inside a per-asset subquery.
-    expect(sql).toContain('SELECT 1 FROM "_AssetToTag" att');
-    expect(sql).toContain('JOIN "Tag" t ON att."B" = t.id');
+    // `t.id =` predicate lives inside a per-asset subquery. Tables are
+    // schema-qualified (`public.`) to match the rest of the module.
+    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
+    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
     expect(sql).toContain('WHERE att."A" = a.id AND t.id =');
   });
 

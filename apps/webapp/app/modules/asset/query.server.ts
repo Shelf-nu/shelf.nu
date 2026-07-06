@@ -1319,7 +1319,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // Handle "untagged" special case
       if (filter.value === "untagged") {
         return Prisma.sql`${whereClause} AND NOT EXISTS (
-          SELECT 1 FROM "_AssetToTag" att
+          SELECT 1 FROM public."_AssetToTag" att
           WHERE att."A" = a.id
         )`;
       }
@@ -1328,8 +1328,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // inner semantic and GROUP BY deduped it) — but self-contained, so the
       // slim pagination phase needs no outer `t`/`att` join.
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM "_AssetToTag" att
-        JOIN "Tag" t ON att."B" = t.id
+        SELECT 1 FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON att."B" = t.id
         WHERE att."A" = a.id AND t.id = ${filter.value}
       )`;
     }
@@ -1341,7 +1341,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // (an asset can't be both untagged and have tags)
       if (values.includes("untagged")) {
         return Prisma.sql`${whereClause} AND NOT EXISTS (
-          SELECT 1 FROM "_AssetToTag" att
+          SELECT 1 FROM public."_AssetToTag" att
           WHERE att."A" = a.id
         )`;
       }
@@ -1354,8 +1354,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         SELECT unnest(ARRAY[${valuesArray}]::text[]) AS required_tag
         EXCEPT
         SELECT t.id
-        FROM "_AssetToTag" att
-        JOIN "Tag" t ON t.id = att."B"
+        FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON t.id = att."B"
         WHERE att."A" = a.id
       )`;
     }
@@ -1372,7 +1372,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         if (tagIds.length === 0) {
           // Only "untagged" was selected - return assets with no tags
           return Prisma.sql`${whereClause} AND NOT EXISTS (
-            SELECT 1 FROM "_AssetToTag" att
+            SELECT 1 FROM public."_AssetToTag" att
             WHERE att."A" = a.id
           )`;
         }
@@ -1383,10 +1383,10 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (SELECT 1 FROM "_AssetToTag" att WHERE att."A" = a.id)
+          NOT EXISTS (SELECT 1 FROM public."_AssetToTag" att WHERE att."A" = a.id)
           OR EXISTS (
-            SELECT 1 FROM "_AssetToTag" att
-            JOIN "Tag" t ON att."B" = t.id
+            SELECT 1 FROM public."_AssetToTag" att
+            JOIN public."Tag" t ON att."B" = t.id
             WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
           )
         )`;
@@ -1399,8 +1399,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // Any-tag EXISTS (see the `contains` branch) — keeps the slim phase free
       // of the fanning tag join while preserving match semantics.
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM "_AssetToTag" att
-        JOIN "Tag" t ON att."B" = t.id
+        SELECT 1 FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON att."B" = t.id
         WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
       )`;
     }
@@ -1412,7 +1412,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (values.includes("untagged")) {
         // If "untagged" is included, we want to ensure assets have at least one tag
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM "_AssetToTag" att2
+          SELECT 1 FROM public."_AssetToTag" att2
           WHERE att2."A" = a.id
         )`;
       }
@@ -1423,8 +1423,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       );
       return Prisma.sql`${whereClause} AND NOT EXISTS (
         SELECT 1
-        FROM "_AssetToTag" att2
-        JOIN "Tag" t2 ON t2.id = att2."B"
+        FROM public."_AssetToTag" att2
+        JOIN public."Tag" t2 ON t2.id = att2."B"
         WHERE att2."A" = a.id
         AND t2.id = ANY(ARRAY[${valuesArray}]::text[])
       )`;
@@ -1997,6 +1997,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         SELECT q.id
         FROM public."Qr" q
         WHERE q."assetId" = a.id
+        ORDER BY q."createdAt" ASC, q.id ASC
         LIMIT 1
       ) AS "qrId",
       a.title AS "assetTitle",
@@ -2365,6 +2366,7 @@ const QR_ID_SUBQUERY = Prisma.sql`(
         SELECT q.id
         FROM public."Qr" q
         WHERE q."assetId" = a.id
+        ORDER BY q."createdAt" ASC, q.id ASC
         LIMIT 1
       )`;
 
