@@ -7407,6 +7407,8 @@ describe("getMinimalBookings", () => {
   });
 
   it("defaults to excluding archived & cancelled when no statuses are given", async () => {
+    // why: stub the query so we can assert the default status where-clause
+    // getMinimalBookings builds, not real DB behavior.
     const findMany = db.booking.findMany as unknown as ReturnType<
       typeof vitest.fn
     >;
@@ -7423,6 +7425,8 @@ describe("getMinimalBookings", () => {
   });
 
   it("scopes to a custodian when custodianUserId is provided (self-service)", async () => {
+    // why: stub the query so we can assert the custodian where-clause
+    // getMinimalBookings adds for self-service callers, not real DB behavior.
     const findMany = db.booking.findMany as unknown as ReturnType<
       typeof vitest.fn
     >;
