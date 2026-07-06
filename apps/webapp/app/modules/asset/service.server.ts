@@ -137,10 +137,7 @@ import type {
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import {
   CUSTOM_FIELD_SEARCH_PATHS,
-  assetQueryFragment,
-  assetQueryJoins,
-  assetReturnFragment,
-  generateCustomFieldSelect,
+  buildAdvancedAssetsQuery,
   generateWhereClause,
   parseFiltersWithHierarchy,
   parseSortingOptions,
@@ -1157,48 +1154,30 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       assetIds,
       availableToBookOnly
     );
-    const { orderByClause, customFieldSortings } = parseSortingOptions(
-      searchParams.getAll("sortBy")
-    );
-    const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+    const sortByValues = searchParams.getAll("sortBy");
+    const { orderByInner, customFieldSortings } =
+      parseSortingOptions(sortByValues);
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
       : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-    const query = Prisma.sql`
-      WITH asset_query AS (
-        ${assetQueryFragment({
-          withBookings: getBookings || isUpcomingBookingsColumnVisible,
-          withBarcodes: canUseBarcodes,
-          withCustomFieldDefinitions: false,
-        })}
-        ${customFieldSelect}
-        ${assetQueryJoins}
-        ${whereClause}
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
-        -- Note: custody_agg.custody / kits_agg.kits / locations_agg.locations
-        -- must be in GROUP BY because the SELECT references them. They are
-        -- per-asset aggregated jsonb arrays from lateral subqueries; jsonb
-        -- supports equality so this is safe and produces one group per
-        -- asset row.
-      ), 
-      sorted_asset_query AS (
-        SELECT * FROM asset_query
-        ${Prisma.raw(orderByClause)}
-        ${paginationClause}
-      ),
-      count_query AS (
-        SELECT COUNT(*)::integer AS total_count
-        FROM asset_query
-      )
-      SELECT 
-        (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment({
-          withBookings: getBookings || isUpcomingBookingsColumnVisible,
-          withBarcodes: canUseBarcodes,
-        })}
-      FROM sorted_asset_query aq;
-    `;
+
+    // Paginate-first assembly: a slim id+sort-keys CTE is paged via an integer
+    // ROW_NUMBER rank, counted cheaply, then the full heavy projection runs
+    // once per page row via LEFT JOIN LATERAL. See buildAdvancedAssetsQuery.
+    const query = buildAdvancedAssetsQuery({
+      whereClause,
+      orderByInner,
+      customFieldSortings,
+      sortBy: sortByValues,
+      parsedFilters,
+      withBookings: getBookings || isUpcomingBookingsColumnVisible,
+      withBarcodes: canUseBarcodes,
+      paginationClause,
+      // Search reads c.name / l.name, so the slim phase must join Category +
+      // Location even without a category/location sort.
+      hasSearch: Boolean(search),
+    });
 
     const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
     const totalAssets = result[0].total_count;

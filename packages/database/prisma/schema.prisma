@@ -273,6 +273,13 @@ model Asset {
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
   @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
+  // Serves the advanced index's default view: WHERE organizationId = ?
+  // ORDER BY createdAt DESC, id ASC LIMIT n. Column order (org first, then
+  // createdAt DESC, then id) lets Postgres seek the org and read the page
+  // straight off the index — no full scan + sort of the workspace. The
+  // reversed-order index above (createdAt, organizationId) can't early-terminate
+  // this query.
+  @@index([organizationId, createdAt(sort: Desc), id], name: "Asset_organizationId_createdAt_id_idx")
   @@index([valuation, organizationId], name: "Asset_valuation_organizationId_idx")
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([assetModelId, organizationId], name: "Asset_assetModelId_organizationId_idx")
