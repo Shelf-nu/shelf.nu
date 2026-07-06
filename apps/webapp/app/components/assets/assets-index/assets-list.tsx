@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { m } from "framer-motion";
 import { Package } from "lucide-react";
-import { Link, useFetcher, useFetchers, useLoaderData } from "react-router";
+import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -45,6 +45,7 @@ import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
+import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
@@ -177,26 +178,10 @@ export const AssetsList = ({
                         withPreview
                       />
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Link
-                                to={`/assets/${resource.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="block truncate text-left font-medium text-gray-900 hover:text-gray-700"
-                              >
-                                {resource.title}
-                              </Link>
-                            </TooltipTrigger>
-                            <TooltipContent
-                              side="top"
-                              className="max-w-[400px]"
-                            >
-                              <p className="text-sm">{resource.title}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                        <ResourceTitleLink
+                          to={`/assets/${resource.id}`}
+                          title={resource.title}
+                        />
                         <div className="flex flex-wrap items-center gap-2">
                           <AssetStatusBadge
                             id={resource.id}
