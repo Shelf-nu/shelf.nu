@@ -38,6 +38,18 @@ describe("parseSortingOptions", () => {
     expect(orderByClause).toBe(`ORDER BY ${orderByInner}`);
   });
 
+  it("does not duplicate the assetId tiebreaker when the sort already uses id", () => {
+    // `id` maps to the "assetId" column, so the tiebreaker must not be appended
+    // again (otherwise ORDER BY would list "assetId" twice).
+    const { orderByInner } = parseSortingOptions(["id:asc"]);
+    expect(orderByInner).toBe('"assetId" asc');
+    expect(orderByInner.match(/"assetId"/g)).toHaveLength(1);
+
+    // Also deduped when id is a secondary sort term.
+    const combo = parseSortingOptions(["name:asc", "id:desc"]).orderByInner;
+    expect(combo.match(/"assetId"/g)).toHaveLength(1);
+  });
+
   it("exposes the inner order-by for the default (no-sort) fallback", () => {
     const { orderByInner } = parseSortingOptions([]);
     expect(orderByInner).toBe('"assetCreatedAt" DESC, "assetId" ASC');

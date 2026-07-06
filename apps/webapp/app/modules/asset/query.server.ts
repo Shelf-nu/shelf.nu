@@ -1724,13 +1724,16 @@ export function parseSortingOptions(sortBy: string[]): {
       '"assetCreatedAt" DESC', // Primary: Newest assets first
       '"assetId" ASC' // Secondary: Stable sort for identical timestamps
     );
-  } else {
+  } else if (!orderByParts.some((part) => part.includes('"assetId"'))) {
     // Explicit sorts have no unique tiebreaker of their own, so rows tied on the
     // sort key (e.g. same category name, same total value, or a mostly-NULL
     // column) land in an arbitrary physical order that can shift between page
     // loads — a latent nondeterministic-pagination bug. Append a stable id
     // tiebreaker (mirrors the default sort's secondary key) so the paged slice
     // and the integer ROW_NUMBER rank are reproducible across requests.
+    //
+    // Skip it when the client already sorts by id (directAssetFields.id maps to
+    // "assetId"), otherwise we'd emit a duplicate ORDER BY key.
     orderByParts.push('"assetId" ASC');
   }
 
