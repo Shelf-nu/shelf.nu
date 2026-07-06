@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { m } from "framer-motion";
 import { Package } from "lucide-react";
-import { useFetcher, useFetchers, useLoaderData } from "react-router";
+import { Link, useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -173,21 +173,30 @@ export const AssetsList = ({
                             resource.extendedProps?.mainImageExpiration,
                         }}
                         alt={`Image of ${resource.title}`}
-                        className="size-14 rounded border object-cover"
+                        className="size-14 shrink-0 rounded border object-cover"
                         withPreview
                       />
-                      <div className="flex flex-col gap-1">
-                        <div className="min-w-0 flex-1 truncate">
-                          <Button
-                            to={`/assets/${resource.id}`}
-                            variant="link"
-                            className="text-left font-medium text-gray-900 hover:text-gray-700"
-                            target={"_blank"}
-                            onlyNewTabIconOnHover={true}
-                          >
-                            {resource.title}
-                          </Button>
-                        </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Link
+                                to={`/assets/${resource.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block truncate text-left font-medium text-gray-900 hover:text-gray-700"
+                              >
+                                {resource.title}
+                              </Link>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              className="max-w-[400px]"
+                            >
+                              <p className="text-sm">{resource.title}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                         <div className="flex flex-wrap items-center gap-2">
                           <AssetStatusBadge
                             id={resource.id}

@@ -30,6 +30,12 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -349,21 +355,27 @@ export default function KitsIndexPage() {
                       alt: resource.title,
                     }}
                     alt={resource.title}
-                    className="size-14 rounded border object-cover"
+                    className="size-14 shrink-0 rounded border object-cover"
                     withPreview
                   />
-                  <div className="flex flex-col gap-1">
-                    <div className="min-w-0 flex-1 truncate">
-                      <Button
-                        to={`/kits/${resource.id}/assets`}
-                        variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
-                        target={"_blank"}
-                        onlyNewTabIconOnHover={true}
-                      >
-                        {resource.title}
-                      </Button>
-                    </div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Link
+                            to={`/kits/${resource.id}/assets`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate text-left font-medium text-gray-900 hover:text-gray-700"
+                          >
+                            {resource.title}
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[400px]">
+                          <p className="text-sm">{resource.title}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <div className="flex items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
