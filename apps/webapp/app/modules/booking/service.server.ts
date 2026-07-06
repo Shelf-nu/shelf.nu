@@ -3316,7 +3316,7 @@ export async function computeBookingAssetSliceRemainingToCheckOut(
 
   // Fetch ALL slices of this asset on this booking (kit + standalone, etc.) —
   // the attributor needs the full slice set so the greedy fill order
-  // (kit-driven first, standalone after) matches the loader.
+  // (standalone-first, kit-driven after) matches the loader.
   const [allSlices, sessions] = await Promise.all([
     tx.bookingAsset.findMany({
       where: { bookingId, assetId: slice.assetId },
@@ -5848,6 +5848,33 @@ export async function partialCheckoutBooking({
       }
     }
 
+    // SECURITY (per-slice IDOR / data integrity): `bookingAssetId` is
+    // caller-supplied and now load-bearing — it drives the per-slice checkout
+    // cap AND the exact per-slice attribution persisted on
+    // `PartialBookingCheckout`. A stale UI or a direct/mobile client could tag a
+    // disposition with a slice id from a DIFFERENT asset or booking; the
+    // exact-attribution reader would then credit the wrong slice, corrupting
+    // per-slice remaining + notes. Validate every tagged disposition's slice
+    // belongs to THIS booking AND matches its `assetId` before it is used for
+    // caps or stored (covers both the delegate and progressive paths below).
+    const assetIdBySliceId = new Map(
+      bookingFound.bookingAssets.map((ba) => [ba.id, ba.asset.id])
+    );
+    for (const d of dispositions) {
+      if (
+        d.bookingAssetId &&
+        assetIdBySliceId.get(d.bookingAssetId) !== d.assetId
+      ) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "Invalid booking asset slice supplied for check-out.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     // Assets already checked out for THIS booking. Source of truth is the
     // PartialBookingCheckout records, but a booking checked out via the
     // all-at-once flow leaves NO records while its assets are live CHECKED_OUT —
@@ -6223,11 +6250,18 @@ export async function partialCheckoutBooking({
         let sliceCommittedRemaining: number | null = null;
         let claimedThisSliceSoFar = 0;
         if (disp.bookingAssetId) {
-          sliceCommittedRemaining = await computeBookingAssetSliceRemaining(
-            tx,
-            id,
-            disp.bookingAssetId
-          );
+          // Checkout-side per-slice remaining: booked − prior
+          // `PartialBookingCheckout` claims attributed to THIS slice. Must NOT
+          // use the check-IN helper (`computeBookingAssetSliceRemaining`), which
+          // only subtracts return `ConsumptionLog`s and would let a slice with
+          // prior checkouts be over-claimed here — and would mis-report the
+          // note's per-slice "still booked" (which reuses this value below).
+          sliceCommittedRemaining =
+            await computeBookingAssetSliceRemainingToCheckOut(
+              tx,
+              id,
+              disp.bookingAssetId
+            );
           claimedThisSliceSoFar =
             claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0;
           const sliceCap = Math.max(

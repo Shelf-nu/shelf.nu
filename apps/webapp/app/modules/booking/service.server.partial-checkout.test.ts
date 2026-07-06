@@ -1324,6 +1324,101 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       expect(note).not.toContain("· standalone");
       expect(note).not.toContain("· in kit");
     });
+
+    it("rejects (and persists nothing) a checkout tagged with a bookingAssetId that is not a slice of the asset on this booking", async () => {
+      // P2 review fix: `bookingAssetId` is caller-supplied and now load-bearing
+      // (exact per-slice attribution). A stale/forged slice id must be rejected
+      // before it is used for caps or stored, or it would credit the wrong
+      // slice and corrupt per-slice remaining + notes.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            {
+              assetId: "asset-gloves",
+              // Not one of this booking's slices (ba-standalone / ba-kit).
+              bookingAssetId: "ba-forged",
+              quantity: 5,
+            },
+          ],
+        })
+      ).rejects.toThrow(/Invalid booking asset slice/);
+
+      expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+    });
+
+    it("caps a per-slice checkout by the slice's OWN checkout remaining, not the check-in remaining (no cross-session over-claim)", async () => {
+      // P1 review fix: the per-slice cap must subtract prior
+      // PartialBookingCheckout claims on THIS slice. With 20 of the standalone
+      // slice's 22 already out (and the sibling kit slice still full), the
+      // asset-level cap stays high (102) but the standalone slice only has 2
+      // left — a 22-unit re-scan of the standalone must be rejected.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+
+      // Prior session: 20 boxes of the STANDALONE slice already checked out.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (db as any).__seedPbcSessions?.([
+        {
+          assetIds: ["asset-gloves"],
+          quantities: [20],
+          bookingAssetIds: ["ba-standalone"],
+        },
+      ]);
+
+      // The checkout-side slice-remaining helper needs each slice's assetId +
+      // assetKitId (to pool prior claims across siblings via the attributor).
+      (
+        db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { id?: string } }) => {
+        const sliceId = args?.where?.id;
+        if (sliceId === "ba-standalone") {
+          return Promise.resolve({
+            id: sliceId,
+            assetId: "asset-gloves",
+            quantity: 22,
+            assetKitId: null,
+          });
+        }
+        if (sliceId === "ba-kit") {
+          return Promise.resolve({
+            id: sliceId,
+            assetId: "asset-gloves",
+            quantity: 100,
+            assetKitId: "ak-kittington",
+          });
+        }
+        return Promise.resolve(null);
+      });
+      // Both slices of the asset, for the attributor's full slice set.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([
+        { id: "ba-standalone", quantity: 22, assetKitId: null },
+        { id: "ba-kit", quantity: 100, assetKitId: "ak-kittington" },
+      ]);
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            {
+              assetId: "asset-gloves",
+              bookingAssetId: "ba-standalone",
+              quantity: 22,
+            },
+          ],
+        })
+      ).rejects.toThrow(/Only 2 boxes left to check out/);
+
+      // The over-claim never reaches persistence.
+      expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+    });
   });
 
   it("multi-asset mixed (INDIVIDUAL + qty) routes each through its own path", async () => {

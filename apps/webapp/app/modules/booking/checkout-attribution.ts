@@ -59,8 +59,12 @@ export type CheckoutAttributionLog = {
  * logs, honoring the positional `bookingAssetIds` contract.
  *
  * For each session, each positional index `i` is processed independently:
- * - Non-QUANTITY_TRACKED assets are skipped (attribution is a QT-only concern;
- *   INDIVIDUAL assets are reconciled by presence, not by counted units).
+ * - An index is included only when `isQtyAsset(assetIds[i])` is true. Callers
+ *   normally pass a QT check (attribution is a QT-only concern, and INDIVIDUAL
+ *   assets are reconciled by presence, not counted units), so non-QT assets are
+ *   skipped — but the predicate is the sole gate: a caller MAY pass a broader
+ *   predicate (e.g. `() => true`, or one scoped to a single assetId) to keep
+ *   whichever assets it needs.
  * - `quantity` is `quantities[i]` when the `quantities` array is aligned with
  *   `assetIds` (equal length), falling back to `1` when it is not (legacy
  *   sessions) or when the element itself is missing.
@@ -69,8 +73,9 @@ export type CheckoutAttributionLog = {
  *   consumer greedy-fills that log.
  *
  * @param sessions - Raw persisted checkout sessions (positional arrays).
- * @param isQtyAsset - Predicate: is this asset id QUANTITY_TRACKED? Non-QT
- *   assets are excluded from the output.
+ * @param isQtyAsset - Inclusion predicate applied per index: an entry whose
+ *   `assetId` returns `false` is skipped. Callers usually pass a
+ *   QUANTITY_TRACKED check, but any predicate is honored (see above).
  * @returns Map keyed by `assetId` → the list of attribution logs for that
  *   asset across all sessions. QT assets that never appear are absent from the
  *   map.

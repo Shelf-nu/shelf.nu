@@ -636,7 +636,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /**
      * Map<assetId, BookingAsset[]> for the greedy attribution fallback.
      * Built once and shared across all four category attributions so the
-     * kit-driven-fills-first ordering stays consistent.
+     * standalone-fills-first ordering stays consistent.
      */
     const bookingAssetRowsByAsset = new Map<
       string,
@@ -704,7 +704,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * disposition attribution above). For each qty-tracked asset, sum the
      * units that have been progressively checked out via
      * `PartialBookingCheckout` rows, then attribute that scalar across the
-     * asset's BookingAsset slices using the same kit-driven-fills-first
+     * asset's BookingAsset slices using the same standalone-fills-first
      * greedy attributor used on the check-IN side.
      *
      * `PartialBookingCheckout` has no per-row FK (no `bookingAssetId`

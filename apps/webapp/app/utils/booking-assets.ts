@@ -305,10 +305,12 @@ export function flattenSelectedBookingItems(
     bookingAssets.map((asset) => [asset.bookingAssetId ?? asset.id, asset])
   );
 
-  return selectedItems.flatMap((item: any) => {
-    // Pagination wrapper objects (type "asset" with an assets array).
-    if (item.type === "asset" && item.assets) {
-      return item.assets.map((asset: any) => {
+  return selectedItems.flatMap((item) => {
+    // Pagination wrapper objects (type "asset" with an assets array). Guard
+    // that `assets` really is an array before mapping — a malformed entry must
+    // not be treated as a list.
+    if (item.type === "asset" && Array.isArray(item.assets)) {
+      return (item.assets as SelectedBookingItem[]).map((asset) => {
         const bookingAsset = bookingAssetsMap.get(
           asset.bookingAssetId ?? asset.id
         );
