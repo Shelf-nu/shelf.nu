@@ -1965,30 +1965,35 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'Code128'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_Code128,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'Code39'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_Code39,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'DataMatrix'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_DataMatrix,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'ExternalQR'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_ExternalQR,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'EAN13'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_EAN13`
     : Prisma.sql``;
@@ -2380,23 +2385,23 @@ const QR_ID_SUBQUERY = Prisma.sql`(
  */
 const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
         SELECT b.value FROM public."Barcode" b
-        WHERE b."assetId" = a.id AND b.type = 'Code128' LIMIT 1
+        WHERE b."assetId" = a.id AND b.type = 'Code128' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
       ) AS barcode_Code128,
       (
         SELECT b.value FROM public."Barcode" b
-        WHERE b."assetId" = a.id AND b.type = 'Code39' LIMIT 1
+        WHERE b."assetId" = a.id AND b.type = 'Code39' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
       ) AS barcode_Code39,
       (
         SELECT b.value FROM public."Barcode" b
-        WHERE b."assetId" = a.id AND b.type = 'DataMatrix' LIMIT 1
+        WHERE b."assetId" = a.id AND b.type = 'DataMatrix' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
       ) AS barcode_DataMatrix,
       (
         SELECT b.value FROM public."Barcode" b
-        WHERE b."assetId" = a.id AND b.type = 'ExternalQR' LIMIT 1
+        WHERE b."assetId" = a.id AND b.type = 'ExternalQR' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
       ) AS barcode_ExternalQR,
       (
         SELECT b.value FROM public."Barcode" b
-        WHERE b."assetId" = a.id AND b.type = 'EAN13' LIMIT 1
+        WHERE b."assetId" = a.id AND b.type = 'EAN13' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
       ) AS barcode_EAN13`;
 
 /**
