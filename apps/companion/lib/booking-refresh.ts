@@ -31,3 +31,24 @@ export function consumeBookingDirty(id: string): boolean {
   // Set.delete returns true iff the id was present (and removes it).
   return dirtyBookingIds.delete(id);
 }
+
+// A lifecycle mutation on the detail screen (reserve/cancel/archive/delete/
+// duplicate) changes a row's status or existence, but the bookings index keeps
+// its own 60s stale-while-revalidate gate. This flag lets the detail screen
+// force the list to refetch on next focus instead of showing stale rows.
+let bookingsListDirty = false;
+
+/** Mark the bookings LIST as needing a refresh after a lifecycle mutation. */
+export function markBookingsListDirty() {
+  bookingsListDirty = true;
+}
+
+/**
+ * Returns true (once) if the bookings list was marked dirty; clears the flag so
+ * subsequent focuses fall back to the normal freshness gate.
+ */
+export function consumeBookingsListDirty(): boolean {
+  if (!bookingsListDirty) return false;
+  bookingsListDirty = false;
+  return true;
+}

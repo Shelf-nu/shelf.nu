@@ -57,12 +57,26 @@ function kitMeta(
   };
 }
 
-/** Build a booking row as returned by the lightweight scan `db.booking.findMany`. */
+/**
+ * Build a booking row as returned by the lightweight scan
+ * `db.booking.findMany`. Post-Phase-4a: Booking has no direct `assets`
+ * relation; assets live behind the `BookingAsset` pivot, and kit
+ * membership is on the `AssetKit` pivot (asset.kitId was removed). A
+ * non-null `kitId` here translates to one `assetKits` entry on the
+ * projected asset; a null `kitId` translates to an empty `assetKits[]`
+ * (a standalone asset that's not in any kit, which the report should
+ * ignore).
+ */
 function booking(from: string, to: string, kitIds: Array<string | null>) {
   return {
     from: new Date(from),
     to: new Date(to),
-    assets: kitIds.map((kitId, i) => ({ id: `asset-${i}-${kitId}`, kitId })),
+    bookingAssets: kitIds.map((kitId, i) => ({
+      asset: {
+        id: `asset-${i}-${kitId}`,
+        assetKits: kitId ? [{ kitId }] : [],
+      },
+    })),
   };
 }
 

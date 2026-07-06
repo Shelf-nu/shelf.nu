@@ -37,6 +37,7 @@ import {
   api,
   type Category,
   type Location,
+  type Tag,
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -45,6 +46,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
+import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -76,6 +78,8 @@ export default function CreateAssetScreen() {
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(
     null
   );
+  // Tags are multi-select (an asset can carry several), unlike category/location.
+  const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Image state ───────────────────────────────
@@ -85,12 +89,18 @@ export default function CreateAssetScreen() {
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
+  const [isTagsLoading, setIsTagsLoading] = useState(false);
+  // Server-computed from GET /api/mobile/tags: whether the caller may mint
+  // tags inline (admins/owners). Gates the picker's "create tag" row.
+  const [canCreateTag, setCanCreateTag] = useState(false);
 
   // ── Picker visibility ───────────────────────────
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showTagsPicker, setShowTagsPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
   const [locationSearch, setLocationSearch] = useState("");
 
@@ -144,6 +154,59 @@ export default function CreateAssetScreen() {
     }
     setIsLocationsLoading(false);
   }, [currentOrg]);
+
+  // ── Load tags ───────────────────────────────────
+  // Guards against a stale response winning after an org switch: each call gets
+  // a monotonic id and only the latest one commits. Also prunes selectedTags to
+  // the refreshed list so tags picked under a previous org don't linger and get
+  // rejected by the org-scoped create endpoint on submit.
+  const latestTagsRequestRef = useRef(0);
+  const loadTags = useCallback(async () => {
+    if (!currentOrg) {
+      setTags([]);
+      setSelectedTags([]);
+      return;
+    }
+    const requestId = ++latestTagsRequestRef.current;
+    setIsTagsLoading(true);
+    try {
+      const { data } = await api.tags(currentOrg.id);
+      if (requestId !== latestTagsRequestRef.current) return;
+      const nextTags = data?.tags ?? [];
+      setTags(nextTags);
+      // Server-computed create capability (false on older servers).
+      setCanCreateTag(data?.canCreate ?? false);
+      setSelectedTags((prev) =>
+        prev.filter((selected) =>
+          nextTags.some((tag) => tag.id === selected.id)
+        )
+      );
+    } finally {
+      if (requestId === latestTagsRequestRef.current) {
+        setIsTagsLoading(false);
+      }
+    }
+  }, [currentOrg]);
+
+  // Inline tag creation from the picker (admins/owners; the server enforces
+  // `tag.create`). Adds the new tag to the local list so the dropdown shows it
+  // without a refetch (the API helper already invalidated the cached list).
+  const handleCreateTag = useCallback(
+    async (name: string): Promise<Tag | null> => {
+      if (!currentOrg) return null;
+      const { data, error } = await api.createTag(currentOrg.id, name);
+      if (error || !data?.tag) {
+        Alert.alert("Couldn't create tag", error || "Please try again.");
+        return null;
+      }
+      const tag = data.tag;
+      setTags((prev) =>
+        [...prev, tag].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      return tag;
+    },
+    [currentOrg]
+  );
 
   // ── Load custom fields for the selected category ──
   // Re-runs whenever the chosen category changes (including "no category").
@@ -200,7 +263,8 @@ export default function CreateAssetScreen() {
   useEffect(() => {
     loadCategories();
     loadLocations();
-  }, [loadCategories, loadLocations]);
+    loadTags();
+  }, [loadCategories, loadLocations, loadTags]);
 
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
@@ -211,6 +275,7 @@ export default function CreateAssetScreen() {
     description.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
+    selectedTags.length > 0 ||
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
@@ -410,6 +475,7 @@ export default function CreateAssetScreen() {
       description: description.trim() || undefined,
       categoryId: selectedCategory?.id,
       locationId: selectedLocation?.id,
+      tags: selectedTags.length ? selectedTags.map((t) => t.id) : undefined,
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
@@ -458,6 +524,7 @@ export default function CreateAssetScreen() {
           setDescription("");
           setSelectedCategory(null);
           setSelectedLocation(null);
+          setSelectedTags([]);
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
@@ -591,6 +658,7 @@ export default function CreateAssetScreen() {
             onPress={() => {
               setShowCategoryPicker(!showCategoryPicker);
               setShowLocationPicker(false);
+              setShowTagsPicker(false);
             }}
             accessibilityLabel={
               selectedCategory
@@ -705,6 +773,7 @@ export default function CreateAssetScreen() {
             onPress={() => {
               setShowLocationPicker(!showLocationPicker);
               setShowCategoryPicker(false);
+              setShowTagsPicker(false);
             }}
             accessibilityLabel={
               selectedLocation
@@ -806,6 +875,25 @@ export default function CreateAssetScreen() {
             </View>
           )}
         </View>
+
+        {/* ── Tags Picker (multi-select) ───────────── */}
+        <TagPickerField
+          tags={tags}
+          selectedTags={selectedTags}
+          onChange={setSelectedTags}
+          isLoading={isTagsLoading}
+          isOpen={showTagsPicker}
+          onToggle={(next) => {
+            setShowTagsPicker(next);
+            // Keep only one dropdown open at a time.
+            if (next) {
+              setShowCategoryPicker(false);
+              setShowLocationPicker(false);
+            }
+          }}
+          canCreate={canCreateTag}
+          onCreateTag={handleCreateTag}
+        />
 
         {/* ── Custom Fields (scoped to selected category) ────────── */}
         {isCustomFieldsLoading ? (

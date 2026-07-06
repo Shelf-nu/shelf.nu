@@ -125,6 +125,10 @@ export default {
         collapsed: true,
         items: [
           {
+            text: "Asset Import (CSV)",
+            link: "/asset-import",
+          },
+          {
             text: "Advanced Asset Index",
             link: "/advanced-index/",
           },

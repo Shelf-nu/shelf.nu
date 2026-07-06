@@ -1,4 +1,4 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
@@ -14,168 +14,193 @@ type AssetWithKit = {
 };
 
 /**
- * Groups assets by kit and sorts both kits and assets within them.
- * Returns: sorted kit assets (grouped) followed by sorted individual assets.
+ * Options controlling {@link groupAndSortAssetsByKit}.
+ */
+export type GroupAndSortOptions<T> = {
+  /**
+   * Predicate deciding whether an asset counts as "checked out" for the Status
+   * sort's bottom bucket. Defaults to a raw `status === "CHECKED_OUT"` check
+   * (used by the PDF export). The booking overview injects a booking-context
+   * aware predicate so QT DRAFT/RESERVED rows and partially-checked-in assets
+   * stay in the actionable (top) bucket.
+   */
+  isCheckedOut?: (asset: T) => boolean;
+};
+
+/** Normalized sort key for a single sortable unit (a kit or a standalone asset). */
+type SortDescriptor = {
+  name: string;
+  category: string | null;
+  location: string | null;
+  checkedOut: boolean;
+  isKit: boolean;
+};
+
+/**
+ * Compares two sort descriptors for the given field/direction.
  *
- * @param assets - Array of assets with kit information
- * @param orderBy - Field to sort by (status, title, category, location)
- * @param orderDirection - Sort direction (asc or desc)
- * @returns Sorted array with kit assets grouped together
+ * Rules shared by kit-units and asset-units:
+ * - `category`/`location` nulls always sort last, regardless of direction.
+ * - Every field falls back to a case-insensitive A→Z name tiebreak, so ordering
+ *   is deterministic and stable.
+ * - `status`: not-checked-out (top) vs checked-out (bottom); `desc` keeps
+ *   actionable items on top, `asc` swaps the buckets.
+ * - `type`: kits (top) vs assets (bottom); `desc` keeps kits first, `asc` swaps.
+ */
+function compareSortDescriptors(
+  a: SortDescriptor,
+  b: SortDescriptor,
+  orderBy: string,
+  orderDirection: "asc" | "desc"
+): number {
+  const dirMul = orderDirection === "asc" ? 1 : -1;
+  // Case-insensitive comparator so the A→Z tiebreak matches the documented
+  // contract regardless of runtime/locale default sensitivity.
+  const compareText = (left: string, right: string) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" });
+  const byName = () => compareText(a.name, b.name);
+
+  switch (orderBy) {
+    case "title":
+      return dirMul * compareText(a.name, b.name);
+
+    case "category": {
+      if (!a.category && b.category) return 1;
+      if (a.category && !b.category) return -1;
+      if (!a.category && !b.category) return byName();
+      return dirMul * compareText(a.category!, b.category!) || byName();
+    }
+
+    case "location": {
+      if (!a.location && b.location) return 1;
+      if (a.location && !b.location) return -1;
+      if (!a.location && !b.location) return byName();
+      return dirMul * compareText(a.location!, b.location!) || byName();
+    }
+
+    case "type": {
+      // Kits (0) before assets (1) when desc; reversed when asc.
+      const bucketA = a.isKit ? 0 : 1;
+      const bucketB = b.isKit ? 0 : 1;
+      const typeMul = orderDirection === "desc" ? 1 : -1;
+      return typeMul * (bucketA - bucketB) || byName();
+    }
+
+    case "status":
+    default: {
+      // Not-checked-out (0) on top, checked-out (1) at the bottom when desc;
+      // reversed when asc. Secondary A→Z by name.
+      const bucketA = a.checkedOut ? 1 : 0;
+      const bucketB = b.checkedOut ? 1 : 0;
+      const statusMul = orderDirection === "desc" ? 1 : -1;
+      return statusMul * (bucketA - bucketB) || byName();
+    }
+  }
+}
+
+/**
+ * Orders a booking's assets for display, treating each kit as a single sortable
+ * unit that competes with standalone assets by the chosen field. Kits stay
+ * visually grouped (their members are emitted contiguously), but they are no
+ * longer force-pinned above standalone assets — except for the `type` sort,
+ * which explicitly groups kits first then assets.
+ *
+ * Preserves the flat-in / flat-out contract: callers pass a flat asset array
+ * and receive a flat array in which each kit's members are adjacent at the
+ * kit's sorted position. `shapeBookingAssets` and the PDF export both rely on
+ * this.
+ *
+ * @param assets - Flat array of enriched booking assets (kit members included).
+ * @param orderBy - Sort field: `status` | `title` | `category` | `location` | `type`.
+ * @param orderDirection - `asc` or `desc`.
+ * @param options - See {@link GroupAndSortOptions}; `isCheckedOut` customizes
+ *   the Status sort's checked-out determination.
+ * @returns The flat, ordered asset array with kit members kept contiguous.
  */
 export function groupAndSortAssetsByKit<T extends AssetWithKit>(
   assets: T[],
   orderBy: string = "status",
-  orderDirection: "asc" | "desc" = "desc"
+  orderDirection: "asc" | "desc" = "desc",
+  options: GroupAndSortOptions<T> = {}
 ): T[] {
-  // Separate kit assets from individual assets
-  const kitAssets: T[] = [];
+  const isCheckedOut =
+    options.isCheckedOut ?? ((asset: T) => asset.status === "CHECKED_OUT");
+
+  // Partition into kit groups (preserving first-seen order) and standalones.
+  const kitOrder: string[] = [];
+  const kitGroups = new Map<string, T[]>();
   const individualAssets: T[] = [];
 
   for (const asset of assets) {
     if (asset.kitId && asset.kit) {
-      kitAssets.push(asset);
+      if (!kitGroups.has(asset.kitId)) {
+        kitGroups.set(asset.kitId, []);
+        kitOrder.push(asset.kitId);
+      }
+      kitGroups.get(asset.kitId)!.push(asset);
     } else {
       individualAssets.push(asset);
     }
   }
 
-  // Group kit assets by kitId
-  const kitGroups = new Map<
-    string,
-    { kitName: string; kitLocationName: string | null; assets: T[] }
-  >();
-  for (const asset of kitAssets) {
-    const kitId = asset.kitId!;
-    if (!kitGroups.has(kitId)) {
-      kitGroups.set(kitId, {
-        kitName: asset.kit!.name,
-        kitLocationName: asset.kit!.location?.name ?? null,
-        assets: [],
-      });
-    }
-    kitGroups.get(kitId)!.assets.push(asset);
+  // Descriptor for a standalone asset (also used to order members inside a kit).
+  const assetDescriptor = (asset: T): SortDescriptor => ({
+    name: asset.title,
+    category: asset.category?.name ?? null,
+    location: asset.location?.name ?? null,
+    checkedOut: isCheckedOut(asset),
+    isKit: false,
+  });
+
+  const compareAssets = (a: T, b: T) =>
+    compareSortDescriptors(
+      assetDescriptor(a),
+      assetDescriptor(b),
+      orderBy,
+      orderDirection
+    );
+
+  // Sort members within each kit so they render in the chosen order and the
+  // first member is a valid representative for the kit's category value.
+  for (const members of kitGroups.values()) {
+    members.sort(compareAssets);
   }
 
-  // Sort function based on orderBy
-  const compareAssets = (a: T, b: T): number => {
-    const multiplier = orderDirection === "asc" ? 1 : -1;
+  // Build the sortable units: one per kit, one per standalone asset.
+  type Unit = { descriptor: SortDescriptor; members: T[] };
+  const units: Unit[] = [];
 
-    switch (orderBy) {
-      case "title":
-        return multiplier * a.title.localeCompare(b.title);
-      case "category": {
-        const catA = a.category?.name;
-        const catB = b.category?.name;
-        // Null categories go to the end regardless of direction
-        if (!catA && catB) return 1;
-        if (catA && !catB) return -1;
-        if (!catA && !catB) return a.title.localeCompare(b.title);
-        // At this point both catA and catB are defined (handled above)
-        return multiplier * catA!.localeCompare(catB!);
-      }
-      case "location": {
-        const locA = a.location?.name;
-        const locB = b.location?.name;
-        // Null locations go to the end regardless of direction
-        if (!locA && locB) return 1;
-        if (locA && !locB) return -1;
-        if (!locA && !locB) return a.title.localeCompare(b.title);
-        return multiplier * locA!.localeCompare(locB!);
-      }
-      case "status":
-      default: {
-        // For status, CHECKED_OUT should come before AVAILABLE when desc
-        // Priority: CHECKED_OUT=1 (urgent), AVAILABLE=3 (least urgent)
-        const statusOrder: Record<string, number> = {
-          CHECKED_OUT: 1,
-          IN_CUSTODY: 2,
-          AVAILABLE: 3,
-        };
-        const statusA = statusOrder[a.status] || 99;
-        const statusB = statusOrder[b.status] || 99;
-        // For "desc", lower priority number comes first (CHECKED_OUT before AVAILABLE)
-        // For "asc", higher priority number comes first (AVAILABLE before CHECKED_OUT)
-        const statusMultiplier = orderDirection === "desc" ? 1 : -1;
-        const statusDiff = statusMultiplier * (statusA - statusB);
-        // Secondary sort by title for consistency
-        return statusDiff !== 0 ? statusDiff : a.title.localeCompare(b.title);
-      }
-    }
-  };
-
-  // First, sort assets within each kit group
-  for (const [, group] of kitGroups) {
-    group.assets.sort(compareAssets);
+  for (const kitId of kitOrder) {
+    const members = kitGroups.get(kitId)!;
+    const first = members[0];
+    units.push({
+      members,
+      descriptor: {
+        name: first.kit!.name,
+        // Representative category = first (already field-sorted) member's.
+        category: first.category?.name ?? null,
+        // Kit's own location, falling back to the first member's location.
+        location: first.kit!.location?.name ?? first.location?.name ?? null,
+        // A kit sinks to the checked-out bucket only when ALL members are out.
+        checkedOut: members.every((m) => isCheckedOut(m)),
+        isKit: true,
+      },
+    });
   }
 
-  // Sort individual assets
-  individualAssets.sort(compareAssets);
+  for (const asset of individualAssets) {
+    units.push({ members: [asset], descriptor: assetDescriptor(asset) });
+  }
 
-  // Now sort kit groups by the sort criteria
-  // (after sorting assets within, so we can use the first sorted asset for comparison)
-  const sortedKitGroups = Array.from(kitGroups.entries()).sort(
-    ([, groupA], [, groupB]) => {
-      const multiplier = orderDirection === "asc" ? 1 : -1;
-
-      switch (orderBy) {
-        case "title":
-          // Sort kits by kit name when sorting by name
-          return multiplier * groupA.kitName.localeCompare(groupB.kitName);
-        case "category": {
-          // Sort kits by first asset's category (after assets are sorted)
-          const catA = groupA.assets[0]?.category?.name;
-          const catB = groupB.assets[0]?.category?.name;
-          // Null categories go to the end regardless of direction
-          if (!catA && catB) return 1;
-          if (catA && !catB) return -1;
-          if (!catA && !catB)
-            return groupA.kitName.localeCompare(groupB.kitName);
-          // At this point both catA and catB are defined (handled above)
-          return multiplier * catA!.localeCompare(catB!);
-        }
-        case "location": {
-          const locA = groupA.kitLocationName;
-          const locB = groupB.kitLocationName;
-          // Null locations go to the end regardless of direction
-          if (!locA && locB) return 1;
-          if (locA && !locB) return -1;
-          if (!locA && !locB)
-            return groupA.kitName.localeCompare(groupB.kitName);
-          return multiplier * locA!.localeCompare(locB!);
-        }
-        case "status":
-        default: {
-          // Sort kits by "most urgent" status in the kit
-          const getKitPriority = (assets: T[]) => {
-            const statusOrder: Record<string, number> = {
-              CHECKED_OUT: 1,
-              IN_CUSTODY: 2,
-              AVAILABLE: 3,
-            };
-            if (assets.length === 0) return 99;
-            return Math.min(...assets.map((a) => statusOrder[a.status] || 99));
-          };
-          const priorityA = getKitPriority(groupA.assets);
-          const priorityB = getKitPriority(groupB.assets);
-          // For "desc", lower priority number comes first (CHECKED_OUT before AVAILABLE)
-          // For "asc", higher priority number comes first (AVAILABLE before CHECKED_OUT)
-          const statusMultiplier = orderDirection === "desc" ? 1 : -1;
-          const priorityDiff = statusMultiplier * (priorityA - priorityB);
-          return priorityDiff !== 0
-            ? priorityDiff
-            : groupA.kitName.localeCompare(groupB.kitName);
-        }
-      }
-    }
+  // Sort the units, then flatten — each kit's members stay contiguous.
+  units.sort((a, b) =>
+    compareSortDescriptors(a.descriptor, b.descriptor, orderBy, orderDirection)
   );
 
-  // Flatten: all kit assets (grouped) + individual assets
   const result: T[] = [];
-  for (const [, group] of sortedKitGroups) {
-    result.push(...group.assets);
+  for (const unit of units) {
+    result.push(...unit.members);
   }
-  result.push(...individualAssets);
-
   return result;
 }
 
@@ -209,8 +234,16 @@ export function shouldPromptEarlyCheckout(
   return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
 }
 
-/** Minimal asset shape needed to decide check-out eligibility. */
-type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
+/**
+ * Minimal asset shape needed to decide check-out eligibility. `type` drives
+ * the QT-vs-INDIVIDUAL branch in {@link isAssetCheckoutEligible}; legacy
+ * callers that omit it fall through to INDIVIDUAL semantics.
+ */
+type CheckoutEligibilityAsset = {
+  id: string;
+  status: AssetStatus;
+  type?: AssetType;
+};
 
 /**
  * Decide whether a booking asset is still eligible to be checked out right now.
@@ -223,25 +256,50 @@ type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
  *   again but DONE for this booking;
  * - in custody (must be released before it can be checked out).
  *
+ * QUANTITY_TRACKED assets are partial top-off aware: when a per-asset
+ * `remainingByAssetId` map is supplied, eligibility is "remaining > 0" (a QT
+ * asset with 2 of 5 units already out is still eligible for the other 3).
+ * Without the map the helper preserves the legacy binary gate so existing
+ * callers behave unchanged.
+ *
  * Shared by the scanner drawer's eligibility filter and its "remaining to check
  * out" denominator so the numerator and denominator always describe the SAME
  * set (the progress bar can reach 100%).
  *
- * @param asset - The asset (id + live status)
+ * @param asset - The asset (id + live status + optional type)
  * @param checkedOutIds - Set of asset ids already checked out for this booking
  * @param returnedIds - Set of asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map;
+ *   when present, QT assets are eligible iff `remaining > 0`
  * @returns `true` when the asset can still be scanned out
  */
 export function isAssetCheckoutEligible(
   asset: CheckoutEligibilityAsset,
   checkedOutIds: Set<string>,
-  returnedIds: Set<string>
+  returnedIds: Set<string>,
+  remainingByAssetId?: Record<string, number>
 ): boolean {
+  if (returnedIds.has(asset.id)) return false;
+  if (asset.status === AssetStatus.IN_CUSTODY) return false;
+  // QUANTITY_TRACKED: eligibility is per-unit when the loader supplies a
+  // value for the asset (top-off-aware path). The asset has remaining
+  // units exactly when remaining > 0. Status CHECKED_OUT for QT implies
+  // remaining === 0 (status flips when every slice is claimed), so the
+  // remaining gate is sufficient. When the map is absent OR the asset has
+  // no entry (legacy callsites, older tests), fall back to the binary
+  // gate so behaviour is unchanged.
+  if (asset.type === AssetType.QUANTITY_TRACKED) {
+    if (remainingByAssetId && asset.id in remainingByAssetId) {
+      return (remainingByAssetId[asset.id] ?? 0) > 0;
+    }
+    // Legacy / unmapped: preserve current behaviour (binary).
+    return (
+      !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
+    );
+  }
+  // INDIVIDUAL: unchanged binary gate.
   return (
-    !checkedOutIds.has(asset.id) &&
-    !returnedIds.has(asset.id) &&
-    asset.status !== AssetStatus.CHECKED_OUT &&
-    asset.status !== AssetStatus.IN_CUSTODY
+    !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
   );
 }
 
@@ -251,20 +309,34 @@ export function isAssetCheckoutEligible(
  * individually) and uses {@link isAssetCheckoutEligible}, so it stays in lock
  * step with the scanner's eligibility filter.
  *
- * @param bookingAssets - All assets on the booking (id + live status)
+ * For QUANTITY_TRACKED assets the meaning is "unique assets with remaining
+ * units > 0" — a QT asset with any remaining quantity counts as 1 toward the
+ * denominator, never as its remaining-unit count. INDIVIDUAL assets still
+ * contribute 1. The scanner's progress bar stays asset-scoped, which matches
+ * the existing UI semantics.
+ *
+ * @param bookingAssets - All assets on the booking (id + live status + optional type)
  * @param checkedOutAssetIds - Asset ids already checked out (record or status)
  * @param checkedInAssetIds - Asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map
+ *   forwarded to {@link isAssetCheckoutEligible}
  * @returns Number of assets still eligible to be checked out
  */
 export function countRemainingCheckoutAssets(
   bookingAssets: CheckoutEligibilityAsset[],
   checkedOutAssetIds: string[],
-  checkedInAssetIds: string[]
+  checkedInAssetIds: string[],
+  remainingByAssetId?: Record<string, number>
 ): number {
   const checkedOutIds = new Set(checkedOutAssetIds);
   const returnedIds = new Set(checkedInAssetIds);
   return bookingAssets.filter((asset) =>
-    isAssetCheckoutEligible(asset, checkedOutIds, returnedIds)
+    isAssetCheckoutEligible(
+      asset,
+      checkedOutIds,
+      returnedIds,
+      remainingByAssetId
+    )
   ).length;
 }
 
@@ -311,21 +383,41 @@ export function formatBookingDuration(from: Date, to: Date): string {
 }
 
 /**
- * Core logic for determining if an asset has booking conflicts
- * Used by both isAssetAlreadyBooked and kit-related functions
+ * Core logic for determining if an asset has booking conflicts.
+ * Assets now reference bookings through the BookingAsset pivot table,
+ * so we traverse `asset.bookingAssets[].booking` instead of the
+ * old implicit `asset.bookings[]`.
+ *
+ * For INDIVIDUAL assets, any overlapping booking is a conflict.
+ * For QUANTITY_TRACKED assets, this function always returns false because
+ * multiple bookings can reserve from the same asset as long as the total
+ * reserved quantity does not exceed the available quantity. The actual
+ * quantity availability check is performed at the service layer via
+ * `computeBookingAvailableQuantity()`.
+ *
+ * Used by both isAssetAlreadyBooked and kit-related functions.
  */
 export function hasAssetBookingConflicts(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {
-  if (!asset.bookings?.length) return false;
+  /**
+   * QUANTITY_TRACKED assets can appear in multiple concurrent bookings,
+   * each reserving a portion of the total quantity. Conflict detection
+   * for these assets is handled at the service layer where we have access
+   * to the full quantity context (total, in-custody, reserved amounts).
+   */
+  if (asset.type === AssetType.QUANTITY_TRACKED) return false;
 
-  const conflictingBookings = asset.bookings.filter(
-    (b) => b.id !== currentBookingId
-  );
+  if (!asset.bookingAssets?.length) return false;
+
+  const conflictingBookings = asset.bookingAssets
+    .map((ba) => ba.booking)
+    .filter((b) => b.id !== currentBookingId);
 
   if (conflictingBookings.length === 0) return false;
 
@@ -348,13 +440,20 @@ export function hasAssetBookingConflicts(
 }
 
 /**
- * Determines if an asset is already booked and unavailable for the current booking context
- * Handles partial check-in logic properly
+ * Determines if an asset is already booked and unavailable for the current booking context.
+ * Handles partial check-in logic properly.
+ *
+ * For QUANTITY_TRACKED assets, this always returns false because they support
+ * concurrent bookings — quantity availability is validated at the service layer.
+ *
+ * Uses the BookingAsset pivot relation (`asset.bookingAssets[].booking`)
+ * instead of the removed implicit `asset.bookings[]`.
  */
 export function isAssetAlreadyBooked(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {

@@ -1,3 +1,5 @@
-title,description,kit,category,tags,location,valuation,custodian,bookable,"cf: Serial number,type:text","cf:brand, type:option","cf:purchase date, type:date","cf:warranty cost, type:amount","cf:temperature rating, type:number"
-AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,WQE239123d,amd,2024-02-22,299.99,-40
-"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,43543we23d,apple,2022-03-12,499.00,85
+title,description,kit,category,tags,location,valuation,custodian,bookable,assetModel,type,quantity,minQuantity,unitOfMeasure,consumptionType,"cf: Serial number,type:text","cf:brand, type:option","cf:purchase date, type:date","cf:warranty cost, type:amount","cf:temperature rating, type:number"
+AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,Ryzen 9 7950X,INDIVIDUAL,,,,,WQE239123d,amd,2024-02-22,299.99,-40
+"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,Macbook Pro M3,INDIVIDUAL,,,,,43543we23d,apple,2022-03-12,499.00,85
+"Office Pens","Black ballpoint, restock-able",Stationery,Office Supplies,small,Sofia office,2,,yes,,QUANTITY_TRACKED,500,50,boxes,ONE_WAY,,,,,
+"Server Rack U6","Spare U6 server units","Datacenter Spares",Hardware,Datacenter,Dutch office,1200,Thea,no,,QUANTITY_TRACKED,8,2,units,TWO_WAY,,,,,

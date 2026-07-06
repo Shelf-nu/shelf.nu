@@ -1,13 +1,17 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { checkinBooking } from "~/modules/booking/service.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -32,6 +36,34 @@ export async function action({ request }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.checkin,
     });
+
+    await assertMobileCanUseBookings(organizationId);
+
+    // PARITY with the web check-in action (bookings.$bookingId.overview.tsx
+    // :1034-1054): when the workspace requires EXPLICIT check-in for the
+    // caller's role, the quick "check in all" path is forbidden — they must
+    // scan / select the assets (the partial-checkin path). The mobile app must
+    // NEVER be more permissive than the web / a workspace's settings, so we
+    // enforce the same policy server-side here.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const explicitCheckinRequired =
+      (role === OrganizationRoles.ADMIN &&
+        bookingSettings.requireExplicitCheckinForAdmin) ||
+      (role === OrganizationRoles.SELF_SERVICE &&
+        bookingSettings.requireExplicitCheckinForSelfService);
+    if (explicitCheckinRequired) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed to quick check-in",
+        message:
+          "This workspace requires explicit check-in. Scan or select the assets to check them in.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const body = await request.json();
     const { bookingId, timeZone } = z

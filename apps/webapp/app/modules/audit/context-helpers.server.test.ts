@@ -64,9 +64,14 @@ describe("resolveAssetIdsForLocationSelection", () => {
     });
 
     expect(result).toEqual(["a1", "a2", "a3"]);
-    // asset query is org-scoped and unions the selected locations
+    // asset query is org-scoped and unions the selected locations.
+    // Post-pivot, asset placement lives on the `AssetLocation` pivot — the
+    // resolver projects the location filter through `assetLocations.some`.
     expect(assetFindMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, locationId: { in: ["l1", "l2"] } },
+      where: {
+        organizationId: ORG,
+        assetLocations: { some: { locationId: { in: ["l1", "l2"] } } },
+      },
       select: { id: true },
     });
   });
@@ -83,7 +88,10 @@ describe("resolveAssetIdsForLocationSelection", () => {
 
     // the `in` clause carries each location once, not the raw duplicated input
     expect(assetFindMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, locationId: { in: ["l1", "l2"] } },
+      where: {
+        organizationId: ORG,
+        assetLocations: { some: { locationId: { in: ["l1", "l2"] } } },
+      },
       select: { id: true },
     });
   });
@@ -113,13 +121,19 @@ describe("resolveAssetIdsForLocationSelection", () => {
     });
 
     expect(result).toEqual(["a1"]);
-    // one asset query; its `location` relation mirrors the active list filter
+    // one asset query; its `assetLocations` pivot relation mirrors the active
+    // list filter. Post-pivot, the asset→location join goes through
+    // `assetLocations.some.location` (was the direct `location` relation).
     expect(assetFindMany).toHaveBeenCalledWith({
       where: {
         organizationId: ORG,
-        location: {
-          organizationId: ORG,
-          name: { contains: "seaham", mode: "insensitive" },
+        assetLocations: {
+          some: {
+            location: {
+              organizationId: ORG,
+              name: { contains: "seaham", mode: "insensitive" },
+            },
+          },
         },
       },
       select: { id: true },
@@ -161,9 +175,13 @@ describe("resolveAssetIdsForKitSelection", () => {
     });
 
     expect(result).toEqual(["a1", "a2", "a3"]);
-    // asset query is org-scoped and unions the selected kits
+    // asset query is org-scoped and unions the selected kits. Post-pivot,
+    // asset→kit lookup goes through the `AssetKit` pivot.
     expect(assetFindMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, kitId: { in: ["k1", "k2"] } },
+      where: {
+        organizationId: ORG,
+        assetKits: { some: { kitId: { in: ["k1", "k2"] } } },
+      },
       select: { id: true },
     });
   });
@@ -195,7 +213,10 @@ describe("resolveAssetIdsForKitSelection", () => {
 
     // the `in` clause carries each kit once, not the raw duplicated input
     expect(assetFindMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, kitId: { in: ["k1", "k2"] } },
+      where: {
+        organizationId: ORG,
+        assetKits: { some: { kitId: { in: ["k1", "k2"] } } },
+      },
       select: { id: true },
     });
   });
@@ -210,11 +231,15 @@ describe("resolveAssetIdsForKitSelection", () => {
     });
 
     expect(result).toEqual(["a1"]);
-    // one asset query; its `kit` relation mirrors the active list filter
+    // one asset query; its `assetKits` pivot relation mirrors the active list
+    // filter. Post-pivot, the kit predicate is nested under
+    // `assetKits.some.kit` (was the direct `kit` relation).
     expect(assetFindMany).toHaveBeenCalledWith({
       where: {
         organizationId: ORG,
-        kit: { organizationId: ORG, status: "AVAILABLE" },
+        assetKits: {
+          some: { kit: { organizationId: ORG, status: "AVAILABLE" } },
+        },
       },
       select: { id: true },
     });

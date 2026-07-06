@@ -62,7 +62,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       "Unassigned";
 
     // Build asset list
-    const assetNames = booking.assets?.map((a) => a.title) ?? [];
+    const assetNames = booking.bookingAssets?.map((ba) => ba.asset.title) ?? [];
     const assetCount = assetNames.length;
     const assetLabel = assetCount === 1 ? "asset" : "assets";
     const assetList =

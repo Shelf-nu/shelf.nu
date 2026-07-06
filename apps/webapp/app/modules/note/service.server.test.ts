@@ -358,8 +358,8 @@ describe("note service", () => {
 
       const result = await createBulkKitChangeNotes({
         newlyAddedAssets: [
-          { id: "asset-1", title: "Camera", kit: null } as any,
-          { id: "asset-2", title: "Lens", kit: null } as any,
+          { id: "asset-1", title: "Camera", type: "INDIVIDUAL", kit: null },
+          { id: "asset-2", title: "Lens", type: "INDIVIDUAL", kit: null },
         ],
         removedAssets: [],
         userId: "user-1",
@@ -373,11 +373,49 @@ describe("note service", () => {
       // Verify the first call has correct structure
       const firstCall = vi.mocked(db.note.create).mock.calls[0][0];
       expect(firstCall.data.type).toBe("UPDATE");
-      expect(firstCall.data.content).toContain("added");
+      // INDIVIDUAL assets keep the countless "added asset to ..." phrasing.
+      expect(firstCall.data.content).toContain("added asset to");
       expect(firstCall.data.asset?.connect?.id).toBe("asset-1");
       expect(firstCall.data.user?.connect?.id).toBe("user-1");
 
       expect(result).toBeUndefined();
+    });
+
+    it("names the per-kit unit count when a QUANTITY_TRACKED asset is added", async () => {
+      vi.mocked(db.user.findFirstOrThrow).mockResolvedValue({
+        firstName: "John",
+        lastName: "Doe",
+      } as any);
+
+      const kit = {
+        id: "kit-1",
+        name: "Camera Kit",
+      };
+
+      await createBulkKitChangeNotes({
+        newlyAddedAssets: [
+          {
+            id: "asset-1",
+            title: "Batteries",
+            type: "QUANTITY_TRACKED",
+            unitOfMeasure: null,
+            // Per-row AssetKit.quantity for THIS kit (not Asset.quantity).
+            quantity: 50,
+            kit: null,
+          },
+        ],
+        removedAssets: [],
+        userId: "user-1",
+        kit: kit as any,
+        organizationId: "org-1",
+      });
+
+      expect(db.note.create).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(db.note.create).mock.calls[0][0];
+      // Qty-tracked add note surfaces the per-kit count and drops "asset".
+      expect(call.data.content).toContain("50 units");
+      expect(call.data.content).toContain("added 50 units to");
+      expect(call.data.content).not.toContain("added asset to");
     });
 
     it("creates notes for assets removed from kit", async () => {
@@ -394,7 +432,9 @@ describe("note service", () => {
 
       await createBulkKitChangeNotes({
         newlyAddedAssets: [],
-        removedAssets: [{ id: "asset-3", title: "Tripod", kit: kit as any }],
+        removedAssets: [
+          { id: "asset-3", title: "Tripod", type: "INDIVIDUAL", kit },
+        ],
         userId: "user-1",
         kit: kit as any,
         organizationId: "org-1",
@@ -406,6 +446,7 @@ describe("note service", () => {
       // Verify the call has correct structure
       const call = vi.mocked(db.note.create).mock.calls[0][0];
       expect(call.data.type).toBe("UPDATE");
+      // INDIVIDUAL keeps the countless "removed asset from ..." phrasing.
       expect(call.data.content).toContain("removed asset from");
       expect(call.data.asset?.connect?.id).toBe("asset-3");
       expect(call.data.user?.connect?.id).toBe("user-1");
@@ -425,10 +466,12 @@ describe("note service", () => {
 
       await createBulkKitChangeNotes({
         newlyAddedAssets: [
-          { id: "asset-1", title: "Camera", kit: null } as any,
-          { id: "asset-2", title: "Lens", kit: null } as any,
+          { id: "asset-1", title: "Camera", type: "INDIVIDUAL", kit: null },
+          { id: "asset-2", title: "Lens", type: "INDIVIDUAL", kit: null },
         ],
-        removedAssets: [{ id: "asset-3", title: "Tripod", kit: kit as any }],
+        removedAssets: [
+          { id: "asset-3", title: "Tripod", type: "INDIVIDUAL", kit },
+        ],
         userId: "user-1",
         kit: kit as any,
         organizationId: "org-1",

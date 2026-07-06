@@ -27,6 +27,77 @@ export type MeResponse = {
   organizations: Organization[];
 };
 
+/**
+ * Asset classification mirrored from the server's `AssetType` Prisma enum.
+ * - `INDIVIDUAL`      — one row = one physical item (the default; behaves
+ *                       exactly as the companion has always rendered).
+ * - `QUANTITY_TRACKED` — one row = N fungible units, which can be partly
+ *                       available / in custody / checked out at once and held
+ *                       by multiple custodians each with a quantity.
+ */
+export type AssetType = "INDIVIDUAL" | "QUANTITY_TRACKED";
+
+/**
+ * Consumption behaviour for QUANTITY_TRACKED assets, mirrored from the
+ * server's `ConsumptionType` Prisma enum. `null` for INDIVIDUAL assets.
+ */
+export type ConsumptionType = "ONE_WAY" | "TWO_WAY";
+
+/**
+ * One holder of a QUANTITY_TRACKED asset and the quantity they hold. A single
+ * asset row can appear here multiple times (one entry per custodian). Mirrors
+ * the server's `MobileAssetResponse.custodyList`.
+ */
+export type AssetCustodyListEntry = {
+  custodian: {
+    id: string;
+    name: string;
+    /**
+     * Auth user id linked to this custodian's team-member record; null for
+     * non-registered members. Lets the client identify its own row (e.g.
+     * self-service users may only release their own custody). Absent on
+     * older servers — treat as unknown, not as "someone else".
+     */
+    userId?: string | null;
+  };
+  /** Total units held by this custodian (operator-assigned + kit-allocated). */
+  quantity: number;
+  /**
+   * Units releasable via the release-quantity endpoint (operator rows only).
+   * `quantity - releasableQuantity` = units held via a kit, which are only
+   * released by releasing the kit's own custody. Absent on older servers —
+   * fall back to `quantity` (the server still enforces the real cap).
+   */
+  releasableQuantity?: number;
+};
+
+/**
+ * Quantity-tracking fields shared by the list-item and detail asset shapes.
+ *
+ * All fields are OPTIONAL: a server that predates the quantity feature simply
+ * omits them, so consumers MUST guard on `type === "QUANTITY_TRACKED"` AND the
+ * presence of each field before reading it. INDIVIDUAL assets carry
+ * `type: "INDIVIDUAL"` with null quantity columns and render unchanged.
+ */
+export type AssetQuantityFields = {
+  /** Asset classification. Absent on pre-quantity servers. */
+  type?: AssetType;
+  /** Total units for a QUANTITY_TRACKED asset; null for INDIVIDUAL. */
+  quantity?: number | null;
+  /** Reorder threshold for a QUANTITY_TRACKED asset; null for INDIVIDUAL. */
+  minQuantity?: number | null;
+  /** Display unit (e.g. "pcs", "boxes", "liters"); null when unset. */
+  unitOfMeasure?: string | null;
+  /** Consumption behaviour; null for INDIVIDUAL assets. */
+  consumptionType?: ConsumptionType | null;
+  /**
+   * Every holder + the quantity they hold. Emitted on the list endpoint for
+   * all assets (empty array when no custody). May be absent on the detail
+   * endpoint / pre-quantity servers — consumers fall back to single custody.
+   */
+  custodyList?: AssetCustodyListEntry[];
+};
+
 export type AssetListItem = {
   id: string;
   title: string;
@@ -36,7 +107,7 @@ export type AssetListItem = {
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
   custody: { custodian: { id: string; name: string } } | null;
-};
+} & AssetQuantityFields;
 
 export type AssetsResponse = {
   assets: AssetListItem[];
@@ -55,6 +126,35 @@ export type AssetNote = {
     firstName: string | null;
     lastName: string | null;
   } | null;
+};
+
+/**
+ * Per-status quantity slices for a QUANTITY_TRACKED asset, returned only by the
+ * detail endpoint. Mirrors the server's `quantityBreakdown` shape (computed by
+ * the same `getQuantityData` helper the web badge uses).
+ *
+ * `null` when the asset is INDIVIDUAL, or when a QUANTITY_TRACKED asset has no
+ * custody/booking activity yet (the server's `getQuantityData` null contract).
+ * Consumers must handle `null` by falling back to the plain total quantity.
+ */
+export type AssetQuantityBreakdown = {
+  /** Total units. */
+  total: number;
+  /** Units neither in custody, reserved, nor checked out. */
+  available: number;
+  /** Units currently held in custody. */
+  inCustody: number;
+  /** Units reserved by upcoming bookings. */
+  reserved: number;
+  /** Units checked out on active bookings. */
+  checkedOut: number;
+  /**
+   * Assign cap for the quantity-custody dialog. Mirrors the web overview
+   * loader: total - in kits - operator custody - checked out; reservations
+   * are deliberately NOT subtracted (they re-validate at their own checkout).
+   * Absent on older servers — fall back to `available`, then the plain total.
+   */
+  custodyAvailable?: number;
 };
 
 export type AssetDetail = {
@@ -100,7 +200,19 @@ export type AssetDetail = {
       active: boolean;
     };
   }[];
-};
+  /**
+   * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
+   * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL
+   * assets or QUANTITY_TRACKED assets with no activity. See type docs.
+   */
+  quantityBreakdown?: AssetQuantityBreakdown | null;
+  /**
+   * Number of custody holders hidden from the caller for privacy (e.g.
+   * self-service users only see their own rows). When > 0 the detail screen
+   * shows a muted "+N other(s) hold this asset" row. Absent on older servers.
+   */
+  custodyListOthersCount?: number;
+} & AssetQuantityFields;
 
 /**
  * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
@@ -275,6 +387,17 @@ export type CustodyResponse = {
   };
 };
 
+/**
+ * Response of the mobile assign-quantity / release-quantity custody endpoints
+ * (QUANTITY_TRACKED assets only). `asset` is the refreshed detail-shaped
+ * asset when the server includes it; the client refetches the detail after
+ * success regardless, so consumers must tolerate the field being absent.
+ */
+export type QuantityCustodyResponse = {
+  success: boolean;
+  asset?: AssetDetail;
+};
+
 export type UpdateLocationResponse = {
   asset: {
     id: string;
@@ -294,13 +417,20 @@ export type UpdateImageResponse = {
 
 /**
  * Response of the three mobile bulk endpoints (bulk-assign-custody,
- * bulk-release-custody, bulk-update-location). The underlying services are
- * all-or-nothing — the routes return only `{ success: true }`, never partial
- * counts. Client-side blockers (lib/batch-blockers.ts) guarantee only clean
- * batches are submitted.
+ * bulk-release-custody, bulk-update-location). Mixed selections skip
+ * QUANTITY_TRACKED assets server-side and report the count via
+ * `skippedQuantityTracked`; selections that are 100% quantity-tracked
+ * surface as an error envelope instead (never a skip count). For every
+ * other eligibility rule the client-side blockers (lib/batch-blockers.ts)
+ * keep batches clean before submit.
  */
 export type BulkActionResponse = {
   success: boolean;
+  /**
+   * Count of QUANTITY_TRACKED assets the server skipped (additive; absent on
+   * older servers). Always 0 for all-INDIVIDUAL batches.
+   */
+  skippedQuantityTracked?: number;
 };
 
 export type BookingStatus =
@@ -366,6 +496,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
+  tags: { id: string; name: string }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
@@ -376,6 +507,24 @@ export type BookingDetailResponse = {
   checkedInAssetIds: string[];
   canCheckout: boolean;
   canCheckin: boolean;
+  /**
+   * False when the workspace requires explicit (scan/select) check-in for the
+   * caller's role — the app hides the quick "Check In All" button to match the
+   * web, which never offers quick check-in under that policy.
+   */
+  canQuickCheckin: boolean;
+  /**
+   * Per-booking lifecycle-action availability, computed server-side mirroring
+   * the web ActionsDropdown gating (role + status + permission). The detail
+   * screen shows only the enabled actions; the server endpoints enforce the
+   * same gates regardless.
+   */
+  bookingActions: {
+    canCancel: boolean;
+    canArchive: boolean;
+    canDuplicate: boolean;
+    canDelete: boolean;
+  };
 };
 
 export type BookingActionResponse = {
@@ -409,6 +558,95 @@ export type PartialCheckoutResponse = {
     name: string;
     status: BookingStatus;
   };
+};
+
+// ── Booking create / edit / reserve ─────────────────────
+
+/** Common response from create / update / reserve mobile booking endpoints. */
+export type BookingMutationResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+/**
+ * Payload for `POST /api/mobile/bookings/create`. Dates are local wire strings
+ * in `yyyy-MM-dd'T'HH:mm` (no offset); `timeZone` is the device IANA zone so the
+ * server can resolve them — there is no client-hint cookie on native. Assets are
+ * optional at create (the picker/scanner add them afterwards, mirroring web).
+ */
+export type CreateBookingPayload = {
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+  assetIds?: string[];
+};
+
+/** Payload for `POST /api/mobile/bookings/update`. */
+export type UpdateBookingPayload = {
+  bookingId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  custodianTeamMemberId: string;
+  description?: string;
+  tags?: string[];
+};
+
+export type RemoveBookingAssetsResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+  removedCount: number;
+};
+
+/** Availability-aware asset row for the booking picker. */
+export type AvailableAsset = {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  mainImageExpiration: string | null;
+  thumbnailImage: string | null;
+  kitId: string | null;
+};
+
+export type AvailableAssetsResponse = {
+  assets: AvailableAsset[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+/** Availability-aware kit row for the booking picker. */
+export type AvailableKit = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+export type AvailableKitsResponse = {
+  kits: AvailableKit[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type BookingTag = { id: string; name: string };
+
+export type BookingTagsResponse = {
+  tags: BookingTag[];
 };
 
 // ── Audit Types ────────────────────────────────────────
@@ -599,6 +837,29 @@ export type CategoriesResponse = {
   categories: Category[];
 };
 
+/** A tag assignable to an asset (asset-create tag picker). */
+export type Tag = {
+  id: string;
+  name: string;
+};
+
+/** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
+export type TagsResponse = {
+  tags: Tag[];
+  /**
+   * Server-computed: whether the caller may mint a new tag via
+   * `POST /api/mobile/tags/create` (admins/owners). Gates the picker's inline
+   * "create tag" affordance so self-service users never see a control that
+   * would 403. Optional so the app tolerates older servers (treated as false).
+   */
+  canCreate?: boolean;
+};
+
+/** Response payload for `POST /api/mobile/tags/create`. */
+export type CreateTagResponse = {
+  tag: Tag;
+};
+
 export type CreateAssetResponse = {
   asset: {
     id: string;
@@ -623,6 +884,11 @@ export type UpdateAssetPayload = {
   categoryId?: string;
   newLocationId?: string;
   currentLocationId?: string;
+  /**
+   * Full desired tag-id set (replace). Omit to leave tags unchanged; pass `[]`
+   * to clear all tags.
+   */
+  tags?: string[];
   valuation?: number | null;
   /**
    * Custom field updates. Each entry is the customField `id` (NOT the asset's
