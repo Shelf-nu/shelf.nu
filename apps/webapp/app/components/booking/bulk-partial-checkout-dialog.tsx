@@ -172,50 +172,48 @@ export default function BulkPartialCheckoutDialog({
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
-  // Denormalised, deduplicated asset list derived from the bookingAssets
-  // pivot. `booking.assets` no longer exists post-pivot, so we project the
-  // pivot rows down to one entry per asset id for `flattenSelectedBookingItems`
-  // (which keys lookups by asset id and merges fields into the selection).
+  // Denormalised asset list derived from the bookingAssets pivot — ONE entry
+  // per `BookingAsset` slice (NOT deduped by asset id). A QUANTITY_TRACKED
+  // asset can span multiple slices (standalone + kit-driven), and each slice
+  // must survive so `flattenSelectedBookingItems` (which keys its enrichment
+  // map by `bookingAssetId`) can enrich the exact selected slice. Deduping by
+  // asset.id used to collapse the two slices, clobbering the standalone
+  // slice's `kitId: null` with the kit slice's `kitId` → the row rendered in
+  // neither bucket (the multi-slice checkout bug). This mirrors the check-in
+  // dialog's un-deduped `assetsList`.
+  //
   // We spread the pivot's per-row fields onto each entry — `bookingAssetId`,
   // `bookedQuantity`, plus the row-level `kit`/`kitId` resolved through the
   // BookingAsset's `assetKitId` — so the flattened selection downstream has
-  // everything the qty picker and kit-grouping renderer need. Deduping by
-  // asset.id mirrors the lookup-by-id contract `flattenSelectedBookingItems`
-  // expects (later slices for the same asset are dropped). Memoised so its
+  // everything the qty picker and kit-grouping renderer need. Memoised so its
   // reference stays stable across renders while `booking.bookingAssets`
   // doesn't change — without this, the enriched-selection array would churn
   // → `qtySlices` would recompute → its consumer `useEffect` (which calls
   // `setQtyByBookingAssetId`) would fire on every render and trip React's
   // max-update-depth guard.
   const assetsList = useMemo<AssetWithStatus[]>(
-    () => [
-      ...new Map(
-        booking.bookingAssets.map((ba) => {
-          // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
-          // not on `asset.kit` directly. When the row was booked under a
-          // specific kit slice, match it via `ba.assetKitId` so kit-driven
-          // rows surface `{ kit, kitId }` and standalone rows leave both
-          // null.
-          const matchedAssetKit = ba.assetKitId
-            ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
-            : null;
-          return [
-            ba.asset.id,
-            {
-              ...ba.asset,
-              bookingAssetId: ba.id,
-              // `?? 1` mirrors the overview loader's projection — defends
-              // against partial fixtures (component tests sometimes omit
-              // BookingAsset.quantity) so spreading this object doesn't
-              // overwrite a caller-supplied bookedQuantity with `undefined`.
-              bookedQuantity: ba.quantity ?? 1,
-              kitId: matchedAssetKit?.kitId ?? null,
-              kit: matchedAssetKit?.kit ?? null,
-            },
-          ];
-        })
-      ).values(),
-    ],
+    () =>
+      booking.bookingAssets.map((ba) => {
+        // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
+        // not on `asset.kit` directly. When the row was booked under a
+        // specific kit slice, match it via `ba.assetKitId` so kit-driven
+        // rows surface `{ kit, kitId }` and standalone rows leave both
+        // null.
+        const matchedAssetKit = ba.assetKitId
+          ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
+          : null;
+        return {
+          ...ba.asset,
+          bookingAssetId: ba.id,
+          // `?? 1` mirrors the overview loader's projection — defends
+          // against partial fixtures (component tests sometimes omit
+          // BookingAsset.quantity) so spreading this object doesn't
+          // overwrite a caller-supplied bookedQuantity with `undefined`.
+          bookedQuantity: ba.quantity ?? 1,
+          kitId: matchedAssetKit?.kitId ?? null,
+          kit: matchedAssetKit?.kit ?? null,
+        };
+      }),
     [booking.bookingAssets]
   );
 

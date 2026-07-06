@@ -140,11 +140,27 @@ function makeLoaderData({
      * `bookedQuantity` the caller put on the selection item).
      */
     quantity?: number;
+    /**
+     * Kit-slice discriminator: `null`/omitted = standalone (free-pool) row;
+     * non-null = kit-driven row (matched against `asset.assetKits[].id`). The
+     * dialog's `assetsList` projection resolves `kit`/`kitId` from this.
+     */
+    assetKitId?: string | null;
     asset: {
       id: string;
       title: string;
       status: AssetStatus;
       type: AssetType;
+      /**
+       * AssetKit memberships surfaced on the asset. A kit-driven slice matches
+       * one via `assetKitId` to resolve its `kit`/`kitId`. Omitted for
+       * standalone-only assets.
+       */
+      assetKits?: Array<{
+        id: string;
+        kitId: string;
+        kit: { id: string; name: string };
+      }>;
     };
   }>;
   checkedOutAssetIds: string[];
@@ -254,6 +270,93 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
     // `getByRole("button", ...)` would also match the dialog-backdrop's
     // role="button" wrapper (its accessible name includes nested text),
     // so query the named form-submit button directly.
+    const submit = document.querySelector<HTMLButtonElement>(
+      'button[type="submit"][name="intent"][value="partial-checkout"]'
+    );
+    expect(submit).not.toBeNull();
+    expect(submit).not.toBeDisabled();
+  });
+
+  it("renders a selected STANDALONE slice of a multi-slice QT asset (list not empty)", () => {
+    // Batteries: QT asset booked BOTH standalone (10 units, kitId null) and
+    // inside a kit (20 units, kitId kit-1) — two BookingAsset slices sharing
+    // one asset.id. The user selected ONLY the standalone slice. Before the
+    // fix, `assetsList` deduped by asset.id (kit slice won) and the flatten
+    // clobbered the standalone slice's kitId → the row rendered in NEITHER
+    // bucket (empty list). Now both slices survive and the standalone slice
+    // enriches correctly, so its row + qty input render.
+    const standaloneSlice: SelectedAssetRow = {
+      id: "battery-id",
+      title: "Batteries",
+      status: AssetStatus.AVAILABLE,
+      type: AssetType.QUANTITY_TRACKED,
+      bookingAssetId: "ba-standalone",
+      bookedQuantity: 10,
+      kitId: null,
+      thumbnailImage: null,
+      mainImage: null,
+      mainImageExpiration: null,
+      category: null,
+    };
+
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [
+          // Standalone slice — no assetKitId → kitId resolves to null.
+          {
+            id: "ba-standalone",
+            quantity: 10,
+            assetKitId: null,
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+          // Kit-driven slice for the SAME asset id — must NOT collapse the
+          // standalone slice out of `assetsList`.
+          {
+            id: "ba-kit",
+            quantity: 20,
+            assetKitId: "ak-1",
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              assetKits: [
+                {
+                  id: "ak-1",
+                  kitId: "kit-1",
+                  kit: { id: "kit-1", name: "Kit" },
+                },
+              ],
+            },
+          },
+        ],
+        checkedOutAssetIds: [],
+        // Asset-level remaining across both slices (10 + 20).
+        remainingToCheckOutByAsset: { "battery-id": 30 },
+      })
+    );
+
+    seedSelection([standaloneSlice]);
+
+    renderDialog();
+
+    // The standalone slice renders — the list is NOT empty.
+    expect(screen.getByText("Batteries")).toBeInTheDocument();
+
+    // Its qty input is present, bounded by the standalone slice's booked units.
+    const qtyInput = screen.getByLabelText(
+      /checkout quantity/i
+    ) as HTMLInputElement;
+    expect(qtyInput).toBeInTheDocument();
+    expect(Number(qtyInput.max)).toBe(10);
+    expect(qtyInput.value).toBe("10");
+
+    // Submit is enabled — there is a slice to check out.
     const submit = document.querySelector<HTMLButtonElement>(
       'button[type="submit"][name="intent"][value="partial-checkout"]'
     );

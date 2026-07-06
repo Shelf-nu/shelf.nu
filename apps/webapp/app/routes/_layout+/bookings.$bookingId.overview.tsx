@@ -36,6 +36,7 @@ import {
   primeBookingOverviewCache,
   readBookingOverviewCache,
 } from "~/modules/booking/booking-overview-client-cache";
+import { checkoutSessionsToLogsByAsset } from "~/modules/booking/checkout-attribution";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   archiveBooking,
@@ -599,8 +600,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * booking; ConsumptionLog now carries `bookingAssetId` so each
      * disposition can be attributed exactly. Legacy logs
      * (`bookingAssetId IS NULL`) get greedy-attributed by
-     * `attributeCategorizedDispositionsByBookingAsset` — kit-driven rows
-     * fill first, then standalone.
+     * `attributeCategorizedDispositionsByBookingAsset` — standalone rows
+     * fill first, then kit-driven (consistent with the check-out fallback).
      */
     const dispositionLogs =
       qtyAssetIdsInBooking.length > 0
@@ -729,36 +730,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qtyAssetIdsInBooking.length > 0
         ? await db.partialBookingCheckout.findMany({
             where: { bookingId: booking.id },
-            select: { assetIds: true, quantities: true },
+            select: {
+              assetIds: true,
+              quantities: true,
+              bookingAssetIds: true,
+            },
           })
         : [];
 
-    // Map<assetId, Array<{ bookingAssetId: null, quantity }>> — every entry
-    // is "legacy" from the attributor's POV (no per-row FK on the model).
-    const checkoutLogsByAsset = new Map<
-      string,
-      Array<{ bookingAssetId: null; quantity: number }>
-    >();
-    for (const session of checkoutSessions) {
-      const ids = session.assetIds ?? [];
-      const qtys = session.quantities ?? [];
-      const aligned = qtys.length === ids.length;
-      for (let i = 0; i < ids.length; i += 1) {
-        const assetId = ids[i];
-        // Skip entries for assets that aren't qty-tracked in this booking —
-        // INDIVIDUAL assets share the same table but go through a different
-        // attribution path (asset-status based) and would just no-op below.
-        if (!bookingAssetRowsByAsset.has(assetId)) continue;
-        // Aligned (Wave-B+): quantities[i] is the exact slice. Legacy
-        // (pre-Wave-B): empty/mismatched quantities[] — count one unit per
-        // occurrence (see service.server.ts ~L2862-2870 for the canonical
-        // read pattern this mirrors).
-        const quantity = aligned ? qtys[i] ?? 1 : 1;
-        const arr = checkoutLogsByAsset.get(assetId) ?? [];
-        arr.push({ bookingAssetId: null, quantity });
-        checkoutLogsByAsset.set(assetId, arr);
-      }
-    }
+    // Map<assetId, Array<{ bookingAssetId: string | null, quantity }>> — parsed
+    // via the shared `checkoutSessionsToLogsByAsset` so every read site honors
+    // the positional `bookingAssetIds` contract identically. Entries tagged with
+    // a persisted `bookingAssetId` attribute to their exact slice; `""`/legacy
+    // rows collapse to `null` → the attributor greedy-fills them. An asset is
+    // qty-tracked here iff it has BookingAsset rows in `bookingAssetRowsByAsset`.
+    const checkoutLogsByAsset = checkoutSessionsToLogsByAsset(
+      checkoutSessions,
+      (assetId) => bookingAssetRowsByAsset.has(assetId)
+    );
 
     // Initialize every qty-tracked row to 0 so downstream lookups never
     // see `undefined` for a row that simply hasn't been checked out yet.
