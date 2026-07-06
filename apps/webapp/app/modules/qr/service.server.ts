@@ -66,6 +66,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
 }): Promise<QrWithInclude<T>> {
   try {
     const qr = await db.qr.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: generic QR resolver used by pre-org scan/claim/link flows where org context does not exist yet; callers that have org context enforce ownership themselves (e.g. claimQrCode checks unclaimed state, link routes compare qr.organizationId to the caller's org)
       where: { id },
       include: { ...include },
     });
@@ -87,6 +88,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
 
 export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
   const qr = await db.qr.findUnique({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the entire purpose of this function is to resolve which organization a scanned QR code belongs to; org context does not exist until this lookup returns it
     where: { id: qrId },
     select: { organizationId: true },
   });
@@ -452,6 +454,7 @@ export async function claimQrCode({
     }
 
     return await db.qr.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: claiming only proceeds for unclaimed codes (verified at line 442: throws if qr.organizationId already set), so the code has no organizationId to scope by — this assigns its first org
       where: {
         id,
       },
@@ -556,6 +559,7 @@ export async function parseQrCodesFromImportData({
       .filter((asset) => asset !== null); // Filter out null values
 
     const codes = await db.qr.findMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: import deliberately fetches codes across orgs so it can detect and REJECT codes belonging to other organizations (see connectedToOtherOrgs check at lines 613-630); scoping to organizationId would hide foreign codes instead of erroring on them
       where: {
         id: {
           in: qrCodePerAsset.map((asset) => asset?.qrId),
@@ -576,6 +580,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import are present more than once in the data. Please make sure each QR code is only present once.",
         additionalData: { duplicateCodes },
         label,
+        // This is a user-input validation failure, not a server fault: return a
+        // 400 and don't capture it to Sentry (see SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -590,6 +598,8 @@ export async function parseQrCodesFromImportData({
         message: "Some of the QR codes you are trying to import do not exist",
         additionalData: { nonExistentCodes },
         label,
+        // User-input validation failure: return a 400 (already not captured).
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -607,6 +617,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import are already linked to an asset or a kit. Please use unlinked or unclaimed codes for your import.",
         additionalData: { linkedCodes },
         label,
+        // User-input validation failure: return a 400 and don't capture it to
+        // Sentry (SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -626,6 +640,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import don't belong to your current organization. You can only import codes that are unclaimed, unlinked or linked to your organization.",
         additionalData: { connectedToOtherOrgs },
         label,
+        // User-input validation failure: return a 400 and don't capture it to
+        // Sentry (SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -633,6 +651,7 @@ export async function parseQrCodesFromImportData({
     const unclaimedCodes = codes.filter((code) => !code.organizationId);
     if (unclaimedCodes.length) {
       await db.qr.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: only unclaimed codes are updated here (filtered to !code.organizationId at line 633); they have no organizationId to scope by — this assigns their first org. Codes belonging to other orgs were already rejected at lines 613-630
         where: {
           id: {
             in: unclaimedCodes.map((code) => code.id),

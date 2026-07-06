@@ -48,7 +48,7 @@ tags:
 - pressKey: enter
 
 - extendedWaitUntil:
-    visible: "1 asset scanned"
+    visible: "1 item scanned"
     timeout: 15000
 
 - takeScreenshot: roles-self-service-assign-custody

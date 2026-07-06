@@ -110,7 +110,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       if (mapData) {
         // Update the database with the geocoded coordinates
         await db.location.update({
-          where: { id: location.id },
+          where: { id: location.id, organizationId },
           data: {
             latitude: mapData.lat,
             longitude: mapData.lon,

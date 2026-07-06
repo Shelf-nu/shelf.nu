@@ -8,6 +8,11 @@ import { flatRoutes } from "remix-flat-routes";
 
 export default remixRoutesOptionAdapter((defineRoutes) =>
   flatRoutes("routes", defineRoutes, {
-    ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"], // Ignore dot files and test files
+    // Ignore dot files and ALL test files. The glob must cover plain `*.test.ts`
+    // / `*.test.tsx` (not just `*.test.server.ts`) — otherwise a co-located route
+    // test like `audits.start.test.ts` is treated as a route module and bundled
+    // into the SSR server build, which then throws "vitest is not defined" at
+    // runtime (the test-only global doesn't exist outside the vitest env).
+    ignoredRouteFiles: ["**/.*", "**/*.test.*"],
   })
 );

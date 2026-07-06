@@ -124,6 +124,8 @@ describe("audit image service", () => {
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
       vi.mocked(db.auditImage.count).mockResolvedValue(3);
 
+      // Expected limit-validation (a 400) — not a server error, so it must
+      // not be captured to Sentry (was noise: SHELF-WEBAPP-1KT).
       await expect(
         uploadAuditImage({
           request: {
@@ -134,7 +136,11 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        message: "Maximum of 3 images per asset exceeded",
+        status: 400,
+        shouldBeCaptured: false,
+      });
     });
 
     it("validates limit for general audit images (5 max)", async () => {
@@ -142,6 +148,8 @@ describe("audit image service", () => {
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
       vi.mocked(db.auditImage.count).mockResolvedValue(5);
 
+      // Expected limit-validation (a 400) — not a server error, so it must
+      // not be captured to Sentry (sibling of SHELF-WEBAPP-1KT).
       await expect(
         uploadAuditImage({
           request: {
@@ -152,7 +160,11 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        message: "Maximum of 5 general images per audit exceeded",
+        status: 400,
+        shouldBeCaptured: false,
+      });
     });
   });
 
@@ -333,5 +345,52 @@ describe("audit image service", () => {
 
       expect(result).toBe(2);
     });
+  });
+});
+
+describe("uploadAuditImage returnParsedFormData", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the bounded-parsed formData alongside the image", async () => {
+    // why: parseFileFormData is the bounded (maxFileSize) streaming parser;
+    // @remix-run/form-data-parser passes text fields through, so the caller
+    // need not re-parse the body unbounded.
+    const fd = new FormData();
+    fd.set("image", JSON.stringify({ originalPath: "p", thumbnailPath: "t" }));
+    fd.set("content", "Dent on top");
+    vi.mocked(parseFileFormData).mockResolvedValue(fd);
+
+    // why: external DB — count returns 0 so the per-asset/per-audit image
+    // limit check passes; create returns a deterministic row so the asserted
+    // return shape ({ image, formData }) is stable without a real Prisma tx.
+    vi.mocked(db.auditImage.count).mockResolvedValue(0);
+    vi.mocked(db.auditImage.create).mockResolvedValue({
+      id: "img-ret-1",
+      auditSessionId: "session-1",
+      auditAssetId: "audit-asset-1",
+      organizationId: "org-1",
+      imageUrl: "https://example.com/p",
+      thumbnailUrl: "https://example.com/t",
+      description: null,
+      uploadedById: "user-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await uploadAuditImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      auditSessionId: "session-1",
+      organizationId: "org-1",
+      uploadedById: "user-1",
+      auditAssetId: "audit-asset-1",
+      returnParsedFormData: true,
+    });
+
+    expect(result).toHaveProperty("image");
+    expect(result).toHaveProperty("formData");
+    expect((result as any).formData.get("content")).toBe("Dent on top");
+    expect((result as any).image.id).toBe("img-ret-1");
   });
 });

@@ -100,11 +100,14 @@ export type FailureReason = {
     | "Environment" // Related to the environment setup
     | "Image Import"
     | "Image Cache"
+    | "Asset Model"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
     | "Audit"
     | "Activity"
-    | "Update";
+    | "Consumption Log"
+    | "Update"
+    | "Analytics";
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html
@@ -211,6 +214,28 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
       "label" in cause &&
       "message" in cause)
   );
+}
+
+/**
+ * A "handled client error": a `ShelfError` whose HTTP status is in the 4xx
+ * range. These are expected, user-facing outcomes (failed validation, business
+ * rule violations, not-found, forbidden) — not server faults. We deliberately
+ * keep them OUT of the Sentry error pipeline (they'd burn the small error
+ * quota and alert on non-issues) and instead record them as low-severity
+ * Sentry **logs** (separate quota) so there's still a searchable trail.
+ *
+ * Note: `ShelfError.status` defaults to 500, so anything without an explicit
+ * 4xx status is treated as a server error (captured normally).
+ *
+ * @see {@link file://./../../server/instrument.server.ts} beforeSend — drops these from errors
+ * @see {@link file://./logger.ts} Logger.handledClientError — emits the log trail
+ */
+export function isHandledClientError(cause: unknown): boolean {
+  if (!isLikeShelfError(cause)) {
+    return false;
+  }
+  const status = cause.status ?? 500;
+  return status >= 400 && status < 500;
 }
 
 /**

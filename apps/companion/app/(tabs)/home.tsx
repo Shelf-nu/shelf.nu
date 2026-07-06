@@ -20,6 +20,9 @@ import {
   type DashboardAudit,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { pushIntoTab } from "@/lib/navigation";
+import { formatDue } from "@/lib/audit-format";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -205,21 +208,31 @@ function HomeContent() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickActionsGrid}>
-          <QuickAction
-            icon="clipboard-outline"
-            label="Audits"
-            onPress={() => router.push("/(tabs)/audits")}
-          />
+          {currentOrg?.auditsEnabled && (
+            <QuickAction
+              icon="clipboard-outline"
+              label="Audits"
+              onPress={() => router.push("/(tabs)/audits")}
+            />
+          )}
           <QuickAction
             icon="scan-outline"
             label="Scan Code"
             onPress={() => router.push("/(tabs)/scanner")}
           />
-          <QuickAction
-            icon="add-circle-outline"
-            label="New Asset"
-            onPress={() => router.push("/(tabs)/assets/new")}
-          />
+          {userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "create",
+          }) && (
+            <QuickAction
+              icon="add-circle-outline"
+              label="New Asset"
+              onPress={() =>
+                pushIntoTab("/(tabs)/assets", "/(tabs)/assets/new")
+              }
+            />
+          )}
           <QuickAction
             icon="calendar-outline"
             label="Bookings"
@@ -279,14 +292,19 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
       )}
 
       {/* ── Active Audits ─────────────────────────── */}
-      {activeAudits && activeAudits.length > 0 && (
+      {/* Gated on the Audits add-on, same as the quick action above —
+          the dashboard endpoint may still return activeAudits, but a
+          non-add-on workspace must not see tappable audit cards that 403. */}
+      {currentOrg?.auditsEnabled && activeAudits && activeAudits.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>
@@ -309,7 +327,9 @@ function HomeContent() {
             <AuditCard
               key={audit.id}
               audit={audit}
-              onPress={() => router.push(`/(tabs)/audits/${audit.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/audits", `/(tabs)/audits/${audit.id}`)
+              }
             />
           ))}
         </View>
@@ -325,7 +345,9 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
@@ -341,7 +363,9 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
@@ -369,7 +393,9 @@ function HomeContent() {
             <AssetRow
               key={asset.id}
               asset={asset}
-              onPress={() => router.push(`/(tabs)/assets/${asset.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${asset.id}`)
+              }
             />
           ))}
         </View>
@@ -530,8 +556,33 @@ const AuditCard = memo(function AuditCard({
       : 0;
   const progressPercent = Math.round(Math.min(progress, 1) * 100);
 
-  const isOverdue =
-    audit.dueDate && new Date(audit.dueDate).getTime() < Date.now();
+  // why: same shared `formatDue` the Audits list uses, so this card and the
+  // list never disagree on a deadline (the bug that started this: "Due 2 Jun"
+  // here vs "Due tomorrow" there). Home only ever shows active audits, but
+  // pass the real flag so the helper stays honest if that changes.
+  const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
+  const due = formatDue(audit.dueDate, isActive);
+  const dueColor =
+    due.tier === "overdue"
+      ? colors.error
+      : due.tier === "soon"
+      ? colors.warning
+      : colors.mutedLight;
+
+  // Same ownership model the Audits list uses: 0 assignees = open for
+  // anyone to scan, otherwise yours or someone else's. `null` when the
+  // dashboard payload predates these fields (older/not-yet-deployed
+  // webapp) — we hide the row entirely rather than render "undefined
+  // assigned". The list endpoint already ships these fields, so the list
+  // shows ownership today; Home lights up once the dashboard deploy lands.
+  const ownership: "open" | "mine" | "others" | null =
+    audit.assigneeCount == null
+      ? null
+      : audit.assigneeCount === 0
+      ? "open"
+      : audit.isAssignedToMe
+      ? "mine"
+      : "others";
 
   const statusLabel =
     audit.status === "PENDING"
@@ -583,24 +634,54 @@ const AuditCard = memo(function AuditCard({
             {audit.foundAssetCount}/{audit.expectedAssetCount} found
           </Text>
         </View>
-        {audit.dueDate && (
+        {due.label && (
           <View style={styles.metaItem}>
             <Ionicons
-              name="time-outline"
+              name={due.tier === "none" ? "calendar-outline" : "time-outline"}
               size={13}
-              color={isOverdue ? colors.error : colors.mutedLight}
+              color={dueColor}
             />
             <Text
               style={[
                 styles.metaText,
-                isOverdue && { color: colors.error, fontWeight: "500" },
+                (due.tier === "overdue" || due.tier === "soon") && {
+                  color: dueColor,
+                  fontWeight: "500",
+                },
               ]}
             >
-              {isOverdue ? "Overdue" : "Due "}
-              {new Date(audit.dueDate).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              })}
+              {due.label}
+            </Text>
+          </View>
+        )}
+
+        {ownership && (
+          <View style={styles.metaItem}>
+            <Ionicons
+              name={
+                ownership === "open" ? "scan-circle-outline" : "people-outline"
+              }
+              size={13}
+              color={ownership === "open" ? colors.primary : colors.mutedLight}
+            />
+            <Text
+              style={[
+                styles.metaText,
+                ownership === "open" && {
+                  color: colors.primaryText,
+                  fontWeight: "500",
+                },
+              ]}
+            >
+              {ownership === "open"
+                ? "Unassigned · anyone can scan"
+                : ownership === "mine"
+                ? audit.assigneeCount === 1
+                  ? "Assigned to you"
+                  : `You + ${(audit.assigneeCount ?? 1) - 1} other${
+                      (audit.assigneeCount ?? 1) - 1 === 1 ? "" : "s"
+                    }`
+                : `${audit.assigneeCount} assigned`}
             </Text>
           </View>
         )}

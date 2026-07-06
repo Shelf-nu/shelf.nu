@@ -184,8 +184,11 @@ export function BarChart({
                   {payload[0]?.payload?.name}
                 </p>
                 <div className="mt-1 space-y-1">
-                  {payload.map((entry, idx) => (
-                    <p key={idx} className="flex items-center gap-2 text-sm">
+                  {payload.map((entry) => (
+                    <p
+                      key={String(entry.dataKey ?? entry.name)}
+                      className="flex items-center gap-2 text-sm"
+                    >
                       <span
                         className="size-2 rounded-full"
                         style={{ backgroundColor: entry.color }}

@@ -48,8 +48,48 @@ export const assetsApi = {
       `/api/mobile/assets/${assetId}?orgId=${orgId}`
     ),
 
-  /** Resolve a QR code to an asset */
-  qr: (qrId: string) => apiFetch<QrResponse>(`/api/mobile/qr/${qrId}`),
+  /**
+   * Resolve a scanned code to an asset or kit, **recording** scan provenance
+   * (who + when) for the resolve, mirroring the web's public QR route.
+   *
+   * Handles both a Shelf QR id and a SAM / sequential id (e.g. `SAM-0001`).
+   * A QR id self-identifies its org, but a SAM id is unique only within a
+   * workspace, so callers pass `orgId` to scope SAM resolution (the server
+   * ignores it on the QR path).
+   *
+   * Recording is an endpoint property here, NOT a flag: use this from genuine
+   * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
+   * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
+   *
+   * @param codeId - The scanned QR id or normalized SAM id.
+   * @param orgId - Caller's current workspace id; required for SAM lookups.
+   */
+  qr: (codeId: string, orgId?: string) =>
+    apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${
+        orgId ? `?orgId=${orgId}` : ""
+      }`
+    ),
+
+  /**
+   * Resolve a scanned code to an asset or kit **without recording** a scan,
+   * mirroring the web's non-recording `get-scanned-item` resolve.
+   *
+   * Same resolution contract as {@link qr} (QR id or SAM id, `orgId` scopes
+   * SAM), but it never writes scan provenance. Use this where a resolve is an
+   * internal identify step rather than a real field scan, e.g. the audit
+   * scanner, which records its own `AuditScan` and must not add an ad-hoc scan
+   * to the asset's "last scanned" history.
+   *
+   * @param codeId - The scanned QR id or normalized SAM id.
+   * @param orgId - Caller's current workspace id; required for SAM lookups.
+   */
+  getScannedItem: (codeId: string, orgId?: string) =>
+    apiFetch<QrResponse>(
+      `/api/mobile/get-scanned-item/${encodeURIComponent(codeId)}${
+        orgId ? `?orgId=${orgId}` : ""
+      }`
+    ),
 
   /** Resolve a barcode (additional code) to an asset */
   barcode: (value: string, orgId: string) =>

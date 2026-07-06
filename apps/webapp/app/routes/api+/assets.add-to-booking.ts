@@ -25,7 +25,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -41,27 +41,32 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     );
 
-    let { finalAssetIds, bookingInfo } = await processBooking(id, assetsIds);
+    let { finalAssetIds, bookingInfo } = await processBooking(
+      id,
+      assetsIds,
+      organizationId,
+      { userId, role }
+    );
 
     /**
      * Remove already added assets and proceed with not added assets.
      */
     if (addOnlyRestAssets) {
-      const bookingAssetIds = bookingInfo.assets.map((asset) => asset.id);
+      const bookingAssetIds = bookingInfo.bookingAssets.map((ba) => ba.assetId);
       finalAssetIds = finalAssetIds.filter(
         (assetId) => !bookingAssetIds.includes(assetId)
       );
     }
 
     if (
-      bookingInfo.assets.length &&
+      bookingInfo.bookingAssets.length &&
       intersected(
-        bookingInfo.assets.map((a) => a.id),
+        bookingInfo.bookingAssets.map((ba) => ba.assetId),
         finalAssetIds
       )
     ) {
-      const alreadyAddedAssets = bookingInfo.assets.filter((asset) =>
-        finalAssetIds.includes(asset.id)
+      const alreadyAddedAssets = bookingInfo.bookingAssets.filter((ba) =>
+        finalAssetIds.includes(ba.assetId)
       );
       const allAssetsInBooking =
         alreadyAddedAssets.length === finalAssetIds.length;
@@ -108,6 +113,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
+      organizationId,
     });
 
     sendNotification({

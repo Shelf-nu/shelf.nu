@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -30,6 +30,7 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import type {
@@ -113,9 +114,18 @@ export default function AssignCustodyDrawer({
     .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
     .map((asset) => asset.id);
 
-  // Asset is part of a kit
+  // Asset is part of a kit. Only INDIVIDUAL assets get blocked here —
+  // a qty-tracked asset can be partially in a kit and still have a
+  // free pool that's eligible for direct custody assignment. The
+  // server-side strict-available re-validation catches over-allocation.
   const assetsArePartOfKit = assets
-    .filter((asset) => !!asset && asset.kitId && asset.id)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.assetKits.length > 0 &&
+        asset.id
+    )
     .map((asset) => asset.id);
 
   // Kit blockers
@@ -127,7 +137,7 @@ export default function AssignCustodyDrawer({
   // Kit has assets inside that that are in custody
   const kitsWithAssetsInCustody = kits
     .filter((kit) =>
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     )
     .map((kit) => kit.id);
   // Kit is checked out
@@ -517,7 +527,10 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(!!asset.kitId),
+    assetLabelPresets.partOfKit(
+      asset.assetKits.length > 0,
+      isQuantityTracked(asset)
+    ),
   ];
 
   // Create the availability labels component with max 2 labels
@@ -555,7 +568,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
     kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
     kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
   ];
 
@@ -572,7 +585,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

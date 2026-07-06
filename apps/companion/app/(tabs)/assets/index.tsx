@@ -17,6 +17,7 @@ import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -30,6 +31,8 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { InventorySegment } from "@/components/kits/inventory-segment";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -64,6 +67,13 @@ function AssetsListContent() {
     error: orgError,
     refresh: refreshOrg,
   } = useOrg();
+  // Server enforces asset:create; hide create affordances for roles
+  // (BASE/SELF_SERVICE) that would only get a 403.
+  const canCreate = userHasPermission({
+    roles: currentOrg?.roles,
+    entity: "asset",
+    action: "create",
+  });
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const [assets, setAssets] = useState<AssetListItem[]>([]);
@@ -229,14 +239,23 @@ function AssetsListContent() {
         text: colors.muted,
       };
 
+      // Quantity indicator (additive) — only for QUANTITY_TRACKED assets that
+      // actually carry a quantity. INDIVIDUAL assets and pre-quantity servers
+      // resolve to null here, so the row renders exactly as before.
+      const quantityLabel = isQuantityTracked(item)
+        ? formatQuantity(item.quantity, item.unitOfMeasure)
+        : null;
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}`}
+            quantityLabel ? `, quantity ${quantityLabel}` : ""
+          }${item.category ? `, ${item.category.name}` : ""}${
+            item.location ? `, ${item.location.name}` : ""
+          }`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -270,6 +289,19 @@ function AssetsListContent() {
                   />
                   <Text style={styles.assetLocation} numberOfLines={1}>
                     {item.location.name}
+                  </Text>
+                </View>
+              )}
+              {/* Quantity badge — QUANTITY_TRACKED assets only (additive) */}
+              {quantityLabel && (
+                <View style={styles.quantityBadge}>
+                  <Ionicons
+                    name="layers-outline"
+                    size={11}
+                    color={colors.muted}
+                  />
+                  <Text style={styles.quantityBadgeText} numberOfLines={1}>
+                    {quantityLabel}
                   </Text>
                 </View>
               )}
@@ -328,6 +360,9 @@ function AssetsListContent() {
 
   return (
     <View style={styles.container}>
+      {/* Assets | Kits switcher */}
+      <InventorySegment active="assets" />
+
       {/* Search bar */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={16} color={colors.mutedLight} />
@@ -432,7 +467,7 @@ function AssetsListContent() {
                   ? "Try selecting a different status filter"
                   : "Create your first asset to start tracking"}
               </Text>
-              {!debouncedSearch && activeFilter === 0 && (
+              {!debouncedSearch && activeFilter === 0 && canCreate && (
                 <TouchableOpacity
                   style={styles.emptyAction}
                   onPress={() => router.push("/(tabs)/assets/new")}
@@ -483,18 +518,20 @@ function AssetsListContent() {
       </View>
 
       {/* FAB — Quick Asset Create */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          router.push("/(tabs)/assets/new");
-        }}
-        activeOpacity={0.85}
-        accessibilityLabel="Create new asset"
-        accessibilityRole="button"
-      >
-        <Ionicons name="add" size={28} color={colors.primaryForeground} />
-      </TouchableOpacity>
+      {canCreate && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push("/(tabs)/assets/new");
+          }}
+          activeOpacity={0.85}
+          accessibilityLabel="Create new asset"
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={28} color={colors.primaryForeground} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -620,6 +657,26 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+
+  // Quantity badge — compact pill for QUANTITY_TRACKED assets. Neutral
+  // (background-tertiary) so it reads as info, not a status. Self-sized via
+  // alignSelf so it hugs its content instead of stretching the meta column.
+  quantityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: borderRadius.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginTop: 2,
+    gap: 3,
+  },
+  quantityBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: "500",
+    color: colors.muted,
   },
 
   // Status badge — pill shape like webapp

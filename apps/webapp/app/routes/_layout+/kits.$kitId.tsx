@@ -35,8 +35,11 @@ import {
 import {
   deleteKit,
   deleteKitImage,
+  emitAssetKitDetachmentNotes,
+  fetchAssetKitDetachmentImpact,
   getKit,
   getKitCurrentBooking,
+  mergeStandaloneCollisionsForKitDetachment,
   relinkKitQrCode,
 } from "~/modules/kit/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -48,6 +51,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -102,33 +106,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: kitId,
         organizationId,
         extraInclude: {
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              custody: { select: { id: true } },
-              bookings: {
-                where: {
-                  status: { in: ["ONGOING", "OVERDUE"] },
-                },
+              asset: {
                 select: {
                   id: true,
-                  name: true,
-                  from: true,
                   status: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
+                  // `type` powers the qty-aware unavailability guard in
+                  // ActionsDropdown — QUANTITY_TRACKED assets don't block
+                  // kit-custody assign (Option B handles partial pools).
+                  type: true,
+                  custody: { select: { id: true } },
+                  bookingAssets: {
+                    where: {
+                      booking: {
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
                     select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                      email: true,
+                      booking: {
+                        select: {
+                          id: true,
+                          name: true,
+                          from: true,
+                          status: true,
+                          custodianTeamMember: true,
+                          custodianUser: {
+                            select: {
+                              firstName: true,
+                              lastName: true,
+                              displayName: true,
+                              profilePicture: true,
+                              email: true,
+                            },
+                          },
+                        },
+                      },
                     },
                   },
+                  availableToBook: true,
                 },
               },
-              availableToBook: true,
             },
           },
           qrCodes: true,
@@ -164,7 +182,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : null;
     const currentBooking = getKitCurrentBooking({
       id: kit.id,
-      assets: kit.assets,
+      assets: kit.assetKits.map((ak) => ak.asset),
     });
 
     const header: HeaderData = {
@@ -259,7 +277,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "delete": {
-        await deleteKit({ id: kitId, organizationId });
+        await deleteKit({ id: kitId, organizationId, actorUserId: userId });
 
         if (image) {
           await deleteKitImage({ url: image });
@@ -283,26 +301,105 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           { additionalData: { userId, organizationId, kitId } }
         );
 
-        const kit = await db.kit.update({
-          where: { id: kitId, organizationId },
-          data: {
-            assets: { disconnect: { id: assetId } },
-          },
-          select: { name: true, custody: { select: { custodianId: true } } },
-        });
-
         /**
-         * If kit was in custody then we have to make the asset available
+         * Wrap the kit disconnect + custody cleanup + status flip in a
+         * single transaction so that:
+         *   1. only the kit-allocated Custody row is removed (operator-
+         *      assigned custody on the same asset is preserved), and
+         *   2. the asset's status is only flipped back to AVAILABLE when
+         *      no custody rows remain — if operator custody still exists
+         *      on the asset, status stays IN_CUSTODY.
+         *
+         * The AssetKit row is deleted at the end, which cascades
+         * `ON DELETE SET NULL` to any BookingAsset rows holding this
+         * kit-driven slice. Before that fires we resolve the rare case
+         * where a standalone slice already exists for the same
+         * `(bookingId, assetId)` — merging the kit qty into the
+         * standalone row so the SET NULL doesn't trip
+         * `BookingAsset_manual_unique`. Detachment notes get the kit /
+         * asset names from a snapshot taken before the merge.
          */
-        if (kit.custody?.custodianId) {
-          await db.asset.update({
-            where: { id: assetId, organizationId },
-            data: {
-              status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
-            },
-          });
-        }
+        const { kit, detachmentImpact, slice } = await db.$transaction(
+          async (tx) => {
+            const assetKitRows = await tx.assetKit.findMany({
+              where: { kitId, assetId },
+              // type + unitOfMeasure label the qty-tracked unit count in
+              // the membership-remove note ("removed 50 units from …");
+              // quantity is the per-row AssetKit.quantity actually being
+              // detached (NOT Asset.quantity). Captured before the
+              // deleteMany below so the note can render after the tx
+              // commits without re-querying.
+              select: {
+                id: true,
+                quantity: true,
+                asset: {
+                  select: { type: true, unitOfMeasure: true },
+                },
+              },
+            });
+            const assetKitIds = assetKitRows.map((ak: { id: string }) => ak.id);
+            const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
+            await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
+
+            const updatedKit = await tx.kit.update({
+              where: { id: kitId, organizationId },
+              data: {
+                // Remove the pivot row that links this asset to the kit.
+                assetKits: { deleteMany: { assetId } },
+              },
+              select: {
+                name: true,
+                custody: { select: { id: true, custodianId: true } },
+              },
+            });
+
+            /**
+             * If kit was in custody then we have to clean up the kit-
+             * allocated custody row on the asset. Filter the deleteMany by
+             * `kitCustodyId` so operator-assigned custody on the same asset
+             * (e.g. someone holding 10 of 50 batteries directly) is left
+             * untouched.
+             */
+            if (updatedKit.custody?.id) {
+              await tx.custody.deleteMany({
+                where: { assetId, kitCustodyId: updatedKit.custody.id },
+              });
+
+              // After removing only the kit-allocated rows, check whether
+              // any custody rows remain for this asset. The asset should
+              // only flip back to AVAILABLE if no custody is left.
+              const remainingCustody = await tx.custody.count({
+                where: { assetId },
+              });
+
+              if (remainingCustody === 0) {
+                await tx.asset.update({
+                  where: { id: assetId, organizationId },
+                  data: { status: AssetStatus.AVAILABLE },
+                });
+              }
+            }
+
+            // Snapshot the (single) AssetKit slice being detached for the
+            // post-tx note. `assetKitRows[0]` is the only matching row
+            // (composite unique on AssetKit (assetId, kitId) guarantees ≤ 1).
+            const detachedSlice = assetKitRows[0] ?? null;
+
+            return {
+              kit: updatedKit,
+              detachmentImpact: impact,
+              slice: detachedSlice,
+            };
+          }
+        );
+
+        await emitAssetKitDetachmentNotes({
+          impact: detachmentImpact,
+          actorUserId: userId,
+          actorFirstName: user.firstName,
+          actorLastName: user.lastName,
+          organizationId,
+        });
 
         const actor = wrapUserLinkForNote({
           id: userId,
@@ -311,11 +408,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
         const kitLink = wrapLinkForNote(`/kits/${kitId}`, kit.name.trim());
 
+        // Qty-tracked: name the per-row AssetKit.quantity actually
+        // detached ("removed 50 units from Camera Kit"); INDIVIDUAL keeps
+        // the original countless wording. Mirrors the singular path in
+        // `createKitChangeNote` (note/service.server.ts) and the bulk
+        // remove path in `bulkRemoveAssetsFromKits`.
+        const count = slice?.asset
+          ? formatUnitCount(slice.asset, slice.quantity)
+          : null;
         await createNote({
-          content: `${actor} removed the asset from ${kitLink}.`,
+          content: count
+            ? `${actor} removed ${count} from ${kitLink}.`
+            : `${actor} removed the asset from ${kitLink}.`,
           type: "UPDATE",
           userId,
           assetId,
+          organizationId,
         });
 
         sendNotification({
@@ -431,7 +539,9 @@ export default function KitDetails() {
   const { roles } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
 
-  const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
+  const kitHasUnavailableAssets = kit.assetKits.some(
+    (ak) => !ak.asset.availableToBook
+  );
 
   const items = [
     { to: "assets", content: "Assets" },
@@ -507,7 +617,7 @@ export default function KitDetails() {
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
-              custody={kit.custody}
+              custody={kit.custody ? [kit.custody] : null}
             />
           </When>
 

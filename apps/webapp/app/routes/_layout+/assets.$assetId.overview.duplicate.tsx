@@ -53,6 +53,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      include: {
+        custody: { select: { quantity: true } },
+      },
     });
 
     return payload({
@@ -101,6 +104,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         custody: { include: { custodian: true } },
         tags: true,
         customFields: true,
+        // Pulled so the duplicate inherits the source asset's primary
+        // placement (`duplicateAsset` reads it via `getPrimaryLocation`).
+        assetLocations: {
+          select: { location: { select: { id: true } } },
+        },
       },
     });
 
@@ -174,6 +182,7 @@ export default function DuplicateAsset() {
                   id={asset.id}
                   status={asset.status}
                   availableToBook={asset.availableToBook}
+                  asset={asset}
                 />
               </div>
             </div>

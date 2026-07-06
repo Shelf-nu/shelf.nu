@@ -7,6 +7,7 @@ import {
   createDebouncedSaver,
 } from "@/lib/audit-scan-persistence";
 import { announce } from "@/lib/a11y";
+import { reportAuditDurabilityEvent } from "@/lib/sentry";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -15,6 +16,17 @@ export type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /** The audit-asset record ID, needed for adding notes/photos. Set after server confirms scan. */
+  auditAssetId?: string;
+  /** Local count of notes added during this session (optimistic). */
+  notesCount?: number;
+  /** Local count of photos added during this session (optimistic). */
+  imagesCount?: number;
+  /**
+   * True when this scan exhausted its sync retries and has not yet reached the
+   * server. Surfaced in the UI and blocks audit completion until re-synced.
+   */
+  syncFailed?: boolean;
 };
 
 export type ScanQueueEntry = {
@@ -114,7 +126,7 @@ export function useAuditInit({
       expectedAssetIdsRef.current = expectedIds;
       expectedAssetMapRef.current = expectedMap;
 
-      // Restore existing scans from server
+      // Restore existing scans from server (including evidence counts)
       const scannedIds = new Set<string>();
       const restoredItems: ScannedItem[] = [];
       for (const scan of data.existingScans) {
@@ -124,6 +136,9 @@ export function useAuditInit({
           name: scan.assetTitle,
           isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
+          auditAssetId: scan.auditAssetId ?? undefined,
+          notesCount: scan.auditNotesCount,
+          imagesCount: scan.auditImagesCount,
         });
       }
       scannedAssetIdsRef.current = scannedIds;
@@ -142,7 +157,13 @@ export function useAuditInit({
 
       // ── Crash recovery ───────────────────────────────
       const persisted = await loadAuditScanState(auditId);
-      if (persisted && persisted.scannedItems.length > 0) {
+      // why: gate on whether there is ANYTHING to recover (the inner check
+      // below decides recover-vs-clear from scanned items OR a non-empty
+      // queue), not on scannedItems alone. The eager queue-persist can write a
+      // fresh queue while scannedItems is still stale/empty (the list updates
+      // on a deferred render), so requiring scannedItems.length here would skip
+      // recovery and drop a queued scan. The queue is the durable record.
+      if (persisted) {
         // Find items that were scanned locally but not yet on the server
         const serverScannedIds = new Set(
           data.existingScans.map((s) => s.assetId)
@@ -150,15 +171,42 @@ export function useAuditInit({
         const recoveredItems = persisted.scannedItems.filter(
           (item) => !serverScannedIds.has(item.assetId)
         );
+        // Re-sync BOTH still-pending scans and scans that previously exhausted
+        // their retries (failedQueue). Without the failedQueue, a scan dropped
+        // after max retries would be merged back into the list as "found" but
+        // never re-submitted — and then marked MISSING on completion.
         const pendingQueue = persisted.pendingQueue || [];
+        const failedQueue = persisted.failedQueue || [];
+        // Exclude anything the server already has: a crash after recordAuditScan
+        // succeeded but before the queue-removal snapshot persisted could leave a
+        // stale entry on disk; re-submitting it would double-record the scan.
+        const queuedForSync = [...pendingQueue, ...failedQueue].filter(
+          (entry) => !serverScannedIds.has(entry.assetId)
+        );
 
-        if (recoveredItems.length > 0 || pendingQueue.length > 0) {
+        if (recoveredItems.length > 0 || queuedForSync.length > 0) {
           // Show recovery dialog (don't block init)
           setIsInitializing(false);
+          // Usually scannedItems and the queue agree; if only the queue
+          // survived (eager-persist before the list state committed), fall back
+          // to its length so the copy isn't "0 unsynced scans".
+          const unsyncedCount = Math.max(
+            recoveredItems.length,
+            queuedForSync.length
+          );
+          // Surface to Sentry: a previous session ended (kill/crash/background)
+          // with scans that never reached the server. Recovery is about to run
+          // — this tells us how often the durability net is actually catching.
+          reportAuditDurabilityEvent("session_recovered", {
+            auditId,
+            unsyncedCount,
+            recoveredItems: recoveredItems.length,
+            queuedForSync: queuedForSync.length,
+          });
           Alert.alert(
             "Resume Previous Session?",
-            `Found ${recoveredItems.length} unsynced scan${
-              recoveredItems.length !== 1 ? "s" : ""
+            `Found ${unsyncedCount} unsynced scan${
+              unsyncedCount !== 1 ? "s" : ""
             } from a previous session.`,
             [
               {
@@ -169,19 +217,41 @@ export function useAuditInit({
               {
                 text: "Resume",
                 onPress: () => {
+                  // A queued scan may have no recovered display item — the
+                  // eager persist can save a queue entry before the list state
+                  // commits. Rebuild display rows for those (name from the
+                  // expected-asset map, else a neutral label) so they show as
+                  // scanned, count correctly, and don't leave the Complete
+                  // button hidden because scannedItems stayed empty. (Codex
+                  // review, PR #2586.)
+                  const recoveredIds = new Set(
+                    recoveredItems.map((i) => i.assetId)
+                  );
+                  const queuedOnlyItems: ScannedItem[] = queuedForSync
+                    .filter((e) => !recoveredIds.has(e.assetId))
+                    .map((e) => ({
+                      assetId: e.assetId,
+                      name:
+                        expectedAssetMapRef.current.get(e.assetId)?.name ??
+                        "Scanned asset",
+                      isExpected: e.isExpected,
+                      scannedAt: new Date().toISOString(),
+                    }));
+                  const allRecovered = [...recoveredItems, ...queuedOnlyItems];
+
                   // Merge recovered items into state
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     scannedIds.add(item.assetId);
                   }
                   scannedAssetIdsRef.current = scannedIds;
 
-                  const merged = [...recoveredItems, ...restoredItems];
+                  const merged = [...allRecovered, ...restoredItems];
                   setScannedItems(merged);
                   scannedItemsRef.current = merged;
 
-                  // Requeue pending items for submission
-                  if (pendingQueue.length > 0) {
-                    scanQueueRef.current = pendingQueue.map((e) => ({
+                  // Requeue pending + previously-failed items for submission
+                  if (queuedForSync.length > 0) {
+                    scanQueueRef.current = queuedForSync.map((e) => ({
                       ...e,
                       retryCount: 0,
                     }));
@@ -192,7 +262,7 @@ export function useAuditInit({
                   // Recalculate counters
                   let extraFound = 0;
                   let extraUnexpected = 0;
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     if (item.isExpected) extraFound++;
                     else extraUnexpected++;
                   }
@@ -205,8 +275,8 @@ export function useAuditInit({
                   }
 
                   announce(
-                    `Resumed ${recoveredItems.length} scan${
-                      recoveredItems.length !== 1 ? "s" : ""
+                    `Resumed ${allRecovered.length} scan${
+                      allRecovered.length !== 1 ? "s" : ""
                     } from previous session`
                   );
                 },

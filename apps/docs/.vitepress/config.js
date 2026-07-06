@@ -114,12 +114,20 @@ export default {
             text: "Booking conflict handling",
             link: "/booking-conflict-queries",
           },
+          {
+            text: "Security Review Agent",
+            link: "/security-review-agent",
+          },
         ],
       },
       {
         text: "📊 Advanced Features",
         collapsed: true,
         items: [
+          {
+            text: "Asset Import (CSV)",
+            link: "/asset-import",
+          },
           {
             text: "Advanced Asset Index",
             link: "/advanced-index/",

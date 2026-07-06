@@ -6,7 +6,11 @@ import { ErrorContent } from "~/components/errors";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
-import { createScan, updateScan } from "~/modules/scan/service.server";
+import {
+  createScan,
+  updateScan,
+  updateScanGeolocation,
+} from "~/modules/scan/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -140,9 +144,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
+
+    // Trust-bound qrId from the URL path (NOT from form data) — used to
+    // verify the supplied scanId actually belongs to this QR.
+    const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
     const { latitude, longitude, scanId } = parseData(
       await request.formData(),
@@ -153,10 +161,17 @@ export async function action({ request }: ActionFunctionArgs) {
       })
     );
 
-    /** This handles the automatic update when we have scanId formData */
+    /**
+     * This handles the automatic geolocation update when we have scanId
+     * formData. SECURITY: this route is public/unauthenticated and `scanId`
+     * is attacker-controlled — `updateScanGeolocation` permits the update only
+     * when the scan was created within a short window AND its `qrId` matches
+     * the URL path's `qrId`, so a leaked scanId alone cannot tamper.
+     */
     if (scanId) {
-      await updateScan({
-        id: scanId,
+      await updateScanGeolocation({
+        scanId,
+        qrId,
         latitude,
         longitude,
       });

@@ -8,6 +8,11 @@ import { HydratedRouter } from "react-router/dom";
 if (window.env?.SENTRY_DSN) {
   Sentry.init({
     dsn: window.env.SENTRY_DSN,
+    // Match the server release so before/after comparisons and source-map
+    // resolution work end-to-end. Empty string when SENTRY_RELEASE /
+    // FLY_RELEASE_VERSION aren't set (local dev).
+    release: window.env.SENTRY_RELEASE || undefined,
+    environment: window.env.NODE_ENV,
     tunnel: "/api/sentry-tunnel",
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,

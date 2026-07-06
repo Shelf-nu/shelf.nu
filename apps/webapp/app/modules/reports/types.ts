@@ -10,7 +10,7 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { BookingStatus, Currency } from "@prisma/client";
+import type { AssetType, BookingStatus, Currency } from "@prisma/client";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -167,6 +167,10 @@ export interface ReportPayload<TRow = Record<string, unknown>> {
   // Top Booked Assets report specific fields
   /** The #1 most booked asset (independent of pagination) */
   topBookedAsset?: TopBookedAssetRow | null;
+
+  // Top Booked Kits report specific fields
+  /** The #1 most booked kit (independent of pagination) */
+  topBookedKit?: TopBookedKitRow | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -309,8 +313,17 @@ export interface IdleAssetRow {
   daysSinceLastUse: number;
   /** Current asset status */
   status: string;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Idle Assets report */
@@ -339,8 +352,19 @@ export interface CustodySnapshotRow {
   assignedAt: Date;
   /** Days in custody */
   daysInCustody: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity-in-custody) for QT; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** **Units held in this custody** (`Custody.quantity`), NOT workspace
+   * stock. Drives the per-row Value cell multiplier — a custodian holding
+   * 5 of a 100-unit QT pool reports value-for-5, not 100. Typed as
+   * `number | null` for `CurrencyCell` compatibility; `Custody.quantity`
+   * is non-null at the DB layer (Int @default(1)). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Custody Snapshot report */
@@ -377,6 +401,40 @@ export type TopBookedAssetsKpiId =
   | "unique_assets_booked"
   | "avg_bookings_per_asset"
   | "most_booked_asset";
+
+/**
+ * Row type for the Top Booked Kits report.
+ *
+ * Kits have no direct relation to bookings — a kit is "booked" when its
+ * member assets (which carry its `kitId`) are added to a booking, and kits
+ * move atomically (you cannot book a single item out of a kit). So
+ * `bookingCount` is the number of distinct bookings the kit appeared in
+ * within the timeframe, deduped per booking. Mirrors {@link TopBookedAssetRow}.
+ */
+export interface TopBookedKitRow {
+  id: string;
+  kitId: string;
+  kitName: string;
+  /** Kit image URL (server-refreshed if the signed URL had expired) */
+  image: string | null;
+  /** Kit image signed-URL expiration, passed through for client-side fallback */
+  imageExpiration: Date | string | null;
+  category: string | null;
+  location: string | null;
+  /** Number of distinct bookings the kit appeared in during the timeframe */
+  bookingCount: number;
+  /** Total days booked (summed booking durations, counted once per booking) */
+  totalDaysBooked: number;
+  /** Time booked percentage (days booked / days in period) */
+  timeBookedRate: number;
+}
+
+/** KPI IDs for the Top Booked Kits report */
+export type TopBookedKitsKpiId =
+  | "total_kit_bookings"
+  | "unique_kits_booked"
+  | "avg_bookings_per_kit"
+  | "most_booked_kit";
 
 // -----------------------------------------------------------------------------
 // R10: Asset Distribution Report Types
@@ -427,8 +485,17 @@ export interface AssetInventoryRow {
   location: string | null;
   status: string;
   custodian: string | null;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
   /** Date asset was created */
   createdAt: Date;
   /** QR code ID if assigned */
@@ -491,8 +558,17 @@ export interface AssetUtilizationRow {
   utilizationRate: number;
   /** Number of bookings in the period */
   bookingCount: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Asset Utilization report */
@@ -585,6 +661,13 @@ export interface CompliancePdfMeta extends ReportPdfMetaBase {
     periodLabel: string;
   };
   custodianPerformance: Array<{
+    /**
+     * TeamMember id when available — used as the row key in PDF tables.
+     * Falls back to `custodianName` only for legacy rows where the id is
+     * missing; names are NOT unique in the schema and shouldn't be the
+     * primary key.
+     */
+    custodianId: string | null;
     custodianName: string;
     rate: number;
     onTime: number;

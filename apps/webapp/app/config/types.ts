@@ -61,6 +61,20 @@ export interface Config {
   collectBusinessIntel: boolean;
 
   /**
+   * Debounce window (ms) for recording mobile companion-app activity.
+   * Internal telemetry threshold used by the mobile API; not env-driven.
+   */
+  mobileActivityDebounceMs: number;
+
+  /**
+   * The Companion app's Android package name (e.g. `com.shelf.companion`).
+   * The webapp's `assetlinks.json` route declares it as the App Links target,
+   * so it lives here as the single source rather than being hardcoded in the
+   * route. Must match `apps/companion/app.json` -> `android.package`.
+   */
+  companionAndroidPackageName: string;
+
+  /**
    * Geocoding configuration
    */
   geocoding: {

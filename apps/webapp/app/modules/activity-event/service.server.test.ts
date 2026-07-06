@@ -1,12 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createActivityEventInput } from "@factories";
+
 import { recordEvent, recordEvents } from "./service.server";
 
 // why: testing service logic without hitting the real database
 vi.mock("~/database/db.server", () => ({
   db: {
-    activityEvent: { create: vi.fn() },
+    activityEvent: { create: vi.fn(), createMany: vi.fn() },
     user: { findUnique: vi.fn() },
   },
 }));
@@ -23,6 +25,9 @@ vi.mock("~/utils/error", () => ({
 
 const mockDb = await import("~/database/db.server");
 const activityEventCreateMock = vi.mocked(mockDb.db.activityEvent.create);
+const activityEventCreateManyMock = vi.mocked(
+  mockDb.db.activityEvent.createMany
+);
 const userFindUniqueMock = vi.mocked(mockDb.db.user.findUnique);
 
 describe("activity event service", () => {
@@ -34,6 +39,7 @@ describe("activity event service", () => {
       displayName: "Jane Doe",
     } as any);
     activityEventCreateMock.mockResolvedValue({} as any);
+    activityEventCreateManyMock.mockResolvedValue({ count: 0 } as any);
   });
 
   describe("recordEvent", () => {
@@ -175,34 +181,101 @@ describe("activity event service", () => {
     it("is a no-op for empty input", async () => {
       await recordEvents([]);
       expect(activityEventCreateMock).not.toHaveBeenCalled();
+      expect(activityEventCreateManyMock).not.toHaveBeenCalled();
       expect(userFindUniqueMock).not.toHaveBeenCalled();
     });
 
-    it("writes one row per input and caches actor snapshots by actorUserId", async () => {
+    it("writes all rows in a single createMany call and caches actor snapshots by actorUserId", async () => {
       await recordEvents([
-        {
-          organizationId: "org-1",
-          actorUserId: "user-1",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
-          assetId: "asset-a",
-        },
-        {
-          organizationId: "org-1",
-          actorUserId: "user-1",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
-          assetId: "asset-b",
-        },
+        createActivityEventInput({ assetId: "asset-a" }),
+        createActivityEventInput({ assetId: "asset-b" }),
       ]);
 
-      // Two writes, one user lookup (cached)
-      expect(activityEventCreateMock).toHaveBeenCalledTimes(2);
+      // why: bulk inserts must be a single round-trip to fit inside the
+      // 5s Prisma interactive-tx budget (Sentry SHELF-WEBAPP-1KN). A
+      // per-row loop blew the budget for large bookings (262 assets).
+      expect(activityEventCreateManyMock).toHaveBeenCalledTimes(1);
+      expect(activityEventCreateMock).not.toHaveBeenCalled();
       expect(userFindUniqueMock).toHaveBeenCalledTimes(1);
+
+      const createManyArg = activityEventCreateManyMock.mock.calls[0][0];
+      // why: Prisma types `data` as `X | X[]`; narrow to array for indexing.
+      const rows =
+        createManyArg.data as Prisma.ActivityEventUncheckedCreateInput[];
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        assetId: "asset-a",
+        action: "BOOKING_ASSETS_ADDED",
+        actorSnapshot: {
+          firstName: "Jane",
+          lastName: "Doe",
+          displayName: "Jane Doe",
+        },
+      });
+      expect(rows[1]).toMatchObject({
+        assetId: "asset-b",
+        action: "BOOKING_ASSETS_ADDED",
+      });
+    });
+
+    it("resolves a distinct snapshot per actorUserId (cache keyed by actor)", async () => {
+      userFindUniqueMock
+        .mockResolvedValueOnce({
+          firstName: "Alice",
+          lastName: "A",
+          displayName: "Alice A",
+        } as any)
+        .mockResolvedValueOnce({
+          firstName: "Bob",
+          lastName: "B",
+          displayName: "Bob B",
+        } as any);
+
+      await recordEvents([
+        createActivityEventInput({
+          actorUserId: "user-alice",
+          assetId: "asset-a",
+        }),
+        createActivityEventInput({
+          actorUserId: "user-bob",
+          assetId: "asset-b",
+        }),
+        createActivityEventInput({
+          actorUserId: "user-alice",
+          assetId: "asset-c",
+        }),
+      ]);
+
+      // Two unique actors → two user lookups; the repeat hits the cache.
+      expect(userFindUniqueMock).toHaveBeenCalledTimes(2);
+      expect(activityEventCreateManyMock).toHaveBeenCalledTimes(1);
+
+      // why: Prisma types `data` as `X | X[]`; narrow to array for indexing.
+      const rows = activityEventCreateManyMock.mock.calls[0][0]
+        .data as Prisma.ActivityEventUncheckedCreateInput[];
+      expect(rows[0]).toMatchObject({
+        actorUserId: "user-alice",
+        actorSnapshot: { firstName: "Alice" },
+      });
+      expect(rows[1]).toMatchObject({
+        actorUserId: "user-bob",
+        actorSnapshot: { firstName: "Bob" },
+      });
+      expect(rows[2]).toMatchObject({
+        actorUserId: "user-alice",
+        actorSnapshot: { firstName: "Alice" },
+      });
+    });
+
+    it("wraps createMany failures in a ShelfError labelled 'Activity'", async () => {
+      activityEventCreateManyMock.mockRejectedValueOnce(new Error("boom"));
+
+      await expect(
+        recordEvents([createActivityEventInput({ assetId: "asset-a" })])
+      ).rejects.toMatchObject({
+        label: "Activity",
+        message: "Failed to record activity events.",
+      });
     });
   });
 });

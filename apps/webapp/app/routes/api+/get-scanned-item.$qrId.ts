@@ -4,6 +4,11 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
+import {
+  getScannerPickerMeta,
+  ScannerPickerContextSchema,
+  type ScannerPickerMeta,
+} from "~/modules/scanner/picker-meta.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -17,6 +22,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  sanitizeAssetExtraInclude,
+  sanitizeKitExtraInclude,
+} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -51,7 +60,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const { assetExtraInclude, kitExtraInclude, auditSessionId } = parseData(
+    const {
+      assetExtraInclude,
+      kitExtraInclude,
+      auditSessionId,
+      pickerContext,
+    } = parseData(
       searchParams,
       z.object({
         assetExtraInclude: z
@@ -77,21 +91,49 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             }
           }),
         auditSessionId: z.string().optional(),
+        /**
+         * JSON-encoded `{ type: "location" | "kit" | "booking", id }`.
+         * When present, the loader attaches a normalised picker MAX
+         * to the asset response (`pickerMeta`) so the scanner drawer
+         * can show "· X available" and bound its qty input — matching
+         * the manage-assets picker UX.
+         */
+        pickerContext: z
+          .string()
+          .optional()
+          .transform((val, ctx) => {
+            if (!val) return undefined;
+            try {
+              return ScannerPickerContextSchema.parse(JSON.parse(val));
+            } catch (e) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Invalid pickerContext: ${
+                  e instanceof Error ? e.message : "parse error"
+                }`,
+              });
+              return z.NEVER;
+            }
+          }),
       })
     ) as {
       assetExtraInclude: Prisma.AssetInclude | undefined;
       kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
+      pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
     };
 
+    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
+    // user-controlled JSON. Allowlist them before merging into the Prisma
+    // include so relation traversal / deep nesting cannot be injected.
     const assetInclude: Prisma.AssetInclude = {
       ...ASSET_INCLUDE,
-      ...(assetExtraInclude ?? {}),
+      ...(sanitizeAssetExtraInclude(assetExtraInclude) ?? {}),
     };
 
     const kitInclude: Prisma.KitInclude = {
       ...KIT_INCLUDE,
-      ...(kitExtraInclude ?? {}),
+      ...(sanitizeKitExtraInclude(kitExtraInclude) ?? {}),
     };
 
     const sequentialId = parseSequentialId(qrId);
@@ -150,6 +192,19 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         }
       }
 
+      // When the scanner provides a destination (location / kit /
+      // booking), attach the same strict-available pool the
+      // manage-assets picker shows so the row label + qty input bound
+      // are consistent across both UX surfaces.
+      const pickerMeta: ScannerPickerMeta | null =
+        pickerContext && asset.id
+          ? await getScannerPickerMeta({
+              assetId: asset.id,
+              organizationId,
+              context: pickerContext,
+            })
+          : null;
+
       return data(
         payload({
           qr: {
@@ -159,6 +214,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
               auditAssetId,
               auditNotesCount,
               auditImagesCount,
+              pickerMeta,
             },
           },
         })
@@ -230,6 +286,18 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     }
 
+    // See the sequential-id branch above for context. Same attachment
+    // shape so consumers can read `qr.asset.pickerMeta` regardless of
+    // which lookup matched.
+    const pickerMeta: ScannerPickerMeta | null =
+      pickerContext && qr.asset?.id
+        ? await getScannerPickerMeta({
+            assetId: qr.asset.id,
+            organizationId,
+            context: pickerContext,
+          })
+        : null;
+
     return data(
       payload({
         qr: {
@@ -241,6 +309,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,
+                pickerMeta,
               }
             : undefined,
         },

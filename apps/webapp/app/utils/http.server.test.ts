@@ -24,6 +24,7 @@ import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
 vitest.mock("./logger", () => ({
   Logger: {
     error: vitest.fn(),
+    handledClientError: vitest.fn(),
   },
 }));
 
@@ -160,6 +161,22 @@ describe(safeRedirect.name, () => {
   it("should return destination path", () => {
     expect(safeRedirect("/items")).toBe("/items");
   });
+
+  it("should block open-redirect bypasses that prefix checks miss", () => {
+    // Protocol-relative and backslash variants all resolve off-origin;
+    // browsers treat "\" like "/" in http(s) URLs.
+    expect(safeRedirect("//evil.com")).toBe("/");
+    expect(safeRedirect("/\\evil.com")).toBe("/"); // "/\evil.com"
+    expect(safeRedirect("/\\\\evil.com")).toBe("/"); // "/\\evil.com"
+    // "%5C" reaches a route loader already decoded to "\" via route params.
+    expect(safeRedirect(`/${decodeURIComponent("%5C")}evil.com`)).toBe("/");
+    // Internal Remix routes remain blocked.
+    expect(safeRedirect("/__manifest")).toBe("/");
+    // Absolute allow-list is matched by origin, not prefix: a host that merely
+    // begins with SERVER_URL, or hides it in userinfo, must not pass.
+    expect(safeRedirect("https://app.shelf.nu.evil.com/phish")).toBe("/");
+    expect(safeRedirect("https://app.shelf.nu@evil.com/phish")).toBe("/");
+  });
 });
 
 describe(payload.name, () => {
@@ -243,6 +260,38 @@ describe(error.name, () => {
     error(cause);
 
     expect(Logger.error).toBeCalledWith(cause);
+  });
+
+  it("records a handled client error to the log trail", () => {
+    const cause = new ShelfError({
+      cause: null,
+      message: "Validation failed",
+      label: "Request validation",
+      status: 400,
+    });
+
+    error(cause);
+
+    expect(Logger.handledClientError).toBeCalledWith(cause);
+  });
+
+  it("does not log or trail aborted requests (status 499)", () => {
+    // why: client disconnects are intentionally suppressed from both
+    // Logger.error and the 4xx log trail so they don't flood Sentry.
+    // Clear first — earlier tests in this describe call error() and the
+    // Logger mocks accumulate (no beforeEach in this block).
+    vitest.clearAllMocks();
+    const cause = new ShelfError({
+      cause: null,
+      message: "Request aborted",
+      label: "Request aborted",
+      status: 499,
+    });
+
+    error(cause);
+
+    expect(Logger.error).not.toBeCalled();
+    expect(Logger.handledClientError).not.toBeCalled();
   });
 });
 

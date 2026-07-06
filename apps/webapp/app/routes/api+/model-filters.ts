@@ -47,6 +47,9 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("booking"),
   }),
+  BasicModelFilters.extend({
+    name: z.literal("assetModel"),
+  }),
 ]);
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];

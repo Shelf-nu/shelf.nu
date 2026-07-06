@@ -5,27 +5,59 @@
  * filters out the knip dead-code findings (out of scope for PR review),
  * and prints a Markdown comment body to stdout.
  *
- * Invoked from `.github/workflows/react-doctor.yml` after the doctor scan.
+ * Invoked from `.github/workflows/react-doctor.yml` (once per app in the
+ * matrix) after the doctor scan.
  *
  * Usage:
- *   node .github/scripts/react-doctor-pr-comment.mjs <diagnostics-dir>
+ *   node .github/scripts/react-doctor-pr-comment.mjs \
+ *     <diagnostics-dir> <exit-code> [path-prefix]
+ *
+ * `<diagnostics-dir>` may be empty: react-doctor only writes a diagnostics
+ * directory when it has findings to record. The exit code (captured from the
+ * CLI via PIPESTATUS in the workflow) disambiguates:
+ *   - empty dir + exit 0       → clean scan, no findings
+ *   - empty dir + non-zero exit → the CLI itself failed
+ *
+ * `[path-prefix]` is the scanned app dir with a trailing slash (e.g.
+ * `apps/companion/`). react-doctor emits file paths relative to the scanned
+ * dir, so we prepend this to render repo-root-relative links. The app name and
+ * convenience script (`<app>:doctor`) are derived from it. Defaults to the
+ * webapp for backward compatibility.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
-const HEADER = "## 🩺 React Doctor";
+const diagDir = process.argv[2];
+const exitCode = process.argv[3];
+// Normalize to exactly one trailing slash so callers can pass either
+// "apps/companion" or "apps/companion/" without breaking the rendered links
+// (`${pathPrefix}${d.filePath}`) or the footer `cd` command.
+const pathPrefix = `${(process.argv[4] || "apps/webapp").replace(/\/+$/, "")}/`;
+
+/** App dir without a trailing slash, e.g. "apps/companion". */
+const appDir = pathPrefix.replace(/\/+$/, "");
+/** App name derived from the prefix, e.g. "apps/companion/" → "companion". */
+const appName = appDir.replace(/^apps\//, "") || "webapp";
+/** Root convenience script for a full local scan, e.g. "companion:doctor". */
+const doctorCmd = `${appName}:doctor`;
+
+const HEADER = `## 🩺 React Doctor — ${appName}`;
 const FOOTER =
-  "<sub>Run locally with `pnpm webapp:doctor` for a full scan, or " +
-  "`cd apps/webapp && pnpm exec react-doctor . --diff` for the same " +
+  `<sub>Run locally with \`pnpm ${doctorCmd}\` for a full scan, or ` +
+  `\`cd ${appDir} && pnpm exec react-doctor . --diff\` for the same ` +
   "diff-only view.</sub>";
 
-const diagDir = process.argv[2];
-
 if (!diagDir) {
+  if (exitCode === "0") {
+    console.log(
+      `${HEADER}\n\n✅ No new findings on the files changed by this PR.\n\n${FOOTER}\n`
+    );
+    process.exit(0);
+  }
   console.log(
-    `${HEADER}\n\nNo diagnostics directory passed — scan may have failed. ` +
-      `Check the workflow logs.\n`
+    `${HEADER}\n\nNo diagnostics directory passed — scan may have failed ` +
+      `(CLI exit ${exitCode || "unknown"}). Check the workflow logs.\n`
   );
   process.exit(0);
 }
@@ -70,7 +102,7 @@ lines.push("");
 const formatLocation = (d) => {
   const file = d.filePath.startsWith("apps/")
     ? d.filePath
-    : `apps/webapp/${d.filePath}`;
+    : `${pathPrefix}${d.filePath}`;
   const lineSuffix = d.line ? `:${d.line}` : "";
   return `\`${file}${lineSuffix}\``;
 };

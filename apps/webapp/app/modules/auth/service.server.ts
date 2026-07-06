@@ -215,12 +215,26 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
-export async function signInWithSSO(domain: string) {
+export async function signInWithSSO(
+  domain: string,
+  /**
+   * Which client is initiating SSO. `"mobile"` lands the post-auth redirect on
+   * the native-app callback path (which hands a session back to the app);
+   * defaults to the web callback. The redirect path is built HERE (never taken
+   * from the caller) so it is always an allow-listed, query-free Supabase
+   * redirect URL — Supabase treats `?` as a wildcard in the allow-list.
+   */
+  { platform = "web" }: { platform?: "web" | "mobile" } = {}
+) {
   try {
+    const redirectTo = `${SERVER_URL}/oauth/callback${
+      platform === "mobile" ? "/mobile" : ""
+    }`;
+
     const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
       domain,
       options: {
-        redirectTo: `${SERVER_URL}/oauth/callback`,
+        redirectTo,
       },
     });
 
@@ -522,14 +536,15 @@ export async function refreshAccessToken(
 
     return mapAuthSession(session);
   } catch (cause) {
+    // SECURITY: never put `refreshToken` (a long-lived bearer credential) in
+    // additionalData — if this error is ever captured it would be spread into
+    // the Sentry event's `extra`. `makeSentryContext` also redacts secret-ish
+    // keys as a backstop, but the credential should not be in the error at all.
     throw new ShelfError({
       cause,
       message:
         "Unable to refresh access token. Please try again. If the issue persists, contact support",
       label,
-      additionalData: {
-        refreshToken,
-      },
     });
   }
 }

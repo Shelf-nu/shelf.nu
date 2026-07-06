@@ -1,0 +1,73 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Create a booking (mobile)"
+tags:
+  - bookings
+  - create
+  - high-impact
+
+---
+# Test: create a booking end-to-end from the Companion app.
+# Name + custodian (start/end default to tomorrow 9–17) -> Create -> lands on
+# the new DRAFT booking detail with Edit + Reserve actions.
+#
+# Requires (in the test org): GRANULAR WORKSPACE (TEAM) with a team member
+# "Dr. Sarah Mitchell" (the custodian we assign). No fixture reset needed —
+# this flow only CREATES.
+
+- runFlow: ../../shared/login.yaml
+
+# Switch to the GRANULAR (TEAM) workspace — bookings are TEAM-only
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# Open Bookings and tap the create FAB
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+
+# ── Fill the form (start/end default to tomorrow 9–17) ──
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Mobile Booking"
+# Dismiss the keyboard (tap a static label), then reveal + open the custodian picker
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- takeScreenshot: booking-create-form-filled
+
+# ── Submit ──
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+
+# ── Lands on the new DRAFT booking detail ──
+- extendedWaitUntil:
+    visible: "QA Mobile Booking"
+    timeout: 20000
+# The detail briefly shows "Refreshing…" on first load; wait for the DRAFT
+# actions to settle before asserting. The buttons' a11y labels mask the inner
+# text, so match the labels.
+- extendedWaitUntil:
+    visible: "Reserve this booking"
+    timeout: 15000
+- assertVisible: "Edit booking"
+- assertVisible: "Browse available assets and kits to add"
+- takeScreenshot: booking-create-success

@@ -30,6 +30,7 @@ import { createSystemBookingNote } from "../booking-note/service.server";
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job keyed by bookingId from the queue payload (SchedulerData has no user org context); the booking record is the org scope and recipients are resolved from booking.organizationId
       where: { id: data.id },
       include: BOOKING_INCLUDE_FOR_EMAIL,
     })
@@ -62,7 +63,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
       const text = checkoutReminderEmailContent({
         bookingName: booking.name,
-        assetsCount: booking._count.assets,
+        assetsCount: booking._count.bookingAssets,
         custodian,
         from: booking.from,
         to: booking.to,
@@ -78,7 +79,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
             new Date(booking.from),
             new Date()
           )}.`,
-          assetCount: booking._count.assets,
+          assetCount: booking._count.bookingAssets,
           hints: data.hints,
           recipientReason: recipient.reason,
           recipientEmail: recipient.email,
@@ -98,6 +99,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job keyed by bookingId from the queue payload (SchedulerData has no user org context); the booking record is the org scope and recipients are resolved from booking.organizationId
       where: { id: data.id },
       include: BOOKING_INCLUDE_FOR_EMAIL,
     })
@@ -118,7 +120,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (booking.from && booking.to && booking.status === BookingStatus.ONGOING) {
     await sendCheckinReminder(
       booking,
-      booking._count.assets,
+      booking._count.bookingAssets,
       data.hints,
       booking.organizationId
     );
@@ -142,6 +144,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
     .update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job keyed by bookingId from the queue payload (SchedulerData has no user org context); transition is gated on current status and downstream notes/recipients use booking.organizationId
       where: { id: data.id, status: BookingStatus.ONGOING },
       data: { status: BookingStatus.OVERDUE },
       include: BOOKING_INCLUDE_FOR_EMAIL,
@@ -197,7 +200,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
     const text = overdueBookingEmailContent({
       bookingName: booking.name,
-      assetsCount: booking._count.assets,
+      assetsCount: booking._count.bookingAssets,
       custodian,
       from: booking.from as Date,
       to: booking.to as Date,
@@ -210,7 +213,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       const html = await bookingUpdatesTemplateString({
         booking,
         heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
-        assetCount: booking._count.assets,
+        assetCount: booking._count.bookingAssets,
         hints: data.hints,
         recipientReason: recipient.reason,
         recipientEmail: recipient.email,
@@ -230,6 +233,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   try {
     // Fetch the booking to check if it's still in COMPLETE status
     const booking = await db.booking.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job keyed by bookingId from the queue payload (SchedulerData has no user org context); org is derived from the fetched booking and used to gate the subsequent archive
       where: { id: data.id },
       select: {
         id: true,
@@ -273,6 +277,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     const now = new Date();
     const updatedBooking = await db.booking
       .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job; booking.id was just fetched above in this same job and the org's autoArchive setting was checked before this guarded status transition (no user org context exists in SchedulerData)
         where: { id: booking.id, status: BookingStatus.COMPLETE },
         data: {
           status: BookingStatus.ARCHIVED,

@@ -81,6 +81,40 @@ export function getActionMethod(request: Request) {
 }
 
 /**
+ * Reads form data from a Remix request and converts undici's
+ * `TypeError: Content-Type was not one of "multipart/form-data" or
+ * "application/x-www-form-urlencoded".` into a non-captured `badRequest`.
+ *
+ * Only `TypeError` (the malformed-body case) is downgraded to a 400 — any
+ * other exception is rethrown so genuine server/runtime faults stay visible
+ * to Sentry instead of being masked as client errors.
+ *
+ * Use this in actions that may receive malformed bodies (auth endpoints
+ * and other public routes that external/mobile clients could hit).
+ *
+ * @param request - The Remix request whose body will be read as form data.
+ *   Pass `request.clone()` if the body needs to be read more than once.
+ * @returns The parsed FormData.
+ * @throws A non-captured `badRequest` if the body is not form-encoded.
+ */
+export async function readFormData(request: Request): Promise<FormData> {
+  try {
+    return await request.formData();
+  } catch (cause) {
+    if (cause instanceof TypeError) {
+      throw new ShelfError({
+        cause,
+        message: "Invalid request body. Expected a form submission.",
+        label: "Request validation",
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+    throw cause;
+  }
+}
+
+/**
  * Validate data with a zod schema.
  *
  * @throws A `badRequest` error if the form data is invalid.
@@ -201,23 +235,44 @@ export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,
   defaultRedirect = "/"
 ) {
-  /** List of domains we allow to redirect to
-   */
-  const safeList = [SERVER_URL, `https://${URL_SHORTENER}`];
-
-  if (!to || typeof to !== "string" || to.startsWith("//")) {
+  if (!to || typeof to !== "string") {
     return defaultRedirect;
   }
 
-  // Block internal Remix routes (manifest, etc.) from being used as redirects
-  // These are framework-internal URLs created by lazy route discovery
+  // Block internal Remix routes (manifest, etc.) created by lazy route discovery.
   if (to.startsWith("/__")) {
     return defaultRedirect;
   }
 
-  // Check if the URL starts with any of the safe domains
-  const isSafeDomain = safeList.some((safeUrl) => to.startsWith(safeUrl));
-  if (!to.startsWith("/") && !isSafeDomain) {
+  // Absolute URL? Validate the allow-list by ORIGIN, never by prefix.
+  // `SERVER_URL` has its trailing slash stripped, so a prefix check matches any
+  // host that merely begins with it — e.g. "https://app.shelf.nu.evil.com" or
+  // the "https://app.shelf.nu@evil.com" userinfo trick — which resolve
+  // off-origin. `new URL(to)` throws for relative inputs, which fall through.
+  try {
+    const absolute = new URL(to);
+    const allowed = new Set([new URL(SERVER_URL).origin]);
+    if (URL_SHORTENER) {
+      allowed.add(new URL(`https://${URL_SHORTENER}`).origin);
+    }
+    return allowed.has(absolute.origin) ? to : defaultRedirect;
+  } catch {
+    // Not an absolute URL — fall through to local-path handling.
+  }
+
+  if (!to.startsWith("/")) {
+    return defaultRedirect;
+  }
+
+  // Final defense: resolve the local path against our own origin and confirm it
+  // stays same-origin. A prefix check (e.g. `startsWith("//")`) misses "//host",
+  // "/\host" and "/\\host": browsers treat "\" like "/" in http(s) URLs, and a
+  // "\" reaches here decoded from "%5C" via route params — all resolve off-origin.
+  try {
+    if (new URL(to, SERVER_URL).origin !== new URL(SERVER_URL).origin) {
+      return defaultRedirect;
+    }
+  } catch {
     return defaultRedirect;
   }
 
@@ -242,6 +297,28 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
   ReturnType<typeof payload<T>>;
 
 /**
+ * Log a caught server error for observability WITHOUT building a response.
+ *
+ * The logging half of {@link error}, for resource/API routes that catch a
+ * `ShelfError` and return their own JSON shape (so they can't use `error()`,
+ * which also fires a user notification and returns a richer payload). Mirrors
+ * `error()`'s logging exactly: 5xx (and uncaught) reach Sentry via
+ * `Logger.error`; handled 4xx land on the low-severity log trail via
+ * `Logger.handledClientError` (and are dropped from the Sentry error pipeline
+ * by `handleBeforeSendError`); client disconnects (status 499, "Request
+ * aborted") are intentionally skipped from both.
+ *
+ * @param cause - The normalized `ShelfError` to log
+ */
+export function logException(cause: ShelfError) {
+  if (cause.label === "Request aborted") {
+    return;
+  }
+  Logger.error(cause);
+  Logger.handledClientError(cause);
+}
+
+/**
  * Create an error response payload.
  *
  * Normalize the error to return to help type inference.
@@ -250,9 +327,13 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @returns The normalized error with `error` key set to the error
  */
 export function error(cause: ShelfError, shouldSendNotification = true) {
-  if (cause.label !== "Request aborted") {
-    Logger.error(cause);
-  }
+  // Single source of truth for "how we log a caught ShelfError": 5xx (and
+  // uncaught) reach Sentry via Logger.error; handled 4xx land on the
+  // low-severity log trail via Logger.handledClientError (dropped from the
+  // Sentry error pipeline by handleBeforeSendError); client disconnects
+  // (status 499 "Request aborted") are skipped from both. error() layers the
+  // notification + richer response payload on top of this.
+  logException(cause);
 
   if (
     cause.label !== "Request aborted" &&

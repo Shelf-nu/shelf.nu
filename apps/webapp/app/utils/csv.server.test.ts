@@ -281,12 +281,14 @@ describe("buildCsvExportDataFromAssets", () => {
         valuation: 1234.5,
         availableToBook: true,
         createdAt: new Date("2024-01-02T03:04:05Z"),
-        custody: {
-          custodian: {
-            name: "Fallback Name",
-            user: { firstName: "Jane", lastName: "Doe" },
+        custody: [
+          {
+            custodian: {
+              name: "Fallback Name",
+              user: { firstName: "Jane", lastName: "Doe" },
+            },
           },
-        },
+        ],
         customFields: [
           {
             customField: { name: "isInsured" },
@@ -402,6 +404,47 @@ describe("buildCsvExportDataFromAssets", () => {
       '""',
     ]);
   });
+
+  it("emits per-unit valuation and qty-aware total_value side by side", () => {
+    // QT asset: 100 boxes at €1/each. `valuation` column stays per-unit
+    // (CSV round-trip safe — re-import won't inflate it), while the new
+    // synthetic `total_value` column reports the qty-aware total (€100).
+    const assets = [
+      {
+        id: "asset-pens",
+        title: "Pens",
+        valuation: 1,
+        quantity: 100,
+        type: "QUANTITY_TRACKED",
+        unitOfMeasure: "boxes",
+        tags: [],
+        custody: [],
+        customFields: [],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      // Injected by the export caller at MAX_SAFE_INTEGER; here we pin
+      // it to position 2 for a stable assertion.
+      { name: "total_value", visible: true, position: 2 },
+    ];
+
+    const [headers, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      request: baseRequest,
+    });
+
+    expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
+    expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
 });
 
 describe("buildCsvExportDataFromBookings", () => {
@@ -422,7 +465,10 @@ describe("buildCsvExportDataFromBookings", () => {
       },
       description: "Studio session",
       tags: [{ name: "commercial" }],
-      assets: [{ title: "Primary Asset" }, { title: "Secondary Asset" }],
+      bookingAssets: [
+        { asset: { title: "Primary Asset" } },
+        { asset: { title: "Secondary Asset" } },
+      ],
     };
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
@@ -443,6 +489,10 @@ describe("buildCsvExportDataFromBookings", () => {
       "Description",
       "Tags",
       "Assets",
+      "Item check-in status",
+      "Check-in date",
+      "Checked in",
+      "Total assets",
     ]);
 
     expect(bookingRow[0]).toBe('"http://localhost:3000/bookings/booking-1"');
@@ -460,6 +510,67 @@ describe("buildCsvExportDataFromBookings", () => {
         expect(value).toBe('""');
       }
     });
+  });
+
+  it("marks each asset checked in/out and rolls up the booking count", () => {
+    // why: an OVERDUE booking where one of two assets has been partially
+    // checked in — exercises the per-asset status/date columns and the
+    // booking-level rollup against real partial check-in input.
+    const checkinDate = new Date("2024-01-05T09:30:00Z");
+    const booking = {
+      id: "booking-2",
+      name: "Field shoot",
+      status: "OVERDUE",
+      from: new Date("2024-01-02T03:04:00Z"),
+      originalFrom: undefined,
+      to: new Date("2024-01-03T03:04:00Z"),
+      originalTo: undefined,
+      custodianTeamMember: { name: "Custodian", user: null },
+      custodianUser: null,
+      description: "",
+      tags: [],
+      // why: bookings carry their assets via the `BookingAsset` pivot
+      // (one row per slice, with a per-slice `quantity`) post-3a, so the
+      // CSV builder feeds off `booking.bookingAssets[].asset` not the
+      // legacy direct `assets` relation.
+      bookingAssets: [
+        {
+          quantity: 1,
+          asset: { id: "asset-returned", title: "Returned Camera" },
+        },
+        { quantity: 1, asset: { id: "asset-out", title: "Still-Out Tripod" } },
+      ],
+    };
+
+    const checkinsByBooking = new Map([
+      [
+        "booking-2",
+        {
+          checkedInAssetIds: new Set(["asset-returned"]),
+          checkinDateByAsset: new Map([["asset-returned", checkinDate]]),
+        },
+      ],
+    ]);
+
+    const [, mainRow, assetRow] = buildCsvExportDataFromBookings(
+      [booking as any],
+      baseRequest,
+      checkinsByBooking
+    );
+
+    // Main row carries the first (returned) asset + booking-level rollup.
+    expect(mainRow[11]).toBe('"Returned Camera"');
+    expect(mainRow[12]).toBe('"Checked in"');
+    expect(mainRow[13]).not.toBe('""'); // a formatted check-in date is present
+    expect(mainRow[14]).toBe('"1"'); // checked in
+    expect(mainRow[15]).toBe('"2"'); // total assets
+
+    // Trailing asset row carries the still-out asset; booking-level columns blank.
+    expect(assetRow[11]).toBe('"Still-Out Tripod"');
+    expect(assetRow[12]).toBe('"Checked out"');
+    expect(assetRow[13]).toBe('""'); // no check-in date for an item still out
+    expect(assetRow[14]).toBe('""'); // booking rollup not repeated on asset rows
+    expect(assetRow[15]).toBe('""');
   });
 });
 

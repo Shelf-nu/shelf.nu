@@ -26,6 +26,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm companion:build:ios:device` - Build native iOS + run on physical iPhone
 - `pnpm companion:build:android` - Build native Android + run on device/emulator
 - `pnpm companion:prebuild:clean` - Regenerate iOS native project from Expo config
+- `pnpm companion:doctor` - Run [react-doctor](https://www.react.doctor/) against the companion app (React Native diagnostics: deprecated modules, reanimated, FlatList perf, hook misuse)
 
 See `apps/companion/README.md` for full setup guide (LAN IPs, HTTP mode, device trust).
 
@@ -43,7 +44,20 @@ See `apps/companion/README.md` for full setup guide (LAN IPs, HTTP mode, device 
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
 - `pnpm run format` - Prettier code formatting (root-level)
 - `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
-- `pnpm webapp:doctor` - Run [react-doctor](https://www.react.doctor/) against the webapp (React health diagnostics: hook misuse, perf, a11y, architecture). Advisory only — not wired into `validate` or CI gates.
+- `pnpm webapp:doctor` - Run [react-doctor](https://www.react.doctor/) against the webapp (React health diagnostics: hook misuse, perf, a11y, architecture). Not part of `validate` or the pre-commit hook. It **does** run in CI: the `🩺 React Doctor` GitHub Action scans changed files on every PR (matrix over webapp + companion), posts a per-app sticky comment, and fails the check on newly-introduced errors (warnings stay advisory). See [companion:doctor](#companion-app-mobile) for the React Native equivalent.
+
+### Security Review Agent (pre-commit)
+
+A Claude-powered security reviewer runs automatically on `git commit` against security-sensitive diffs (routes, `*.server.ts`, prisma, Supabase wiring, server middleware, new dependencies). It catches the regressions hit most often — cross-org IDORs, missing `requirePermission` gates, open redirects, missing Zod validation, audit-trail gaps — before code reaches review.
+
+- Interactive subagent: `.claude/agents/shelf-security-reviewer.md` (full toolset — for manual `claude --agent shelf-security-reviewer ...` use with permission prompts).
+- Headless subagent: `.claude/agents/shelf-security-reviewer-headless.md` (`Skill`-only — what the pre-commit hook invokes; safe under `bypassPermissions` because there's no Bash/network channel to exfiltrate through).
+- Pre-commit wrapper: `scripts/security-review-staged.sh`
+- Wired into `lefthook.yml` at priority 5 (after typecheck)
+
+Advisory by default — findings print, the commit proceeds. Opt in to blocking with `SHELF_SEC_REVIEW_BLOCK=1`; skip with `SHELF_SEC_REVIEW=0`. Manual use: `claude --agent shelf-security-reviewer "review PR #N"`.
+
+📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
 
 ### Database
 
@@ -220,7 +234,10 @@ const disabled = useDisabled(fetcher);
 
 ### Silencing react-doctor findings
 
-`pnpm webapp:doctor` is advisory, not a CI gate, but we aim to keep it clean.
+`react-doctor` runs in CI on every PR for both the webapp (`pnpm webapp:doctor`)
+and the companion app (`pnpm companion:doctor`): warnings are advisory, but
+**newly-introduced errors fail the PR check**, so keep both clean. The guidance
+below applies to both apps.
 
 **Important:** `react-doctor` does **not** respect `// eslint-disable-next-line` comments. The only way to silence a finding is to refactor the code so the pattern no longer matches. Standard ESLint disable comments still work for `pnpm webapp:lint` — they just don't help with `pnpm webapp:doctor`.
 
@@ -396,6 +413,10 @@ export async function createUserNote(args: CreateUserNoteArgs) { ... }
 - Keep helper functions focused on a single responsibility
 - Place shared helpers near the code that uses them, or in a shared utils file
   if used across multiple modules
+
+### TypeScript Strictness
+
+- **Never use `any` as a shortcut.** The `any` type should only be used when it genuinely makes sense (e.g., wrapping third-party APIs with unknown shapes). Using `any` because it's "easier" or "less work" to figure out the proper type is not acceptable. Always find or define the correct type — use `unknown` with type narrowing if the shape is truly dynamic.
 
 ### Key Business Features
 

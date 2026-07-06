@@ -1,6 +1,8 @@
 name: 🩺 React Doctor
 
-# Runs on every PR that touches webapp source. Two outcomes:
+# Runs on every PR that touches webapp OR companion source. The job fans out
+# over both apps via a matrix; each app is scanned independently and gets its
+# own sticky PR comment. Two outcomes per app:
 #   1. Always posts (or updates) a sticky PR comment summarising findings on
 #      the files changed by this PR.
 #   2. Fails the check if NEW errors are introduced — warnings stay advisory.
@@ -11,6 +13,9 @@ on:
       - "apps/webapp/**/*.ts"
       - "apps/webapp/**/*.tsx"
       - "apps/webapp/package.json"
+      - "apps/companion/**/*.ts"
+      - "apps/companion/**/*.tsx"
+      - "apps/companion/package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/react-doctor.yml"
       - ".github/scripts/react-doctor-pr-comment.mjs"
@@ -26,11 +31,21 @@ jobs:
 
   doctor:
     needs: authorize
-    name: 🩺 React Doctor
+    name: 🩺 React Doctor (${{ matrix.app.name }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    strategy:
+      # Scan each app independently — a failure on one app must not cancel the
+      # other's scan or its PR comment.
+      fail-fast: false
+      matrix:
+        app:
+          - name: webapp
+            dir: apps/webapp
+          - name: companion
+            dir: apps/companion
     steps:
       - name: 🛑 Cancel previous runs
         uses: styfle/cancel-workflow-action@0.11.0
@@ -50,20 +65,54 @@ jobs:
         # named ref restores the diff path.
         run: git switch -C react-doctor-pr-head
 
+      - name: 🔎 Detect whether this app changed in the PR
+        id: changes
+        # Gate the rest of this matrix leg on whether the app actually has
+        # changes in the PR diff. Without this, a webapp-only PR still posts an
+        # empty "🩺 React Doctor — companion ✅ No new findings" sticky comment
+        # (and vice-versa). Uses the same origin/<base> ref react-doctor's
+        # --diff relies on, so no extra dependency is needed.
+        # BASE_REF is untrusted PR input → passed via env, never inline ${{ }}.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          APP_DIR: ${{ matrix.app.dir }}
+        run: |
+          # Capture the diff, then test each path with a literal prefix match.
+          # Two reasons to avoid `git diff | grep -q "^${APP_DIR}/"`:
+          #   * pipefail: grep -q exits on first match and closes the pipe; git
+          #     can die with SIGPIPE (141) on large diffs and bash -eo pipefail
+          #     surfaces that 141 — flipping the gate to false for an app that
+          #     actually changed.
+          #   * regex: APP_DIR interpolated into a grep pattern would treat any
+          #     metacharacter as regex. A quoted `case` glob keeps it literal.
+          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          CHANGED=false
+          while IFS= read -r file; do
+            case "$file" in
+              "${APP_DIR}"/*) CHANGED=true; break ;;
+            esac
+          done <<< "$CHANGED_FILES"
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "App ${APP_DIR} changed in this PR: $CHANGED"
+
       - name: 📦 Setup pnpm
+        if: steps.changes.outputs.changed == 'true'
         uses: pnpm/action-setup@v4
 
       - name: ⎔ Setup node
+        if: steps.changes.outputs.changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: 📥 Install deps
+        if: steps.changes.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: 🩺 Run react-doctor (diff vs base)
         id: doctor
-        working-directory: apps/webapp
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: ${{ matrix.app.dir }}
         # Notes:
         #   --diff origin/<base>     — only files changed vs the PR target
         #   --no-dead-code           — knip findings are out of scope here
@@ -93,24 +142,31 @@ jobs:
           exit 0
 
       - name: 📝 Build PR comment body
-        if: always()
+        if: always() && steps.changes.outputs.changed == 'true'
         env:
           DIAG_PATH: ${{ steps.doctor.outputs.diag_path }}
+          EXIT_CODE: ${{ steps.doctor.outputs.exit_code }}
+          # react-doctor emits file paths relative to the scanned dir, so the
+          # comment builder needs the app dir to render repo-root-relative links.
+          PATH_PREFIX: ${{ matrix.app.dir }}/
         run: |
-          node .github/scripts/react-doctor-pr-comment.mjs "$DIAG_PATH" \
+          node .github/scripts/react-doctor-pr-comment.mjs \
+            "$DIAG_PATH" "$EXIT_CODE" "$PATH_PREFIX" \
             > "$RUNNER_TEMP/comment.md"
           echo "--- comment preview ---"
           cat "$RUNNER_TEMP/comment.md"
 
       - name: 💬 Post or update PR comment
-        if: always()
+        if: always() && steps.changes.outputs.changed == 'true'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: react-doctor
+          # Per-app header so the two matrix jobs maintain separate sticky
+          # comments instead of overwriting each other.
+          header: react-doctor-${{ matrix.app.name }}
           path: ${{ runner.temp }}/comment.md
 
       - name: ❌ Fail if errors introduced
-        if: steps.doctor.outputs.exit_code != '0'
+        if: steps.changes.outputs.changed == 'true' && steps.doctor.outputs.exit_code != '0'
         run: |
           echo "react-doctor introduced new errors on this PR — see the comment for details."
           exit 1

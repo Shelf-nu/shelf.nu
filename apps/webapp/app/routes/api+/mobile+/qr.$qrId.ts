@@ -1,88 +1,69 @@
 import { data, type LoaderFunctionArgs } from "react-router";
-import { z } from "zod";
-import { db } from "~/database/db.server";
-import {
-  requireMobileAuth,
-  MOBILE_ASSET_SELECT,
-} from "~/modules/api/mobile-auth.server";
-import { makeShelfError } from "~/utils/error";
-import { getParams } from "~/utils/http.server";
+import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
+import { createScan } from "~/modules/scan/service.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 /**
  * GET /api/mobile/qr/:qrId
  *
- * Resolves a QR code to its linked asset or kit.
- * Used by the mobile scanner after scanning a Shelf QR code.
+ * The **recording** mobile code resolve. Resolves a scanned QR id or SAM id to
+ * its linked asset/kit (via {@link resolveMobileScannedCode}) and records scan
+ * provenance (who + when) for a real QR field scan, mirroring the public web QR
+ * resolver (`qr+/_public+/$qrId.tsx`).
+ *
+ * Recording is unconditional here: it is an endpoint-level property, NOT a
+ * client-supplied flag. Callers that only need to identify a code without
+ * recording use the sibling non-recording route instead (the audit scanner),
+ * mirroring the web's `get-scanned-item` split. SAM resolves have no backing QR
+ * id, so nothing is recorded (matching web). GPS coordinates are intentionally
+ * NOT captured here (a separate, deliberate item).
+ *
+ * Used by the companion scanner tab and deep-link handler.
+ *
+ * @see {@link file://./get-scanned-item.$qrId.ts} (the non-recording sibling)
+ * @see {@link file://./../../qr+/_public+/$qrId.tsx} (the web recording resolve)
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
-    const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-    // First fetch just the QR code to check authorization
-    const qr = await db.qr.findUnique({
-      where: { id: qrId },
-      select: {
-        id: true,
-        assetId: true,
-        kitId: true,
-        organizationId: true,
-      },
-    });
-
-    if (!qr) {
-      return data({ error: { message: "QR code not found" } }, { status: 404 });
-    }
-
-    // Require organization membership — deny unowned QR codes
-    if (!qr.organizationId) {
+    const result = await resolveMobileScannedCode({ request, params, user });
+    if (!result.ok) {
       return data(
-        {
-          error: { message: "This QR code is not linked to any organization" },
-        },
-        { status: 404 }
+        { error: { message: result.message } },
+        { status: result.status }
       );
     }
 
-    const membership = await db.userOrganization.findUnique({
-      where: {
-        userId_organizationId: {
+    // Record scan provenance for a real QR field scan. SAM resolves expose no
+    // QR id (`recordableQrId === null`), so there is nothing to record.
+    // Non-fatal: a provenance failure must never turn a successful resolve into
+    // an error response for the scanner.
+    if (result.recordableQrId) {
+      try {
+        await createScan({
+          userAgent: request.headers.get("user-agent") ?? "mobile-companion",
           userId: user.id,
-          organizationId: qr.organizationId,
-        },
-      },
-      select: { id: true },
-    });
-
-    if (!membership) {
-      return data(
-        {
-          error: {
-            message: "This QR code belongs to a different organization",
-          },
-        },
-        { status: 403 }
-      );
+          qrId: result.recordableQrId,
+          deleted: false,
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to record mobile scan provenance",
+            // why: qrId is enough to trace the failing scan; avoid putting a
+            // raw user identifier into the log pipeline.
+            additionalData: { qrId: result.recordableQrId },
+            label: "Scan",
+          })
+        );
+      }
     }
 
-    // Now fetch the full data (only after authorization passes)
-    let asset = null;
-    if (qr.assetId) {
-      asset = await db.asset.findUnique({
-        where: { id: qr.assetId },
-        select: MOBILE_ASSET_SELECT,
-      });
-    }
-
-    return data({
-      qr: {
-        id: qr.id,
-        assetId: qr.assetId,
-        kitId: qr.kitId,
-        organizationId: qr.organizationId,
-        asset,
-      },
-    });
+    return data({ qr: result.qr });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

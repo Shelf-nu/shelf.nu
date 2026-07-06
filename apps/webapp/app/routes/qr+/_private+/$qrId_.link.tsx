@@ -50,6 +50,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     const qr = await db.qr.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: query is intentionally unscoped so the loader can distinguish three cases — unclaimed code (line 62: redirect to /claim), code owned by another org (line 66: throw 403), and code owned by the caller's org (proceed). Org ownership IS enforced at lines 62-74; scoping would collapse the unclaimed case and break the redirect-to-claim flow
       where: {
         id: qrId,
       },

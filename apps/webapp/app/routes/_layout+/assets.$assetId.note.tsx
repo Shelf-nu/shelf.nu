@@ -83,6 +83,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content,
           assetId,
           userId,
+          organizationId,
         });
 
         return payload({ note });

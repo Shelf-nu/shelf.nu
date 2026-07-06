@@ -28,11 +28,13 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { ManageModelRequests } from "~/components/booking/manage-model-requests";
 import styles from "~/components/booking/styles.css?url";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
@@ -53,7 +55,10 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
@@ -63,41 +68,74 @@ import {
   updateBookingAssets,
   createKitBookingNote,
 } from "~/modules/booking/service.server";
+import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getParams,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
+import {
+  wrapAssetWithCountForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+// asset shape now lives at `assetKits[].asset`.
 export type KitForBooking = Prisma.KitGetPayload<{
   include: {
     location: typeof LOCATION_WITH_HIERARCHY;
-    _count: { select: { assets: true } };
-    assets: {
+    _count: { select: { assetKits: true } };
+    // Code-resolution relations for the AssetCodeBadge — kits are code-bearing
+    // entities too. The runtime loader already includes these via
+    // KITS_INCLUDE_FIELDS; declaring them here lines the type up.
+    qrCodes: { take: 1; select: { id: true } };
+    barcodes: { select: { id: true; type: true; value: true } };
+    assetKits: {
       select: {
-        id: true;
-        status: true;
-        availableToBook: true;
-        custody: true;
-        bookings: {
+        asset: {
           select: {
             id: true;
+            // `type` powers the qty-aware in-custody guard in
+            // `getKitAvailabilityStatus` — qty-tracked assets with
+            // partial operator custody must not flag the whole kit
+            // as in-custody.
+            type: true;
             status: true;
-            name: true;
-            from: true;
-            to: true;
+            availableToBook: true;
+            custody: true;
+            bookingAssets: {
+              include: {
+                booking: {
+                  select: {
+                    id: true;
+                    status: true;
+                    name: true;
+                    from: true;
+                    to: true;
+                  };
+                };
+              };
+            };
           };
         };
       };
@@ -155,7 +193,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
+    const bookingKitIds = getKitIdsByAssets(
+      booking.bookingAssets.map((ba) => ba.asset)
+    );
+
+    /**
+     * Book-by-Model — Models tab payload. Shared with the manage-assets
+     * loader via `getBookingModelTabData` so both surfaces compute model
+     * availability identically (see the helper's JSDoc for the "total −
+     * inCustody − reserved" formula).
+     */
+    const modelTabData = await getBookingModelTabData({
+      organizationId,
+      booking,
+    });
 
     const { page, perPage, kits, search, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
@@ -164,44 +215,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentBookingId: bookingId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              availableToBook: true,
-              custody: true,
-              bookings: {
-                /**
-                 * Important to make sure the bookings are overlapping the period of the current booking
-                 */
-                where: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.from },
-                          to: { gte: booking.to },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.from },
-                        },
-                      ],
-                    }),
-                },
+              asset: {
                 select: {
                   id: true,
+                  type: true,
                   status: true,
-                  name: true,
-                  from: true,
-                  to: true,
+                  availableToBook: true,
+                  custody: true,
+                  bookingAssets: {
+                    /**
+                     * Important to make sure the bookings are overlapping the period of the current booking
+                     */
+                    where: {
+                      booking: {
+                        status: {
+                          in: [
+                            BookingStatus.RESERVED,
+                            BookingStatus.ONGOING,
+                            BookingStatus.OVERDUE,
+                          ],
+                        },
+                        ...(booking.from &&
+                          booking.to && {
+                            OR: [
+                              {
+                                from: { lte: booking.from },
+                                to: { gte: booking.to },
+                              },
+                              {
+                                from: { gte: booking.from },
+                                to: { lte: booking.from },
+                              },
+                            ],
+                          }),
+                      },
+                    },
+                    include: {
+                      booking: {
+                        select: {
+                          id: true,
+                          status: true,
+                          name: true,
+                          from: true,
+                          to: true,
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -230,6 +292,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       items: kits,
       totalItems: totalKits,
       bookingKitIds,
+      ...modelTabData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -267,9 +330,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: { id: bookingId, organizationId },
         select: {
           id: true,
+          // why: `name` is used to build the booking link in per-asset
+          // notes written after `updateBookingAssets` ("added 50 units
+          // of {asset} via {kit} to {booking}"). Cheap scalar pull.
+          name: true,
           status: true,
-          assets: {
-            select: { id: true },
+          bookingAssets: {
+            // `assetKitId` is needed by the kit-add logic below — it
+            // checks "is this kit's AssetKit already represented in this
+            // booking" (per-row test) rather than "is this asset already
+            // in the booking" (which is wrong now that the same asset
+            // can appear standalone AND kit-driven in the same booking).
+            select: {
+              assetKitId: true,
+              asset: { select: { id: true } },
+            },
           },
         },
       })
@@ -314,37 +389,94 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const selectedKits = await db.kit.findMany({
-      where: { id: { in: kitIds } },
+      // Scope to caller's org: kitIds come from request input, so an
+      // attacker could otherwise reference kits from another workspace.
+      where: { id: { in: kitIds }, organizationId },
       select: {
         id: true,
         name: true,
         status: true,
-        assets: { select: { id: true, status: true } },
+        assetKits: {
+          // `id` + `quantity` so the kit-driven BookingAsset rows created
+          // below get the matching `AssetKit.id` recorded on `assetKitId`
+          // and inherit the kit's slice quantity for QUANTITY_TRACKED
+          // assets (otherwise rows would default to qty=1, leaving the
+          // kit's "10 boxes of Pencils" looking like 1 box in the booking).
+          // `title` + `type` + `unitOfMeasure` feed the per-asset Note
+          // emission after `updateBookingAssets` so qty-tracked rows
+          // render "added 50 boxes of {asset} via {kit} to {booking}".
+          select: {
+            id: true,
+            quantity: true,
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                unitOfMeasure: true,
+                status: true,
+              },
+            },
+          },
+        },
       },
     });
 
-    const allSelectedAssetIds = selectedKits.flatMap((k) =>
-      k.assets.map((a) => a.id)
+    // Existing kit-driven AssetKit ids in this booking — we use these to
+    // detect "this kit is already added" rather than "this asset is
+    // already added" (which was the old, wrong test before BookingAsset
+    // grew multi-row support). A qty-tracked asset can now be in a
+    // booking as standalone AND kit-driven simultaneously; the standalone
+    // entry must NOT block the kit-driven row from being created.
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((ba) => ba.assetKitId)
+        .filter((v): v is string => v != null)
     );
 
-    // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
+    // Build the kit-driven slice specs — one element per `AssetKit`
+    // membership we'd want to insert. Skip slices whose AssetKit is
+    // already represented in the booking — the user already added that
+    // kit.
+    //
+    // The SAME asset appearing in multiple selected kits produces
+    // MULTIPLE slice specs (one per AssetKit), each a distinct row in
+    // the kit-driven bucket (partial unique is on `assetKitId`, not
+    // `assetId`). This is what fixes the multi-kit-per-asset drop: a
+    // qty-tracked asset in two kits added to one booking now yields two
+    // kit-driven `BookingAsset` rows.
+    const kitSlices: Array<{
+      assetId: string;
+      assetKitId: string;
+      quantity: number;
+    }> = [];
+    for (const kit of selectedKits) {
+      for (const ak of kit.assetKits) {
+        if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
+        kitSlices.push({
+          assetId: ak.asset.id,
+          assetKitId: ak.id,
+          quantity: ak.quantity,
+        });
+      }
+    }
+    const newAssetIds = Array.from(new Set(kitSlices.map((s) => s.assetId)));
 
-    // Filter out existing assets to get only newly added ones
-    const newAssetIds = allSelectedAssetIds.filter(
-      (assetId) => !existingAssetIds.includes(assetId)
-    );
-
-    // Only validate kits that are actually adding NEW assets to the booking
+    // Only validate kits that are actually adding NEW slices to the
+    // booking (i.e. at least one of the kit's AssetKits isn't already
+    // represented). Kits whose AssetKits are all already present in the
+    // booking are no-ops here.
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assets.some((asset) => newAssetIds.includes(asset.id))
+      kit.assetKits.some((ak) => !existingAssetKitIds.has(ak.id))
     );
 
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =
       await getDetailedPartialCheckinData(bookingId);
 
-    const bookingAssetIds = new Set(existingAssetIds);
+    const bookingAssetIds = new Set<string>(
+      booking.bookingAssets.map((ba) => ba.asset.id)
+    );
 
     // Filter kits that are truly unavailable (using centralized helper for consistency)
     const checkedOutKits = newlyAddedKits.filter((kit) => {
@@ -382,19 +514,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    // Only the kits actually being added now (those contributing a new
+    // asset) — NOT the full submitted selection. Passing the whole
+    // selection would flip still-available kits already on an ongoing
+    // booking to CHECKED_OUT. Hoisted so both `updateBookingAssets` and
+    // the qty-aware notes loop below share one source of truth.
+    const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
+
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
-      /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
+      /**
+       * A pure kit-add has NO genuine standalone assets — every member
+       * already travels through `kitSlices` (one per-AssetKit row that
+       * drives the kit-driven insert and carries per-row quantities for
+       * QUANTITY_TRACKED). So we pass `assetIds: []` here.
+       *
+       * Passing the slice asset ids as `assetIds` too would create a
+       * DUPLICATE standalone `BookingAsset` row (assetKitId NULL) for
+       * every member, on top of the kit-driven row — that was the "kit
+       * assets show twice" bug that inflated all booking counts/progress.
+       *
+       * `updateBookingAssets` still validates and reports correctly with
+       * an empty `assetIds`: FK validation unions `assetIds` with the
+       * slice asset ids, and `addedAssetIds` derives from the kit asset
+       * ids, so the ONGOING/OVERDUE status flip and per-asset
+       * `BOOKING_ASSETS_ADDED` events still fire. `scan-assets.tsx` uses
+       * the same standalone-vs-kit-slice separation.
+       */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds: newAssetIds, // Only the newly added assets from kits
-        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
+        // Pure kit-add: members are created ONLY as kit-driven rows via
+        // `kitSlices`; no standalone rows — see comment above.
+        assetIds: [],
+        kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
+        kitSlices,
       });
 
-      /** We create notes for the newly added kits instead of individual assets */
-      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,
@@ -405,20 +562,68 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           action: "added",
         });
       }
+
+      /** Per-asset notes — one per kit-driven slice. Mirrors the
+       * `addAssetsToBooking` kit-add branch in
+       * `booking/service.server.ts` so the asset timeline shows the
+       * per-row qty count for QUANTITY_TRACKED rows ("added 50 boxes
+       * of {asset} via {kit} to {booking}") and the legacy "added
+       * asset via {kit} to {booking}" wording for INDIVIDUAL. Same
+       * slice loop the BookingAsset insert uses, so the per-row
+       * AssetKit.quantity is naturally what we name in the note.
+       */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, booking.name);
+      const assetKitToKit = new Map<string, { id: string; name: string }>();
+      for (const kit of newlyAddedKits) {
+        for (const ak of kit.assetKits) {
+          assetKitToKit.set(ak.id, { id: kit.id, name: kit.name });
+        }
+      }
+      await Promise.all(
+        kitSlices.map(async (slice) => {
+          const ak = newlyAddedKits
+            .flatMap((kit) => kit.assetKits.map((ak) => ({ ak, kit })))
+            .find((entry) => entry.ak.id === slice.assetKitId);
+          if (!ak) return;
+          const assetMeta = ak.ak.asset;
+          const kit = ak.kit;
+          const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
+          const content = isQuantityTracked(assetMeta)
+            ? `${actor} added ${wrapAssetWithCountForNote(
+                assetMeta,
+                slice.quantity
+              )} via ${kitLink} to ${bookingLink}.`
+            : `${actor} added asset via ${kitLink} to ${bookingLink}.`;
+          await createNotes({
+            content,
+            type: "UPDATE",
+            userId,
+            assetIds: [slice.assetId],
+            organizationId,
+          });
+        })
+      );
     }
 
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
       const removedKits = await db.kit.findMany({
-        where: { id: { in: removedKitIds } },
+        // Scope to caller's org: removedKitIds come from request input, so an
+        // attacker could otherwise reference kits from another workspace.
+        where: { id: { in: removedKitIds }, organizationId },
         select: {
           id: true,
           name: true,
-          assets: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       });
       const allRemovedAssetIds = removedKits.flatMap((k) =>
-        k.assets.map((a) => a.id)
+        k.assetKits.map((ak) => ak.asset.id)
       );
 
       await removeAssets({
@@ -453,10 +658,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert dialog,
-     * so we have to redirect to manage-assets url
+     * so we have to redirect to manage-assets url. `redirectTo` is a
+     * client-supplied form value, so route it through `safeRedirect` to block
+     * open-redirects to another origin — falling back to the booking page.
      */
     if (redirectTo) {
-      return redirect(redirectTo);
+      return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }
 
     return redirect(`/bookings/${bookingId}`);
@@ -470,7 +677,23 @@ export default function AddKitsToBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, items, bookingKitIds } = useLoaderData<typeof loader>();
+  const {
+    booking,
+    items,
+    bookingKitIds,
+    showModelsTab,
+    assetModels,
+    modelRequests,
+  } = useLoaderData<typeof loader>();
+
+  /**
+   * Local state for the active tab value. "kits" is the default on mount.
+   * "assets" always navigates away (existing manage-assets route); "models"
+   * renders inline via `ManageModelRequests`, mirroring manage-assets' tab
+   * pattern.
+   */
+  const [activeTab, setActiveTab] = useState<"kits" | "models">("kits");
+
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -501,8 +724,20 @@ export default function AddKitsToBooking() {
     unhideAssetsBookigIds: booking.id,
   })}`;
 
-  const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
+  const totalAssetsSelected = booking.bookingAssets.filter(
+    (ba) => ba.asset.assetKits.length === 0
+  ).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
+
+  /**
+   * Total quantity reserved via model-level requests — shown as a count
+   * badge on the Models tab trigger, identical to manage-assets
+   * (`manage-assets.tsx` — `totalModelRequestUnits`).
+   */
+  const totalModelRequestUnits = useMemo(
+    () => modelRequests.reduce((acc, req) => acc + req.quantity, 0),
+    [modelRequests]
+  );
 
   /**
    * Set selected items for kit based on the route data.
@@ -541,14 +776,23 @@ export default function AddKitsToBooking() {
   return (
     <Tabs
       className="flex h-full max-h-full flex-col"
-      value="kits"
-      onValueChange={() => {
-        if (hasUnsavedChanges) {
-          setIsAlertOpen(true);
+      value={activeTab}
+      activationMode="manual"
+      onValueChange={(nextValue) => {
+        // "assets" always navigates away (existing route). "kits" and
+        // "models" render inline on this route — just update the
+        // active-tab state.
+        if (nextValue === "assets") {
+          if (hasUnsavedChanges) {
+            setIsAlertOpen(true);
+            return;
+          }
+          void navigate(manageAssetsUrl);
           return;
         }
-
-        void navigate(manageAssetsUrl);
+        if (nextValue === "models" || nextValue === "kits") {
+          setActiveTab(nextValue);
+        }
       }}
     >
       <div className="border-b px-6 py-2">
@@ -569,14 +813,39 @@ export default function AddKitsToBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
+          {showModelsTab ? (
+            <TabsTrigger
+              className="flex-1 gap-x-2"
+              value="models"
+              aria-label={`Models tab${
+                totalModelRequestUnits > 0
+                  ? ` (${totalModelRequestUnits} reserved)`
+                  : ""
+              }`}
+            >
+              Models
+              {totalModelRequestUnits > 0 ? (
+                <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                  {totalModelRequestUnits}
+                </GrayBadge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
       </div>
 
-      <Filters
-        slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
-        innerWrapperClassName="justify-between"
-        className="justify-between !border-t-0 border-b px-6 md:flex"
-      />
+      {/*
+       * The kit availability filter only makes sense on the Kits tab. The
+       * Models tab uses its own picker + availability hints (via
+       * `ManageModelRequests`).
+       */}
+      {activeTab === "kits" ? (
+        <Filters
+          slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
+          innerWrapperClassName="justify-between"
+          className="justify-between !border-t-0 border-b px-6 md:flex"
+        />
+      ) : null}
 
       <TabsContent value="kits" asChild>
         <List
@@ -613,11 +882,40 @@ export default function AddKitsToBooking() {
         />
       </TabsContent>
 
-      {/* Footer of the modal */}
-      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
-        <div className="flex flex-col justify-center gap-1">
-          {selectedBulkItems.length} kits selected
-        </div>
+      {showModelsTab ? (
+        <TabsContent
+          value="models"
+          className="mt-0 flex min-h-0 flex-1 flex-col"
+        >
+          <ManageModelRequests
+            bookingId={booking.id}
+            assetModels={assetModels}
+            modelRequests={modelRequests}
+          />
+        </TabsContent>
+      ) : null}
+
+      {/*
+       * Footer of the modal. The `<Form ref={formRef}>` (and every hidden
+       * input in it) is ALWAYS mounted, regardless of `activeTab`:
+       * `UnsavedChangesAlert.onYes` submits `formRef.current` directly, so
+       * switching tabs must not leave that ref null (a conditionally-mounted
+       * form would make confirm-from-alert silently no-op on the non-Kits
+       * tabs). Only the visible "N kits selected" text and the Confirm button
+       * are Kits-tab-only: the Models tab has no standalone save of its own
+       * (each reservation posts inline via the model-requests API route).
+       */}
+      <footer
+        className={tw(
+          "mt-auto flex shrink-0 items-center border-t px-6 py-3",
+          activeTab === "kits" ? "justify-between" : "justify-end"
+        )}
+      >
+        {activeTab === "kits" ? (
+          <div className="flex flex-col justify-center gap-1">
+            {selectedBulkItems.length} kits selected
+          </div>
+        ) : null}
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
@@ -645,14 +943,17 @@ export default function AddKitsToBooking() {
             {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
             ) : null}
-            <Button
-              type="submit"
-              name="intent"
-              value="addKits"
-              disabled={isSearching}
-            >
-              Confirm
-            </Button>
+            {/* Omitted entirely (not just hidden) on the Models tab — see the comment above the footer. */}
+            {activeTab === "kits" ? (
+              <Button
+                type="submit"
+                name="intent"
+                value="addKits"
+                disabled={isSearching}
+              >
+                Confirm
+              </Button>
+            ) : null}
           </Form>
         </div>
       </footer>
@@ -677,14 +978,20 @@ export default function AddKitsToBooking() {
 function Row({ item: kit }: { item: KitForBooking }) {
   const { booking } = useLoaderData<typeof loader>();
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    : null;
 
   // For Case 1: Check if kit is checked out in current booking
   // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
-    kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+    kit.assetKits.some((ak) =>
+      ak.asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 
@@ -715,7 +1022,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   <KitStatusBadge
                     status={KitStatus.CHECKED_OUT}
                     availableToBook={
-                      !kit.assets.some((a) => !a.availableToBook)
+                      !kit.assetKits.some((ak) => !ak.asset.availableToBook)
                     }
                   />
                 </When>
@@ -729,11 +1036,13 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   <KitStatusBadge
                     status={kit.status}
                     availableToBook={
-                      !kit.assets.some((a) => !a.availableToBook)
+                      !kit.assetKits.some((ak) => !ak.asset.availableToBook)
                     }
                   />
                 </When>
                 <KitAvailabilityLabel kit={kit} />
+                {/* Kit's display code chip — same identifier surface as assets. */}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>
@@ -762,7 +1071,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
           />
         ) : null}
       </Td>
-      <Td>{kit._count.assets}</Td>
+      <Td>{kit._count.assetKits}</Td>
     </>
   );
 }

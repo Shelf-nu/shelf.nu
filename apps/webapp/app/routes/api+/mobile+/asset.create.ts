@@ -28,8 +28,10 @@ import {
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
+import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -51,6 +53,7 @@ import {
  *   locationId?: string
  *   valuation?: number
  *   customFields?: { id: string; value: string | number | boolean | null }[]
+ *   qrId?: string (optional - links an existing unlinked QR code to the asset)
  * }
  *
  * @param args - React Router action args (carrying the incoming request).
@@ -78,14 +81,19 @@ export async function action({ request }: ActionFunctionArgs) {
       description,
       categoryId,
       locationId,
+      tags,
       valuation,
       customFields,
+      qrId,
     } = z
       .object({
         title: z.string().min(2, "Title must be at least 2 characters"),
         description: z.string().optional(),
         categoryId: z.string().optional(),
         locationId: z.string().optional(),
+        // Tag ids to assign to the new asset. Validated below against the
+        // caller's organization before they are connected.
+        tags: z.array(z.string()).optional(),
         valuation: z.number().optional(),
         customFields: z
           .array(
@@ -95,6 +103,7 @@ export async function action({ request }: ActionFunctionArgs) {
             })
           )
           .optional(),
+        qrId: z.string().optional(),
       })
       .parse(body);
 
@@ -113,6 +122,13 @@ export async function action({ request }: ActionFunctionArgs) {
         );
       }
     }
+
+    // why: tag ids come from request input and are attacker-controlled. Assert
+    // they belong to the caller's org AND are assignable to assets (useFor empty
+    // or ASSET) before connecting them — matching the picker's source — so a
+    // crafted request can't attach a booking-only tag. No-op when no tags are
+    // supplied.
+    await assertTagsAssignableToAssets({ tagIds: tags ?? [], organizationId });
 
     // why: every category may have its own set of required custom fields.
     // We always fetch the active definitions for the chosen category (or
@@ -191,8 +207,12 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       categoryId: categoryId || null,
       locationId: locationId || undefined,
+      // Connect the (org-validated) tags. `buildTagsSet` takes a comma-joined
+      // id string and is the same helper the web create form uses.
+      tags: buildTagsSet(tags && tags.length ? tags.join(",") : undefined),
       valuation: valuation ?? null,
       customFieldsValues,
+      qrId: qrId || undefined,
     });
 
     return data({

@@ -4,6 +4,7 @@ import { custodyApi } from "./custody";
 import { bookingsApi } from "./bookings";
 import { auditsApi } from "./audits";
 import { dashboardApi } from "./dashboard";
+import { kitsApi } from "./kits";
 
 export { onAuthError } from "./client";
 export { invalidateResponseCache } from "./cache";
@@ -17,4 +18,5 @@ export const api = {
   ...custodyApi,
   ...bookingsApi,
   ...auditsApi,
+  ...kitsApi,
 };

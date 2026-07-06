@@ -1,6 +1,8 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
@@ -32,6 +34,10 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
+    // Caller's role — required so releaseCustody can enforce the SELF_SERVICE
+    // self-restriction (only release custody of assets assigned to themselves).
+    const { role } = await getMobileUserContext(user.id, organizationId);
+
     const body = await request.json();
     const { assetId } = z
       .object({
@@ -39,7 +45,43 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    const asset = await releaseCustody({ assetId, organizationId });
+    // why: read the current custody record so we can attach actor +
+    // teamMember + targetUser to the CUSTODY_RELEASED activity event.
+    // releaseCustody only emits the event when activityEvent is provided
+    // (it's optional in the helper signature) — mirrors the pattern used
+    // in assets.$assetId.overview.release-custody.tsx.
+    //
+    // why org-scoped via `asset.organizationId`: `findUnique({ assetId })`
+    // would happily return custody data for an asset in ANOTHER org
+    // (assetId is globally unique but not org-scoped on its own). The
+    // downstream `releaseCustody` enforces org scoping, but this pre-read
+    // would still leak `custodian.id` / `custodian.user.id` cross-org if
+    // an attacker guessed an asset id. Filtering on the related asset's
+    // `organizationId` makes the read consistent with the rest of the
+    // route's tenant boundary.
+    const custodyRecord = await db.custody.findFirst({
+      where: {
+        assetId,
+        asset: { organizationId },
+      },
+      select: {
+        custodian: {
+          select: { id: true, user: { select: { id: true } } },
+        },
+      },
+    });
+
+    const asset = await releaseCustody({
+      assetId,
+      organizationId,
+      userId: user.id,
+      role,
+      activityEvent: {
+        actorUserId: user.id,
+        teamMemberId: custodyRecord?.custodian?.id,
+        targetUserId: custodyRecord?.custodian?.user?.id,
+      },
+    });
 
     // Create a note for the activity log (matches webapp format)
     const actor = wrapUserLinkForNote({
@@ -53,6 +95,7 @@ export async function action({ request }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: user.id,
       assetId: asset.id,
+      organizationId,
     });
 
     return data({ asset });

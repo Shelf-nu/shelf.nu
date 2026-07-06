@@ -36,6 +36,8 @@ type CheckinDialogProps = {
   variant?: "default" | "dropdown" | "primary";
   /** Specific asset IDs for enhanced completion messaging */
   specificAssetIds?: string[];
+  /** Render the trigger button full-width to match a sibling full-width button. */
+  fullWidth?: boolean;
 };
 
 export default function CheckinDialog({
@@ -46,6 +48,7 @@ export default function CheckinDialog({
   label = "Check-in",
   variant = "default",
   specificAssetIds,
+  fullWidth = false,
 }: CheckinDialogProps) {
   const isEarlyCheckin = isBookingEarlyCheckin(booking.to);
   if (!isEarlyCheckin) {
@@ -63,7 +66,7 @@ export default function CheckinDialog({
             : ""
         )}
         variant={variant === "dropdown" ? "link" : "primary"}
-        width={variant === "dropdown" ? "full" : undefined}
+        width={variant === "dropdown" || fullWidth ? "full" : undefined}
       >
         {variant === "dropdown" ? (
           <span className="flex items-center gap-2">
@@ -94,6 +97,7 @@ export default function CheckinDialog({
               : ""
           )}
           variant={variant === "dropdown" ? "link" : "primary"}
+          width={variant === "dropdown" || fullWidth ? "full" : undefined}
         >
           {variant === "dropdown" ? (
             <span className="flex items-center gap-2">

@@ -15,9 +15,11 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
 import { DEFAULT_SSO_DOMAIN } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -37,15 +39,25 @@ const SSOLoginFormSchema = z.object({
       message: "Please enter a valid domain name",
     })),
   redirectTo: z.string().optional(),
+  // "mobile" routes the post-auth redirect to the native-app callback so the
+  // companion app can complete SSO login (see signInWithSSO).
+  platform: z.enum(["web", "mobile"]).optional(),
 });
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
   const subHeading = "Enter your company's domain to login with SSO.";
   const { disableSSO } = config;
 
+  const url = new URL(request.url);
+  // The native-app flow opens this page with `?platform=mobile`. The in-app
+  // browser may carry a stale web cookie, but the app still needs to complete
+  // the SSO handoff to obtain its OWN session — so don't short-circuit it to
+  // /assets. The web flow still redirects an already-authenticated session.
+  const isMobile = url.searchParams.get("platform") === "mobile";
+
   try {
-    if (context.isAuthenticated) {
+    if (context.isAuthenticated && !isMobile) {
       return redirect("/assets");
     }
 
@@ -61,11 +73,33 @@ export async function loader({ context }: LoaderFunctionArgs) {
       });
     }
 
-    // If a default SSO domain is configured, skip the domain input form
-    // and redirect directly to the identity provider.
-    if (DEFAULT_SSO_DOMAIN) {
-      const url = await signInWithSSO(DEFAULT_SSO_DOMAIN);
-      return redirect(url);
+    // PKCE (native SSO): a PKCE-capable companion build appends an S256
+    // `code_challenge`. Stash it in a short-lived cookie so it survives the SSO
+    // redirect chain back to `/oauth/callback/mobile`, where it is bound to the
+    // minted auth code. Only accept a well-formed S256 challenge (43-char
+    // base64url); anything else is ignored (treated as a legacy, non-PKCE flow).
+    const codeChallenge = url.searchParams.get("code_challenge");
+    const validChallenge =
+      isMobile && codeChallenge && /^[A-Za-z0-9_-]{43}$/.test(codeChallenge)
+        ? codeChallenge
+        : null;
+
+    if (validChallenge) {
+      return data(payload({ title, subHeading }), {
+        headers: {
+          "Set-Cookie":
+            await mobilePkceChallengeCookie.serialize(validChallenge),
+        },
+      });
+    }
+
+    // If a default SSO domain is configured, skip the domain input form and
+    // redirect straight to the identity provider. Guarded to web only: mobile
+    // (PKCE) requests are handled above and must complete their own handoff,
+    // so they should not be short-circuited into the web SSO redirect.
+    if (DEFAULT_SSO_DOMAIN && !isMobile) {
+      const redirectUrl = await signInWithSSO(DEFAULT_SSO_DOMAIN);
+      return redirect(redirectUrl);
     }
 
     return payload({ title, subHeading });
@@ -81,12 +115,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { domain } = parseData(
+        const { domain, platform } = parseData(
           await request.formData(),
           SSOLoginFormSchema,
           { shouldBeCaptured: false }
         );
-        const url = await signInWithSSO(domain);
+        const url = await signInWithSSO(domain, { platform });
 
         return redirect(url);
       }
@@ -108,6 +142,10 @@ export default function SSOLogin() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
+  const [searchParams] = useSearchParams();
+  // Native-app SSO opens this page with `?platform=mobile`; forward it so the
+  // action targets the mobile callback. Defaults to web for the normal flow.
+  const platform = searchParams.get("platform") === "mobile" ? "mobile" : "web";
 
   /** Focus the domain field on mount (intentional first-field focus on auth pages). */
   const domainInputRef = useAutoFocus<HTMLInputElement>();
@@ -116,6 +154,8 @@ export default function SSOLogin() {
     <>
       <div className="flex flex-col gap-3">
         <Form method="post" ref={zo.ref}>
+          {/* Forwarded so the action can target the native-app callback. */}
+          <input type="hidden" name="platform" value={platform} />
           <div className="flex flex-col gap-3">
             <Input
               ref={domainInputRef}

@@ -71,8 +71,8 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     // Fetch the updated asset to return fresh image URLs
-    const updatedAsset = await db.asset.findUnique({
-      where: { id: assetId },
+    const updatedAsset = await db.asset.findFirst({
+      where: { id: assetId, organizationId },
       select: {
         id: true,
         title: true,

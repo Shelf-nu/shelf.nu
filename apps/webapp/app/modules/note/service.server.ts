@@ -9,6 +9,7 @@ import type {
   Tag,
   User,
 } from "@prisma/client";
+import type { AssetType, ConsumptionType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   buildCategoryChangeNote,
@@ -22,6 +23,10 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import {
+  formatUnitCount,
+  sanitizeUnitOfMeasureLabel,
+} from "~/utils/asset-quantity";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
@@ -29,23 +34,56 @@ import {
   wrapUserLinkForNote,
   wrapTagForNote,
 } from "~/utils/markdoc-wrappers";
+import {
+  assertAssetsBelongToOrg,
+  type OrgValidationTxClient,
+} from "~/utils/org-validation.server";
 
 const label = "Note";
 
+/**
+ * Minimal Prisma surface `createNotes` needs when run inside a transaction.
+ * Extends {@link OrgValidationTxClient} (so the same `tx` can be forwarded to
+ * `assertAssetsBelongToOrg`) with the `note.createMany` write. Typed
+ * structurally because the extended transaction client is not directly
+ * assignable to the generated `Prisma.TransactionClient` (same approach as
+ * `RecordEventTxClient` / `OrgValidationTxClient`).
+ */
+export type NotesTxClient = OrgValidationTxClient & {
+  note: {
+    createMany: (args: {
+      data: Prisma.NoteUncheckedCreateInput[];
+    }) => Promise<{ count: number }>;
+  };
+};
+
 export type TagSummary = Pick<Tag, "id" | "name">;
 
-/** Creates a singular note */
+/**
+ * Creates a singular note.
+ *
+ * `organizationId` is required and validated: the target asset must belong to
+ * that organization before the note is written. This prevents cross-org IDOR
+ * where a caller supplies an asset ID from another tenant.
+ *
+ * @param params.organizationId - Caller's validated organization ID
+ * @throws {ShelfError} 400 if the asset is not in `organizationId`
+ */
 export async function createNote({
   content,
   type,
   userId,
   assetId,
+  organizationId,
 }: Pick<Note, "content"> & {
   type?: Note["type"];
   userId: User["id"];
   assetId: Asset["id"];
+  organizationId: string;
 }) {
   try {
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+
     const data = {
       content,
       type: type || "COMMENT",
@@ -74,18 +112,39 @@ export async function createNote({
   }
 }
 
-/** Creates multiple notes with the same content */
-export async function createNotes({
-  content,
-  type,
-  userId,
-  assetIds,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetIds: Asset["id"][];
-}) {
+/**
+ * Creates multiple notes with the same content.
+ *
+ * `organizationId` is required and validated: every target asset must belong
+ * to that organization before the notes are written (cross-org IDOR guard).
+ *
+ * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional Prisma transaction client. When the caller already runs
+ *   inside a `db.$transaction`, pass it so the org guard and the note write
+ *   commit atomically with the surrounding mutation (and roll back together).
+ *   Defaults to the global `db`.
+ * @throws {ShelfError} 400 if any asset is not in `organizationId`
+ */
+export async function createNotes(
+  {
+    content,
+    type,
+    userId,
+    assetIds,
+    organizationId,
+  }: Pick<Note, "content"> & {
+    type?: Note["type"];
+    userId: User["id"];
+    assetIds: Asset["id"][];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
   try {
+    const client = tx ?? db;
+
+    await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
+
     const data = assetIds.map((id) => ({
       content,
       type: type || "COMMENT",
@@ -93,7 +152,7 @@ export async function createNotes({
       assetId: id,
     }));
 
-    return await db.note.createMany({
+    return await client.note.createMany({
       data,
     });
   } catch (cause) {
@@ -124,20 +183,42 @@ export async function deleteNote({
   }
 }
 
+/**
+ * Per-asset note shape used by `createBulkKitChangeNotes`.
+ *
+ * Kit membership lives on the `AssetKit` pivot rather than a direct
+ * 1:1 relation, so callers flatten the pivot themselves and attach a
+ * `kit: { id, name } | null` synthetic field per row. This helper only
+ * needs the minimal fields it reads from that shape.
+ *
+ * `type` + `unitOfMeasure` + `quantity` drive the qty-tracked unit count
+ * in the add/remove note ("added 50 units to Camera Kit"). `quantity` is
+ * the per-row `AssetKit.quantity` for THIS kit (the slice held in the kit
+ * being changed), NOT `Asset.quantity` — the caller supplies it.
+ */
+type AssetForKitChangeNote = {
+  id: Asset["id"];
+  title: Asset["title"];
+  type: AssetType;
+  unitOfMeasure?: string | null;
+  /** The asset's `AssetKit.quantity` for the kit being changed. */
+  quantity?: number | null;
+  kit: Pick<Kit, "id" | "name"> | null;
+};
+
 export async function createBulkKitChangeNotes({
   newlyAddedAssets,
   removedAssets,
   userId,
   kit,
+  organizationId,
 }: {
-  newlyAddedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  removedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
+  newlyAddedAssets: AssetForKitChangeNote[];
+  removedAssets: AssetForKitChangeNote[];
   userId: User["id"];
   kit: Kit;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user
@@ -168,7 +249,14 @@ export async function createBulkKitChangeNotes({
           lastName: user.lastName ?? "",
           assetId: asset.id,
           userId,
+          organizationId,
           isRemoving: isAssetRemoved,
+          // Qty-tracked unit count for the add/remove phrasing. `quantity`
+          // is this asset's per-row AssetKit.quantity for the kit being
+          // changed (supplied by the caller), not Asset.quantity.
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: asset.quantity,
         });
       }
     }
@@ -193,7 +281,11 @@ export async function createKitChangeNote({
   lastName,
   assetId,
   userId,
+  organizationId,
   isRemoving,
+  type,
+  unitOfMeasure,
+  quantity,
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
   newKit: Pick<Kit, "id" | "name"> | null;
@@ -201,7 +293,19 @@ export async function createKitChangeNote({
   lastName: string;
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   isRemoving: boolean;
+  /** Asset type — decides whether a qty-tracked unit count applies. */
+  type: AssetType;
+  /** Labels the count ("units" / "boxes"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /**
+   * Per-row `AssetKit.quantity` for the kit being changed (NOT
+   * `Asset.quantity`). Surfaced in the add/remove phrasing for
+   * QUANTITY_TRACKED assets; ignored for INDIVIDUAL.
+   */
+  quantity?: number | null;
 }) {
   try {
     const userLink = wrapUserLinkForNote({
@@ -209,6 +313,10 @@ export async function createKitChangeNote({
       firstName,
       lastName,
     });
+    // Qty-tracked unit label ("50 units") for this kit's slice, or null
+    // for INDIVIDUAL / missing quantity — in which case we keep the
+    // original countless phrasing ("added asset to ...").
+    const count = formatUnitCount({ type, unitOfMeasure }, quantity);
     let message = "";
 
     /** User is changing from kit to another */
@@ -230,7 +338,11 @@ export async function createKitChangeNote({
         { id: newKit.id, name: newKit.name.trim() },
         "added"
       );
-      message = `${userLink} added asset to ${newKitLink}.`;
+      // Qty-tracked: name the units added ("added 50 units to Camera Kit");
+      // INDIVIDUAL keeps the original "added asset to ..." wording.
+      message = count
+        ? `${userLink} added ${count} to ${newKitLink}.`
+        : `${userLink} added asset to ${newKitLink}.`;
     }
 
     /** User is removing the asset from kit */
@@ -240,7 +352,11 @@ export async function createKitChangeNote({
           { id: currentKit.id, name: currentKit.name.trim() },
           "removed"
         );
-        message = `${userLink} removed asset from ${currentKitLink}.`;
+        // Qty-tracked: name the units removed ("removed 50 units from
+        // Camera Kit"); INDIVIDUAL keeps "removed asset from ...".
+        message = count
+          ? `${userLink} removed ${count} from ${currentKitLink}.`
+          : `${userLink} removed asset from ${currentKitLink}.`;
       } else {
         message = `${userLink} removed asset from a kit.`;
       }
@@ -255,6 +371,7 @@ export async function createKitChangeNote({
       type: "UPDATE",
       userId,
       assetId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -267,15 +384,117 @@ export async function createKitChangeNote({
   }
 }
 
+/**
+ * Persist a per-side system note for a Phase 4c kit-axis "move units"
+ * operation. Wording mirrors the location-axis move note:
+ *
+ *   `{user} moved {N units} from kit {KitX-link} to kit {KitY-link}.`
+ *
+ * Called twice per move — once for the from-side and once for the to-side —
+ * so both kit pages and the asset feed have a chronological record of the
+ * redistribution. INDIVIDUAL assets omit the unit-count fragment to match
+ * the rest of the kit-note family.
+ *
+ * Writes through the global `db` (no tx) to mirror `createKitChangeNote`.
+ * The paired ActivityEvents are the source of truth for tx atomicity; notes
+ * are surfaced UI sugar that lands post-tx if the move commits.
+ *
+ * @param params.fromKit - Source kit (asset is losing units from here)
+ * @param params.toKit - Destination kit (asset is gaining units here)
+ * @param params.firstName / params.lastName - Acting user (for the userLink)
+ * @param params.assetId - Asset whose units are being redistributed
+ * @param params.userId - Acting user — written to `Note.userId`
+ * @param params.organizationId - Caller's validated organization ID
+ * @param params.type - `AssetType` — decides whether to render a unit count
+ * @param params.unitOfMeasure - Labels the count ("pairs" / "boxes"); defaults to "units"
+ * @param params.quantity - Number of units moved in this redistribution
+ * @throws {ShelfError} On DB failure
+ */
+export async function createKitMoveNote({
+  fromKit,
+  toKit,
+  firstName,
+  lastName,
+  assetId,
+  userId,
+  organizationId,
+  type,
+  unitOfMeasure,
+  quantity,
+}: {
+  fromKit: Pick<Kit, "id" | "name">;
+  toKit: Pick<Kit, "id" | "name">;
+  firstName: string;
+  lastName: string;
+  assetId: Asset["id"];
+  userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
+  /** Asset type — decides whether a qty-tracked unit count applies. */
+  type: AssetType;
+  /** Labels the count ("units" / "pairs"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /** Number of units moved in this redistribution. */
+  quantity: number;
+}) {
+  try {
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName,
+      lastName,
+    });
+
+    const fromKitLink = wrapKitsWithDataForNote(
+      { id: fromKit.id, name: fromKit.name.trim() },
+      "updated"
+    );
+    const toKitLink = wrapKitsWithDataForNote(
+      { id: toKit.id, name: toKit.name.trim() },
+      "updated"
+    );
+
+    // Qty-tracked: "moved 50 units from kit A to kit B"; INDIVIDUAL falls
+    // back to the countless wording to match the rest of the kit-note family.
+    const count = formatUnitCount({ type, unitOfMeasure }, quantity);
+    const message = count
+      ? `${userLink} moved ${count} from kit ${fromKitLink} to kit ${toKitLink}.`
+      : `${userLink} moved asset from kit ${fromKitLink} to kit ${toKitLink}.`;
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+      organizationId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a kit move note. Please try again or contact support",
+      additionalData: {
+        userId,
+        assetId,
+        fromKitId: fromKit.id,
+        toKitId: toKit.id,
+      },
+      label,
+    });
+  }
+}
+
 export async function createTagChangeNoteIfNeeded({
   assetId,
   userId,
+  organizationId,
   previousTags,
   currentTags,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousTags: TagSummary[];
   currentTags: TagSummary[];
   loadUserForNotes: () => Promise<BasicUserName>;
@@ -334,6 +553,7 @@ export async function createTagChangeNoteIfNeeded({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -343,12 +563,15 @@ export async function createTagChangeNoteIfNeeded({
 export async function createAssetNameChangeNote({
   assetId,
   userId,
+  organizationId,
   previousName,
   newName,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousName?: string | null;
   newName?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -369,6 +592,7 @@ export async function createAssetNameChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -378,12 +602,15 @@ export async function createAssetNameChangeNote({
 export async function createAssetDescriptionChangeNote({
   assetId,
   userId,
+  organizationId,
   previousDescription,
   newDescription,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousDescription?: string | null;
   newDescription?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -404,6 +631,7 @@ export async function createAssetDescriptionChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -413,12 +641,15 @@ export async function createAssetDescriptionChangeNote({
 export async function createAssetCategoryChangeNote({
   assetId,
   userId,
+  organizationId,
   previousCategory,
   newCategory,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousCategory?: Pick<Category, "id" | "name" | "color"> | null;
   newCategory?: Pick<Category, "id" | "name" | "color"> | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -439,6 +670,7 @@ export async function createAssetCategoryChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -448,6 +680,7 @@ export async function createAssetCategoryChangeNote({
 export async function createAssetValuationChangeNote({
   assetId,
   userId,
+  organizationId,
   previousValuation,
   newValuation,
   currency,
@@ -456,6 +689,8 @@ export async function createAssetValuationChangeNote({
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousValuation?: Prisma.Decimal | number | null;
   newValuation?: Prisma.Decimal | number | null;
   currency: Currency;
@@ -480,6 +715,7 @@ export async function createAssetValuationChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -490,10 +726,13 @@ export async function createAssetNotesForAuditAddition({
   assetIds,
   userId,
   audit,
+  organizationId,
 }: {
   assetIds: Asset["id"][];
   userId: User["id"];
   audit: Pick<AuditSession, "id" | "name">;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user.findUnique({
@@ -521,6 +760,7 @@ export async function createAssetNotesForAuditAddition({
       type: "UPDATE",
       userId,
       assetIds,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -540,10 +780,13 @@ export async function createAssetNotesForAuditRemoval({
   assetIds,
   userId,
   audit,
+  organizationId,
 }: {
   assetIds: Asset["id"][];
   userId: User["id"];
   audit: Pick<AuditSession, "id" | "name">;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user.findUnique({
@@ -571,6 +814,7 @@ export async function createAssetNotesForAuditRemoval({
       type: "UPDATE",
       userId,
       assetIds,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -581,4 +825,105 @@ export async function createAssetNotesForAuditRemoval({
       label,
     });
   }
+}
+
+/** Human-readable label for ConsumptionType values */
+function consumptionTypeLabel(
+  type: ConsumptionType | null | undefined
+): string {
+  if (type === "ONE_WAY") return "Used up (one-way)";
+  if (type === "TWO_WAY") return "Returnable (two-way)";
+  return "—";
+}
+
+/**
+ * Persist a note when quantity-related fields are changed via the edit form.
+ *
+ * Tracks changes to: quantity, minQuantity, consumptionType, unitOfMeasure.
+ * Only creates a note when at least one field actually changed.
+ */
+export async function createAssetQuantityChangeNote({
+  assetId,
+  organizationId,
+  userId,
+  previousQuantity,
+  newQuantity,
+  previousMinQuantity,
+  newMinQuantity,
+  previousConsumptionType,
+  newConsumptionType,
+  previousUnitOfMeasure,
+  newUnitOfMeasure,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
+  userId: User["id"];
+  previousQuantity?: number | null;
+  newQuantity?: number | null;
+  previousMinQuantity?: number | null;
+  newMinQuantity?: number | null;
+  previousConsumptionType?: ConsumptionType | null;
+  newConsumptionType?: ConsumptionType | null;
+  previousUnitOfMeasure?: string | null;
+  newUnitOfMeasure?: string | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const changes: string[] = [];
+
+  if (
+    newQuantity !== undefined &&
+    (previousQuantity ?? null) !== (newQuantity ?? null)
+  ) {
+    changes.push(
+      `total quantity from **${previousQuantity ?? "—"}** to **${
+        newQuantity ?? "—"
+      }**`
+    );
+  }
+
+  if (
+    newMinQuantity !== undefined &&
+    (previousMinQuantity ?? null) !== (newMinQuantity ?? null)
+  ) {
+    changes.push(
+      `low-stock threshold from **${previousMinQuantity ?? "—"}** to **${
+        newMinQuantity ?? "—"
+      }**`
+    );
+  }
+
+  if (
+    newConsumptionType !== undefined &&
+    (previousConsumptionType ?? null) !== (newConsumptionType ?? null)
+  ) {
+    changes.push(
+      `behavior from **${consumptionTypeLabel(
+        previousConsumptionType
+      )}** to **${consumptionTypeLabel(newConsumptionType)}**`
+    );
+  }
+
+  if (
+    newUnitOfMeasure !== undefined &&
+    (previousUnitOfMeasure ?? null) !== (newUnitOfMeasure ?? null)
+  ) {
+    const prevLabel = sanitizeUnitOfMeasureLabel(previousUnitOfMeasure) || "—";
+    const nextLabel = sanitizeUnitOfMeasureLabel(newUnitOfMeasure) || "—";
+    changes.push(`unit of measure from **${prevLabel}** to **${nextLabel}**`);
+  }
+
+  if (changes.length === 0) return;
+
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = `${userLink} updated ${changes.join(", ")}.`;
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+    organizationId,
+  });
 }

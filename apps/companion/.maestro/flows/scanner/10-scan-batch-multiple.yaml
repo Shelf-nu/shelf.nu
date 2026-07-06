@@ -6,7 +6,7 @@ tags:
 
 ---
 # Test: Scanning same QR twice in batch mode deduplicates
-# Verifies batch drawer shows "1 asset scanned" not "2 asset scanned"
+# Verifies batch drawer shows "1 item scanned" not "2 item scanned"
 
 - runFlow: ../../shared/login.yaml
 - tapOn:
@@ -31,7 +31,7 @@ tags:
 - pressKey: enter
 
 - extendedWaitUntil:
-    visible: "1 asset scanned"
+    visible: "1 item scanned"
     timeout: 15000
 
 # Second scan of same QR — should deduplicate
@@ -42,6 +42,6 @@ tags:
 - pressKey: enter
 
 # Should still show 1, not 2 (dedup)
-- assertVisible: "1 asset scanned"
+- assertVisible: "1 item scanned"
 
 - takeScreenshot: scanner-batch-dedup

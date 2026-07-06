@@ -60,7 +60,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId, deletedAt: null }
-            : { id: { in: customFieldIds }, deletedAt: null },
+            : { id: { in: customFieldIds }, organizationId, deletedAt: null },
         });
 
         await assertWillExceedCustomFieldLimit({
@@ -94,7 +94,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId, deletedAt: null }
-            : { id: { in: customFieldIds }, deletedAt: null },
+            : { id: { in: customFieldIds }, organizationId, deletedAt: null },
         });
 
         await bulkActivateOrDeactivateCustomFields({

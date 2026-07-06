@@ -121,6 +121,9 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
         .map((value, index) => {
           if (cellIsEmpty(value)) return undefined; // Return undefined for empty cells
 
+          // Backup-export emits `assetModel` as a JSON-serialised object
+          // (`{ name }`) so cross-org backup-restore can resolve / create
+          // the model by name. Symmetric with `category` / `location`.
           switch (keys[index]) {
             case "category":
             case "location":
@@ -128,6 +131,7 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
             case "notes":
             case "custody":
             case "customFields":
+            case "assetModel":
               return [keys[index], JSON.parse(value)];
             default:
               return [keys[index], value];
