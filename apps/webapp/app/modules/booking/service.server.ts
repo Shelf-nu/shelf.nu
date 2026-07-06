@@ -8052,6 +8052,97 @@ export async function getBookingsFilterData({
   };
 }
 
+/**
+ * DRAFT-visibility rule shared by every booking-list query: bookings that are
+ * not DRAFT are visible to everyone in the org, while DRAFT bookings are only
+ * visible to their creator. Extracted so heavy ({@link getBookings}) and slim
+ * ({@link getMinimalBookings}) list queries cannot drift apart on this
+ * permission-sensitive predicate.
+ *
+ * @param userId - The viewer, matched against `Booking.creatorId` for drafts.
+ * @returns A `Prisma.BookingWhereInput` OR-clause to push into `where.AND`.
+ */
+export function bookingDraftVisibilityClause(
+  userId: Booking["creatorId"]
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { status: { not: "DRAFT" } },
+      { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
+    ],
+  };
+}
+
+/**
+ * Slim booking list for pickers that render only a name + date range and
+ * filter client-side (e.g. the bulk "add to existing booking" dialog). Unlike
+ * {@link getBookings} it selects a handful of scalar columns instead of the
+ * heavy asset/kit/custodian projection, and runs no count query — the caller
+ * gets every matching row (paginate-first is moot when only ~5 columns per row
+ * are fetched). Shares {@link bookingDraftVisibilityClause} so it honours the
+ * same DRAFT-creator visibility as the full index.
+ *
+ * @param params.organizationId - Workspace scope.
+ * @param params.userId - Viewer, for the DRAFT-visibility rule.
+ * @param params.statuses - Explicit status filter; defaults to excluding
+ *   ARCHIVED + CANCELLED (mirrors {@link getBookings}).
+ * @param params.custodianUserId - Restrict to a custodian (self-service views).
+ * @returns `{ bookings }` — id, name, status, from, to, ordered by `from`
+ *   with a stable `id` tiebreaker.
+ * @throws {ShelfError} If the query fails.
+ */
+export async function getMinimalBookings(params: {
+  organizationId: Organization["id"];
+  userId: Booking["creatorId"];
+  statuses?: Booking["status"][] | null;
+  custodianUserId?: Booking["custodianUserId"] | null;
+}) {
+  const { organizationId, userId, statuses, custodianUserId } = params;
+
+  try {
+    const where: Prisma.BookingWhereInput = {
+      organizationId,
+      AND: [bookingDraftVisibilityClause(userId)],
+    };
+
+    if (statuses?.length) {
+      where.status = { in: statuses };
+    } else {
+      // Default: hide archived & cancelled, matching getBookings.
+      where.status = {
+        notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+      };
+    }
+
+    if (custodianUserId) {
+      where.custodianUserId = custodianUserId;
+    }
+
+    const bookings = await db.booking.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        from: true,
+        to: true,
+      },
+      // `id` tiebreaker so the (unpaginated) order is stable across requests.
+      orderBy: [{ from: "asc" }, { id: "asc" }],
+    });
+
+    return { bookings };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings. Please try again or contact support.",
+      additionalData: { ...params },
+      label,
+    });
+  }
+}
+
 export async function getBookings(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -8107,27 +8198,7 @@ export async function getBookings(params: {
     /** The idea is that only the creator of a draft booking can see it
      * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
      */
-    where.AND = [
-      {
-        OR: [
-          {
-            status: {
-              not: "DRAFT",
-            },
-          },
-          {
-            AND: [
-              {
-                status: "DRAFT",
-              },
-              {
-                creatorId: userId,
-              },
-            ],
-          },
-        ],
-      },
-    ];
+    where.AND = [bookingDraftVisibilityClause(userId)];
 
     /** If the search string exists, add it to the where object */
     if (search?.trim()?.length) {
@@ -8322,11 +8393,15 @@ export async function getBookings(params: {
                       color: true,
                     },
                   },
-                  bookingAssets: {
-                    select: {
-                      bookingId: true,
-                    },
-                  },
+                  // NOTE: deliberately NO `bookingAssets` here. A previous
+                  // version selected each asset's entire lifetime
+                  // `bookingAssets: { bookingId }` pivot history, which grows
+                  // without bound and had zero consumers (every reader of
+                  // `asset.bookingAssets` needs `ba.booking.{id,status}` from
+                  // asset-centric queries, which this shape cannot provide).
+                  // If a surface ever needs conflict info here, scope it with
+                  // a `where` on active statuses + date overlap like
+                  // getBookingFlags does.
                   assetKits: {
                     select: {
                       // See the comment in `bookings.$bookingId.overview.tsx`
@@ -8366,7 +8441,16 @@ export async function getBookings(params: {
           },
           ...(extraInclude || undefined),
         },
-        orderBy: { [orderBy]: orderDirection },
+        // Stable `id` tiebreaker so rows tied on the sort key (same `from`
+        // date, same name, ...) keep a fixed order across requests. Without
+        // it, skip/take paging over ties can duplicate or drop rows between
+        // pages. Skipped when the caller already sorts by id (duplicate
+        // ORDER BY key). Mirrors the tiebreaker the advanced asset index
+        // uses (see parseSortingOptions in asset/query.server.ts).
+        orderBy: [
+          { [orderBy]: orderDirection },
+          ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
+        ],
       }),
       db.booking.count({ where }),
     ]);

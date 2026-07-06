@@ -162,6 +162,15 @@ export type AdvancedAssetBooking = Pick<
     "id" | "firstName" | "lastName" | "profilePicture"
   >;
   creator?: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  /** BookingAsset.assetKitId of THIS slice: null = standalone (free pool),
+   * non-null = kit-driven (FK → AssetKit.id). Availability view only. */
+  assetKitId?: string | null;
+  /** BookingAsset.quantity — booked units for THIS slice. Never Asset.quantity
+   * (workspace stock). Availability view only. */
+  quantity?: number;
+  /** Kit name for THIS slice (null when standalone), resolved via
+   * AssetKit → Kit.name. Availability view only. */
+  kitName?: string | null;
 };
 
 /** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
