@@ -294,11 +294,14 @@ describe("flattenSelectedBookingItems", () => {
     { id: "asset-2", status: "AVAILABLE", kitId: "kit-1" },
   ];
 
-  it("enriches a direct asset entry from the booking record", () => {
-    // Atom entry carries a stale status; the booking record wins.
+  it("fills genuine gaps from the booking record while the selected item wins", () => {
+    // The selection atom holds the authoritative enriched loader row: its own
+    // fields win (status stays AVAILABLE, NOT the record's CHECKED_OUT), and
+    // the booking record only fills genuine gaps (kitId, absent on the item).
     const selected = [{ id: "asset-1", title: "Camera", status: "AVAILABLE" }];
     const [result] = flattenSelectedBookingItems(selected, bookingAssets);
-    expect(result.status).toBe("CHECKED_OUT");
+    expect(result.status).toBe("AVAILABLE"); // selected item wins
+    expect(result.kitId).toBe(null); // filled from booking record
     expect(result.title).toBe("Camera");
   });
 
@@ -335,5 +338,75 @@ describe("flattenSelectedBookingItems", () => {
     const kit = { id: "kit-1", name: "Kit A", _count: { assets: 2 } };
     const [result] = flattenSelectedBookingItems([kit], bookingAssets);
     expect(result).toEqual(kit);
+  });
+
+  // A QUANTITY_TRACKED asset can be booked BOTH standalone (kitId null) and
+  // inside a kit (kitId set) — two BookingAsset slices sharing one asset.id.
+  // The enrichment map keys by bookingAssetId so both slices coexist, and the
+  // selected slice's own bookingAssetId/kitId survive the merge.
+  const multiSliceBookingAssets = [
+    {
+      id: "battery",
+      bookingAssetId: "ba-standalone",
+      status: "CHECKED_OUT",
+      kitId: null,
+    },
+    {
+      id: "battery",
+      bookingAssetId: "ba-kit",
+      status: "CHECKED_OUT",
+      kitId: "kit-1",
+    },
+  ];
+
+  it("preserves a selected STANDALONE slice's kitId:null and its own bookingAssetId when both slices are present", () => {
+    const selected = [
+      {
+        id: "battery",
+        title: "Batteries",
+        bookingAssetId: "ba-standalone",
+        kitId: null,
+        status: "AVAILABLE",
+      },
+    ];
+    const [result] = flattenSelectedBookingItems(
+      selected,
+      multiSliceBookingAssets
+    );
+    // The kit slice's kitId must NOT clobber the selected standalone slice.
+    expect(result.bookingAssetId).toBe("ba-standalone");
+    expect(result.kitId).toBe(null);
+    expect(result.title).toBe("Batteries");
+  });
+
+  it("keeps a selected KIT-MEMBER slice's kitId when both slices are present", () => {
+    const selected = [
+      {
+        id: "battery",
+        title: "Batteries",
+        bookingAssetId: "ba-kit",
+        kitId: "kit-1",
+        status: "AVAILABLE",
+      },
+    ];
+    const [result] = flattenSelectedBookingItems(
+      selected,
+      multiSliceBookingAssets
+    );
+    expect(result.bookingAssetId).toBe("ba-kit");
+    expect(result.kitId).toBe("kit-1");
+  });
+
+  it("enriches a legacy item without bookingAssetId via the id fallback", () => {
+    // Legacy entries (both selection and booking record) lack bookingAssetId,
+    // so the map keys by id and the item is looked up by id — enrichment still
+    // works (status filled from the record).
+    const legacyBookingAssets = [
+      { id: "legacy-asset", status: "CHECKED_OUT", kitId: null },
+    ];
+    const selected = [{ id: "legacy-asset", title: "Old Camera" }];
+    const [result] = flattenSelectedBookingItems(selected, legacyBookingAssets);
+    expect(result.status).toBe("CHECKED_OUT");
+    expect(result.title).toBe("Old Camera");
   });
 });
