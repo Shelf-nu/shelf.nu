@@ -429,6 +429,10 @@ function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 }
 
 function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  if (filter.name === "qrLabelApplied") {
+    return Prisma.sql`${whereClause} AND (a."qrLabelAppliedAt" IS NOT NULL) = ${filter.value}`;
+  }
+
   return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
     filter.value
   }`;
@@ -1446,7 +1450,8 @@ type DirectAssetField =
   | "updatedAt"
   | "availableToBook"
   | "type"
-  | "quantity";
+  | "quantity"
+  | "qrLabelApplied";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1460,6 +1465,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  qrLabelApplied: "assetQrLabelAppliedAt",
 };
 
 /**
@@ -1624,6 +1630,8 @@ export function parseSortingOptions(sortBy: string[]): {
         orderByParts.push(
           `("assetValue" * "assetQuantity") ${field.direction}`
         );
+      } else if (field.name === "qrLabelApplied") {
+        orderByParts.push(`"${columnName}" ${field.direction} NULLS LAST`);
       } else {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);
@@ -2021,6 +2029,8 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a.title AS "assetTitle",
       a.description AS "assetDescription",
       a."sequentialId" AS "assetSequentialId",
+      a."qrLabelAppliedAt" AS "assetQrLabelAppliedAt",
+      (a."qrLabelAppliedAt" IS NOT NULL) AS "assetQrLabelApplied",
       a."createdAt" AS "assetCreatedAt",
       a."updatedAt" AS "assetUpdatedAt",
       a."userId" AS "assetUserId",
@@ -2331,6 +2341,8 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'id', aq."assetId",
           'sequentialId', aq."assetSequentialId",
           'qrId', aq."qrId",
+          'qrLabelAppliedAt', aq."assetQrLabelAppliedAt",
+          'qrLabelApplied', aq."assetQrLabelApplied",
           'title', aq."assetTitle",
           'description', aq."assetDescription",
           'createdAt', aq."assetCreatedAt",
@@ -2753,6 +2765,7 @@ export function buildAdvancedAssetsQuery({
           a.status AS "assetStatus",
           a.type AS "assetType",
           a.description AS "assetDescription",
+          a."qrLabelAppliedAt" AS "assetQrLabelAppliedAt",
           a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
         ${baseJoins}
         ${custodyJoins}

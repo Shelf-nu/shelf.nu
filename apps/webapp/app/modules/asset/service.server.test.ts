@@ -36,6 +36,7 @@ import {
   relinkAssetQrCode,
   renderBulkAssetTitle,
   updateAsset,
+  updateAssetQrCode,
   uploadDuplicateAssetMainImage,
 } from "./service.server";
 
@@ -57,6 +58,7 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
       count: vitest.fn().mockResolvedValue(0),
+      create: vitest.fn().mockResolvedValue({ id: "asset-1" }),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -75,7 +77,11 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
     },
     qr: {
+      findUnique: vitest.fn().mockResolvedValue(null),
       update: vitest.fn().mockResolvedValue({}),
+    },
+    note: {
+      create: vitest.fn().mockResolvedValue({}),
     },
     // why: checkOutQuantity finds/creates/increments the operator-allocated
     // custody row; releaseQuantity finds it then deletes or decrements by
@@ -263,21 +269,177 @@ vitest.mock("./sequential-id.server", () => ({
   getNextSequentialId: vitest.fn().mockResolvedValue("TST-0001"),
 }));
 
+describe("createAsset", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.create as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+    });
+  });
+
+  it("does not mark the ID as assigned when creating an asset with an auto-generated QR", async () => {
+    await createAsset({
+      title: "Camera Kit",
+      description: null,
+      categoryId: null,
+      userId: "user-1",
+      organizationId: "org-1",
+      valuation: null,
+    });
+
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          qrCodes: {
+            create: [
+              expect.objectContaining({
+                organization: { connect: { id: "org-1" } },
+                user: { connect: { id: "user-1" } },
+              }),
+            ],
+          },
+          qrLabelAppliedAt: undefined,
+        }),
+      })
+    );
+  });
+
+  it("marks the ID as assigned when creating an asset from a linkable QR", async () => {
+    const qr = {
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    };
+    (getQr as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+
+    await createAsset({
+      title: "Camera Kit",
+      description: null,
+      categoryId: null,
+      userId: "user-1",
+      organizationId: "org-1",
+      qrId: "qr-1",
+      valuation: null,
+    });
+
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          qrCodes: { connect: { id: "qr-1" } },
+          qrLabelAppliedAt: expect.any(Date),
+        }),
+      })
+    );
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+  });
+
+  it("claims an unassigned QR inside the asset creation transaction", async () => {
+    const qr = {
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    };
+    (getQr as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+
+    await createAsset({
+      title: "Camera Kit",
+      description: null,
+      categoryId: null,
+      userId: "user-1",
+      organizationId: "org-1",
+      qrId: "qr-1",
+      valuation: null,
+    });
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1" },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+  });
+
+  it("does not steal a QR assigned after the initial lookup", async () => {
+    (getQr as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "other-asset",
+      kitId: null,
+    });
+
+    await expect(
+      createAsset({
+        title: "Camera Kit",
+        description: null,
+        categoryId: null,
+        userId: "user-1",
+        organizationId: "org-1",
+        qrId: "qr-1",
+        valuation: null,
+      })
+    ).rejects.toMatchObject({ status: 409, shouldBeCaptured: false });
+
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("retries a serialization conflict while creating from an existing QR", async () => {
+    const qr = {
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    };
+    (getQr as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue(qr);
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("conflict"), { code: "P2034" })
+    );
+
+    await createAsset({
+      title: "Camera Kit",
+      description: null,
+      categoryId: null,
+      userId: "user-1",
+      organizationId: "org-1",
+      qrId: "qr-1",
+      valuation: null,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("relinkAssetQrCode (asset)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      qrCodes: [],
+    });
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
   });
 
   it("throws when QR is already linked to a kit", async () => {
-    //@ts-expect-error mock setup
-    getQr.mockResolvedValue({
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "qr-1",
       organizationId: "org-1",
       assetId: null,
       kitId: "kit-1",
     });
-    //@ts-expect-error mock setup
-    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
 
     await expect(
       relinkAssetQrCode({
@@ -290,15 +452,9 @@ describe("relinkAssetQrCode (asset)", () => {
   });
 
   it("relinks when QR is available", async () => {
-    //@ts-expect-error mock setup
-    getQr.mockResolvedValue({
-      id: "qr-1",
-      organizationId: "org-1",
-      assetId: null,
-      kitId: null,
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      qrCodes: [{ id: "old-qr" }],
     });
-    //@ts-expect-error mock setup
-    db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
 
     await relinkAssetQrCode({
       qrId: "qr-1",
@@ -314,12 +470,194 @@ describe("relinkAssetQrCode (asset)", () => {
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: "asset-1", organizationId: "org-1" },
       data: {
+        qrLabelAppliedAt: expect.any(Date),
         qrCodes: {
           set: [],
           connect: { id: "qr-1" },
         },
       },
     });
+    expect(db.note.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        asset: { connect: { id: "asset-1" } },
+        user: { connect: { id: "user-1" } },
+        type: "UPDATE",
+        content: expect.stringContaining(
+          "changed QR code from **old-qr** to **qr-1**"
+        ),
+      }),
+    });
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+  });
+
+  it("retries a serialization conflict", async () => {
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockRejectedValueOnce({
+      code: "P2034",
+    });
+
+    await relinkAssetQrCode({
+      qrId: "qr-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("updateAssetQrCode", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+    });
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+  });
+
+  it("marks the ID as assigned when linking a scanned QR to an existing asset", async () => {
+    await updateAssetQrCode({
+      newQrId: "qr-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.asset.update).toHaveBeenCalledOnce();
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: "asset-1", organizationId: "org-1" },
+      data: {
+        qrLabelAppliedAt: expect.any(Date),
+        qrCodes: {
+          set: [],
+          connect: { id: "qr-1" },
+        },
+      },
+    });
+  });
+
+  it("claims an unclaimed QR in the same transaction as the asset link", async () => {
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+
+    await updateAssetQrCode({
+      newQrId: "qr-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1" },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+    expect(db.asset.update).toHaveBeenCalledOnce();
+  });
+
+  it("retries a serialization conflict", async () => {
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockRejectedValueOnce({
+      code: "P2034",
+    });
+
+    await updateAssetQrCode({
+      newQrId: "qr-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a QR owned by another organization before changing the asset", async () => {
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-2",
+      assetId: null,
+      kitId: null,
+    });
+
+    await expect(
+      updateAssetQrCode({
+        newQrId: "qr-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(db.qr.update).not.toHaveBeenCalled();
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a QR already linked to a different asset", async () => {
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-2",
+      kitId: null,
+    });
+
+    await expect(
+      updateAssetQrCode({
+        newQrId: "qr-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a QR already linked to a kit", async () => {
+    (db.qr.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: "kit-1",
+    });
+
+    await expect(
+      updateAssetQrCode({
+        newQrId: "qr-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a target asset outside the current organization", async () => {
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+
+    await expect(
+      updateAssetQrCode({
+        newQrId: "qr-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(db.qr.update).not.toHaveBeenCalled();
+    expect(db.asset.update).not.toHaveBeenCalled();
   });
 });
 
@@ -568,6 +906,9 @@ describe("refreshExpiredAssetImages", () => {
 describe("createAsset quantity validation", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    (db.asset.create as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+    });
   });
 
   it("throws when QUANTITY_TRACKED asset has no quantity", async () => {
@@ -606,9 +947,13 @@ describe("createAsset quantity validation", () => {
 
   it("does not throw quantity validation for INDIVIDUAL assets", async () => {
     // This test verifies that INDIVIDUAL assets skip quantity validation.
-    // The function will proceed past validation but will fail on
-    // other operations (e.g., sequential ID generation) which is expected.
+    // The function will proceed past validation but can still fail on
+    // downstream writes, which is expected.
     // We assert the thrown error is NOT a quantity validation error.
+    (db.asset.create as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("create failed")
+    );
+
     await expect(
       createAsset({
         title: "Test Laptop",

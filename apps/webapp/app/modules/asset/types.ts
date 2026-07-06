@@ -182,6 +182,7 @@ export type AdvancedIndexAsset = Pick<
   | "description"
   | "createdAt"
   | "updatedAt"
+  | "qrLabelAppliedAt"
   | "userId"
   | "mainImage"
   | "thumbnailImage"
@@ -198,6 +199,7 @@ export type AdvancedIndexAsset = Pick<
   | "availableToBook"
 > & {
   qrId: string; // QR code will always be available
+  qrLabelApplied: boolean;
   assetModelId?: string | null;
   assetModelName?: string | null;
   /** Primary kit (oldest pivot row) — mirrors the LATERAL primary-pick

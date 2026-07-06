@@ -194,6 +194,7 @@ export const action = async ({
       newQrId: qrId,
       assetId,
       organizationId,
+      userId: authSession.userId,
     });
 
     return redirect(`/qr/${qrId}/successful-link?type=asset`);
