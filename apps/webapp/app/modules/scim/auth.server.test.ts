@@ -121,7 +121,9 @@ describe("authenticateScimRequest", () => {
     await authenticateScimRequest(request);
 
     expect(mockDb.db.scimToken.update).toHaveBeenCalledWith({
-      where: { id: "token-1" },
+      // Org-scoped write: where includes organizationId (from the resolved token)
+      // per the org-scope IDOR convention, in addition to the unique id.
+      where: { id: "token-1", organizationId: "org-123" },
       data: { lastUsedAt: expect.any(Date) },
     });
   });

@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScimTokenItem } from "./edit-form";
+import { TooltipProvider } from "../shared/tooltip";
 
 // ── Mocks ──────────────────────────────────────────────
 
@@ -131,13 +132,18 @@ beforeEach(() => {
  * The section is conditionally shown when isOwner + enabledSso + ssoDetails.
  */
 function renderScimSection(tokens?: ScimTokenItem[]) {
+  // why: WorkspaceEditForms renders shared <Button>s that use a Radix Tooltip.
+  // In the running app the provider comes from the app-level <TooltipProvider>
+  // in root.tsx; the isolated unit test must supply its own to match.
   return render(
-    <WorkspaceEditForms
-      name="Test Org"
-      currency="USD"
-      qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
-      scimTokens={tokens}
-    />
+    <TooltipProvider>
+      <WorkspaceEditForms
+        name="Test Org"
+        currency="USD"
+        qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+        scimTokens={tokens}
+      />
+    </TooltipProvider>
   );
 }
 
