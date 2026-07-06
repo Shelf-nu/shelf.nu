@@ -22,6 +22,7 @@ import {
   type ReminderRepeatValue,
 } from "~/modules/asset-reminder/recurrence";
 
+/** Props for {@link ReminderRecurrenceFields}. */
 type ReminderRecurrenceFieldsProps = {
   /** Whether the workspace tier includes recurring reminders. */
   canUseRecurringReminders: boolean;
@@ -41,6 +42,7 @@ type ReminderRecurrenceFieldsProps = {
   endsAtError?: string;
 };
 
+/** The shared option list (Never + the repeating presets) for both select states. */
 function RepeatOptions() {
   return (
     <SelectContent>
@@ -54,6 +56,15 @@ function RepeatOptions() {
   );
 }
 
+/**
+ * Renders the Repeat select and the optional "Ends on" date input for the
+ * set/edit reminder dialog. When the workspace tier lacks recurring
+ * reminders, the controls render locked with an upgrade nudge and the
+ * stored cadence round-trips via hidden inputs.
+ *
+ * @param props - See {@link ReminderRecurrenceFieldsProps}.
+ * @returns The recurrence form-fields fragment.
+ */
 export default function ReminderRecurrenceFields({
   canUseRecurringReminders,
   disabled,
