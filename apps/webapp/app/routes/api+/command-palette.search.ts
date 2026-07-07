@@ -151,14 +151,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
 
-    // Check permissions for different entity types based on actual roles
-    const hasKitPermission = ["OWNER", "ADMIN"].includes(role);
+    // Check permissions for different entity types based on actual roles.
+    // BOOKING_MANAGER holds read on kit/booking/location/teamMember in the
+    // permission matrix (issue #1800), so it must appear in these lists or
+    // its palette results come back empty despite the granted reads.
+    const hasKitPermission = ["OWNER", "ADMIN", "BOOKING_MANAGER"].includes(
+      role
+    );
     const hasBookingPermission =
       !isPersonalWorkspace &&
-      ["OWNER", "ADMIN", "SELF_SERVICE", "BASE"].includes(role);
-    const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
+      ["OWNER", "ADMIN", "SELF_SERVICE", "BASE", "BOOKING_MANAGER"].includes(
+        role
+      );
+    const hasLocationPermission = [
+      "OWNER",
+      "ADMIN",
+      "BOOKING_MANAGER",
+    ].includes(role);
     const hasTeamMemberPermission =
-      !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
+      !isPersonalWorkspace &&
+      ["OWNER", "ADMIN", "BOOKING_MANAGER"].includes(role);
     const hasAuditPermission = true;
 
     // Prepare where clauses for other entities
