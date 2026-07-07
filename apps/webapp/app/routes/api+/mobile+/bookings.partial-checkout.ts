@@ -89,6 +89,10 @@ export async function action({ request }: ActionFunctionArgs) {
       checkouts,
       userId: user.id,
       hints,
+      // Native scan flow: the app sends bare `assetIds` with no per-unit count,
+      // so a bare QUANTITY_TRACKED scan means "check out all remaining units"
+      // for that asset (mirrors "Check Out All"). Web callers never set this.
+      resolveBareQtToAllRemaining: true,
     });
 
     return data({

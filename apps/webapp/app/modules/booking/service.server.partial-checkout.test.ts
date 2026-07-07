@@ -1024,6 +1024,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     await partialCheckoutBooking({
       ...baseParams,
       assetIds: ["asset-qty-1"],
+      resolveBareQtToAllRemaining: true,
     });
 
     expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
@@ -1045,6 +1046,36 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
   });
 
+  it("WITHOUT the opt-in (web/other callers) a bare QT scan keeps legacy 1-unit semantics — all-remaining is never inferred from asset type", async () => {
+    expect.assertions(1);
+
+    // Identical bare scan to the opt-in test above but with NO
+    // `resolveBareQtToAllRemaining` — the way every web/other caller reaches
+    // this service. The QT asset checks out just 1 unit (the sentinel), proving
+    // the all-remaining behavior is a per-caller opt-in, not inferred from the
+    // asset being QUANTITY_TRACKED.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(qtyOnlyBooking);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-qty-1"],
+    });
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-qty-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutCount: 1,
+      },
+      select: { id: true },
+    });
+  });
+
   it("explicit per-unit checkout of quantity 1 stays exactly 1 — the all-remaining default only applies to bare scans", async () => {
     expect.assertions(1);
 
@@ -1058,10 +1089,13 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       checkouts: [
         { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 1 },
       ],
+      // Even with the opt-in on, an explicit `checkouts` entry is not a bare
+      // `assetIds` id, so it is left exactly as sent.
+      resolveBareQtToAllRemaining: true,
     });
 
-    // An explicit `checkouts` entry carries no `defaultAllRemaining` flag, so a
-    // genuine 1-unit partial is recorded as 1, never bumped to all-remaining.
+    // An explicit `checkouts` entry is not a bare `assetIds` id, so a genuine
+    // 1-unit partial is recorded as 1, never bumped to all-remaining.
     expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
       data: {
         bookingId: "booking-1",
@@ -1922,6 +1956,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       partialCheckoutBooking({
         ...baseParams,
         assetIds: ["asset-qty-1"],
+        resolveBareQtToAllRemaining: true,
       })
     ).rejects.toThrow(/Only 0 units left/);
 

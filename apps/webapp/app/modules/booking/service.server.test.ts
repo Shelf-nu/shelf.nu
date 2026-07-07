@@ -6067,6 +6067,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     await partialCheckinBooking({
       ...baseParams,
       assetIds: [mockQtyAssetId],
+      resolveBareQtToAllRemaining: true,
     });
 
     // Resolved to "all remaining" (10) → one RETURN log for the full amount
@@ -6130,6 +6131,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     await partialCheckinBooking({
       ...baseParams,
       assetIds: [mockQtyAssetId],
+      resolveBareQtToAllRemaining: true,
     });
 
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
@@ -6140,6 +6142,24 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         bookingId: mockQtyBookingId,
       })
     );
+  });
+
+  it("WITHOUT the opt-in (web/other callers) a bare QT check-in still hits the non-zero-disposition guard — the exemption is opt-in only", async () => {
+    expect.assertions(1);
+
+    // Same bare scan as the opt-in tests but with NO
+    // `resolveBareQtToAllRemaining` — the way every web/other caller reaches
+    // the service. The QT id carries no disposition, so the server-side guard
+    // stays fully in force and rejects it. Proof the exemption is per-caller,
+    // not inferred from the asset being QUANTITY_TRACKED.
+    setupQtyMocks();
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        assetIds: [mockQtyAssetId],
+      })
+    ).rejects.toThrow(/must include at least one non-zero disposition/);
   });
 
   it("rejects a BARE re-scan of a QT asset that is already fully checked in (no units remain)", async () => {
@@ -6187,6 +6207,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       partialCheckinBooking({
         ...baseParams,
         assetIds: [mockQtyAssetId],
+        resolveBareQtToAllRemaining: true,
       })
     ).rejects.toThrow(/no units remain to check in/);
   });
@@ -6214,6 +6235,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     const result = await partialCheckinBooking({
       ...baseParams,
       assetIds: [mockQtyAssetId],
+      resolveBareQtToAllRemaining: true,
     });
 
     // Full-coverage batch delegates and completes the booking (it did not throw

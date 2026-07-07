@@ -117,6 +117,10 @@ export async function action({ request }: ActionFunctionArgs) {
       assetIds,
       userId: user.id,
       hints,
+      // Native scan flow: a bare QUANTITY_TRACKED scan (no per-unit disposition)
+      // means "check in all remaining units" for that asset. Web callers never
+      // set this, so the non-zero-disposition guard stays in force for them.
+      resolveBareQtToAllRemaining: true,
     });
 
     return data({
