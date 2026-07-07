@@ -77,7 +77,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
             booking.custodianTeamMember?.name ||
             "Unassigned"
           : "",
-        assetTitles: booking.assets.map((asset) => asset.title),
+        assetTitles: booking.bookingAssets.map((ba) => ba.asset.title),
         bookingUrl: `${SERVER_URL}/bookings/${booking.id}`,
         updatedAt: booking.updatedAt,
       })

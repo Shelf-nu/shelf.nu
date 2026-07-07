@@ -30,6 +30,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/audits.$auditId.overview";
 import {
   PermissionAction,
@@ -54,7 +55,10 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
  */
 export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   const { session, canRemoveAssets } = useLoaderData<typeof loader>();
-  const { category, location, custody } = item;
+  const { category, location, custody: custodyArray } = item;
+  // `custody` is an array on the quantities data model — surface the primary
+  // custody row so the existing single-custodian badge keeps working.
+  const custody = getPrimaryCustody(custodyArray);
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
   const { roles } = useUserRoleHelper();

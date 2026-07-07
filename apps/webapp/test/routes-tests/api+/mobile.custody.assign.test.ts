@@ -35,7 +35,7 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: external service — we mock the custody assignment without hitting the database
 vitest.mock("~/modules/asset/service.server", () => ({
-  bulkAssignCustody: vitest.fn().mockResolvedValue(undefined),
+  bulkCheckOutAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -69,7 +69,7 @@ import {
   requireMobilePermission,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 
 const mockUser = {
@@ -134,7 +134,7 @@ describe("POST /api/mobile/custody/assign", () => {
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
 
-    expect(bulkAssignCustody).toHaveBeenCalledWith(
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         assetIds: ["asset-1"],

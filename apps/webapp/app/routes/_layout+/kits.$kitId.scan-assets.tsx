@@ -55,7 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           qrCodes: {
             select: { id: true },
           },
-          assets: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       })
       .catch((cause) => {

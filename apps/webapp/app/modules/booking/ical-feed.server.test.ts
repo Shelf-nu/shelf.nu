@@ -37,7 +37,9 @@ beforeEach(() => {
 
 describe("getBookingsForICalFeed scoping", () => {
   it("restricts a member who can't see all bookings to their own (custodian user OR team member)", async () => {
-    vi.mocked(db.teamMember.findFirst).mockResolvedValue({ id: "tm-1" } as never);
+    vi.mocked(db.teamMember.findFirst).mockResolvedValue({
+      id: "tm-1",
+    } as never);
 
     await getBookingsForICalFeed({
       organizationId: ORG_ID,
@@ -68,6 +70,8 @@ describe("getBookingsForICalFeed scoping", () => {
     expect(where.custodianUserId).toBeUndefined();
     // privileged roles never need a team-member lookup
     expect(db.teamMember.findFirst).not.toHaveBeenCalled();
+    // the feed renders rows only — it must not run the wasted COUNT companion
+    expect(db.booking.count).not.toHaveBeenCalled();
   });
 
   it("only includes active statuses (excludes DRAFT/ARCHIVED/CANCELLED)", async () => {

@@ -32,6 +32,7 @@ import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -238,14 +239,23 @@ function AssetsListContent() {
         text: colors.muted,
       };
 
+      // Quantity indicator (additive) — only for QUANTITY_TRACKED assets that
+      // actually carry a quantity. INDIVIDUAL assets and pre-quantity servers
+      // resolve to null here, so the row renders exactly as before.
+      const quantityLabel = isQuantityTracked(item)
+        ? formatQuantity(item.quantity, item.unitOfMeasure)
+        : null;
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}`}
+            quantityLabel ? `, quantity ${quantityLabel}` : ""
+          }${item.category ? `, ${item.category.name}` : ""}${
+            item.location ? `, ${item.location.name}` : ""
+          }`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -279,6 +289,19 @@ function AssetsListContent() {
                   />
                   <Text style={styles.assetLocation} numberOfLines={1}>
                     {item.location.name}
+                  </Text>
+                </View>
+              )}
+              {/* Quantity badge — QUANTITY_TRACKED assets only (additive) */}
+              {quantityLabel && (
+                <View style={styles.quantityBadge}>
+                  <Ionicons
+                    name="layers-outline"
+                    size={11}
+                    color={colors.muted}
+                  />
+                  <Text style={styles.quantityBadgeText} numberOfLines={1}>
+                    {quantityLabel}
                   </Text>
                 </View>
               )}
@@ -634,6 +657,26 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+
+  // Quantity badge — compact pill for QUANTITY_TRACKED assets. Neutral
+  // (background-tertiary) so it reads as info, not a status. Self-sized via
+  // alignSelf so it hugs its content instead of stretching the meta column.
+  quantityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: borderRadius.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginTop: 2,
+    gap: 3,
+  },
+  quantityBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: "500",
+    color: colors.muted,
   },
 
   // Status badge — pill shape like webapp

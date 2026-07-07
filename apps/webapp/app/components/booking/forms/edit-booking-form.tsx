@@ -40,6 +40,12 @@ import { BookingFormSchema } from "./forms-schema";
 
 type BookingFlags = {
   hasAssets: boolean;
+  /**
+   * Phase 3d: booking has ≥ 1 outstanding `BookingModelRequest` row.
+   * Together with `hasAssets`, this lets the Reserve button accept
+   * bookings that only hold model-level reservations.
+   */
+  hasModelRequests?: boolean;
   hasUnavailableAssets: boolean;
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
@@ -87,8 +93,21 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     teamMembersForForm,
     userId,
     currentOrganization,
+    booking: loaderBooking,
     lifecycleProgress,
   } = useLoaderData<BookingPageLoaderData>();
+
+  /**
+   * Bookings with outstanding `BookingModelRequest` rows must route through
+   * the fulfil-and-checkout scanner instead of the normal checkout alert —
+   * the server's `RESERVED → ONGOING` guard refuses transitions while any
+   * request still has `quantity > 0`. Derived inline from
+   * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
+   * to avoid a new loader field.
+   */
+  const outstandingModelRequestCount =
+    loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
+    0;
 
   // Progressive checkout is only offered while there are still items that
   // haven't been checked out yet (the Booked bucket). Once everything has been
@@ -185,11 +204,26 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   });
 
   /**
-   * Sync the editable `endDate` state with the `incomingEndDate` prop when it
-   * changes. Using the "store prior prop in ref + update during render" pattern
-   * (the React-recommended replacement for prop-sync effects) satisfies
+   * Sync the editable `startDate` / `endDate` state with the incoming loader
+   * props when they change. React Router reuses this component instance across
+   * a client-side navigation between two bookings (same route, different
+   * param), so `useState` keeps the previously-rendered booking's dates unless
+   * we mirror the new props here. Without the `startDate` sync, the duplicate →
+   * redirect flow showed the SOURCE booking's start date until a full refresh.
+   *
+   * Uses the "store prior prop in ref + update during render" pattern (the
+   * React-recommended replacement for prop-sync effects), which satisfies
    * `no-effect-event-handler` while preserving the original behaviour.
    */
+  const lastIncomingStartDateRef = useRef(incomingStartDate);
+  if (
+    incomingStartDate &&
+    incomingStartDate !== lastIncomingStartDateRef.current
+  ) {
+    lastIncomingStartDateRef.current = incomingStartDate;
+    setStartDate(incomingStartDate);
+  }
+
   const lastIncomingEndDateRef = useRef(incomingEndDate);
   if (incomingEndDate && incomingEndDate !== lastIncomingEndDateRef.current) {
     lastIncomingEndDateRef.current = incomingEndDate;
@@ -270,7 +304,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 disabled={
                   disabled ||
                   isLoadingWorkingHours ||
-                  !bookingFlags?.hasAssets ||
+                  (!bookingFlags?.hasAssets &&
+                    !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets
                     ? {
@@ -280,7 +315,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                           ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
-                          : "You need to add assets to your booking before you can reserve it",
+                          : "You need to add assets or reserve at least one model on your booking before you can reserve it",
                       }
                     : false
                 }
@@ -301,6 +336,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               dropdown — mirroring the check-in dropdown for a consistent header.
               CheckoutDropdown renders a single button when only one option
               applies, and nothing when neither does.
+
+              When the booking has outstanding `BookingModelRequest` rows the
+              normal RESERVED → ONGOING transition is refused by the server
+              (qty > 0 model requests must be fulfilled first), so we bypass
+              the dropdown entirely and route through the fulfil-and-checkout
+              scanner — HEAD's qty-tracked behaviour.
             */}
             <When
               truthy={
@@ -310,27 +351,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 canCheckOutBooking
               }
             >
-              <CheckoutDropdown
-                portalContainer={formElement || undefined}
-                formId="edit-booking-form"
-                booking={{ id, name: name!, from: new Date(startDate!) }}
-                disabled={disabled}
-                canFullCheckOut={!!bookingStatus?.isReserved}
-                canCheckOutRemaining={
-                  !!(
-                    (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
-                    hasItemsToCheckOut
-                  )
-                }
-                canScanCheckOut={
-                  !!(
-                    (bookingStatus?.isReserved ||
-                      bookingStatus?.isOngoing ||
-                      bookingStatus?.isOverdue) &&
-                    hasItemsToCheckOut
-                  )
-                }
-                checkOutDisabled={
+              {(() => {
+                const checkoutDisabled =
                   disabled ||
                   isLoadingWorkingHours ||
                   bookingFlags?.hasUnavailableAssets ||
@@ -346,9 +368,51 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                           ? undefined
                           : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
                       }
-                    : false
+                    : false;
+
+                // When requests are outstanding, the normal checkout would hit
+                // the guard — route through the fulfil scanner instead. This
+                // takes precedence over the progressive-checkout dropdown
+                // because the booking can't transition until requests are met.
+                if (outstandingModelRequestCount > 0) {
+                  return (
+                    <Button
+                      to="fulfil-and-checkout"
+                      disabled={checkoutDisabled}
+                      className="grow"
+                      size="sm"
+                    >
+                      Check Out
+                    </Button>
+                  );
                 }
-              />
+
+                return (
+                  <CheckoutDropdown
+                    portalContainer={formElement || undefined}
+                    formId="edit-booking-form"
+                    booking={{ id, name: name!, from: new Date(startDate!) }}
+                    disabled={disabled}
+                    canFullCheckOut={!!bookingStatus?.isReserved}
+                    canCheckOutRemaining={
+                      !!(
+                        (bookingStatus?.isOngoing ||
+                          bookingStatus?.isOverdue) &&
+                        hasItemsToCheckOut
+                      )
+                    }
+                    canScanCheckOut={
+                      !!(
+                        (bookingStatus?.isReserved ||
+                          bookingStatus?.isOngoing ||
+                          bookingStatus?.isOverdue) &&
+                        hasItemsToCheckOut
+                      )
+                    }
+                    checkOutDisabled={checkoutDisabled}
+                  />
+                );
+              })()}
             </When>
 
             <When

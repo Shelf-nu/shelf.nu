@@ -11,9 +11,9 @@ export default function BookingActionsDropdown() {
 
   if (isPersonalOrg(organization)) return null;
 
-  const noAssets = kit.assets.length === 0;
-  const someAssetIsNotAvailable = kit.assets.some(
-    (asset) => !asset.availableToBook
+  const noAssets = kit.assetKits.length === 0;
+  const someAssetIsNotAvailable = kit.assetKits.some(
+    (ak) => !ak.asset.availableToBook
   );
 
   const disabled = noAssets

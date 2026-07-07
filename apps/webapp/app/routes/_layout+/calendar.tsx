@@ -63,6 +63,15 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
+/** One folded BookingAsset pivot slice on a collapsed availability bar.
+ * `assetKitId === null` ⇒ standalone (free pool); non-null ⇒ kit-driven.
+ * `quantity` is booked units (BookingAsset.quantity). Availability view only. */
+export type AvailabilitySlice = {
+  assetKitId: string | null;
+  kitName: string | null;
+  quantity: number;
+};
+
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
@@ -73,6 +82,17 @@ export type CalendarExtendedProps = {
   custodian: TeamMemberForBadge;
   creator: TeamMemberForBadge;
   tags: Pick<Tag, "id" | "name">[];
+  /** Availability view only: per-slice breakdown of one (asset, booking).
+   * Absent on the booking calendar (which never sets it). */
+  slices?: AvailabilitySlice[];
+  /** Number of folded slices (>1 ⇒ show glyph count on the bar). */
+  sliceCount?: number;
+  /** Sum of BookingAsset.quantity across folded slices (booked-units total). */
+  bookedTotal?: number;
+  /** True only for QUANTITY_TRACKED assets. INDIVIDUAL assets are single
+   * physical units (always qty 1), so the calendar hides the per-slice `Qty`
+   * and the booked-units total for them — the number is redundant noise. */
+  quantityTracked?: boolean;
 };
 
 // Loader Function to Return Bookings Data
@@ -118,39 +138,39 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       calendarFeedUrl,
     ] = await Promise.all([
-        // Team members for filters - when canSeeAllCustody is false, only current user's team member
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          selectedTeamMembers: teamMemberIds,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody,
-          userId,
-        }),
-        // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-        isSelfServiceOrBase
-          ? getTeamMemberForForm({
-              organizationId,
-              userId,
-              isSelfServiceOrBase,
-              getAll:
-                searchParams.has("getAll") &&
-                hasGetAllValue(searchParams, "teamMember"),
-            })
-          : Promise.resolve(null), // ADMIN users reuse teamMembersData
-        getTagsForBookingTagsFilter({
-          organizationId,
-        }),
-        getBookingsForCalendar({
-          request,
-          organizationId,
-          userId,
-          canSeeAllBookings,
-          canSeeAllCustody,
-        }),
-        getMemberCalendarFeedUrl({ organizationId, userId }),
-      ]);
+      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: !canSeeAllCustody,
+        userId,
+      }),
+      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
+            organizationId,
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
+      getBookingsForCalendar({
+        request,
+        organizationId,
+        userId,
+        canSeeAllBookings,
+        canSeeAllCustody,
+      }),
+      getMemberCalendarFeedUrl({ organizationId, userId }),
+    ]);
 
     const modelName = {
       singular: "booking",

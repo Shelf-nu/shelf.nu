@@ -189,7 +189,10 @@ describe("calendar feed URL helpers", () => {
     } as never);
 
     expect(
-      await getMemberCalendarFeedUrl({ userId: USER_ID, organizationId: ORG_ID })
+      await getMemberCalendarFeedUrl({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
     ).toBeNull();
   });
 
@@ -199,7 +202,10 @@ describe("calendar feed URL helpers", () => {
     } as never);
 
     expect(
-      await getMemberCalendarFeedUrl({ userId: USER_ID, organizationId: ORG_ID })
+      await getMemberCalendarFeedUrl({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
     ).toContain("/api/calendar/feed/tok-xyz.ics");
   });
 });
