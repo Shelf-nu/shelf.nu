@@ -282,14 +282,22 @@ export type BookingModelTabData = {
  * scopes both the model count and list, preventing cross-org leakage.
  * @param booking - The booking these models are being reserved against.
  * Only `id`, `from`, `to`, and `modelRequests` are read.
+ * @param search - Optional case-insensitive name filter. The seed list is
+ * capped at `MODEL_PICKER_LIMIT`, so without this a model sorting after the
+ * cap is unreachable. The web's DynamicSelect searches beyond the seed via
+ * the `model-filters` endpoint; passing `search` here gives the same reach
+ * to callers (e.g. the mobile picker) that render this list directly.
+ * `totalAssetModels` stays the full-org count so "showing N of M" is honest.
  * @returns The Models tab payload; see {@link BookingModelTabData}.
  */
 export async function getBookingModelTabData({
   organizationId,
   booking,
+  search,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
+  search?: string;
 }): Promise<BookingModelTabData> {
   try {
     const assetModelsCount = await db.assetModel.count({
@@ -297,11 +305,26 @@ export async function getBookingModelTabData({
     });
     const showModelsTab = assetModelsCount > 0;
 
+    // Case-insensitive name filter, applied to the seed fetch only (not the
+    // full-org count/showModelsTab). Trimmed; blank search = no filter.
+    // Escape the LIKE metacharacters (`%` `_` and the escape char `\`) so a
+    // literal search like "model_1" matches literally instead of treating `_`
+    // as a single-char wildcard (Prisma `contains` compiles to ILIKE).
+    const trimmedSearch = search?.trim();
+    const searchWhere = trimmedSearch
+      ? {
+          name: {
+            contains: trimmedSearch.replace(/[\\%_]/g, "\\$&"),
+            mode: "insensitive" as const,
+          },
+        }
+      : {};
+
     let assetModels: BookingModelTabAssetModel[] = [];
 
     if (showModelsTab) {
       const rawModels = await db.assetModel.findMany({
-        where: { organizationId },
+        where: { organizationId, ...searchWhere },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
         take: MODEL_PICKER_LIMIT,

@@ -48,7 +48,7 @@ const httpsConfig =
 export default defineConfig({
   envDir: "../..",
   ssr: {
-    noExternal: ["@shelf/database"],
+    noExternal: ["@shelf/database", "@shelf/labels"],
   },
   server: {
     port: 3000,

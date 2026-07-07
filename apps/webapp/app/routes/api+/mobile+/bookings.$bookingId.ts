@@ -121,6 +121,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             { asset: { createdAt: "asc" } },
           ],
         },
+        // Book-by-model reservations: intent rows for N units of an
+        // AssetModel that have NOT yet been assigned to concrete assets.
+        // Shipped alongside bookingAssets so the app can render "Reserved
+        // model" rows plus the scan-to-assign progress. We ship ALL rows
+        // (outstanding + already-fulfilled) like the web booking-detail
+        // tab (getBookingModelTabData) so fulfilled rows read as history.
+        modelRequests: {
+          select: {
+            id: true,
+            assetModelId: true,
+            quantity: true,
+            fulfilledQuantity: true,
+            fulfilledAt: true,
+            assetModel: { select: { id: true, name: true } },
+          },
+          orderBy: { assetModel: { name: "asc" } },
+        },
         _count: {
           select: { bookingAssets: true },
         },
@@ -276,6 +293,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         canDeletePerm,
     };
 
+    // Flatten book-by-model reservations into a mobile-friendly shape. Each
+    // row is one AssetModel the booking reserved N units of. `outstanding`
+    // is the count still waiting to be assigned to concrete assets (what the
+    // scan-to-assign flow works down); `fulfilledAt` non-null = fully
+    // assigned, kept as read-only history to match the web tab.
+    const modelRequests = booking.modelRequests.map((mr) => ({
+      id: mr.id,
+      assetModelId: mr.assetModelId,
+      assetModelName: mr.assetModel.name,
+      quantity: mr.quantity,
+      fulfilledQuantity: mr.fulfilledQuantity,
+      outstandingQuantity: Math.max(mr.quantity - mr.fulfilledQuantity, 0),
+      fulfilledAt: mr.fulfilledAt ? mr.fulfilledAt.toISOString() : null,
+    }));
+    // Number of distinct models reserved (rows) and total units still
+    // outstanding across all of them — lets the app show a compact
+    // "3 models, 5 units to assign" summary without re-summing client-side.
+    const modelRequestCount = modelRequests.length;
+    const outstandingModelUnitCount = modelRequests.reduce(
+      (sum, mr) => sum + mr.outstandingQuantity,
+      0
+    );
+
     return data({
       booking: {
         id: booking.id,
@@ -293,6 +333,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         assets,
         assetCount: totalAssets,
         checkedOutCount,
+        modelRequests,
+        modelRequestCount,
+        outstandingModelUnitCount,
       },
       checkedInAssetIds,
       canCheckout,
