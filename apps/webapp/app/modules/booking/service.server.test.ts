@@ -6019,6 +6019,208 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("bare scan (no disposition) of a TWO_WAY QT asset in a partial batch defaults to RETURN of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    // Two-asset booking: the QT "Pens" (booked 10) + an INDIVIDUAL asset that
+    // is NOT scanned this batch. Because the batch does not cover every
+    // outstanding asset, the flow stays on the partial path (it does not
+    // delegate to the full checkinBooking), so the in-tx default resolution is
+    // what we're exercising here.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    // No prior check-ins → both assets outstanding (keeps us off the early-exit).
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    // The scanned QT asset is checked out (passes the progressive-checkout guard).
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    // Bare scan — no `checkins` disposition, exactly what the native app sends.
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Resolved to "all remaining" (10) → one RETURN log for the full amount
+    // (default lock stub has no consumptionType → treated as returnable).
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
+  it("bare scan (no disposition) of a ONE_WAY (consumable) QT asset defaults to CONSUME of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    // Mark the locked asset consumable so the default resolves to CONSUME.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: mockQtyAssetId,
+      title: "Pens",
+      quantity: 100,
+      consumptionType: ConsumptionType.ONE_WAY,
+    });
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "CONSUME",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
+  it("rejects a BARE re-scan of a QT asset that is already fully checked in (no units remain)", async () => {
+    expect.assertions(1);
+
+    // Asset booked 10, all 10 already logged back → remaining 0. A bare scan
+    // must reject rather than write a no-op PartialBookingCheckin + event.
+    setupQtyMocks({ logged: 10 });
+
+    // Two-asset booking (QT fully reconciled + an INDIVIDUAL still out) so the
+    // batch does not cover all outstanding and stays on the partial path.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        assetIds: [mockQtyAssetId],
+      })
+    ).rejects.toThrow(/no units remain to check in/);
+  });
+
+  it("bare full-coverage scan of a single QT asset is accepted (not rejected by the guard) and completes via the delegate path", async () => {
+    expect.assertions(1);
+
+    // Single-QT-asset booking (default makeQtyBooking): a bare scan covers ALL
+    // outstanding units, so `hasQuantityDispositions` is false and the batch
+    // takes the "all remaining scanned → complete check-in" early-exit that
+    // delegates to the full checkinBooking. This is the common native case, and
+    // pre-fix it would have thrown at the non-zero-disposition guard. We assert
+    // the batch is accepted and completes (isComplete) — proof the bare id
+    // reaches the delegate. checkinBooking's own all-remaining default is
+    // exercised by its dedicated tests; asserting its internal ConsumptionLog
+    // here would just re-test that function under partialCheckinBooking's mocks.
+    setupQtyMocks();
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    const result = await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Full-coverage batch delegates and completes the booking (it did not throw
+    // the "must include a non-zero disposition" guard the bare id used to hit).
+    expect(result.isComplete).toBe(true);
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 

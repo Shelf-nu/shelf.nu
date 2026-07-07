@@ -1088,6 +1088,75 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
   });
 
+  it("bare scan of a booked-50 QT asset (no explicit count) checks out ALL 50 units, and does NOT delegate with a wrong count", async () => {
+    expect.assertions(2);
+
+    // RESERVED single-QT-asset booking. A bare `assetIds` scan carries the
+    // sentinel quantity=1, so `qtyClaimsCoverFullRemaining` (1 < 50) is false
+    // and the booking does NOT delegate to the full checkoutBooking; it stays
+    // on the partial path, where the in-tx loop resolves the bare disposition
+    // to "all remaining" (50). Had it delegated, the delegate-path ledger would
+    // record quantities:[1] for a fully-checked-out booked-50 asset (the
+    // split-brain) — so asserting quantities:[50] proves BOTH the all-remaining
+    // default AND that no delegation happened.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(qtyOnlyBooking);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-qty-1"],
+    });
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-qty-1"],
+        quantities: [50],
+        bookingAssetIds: [""],
+        checkoutCount: 1,
+      },
+      select: { id: true },
+    });
+
+    // All 50 units claimed → the asset flips CHECKED_OUT (org-scoped).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-qty-1"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+  });
+
+  it("explicit per-unit checkout of quantity 1 stays exactly 1 — the all-remaining default only applies to bare scans", async () => {
+    expect.assertions(1);
+
+    // ONGOING so we stay on the partial path and observe the ledger write.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...qtyOnlyBooking, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [
+        { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 1 },
+      ],
+    });
+
+    // An explicit `checkouts` entry carries no `defaultAllRemaining` flag, so a
+    // genuine 1-unit partial is recorded as 1, never bumped to all-remaining.
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-qty-1"],
+        quantities: [1],
+        bookingAssetIds: ["ba-qty-1"],
+        checkoutCount: 1,
+      },
+      select: { id: true },
+    });
+  });
+
   it("records BOTH slices of a same-asset multi-slice checkout positionally (standalone + kit in one session)", async () => {
     expect.assertions(2);
 
@@ -1933,6 +2002,56 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     ).rejects.toThrow(/Only 0 units left/);
 
     // No new row written for the rejected re-scan.
+    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a BARE re-scan of a QUANTITY_TRACKED asset when remaining === 0 (keeps the sentinel, writes no quantities:[0] row)", async () => {
+    expect.assertions(2);
+
+    // Same "fully out" state as the explicit re-scan test above, but scanned
+    // BARE (assetIds only) — the native path. A bare scan must reject exactly
+    // like the explicit re-scan: resolving to `cap` (0) would otherwise persist
+    // a bogus quantities:[0] row + audit events for an already-out asset.
+    const smallQtyBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          id: "ba-qty-1",
+          quantity: 10,
+          asset: {
+            id: "asset-qty-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pens",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(smallQtyBooking);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ quantity: 10 }]);
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__seedPbcSessions?.([
+      { assetIds: ["asset-qty-1"], quantities: [10] },
+    ]);
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-qty-1"],
+      })
+    ).rejects.toThrow(/Only 0 units left/);
+
+    // No new row written for the rejected bare re-scan.
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
 
