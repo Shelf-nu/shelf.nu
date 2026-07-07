@@ -222,4 +222,22 @@ describe("POST/DELETE /api/mobile/bookings/:bookingId/model-requests", () => {
     expect(response.init?.status).toBe(404);
     expect(upsertMock).not.toHaveBeenCalled();
   });
+
+  it("400s on an invalid body (validation), not 500, without calling the service", async () => {
+    withRole(OrganizationRoles.ADMIN);
+    findFirstMock.mockResolvedValue({
+      id: BOOKING_ID,
+      custodianUserId: CALLER_ID,
+    } as never);
+
+    // quantity 0 fails UpsertSchema (.positive) → must be a 400, not a raw
+    // ZodError that makeShelfError would surface as a 500.
+    const response = await action(
+      makeArgs("POST", { assetModelId: MODEL_ID, quantity: 0 })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(upsertMock).not.toHaveBeenCalled();
+  });
 });

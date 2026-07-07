@@ -60,6 +60,25 @@ const DeleteSchema = z.object({
   assetModelId: z.string().min(1, "Asset model ID is required"),
 });
 
+/**
+ * Validate `body` against `schema`, throwing a 400 `ShelfError` (not the raw
+ * `ZodError`, which `makeShelfError` maps to a 500) on failure. Mirrors what
+ * `parseData` does for form/query input, for a JSON body.
+ */
+function parseOr400<T>(schema: z.ZodType<T>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ShelfError({
+      cause: parsed.error,
+      message: parsed.error.issues[0]?.message ?? "Invalid request body.",
+      label: "Booking",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+  return parsed.data;
+}
+
 export async function action({ request, params }: ActionFunctionArgs) {
   let userId: string | undefined;
 
@@ -126,12 +145,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    if (isPost(request)) {
-      const { assetModelId, quantity } = UpsertSchema.parse(
-        await request.json()
-      );
+    // Parse the JSON body once. Malformed JSON or a schema mismatch is a
+    // CLIENT error (400) — without this guard the raw SyntaxError/ZodError
+    // reaches makeShelfError, which doesn't special-case them and returns a
+    // generic 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      throw new ShelfError({
+        cause: null,
+        message: "Request body must be valid JSON.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
-      const modelRequest = await upsertBookingModelRequest({
+    if (isPost(request)) {
+      const { assetModelId, quantity } = parseOr400(UpsertSchema, body);
+
+      await upsertBookingModelRequest({
         bookingId,
         assetModelId,
         quantity,
@@ -139,11 +173,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
         userId: user.id,
       });
 
-      return data({ success: true, request: modelRequest });
+      // Return only `{ success: true }` (like DELETE). The client refetches the
+      // booking; it never consumes the upserted row, so we don't ship the raw
+      // Prisma record (which wouldn't match the client's BookingModelRequest
+      // shape anyway).
+      return data({ success: true });
     }
 
     if (isDelete(request)) {
-      const { assetModelId } = DeleteSchema.parse(await request.json());
+      const { assetModelId } = parseOr400(DeleteSchema, body);
 
       await removeBookingModelRequest({
         bookingId,
