@@ -6191,6 +6191,36 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     ).rejects.toThrow(/no units remain to check in/);
   });
 
+  it("bare full-coverage scan of a single QT asset is accepted (not rejected by the guard) and completes via the delegate path", async () => {
+    expect.assertions(1);
+
+    // Single-QT-asset booking (default makeQtyBooking): a bare scan covers ALL
+    // outstanding units, so `hasQuantityDispositions` is false and the batch
+    // takes the "all remaining scanned → complete check-in" early-exit that
+    // delegates to the full checkinBooking. This is the common native case, and
+    // pre-fix it would have thrown at the non-zero-disposition guard. We assert
+    // the batch is accepted and completes (isComplete) — proof the bare id
+    // reaches the delegate. checkinBooking's own all-remaining default is
+    // exercised by its dedicated tests; asserting its internal ConsumptionLog
+    // here would just re-test that function under partialCheckinBooking's mocks.
+    setupQtyMocks();
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    const result = await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Full-coverage batch delegates and completes the booking (it did not throw
+    // the "must include a non-zero disposition" guard the bare id used to hit).
+    expect(result.isComplete).toBe(true);
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 
