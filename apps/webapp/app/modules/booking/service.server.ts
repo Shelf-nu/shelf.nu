@@ -5098,9 +5098,20 @@ export async function partialCheckinBooking({
         // never overrides an operator's explicit returned/consumed split.
         if (
           bareCheckinAssetIds.has(disp.assetId) &&
-          sumDisposition(disp) === 0 &&
-          cap > 0
+          sumDisposition(disp) === 0
         ) {
+          // Re-scan of an asset with no units left to check in (`cap === 0`):
+          // reject instead of writing a no-op PartialBookingCheckin + event.
+          // Matches the `claimed > cap` rejection an explicit re-scan gets.
+          if (cap <= 0) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot check in "${lockedAsset.title}" — no units remain to check in on this booking.`,
+              shouldBeCaptured: false,
+            });
+          }
           if (lockedAsset.consumptionType === "ONE_WAY") {
             disp.consumed = cap;
           } else {
@@ -6333,7 +6344,13 @@ export async function partialCheckoutBooking({
         // `PartialBookingCheckout.quantities[]` ledger write below records the
         // real units, not the sentinel 1. Mirrors the "Check Out All" default;
         // explicit per-unit `quantity` payloads are left untouched.
-        if (disp.defaultAllRemaining) {
+        //
+        // Only resolve when units remain. On a re-scan of an already
+        // fully-checked-out asset `cap === 0`; we KEEP the sentinel
+        // `quantity: 1` so the `claimed > cap` guard below throws
+        // "Only 0 units left…" — the same rejection an explicit re-scan gets —
+        // instead of persisting a bogus `quantities: [0]` row + audit events.
+        if (disp.defaultAllRemaining && cap > 0) {
           disp.quantity = cap;
         }
         const claimed = disp.quantity;

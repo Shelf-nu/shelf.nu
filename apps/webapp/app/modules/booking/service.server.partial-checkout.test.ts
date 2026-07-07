@@ -1879,6 +1879,56 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
 
+  it("rejects a BARE re-scan of a QUANTITY_TRACKED asset when remaining === 0 (keeps the sentinel, writes no quantities:[0] row)", async () => {
+    expect.assertions(2);
+
+    // Same "fully out" state as the explicit re-scan test above, but scanned
+    // BARE (assetIds only) — the native path. A bare scan must reject exactly
+    // like the explicit re-scan: resolving to `cap` (0) would otherwise persist
+    // a bogus quantities:[0] row + audit events for an already-out asset.
+    const smallQtyBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          id: "ba-qty-1",
+          quantity: 10,
+          asset: {
+            id: "asset-qty-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pens",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(smallQtyBooking);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ quantity: 10 }]);
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__seedPbcSessions?.([
+      { assetIds: ["asset-qty-1"], quantities: [10] },
+    ]);
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-qty-1"],
+      })
+    ).rejects.toThrow(/Only 0 units left/);
+
+    // No new row written for the rejected bare re-scan.
+    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
   it("event meta carries quantity for qty-tracked rows and omits it for INDIVIDUAL", async () => {
     expect.assertions(2);
 

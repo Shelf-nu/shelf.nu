@@ -6142,6 +6142,55 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("rejects a BARE re-scan of a QT asset that is already fully checked in (no units remain)", async () => {
+    expect.assertions(1);
+
+    // Asset booked 10, all 10 already logged back → remaining 0. A bare scan
+    // must reject rather than write a no-op PartialBookingCheckin + event.
+    setupQtyMocks({ logged: 10 });
+
+    // Two-asset booking (QT fully reconciled + an INDIVIDUAL still out) so the
+    // batch does not cover all outstanding and stays on the partial path.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        assetIds: [mockQtyAssetId],
+      })
+    ).rejects.toThrow(/no units remain to check in/);
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 
