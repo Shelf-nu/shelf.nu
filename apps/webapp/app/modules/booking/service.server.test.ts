@@ -6019,6 +6019,129 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("bare scan (no disposition) of a TWO_WAY QT asset in a partial batch defaults to RETURN of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    // Two-asset booking: the QT "Pens" (booked 10) + an INDIVIDUAL asset that
+    // is NOT scanned this batch. Because the batch does not cover every
+    // outstanding asset, the flow stays on the partial path (it does not
+    // delegate to the full checkinBooking), so the in-tx default resolution is
+    // what we're exercising here.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    // No prior check-ins → both assets outstanding (keeps us off the early-exit).
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    // The scanned QT asset is checked out (passes the progressive-checkout guard).
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    // Bare scan — no `checkins` disposition, exactly what the native app sends.
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Resolved to "all remaining" (10) → one RETURN log for the full amount
+    // (default lock stub has no consumptionType → treated as returnable).
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
+  it("bare scan (no disposition) of a ONE_WAY (consumable) QT asset defaults to CONSUME of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    // Mark the locked asset consumable so the default resolves to CONSUME.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: mockQtyAssetId,
+      title: "Pens",
+      quantity: 100,
+      consumptionType: ConsumptionType.ONE_WAY,
+    });
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "CONSUME",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 

@@ -1006,6 +1006,75 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
   });
 
+  it("bare scan of a booked-50 QT asset (no explicit count) checks out ALL 50 units, and does NOT delegate with a wrong count", async () => {
+    expect.assertions(2);
+
+    // RESERVED single-QT-asset booking. A bare `assetIds` scan carries the
+    // sentinel quantity=1, so `qtyClaimsCoverFullRemaining` (1 < 50) is false
+    // and the booking does NOT delegate to the full checkoutBooking; it stays
+    // on the partial path, where the in-tx loop resolves the bare disposition
+    // to "all remaining" (50). Had it delegated, the delegate-path ledger would
+    // record quantities:[1] for a fully-checked-out booked-50 asset (the
+    // split-brain) — so asserting quantities:[50] proves BOTH the all-remaining
+    // default AND that no delegation happened.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(qtyOnlyBooking);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-qty-1"],
+    });
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-qty-1"],
+        quantities: [50],
+        bookingAssetIds: [""],
+        checkoutCount: 1,
+      },
+      select: { id: true },
+    });
+
+    // All 50 units claimed → the asset flips CHECKED_OUT (org-scoped).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-qty-1"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+  });
+
+  it("explicit per-unit checkout of quantity 1 stays exactly 1 — the all-remaining default only applies to bare scans", async () => {
+    expect.assertions(1);
+
+    // ONGOING so we stay on the partial path and observe the ledger write.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...qtyOnlyBooking, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [
+        { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 1 },
+      ],
+    });
+
+    // An explicit `checkouts` entry carries no `defaultAllRemaining` flag, so a
+    // genuine 1-unit partial is recorded as 1, never bumped to all-remaining.
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-qty-1"],
+        quantities: [1],
+        bookingAssetIds: ["ba-qty-1"],
+        checkoutCount: 1,
+      },
+      select: { id: true },
+    });
+  });
+
   it("records BOTH slices of a same-asset multi-slice checkout positionally (standalone + kit in one session)", async () => {
     expect.assertions(2);
 
