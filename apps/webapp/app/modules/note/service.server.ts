@@ -23,11 +23,15 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import { NOTE_TYPE_FILTER_MAP } from "~/modules/note/note-filters";
 import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   wrapKitsWithDataForNote,
   wrapLinkForNote,
@@ -178,6 +182,151 @@ export async function deleteNote({
       cause,
       message: "Something went wrong while deleting the note",
       additionalData: { id, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Loads a single asset's notes (its activity log) with pagination, free-text
+ * search, and a note-type filter — so the activity tab reuses the same list
+ * mechanics (`<Filters>`, `<StatusFilter>`, `<Pagination>`) as the rest of the
+ * app instead of rendering every note unbounded.
+ *
+ * Reads the standard list query params from the request:
+ * - `page` / `per_page` — pagination ({@link getParamsValues} + {@link updateCookieWithPerPage})
+ * - `s` — free-text search, matched against note content and the author's name
+ * - `noteType` — "Comments" (human `COMMENT` notes) or "Updates" (system
+ *   `UPDATE` notes); any other value (incl. absent / "ALL") returns both.
+ *
+ * The total count is resolved BEFORE the page is fetched so the requested
+ * The requested `page` is clamped to the last populated page: an out-of-range
+ * page (deleting the last note on a page, or a stale bookmarked `?page=N`)
+ * returns that page instead of an empty list that reads as a false "No Notes"
+ * empty state. The clamped value is what's returned as `page`. `totalPages`
+ * itself follows the shared list contract (`0` when nothing matches).
+ *
+ * `organizationId` is required and scopes the query via `asset.organizationId`,
+ * so a note can never be read across tenants even if a foreign `assetId` is
+ * supplied (see `.claude/rules/org-scope-user-supplied-ids.md`).
+ *
+ * @returns Pagination metadata plus the page of notes (`items`, newest first),
+ *   `hasNotes` (whether the asset has ANY notes ignoring the active filter — so
+ *   the UI can keep the "Export activity CSV" action visible even when a filter
+ *   matches zero notes), and the `cookie` for the loader to serialize as a
+ *   `Set-Cookie` header (persists the per-page preference).
+ * @throws {ShelfError} If the database query fails.
+ */
+export async function getPaginatedAndFilterableAssetNotes({
+  assetId,
+  organizationId,
+  request,
+}: {
+  assetId: Asset["id"];
+  organizationId: string;
+  request: Request;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+
+  const typeFilter = NOTE_TYPE_FILTER_MAP[searchParams.get("noteType") ?? ""];
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    /**
+     * Normalize the page size once and use it for the query, the skip offset,
+     * and the returned metadata so `perPage`/`totalPages` always describe the
+     * page we actually fetched (200 is the established out-of-range fallback).
+     */
+    const safePerPage = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    /** Scope by the asset AND its organization (cross-tenant read guard) */
+    const where: Prisma.NoteWhereInput = {
+      assetId,
+      asset: { organizationId },
+    };
+
+    if (typeFilter) {
+      where.type = typeFilter;
+    }
+
+    if (search) {
+      /**
+       * Match the search term against the note body or the author's name.
+       * `displayName` is included because the note card shows it (via
+       * `resolveUserDisplayName`) for SSO users, so a search for the visible
+       * author name must match it too.
+       */
+      where.OR = [
+        { content: { contains: search, mode: "insensitive" } },
+        {
+          user: {
+            OR: [
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+              { displayName: { contains: search, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    // Count first so the requested page can be clamped into range before the
+    // page is fetched (see JSDoc). `totalPages` follows the shared list contract
+    // (`0` when nothing matches, like the other paginated services), so clamp
+    // against a separate `lastPage` ceiling instead of inflating the metadata.
+    const totalItems = await db.note.count({ where });
+    const totalPages = Math.ceil(totalItems / safePerPage);
+    // Clamp the requested page into [1, lastPage] so an out-of-range page
+    // (e.g. deleting the last note on a page, or a stale bookmarked ?page=N)
+    // still returns a populated page instead of an empty list.
+    const lastPage = Math.max(1, totalPages);
+    const currentPage = Math.min(Math.max(page, 1), lastPage);
+    const skip = (currentPage - 1) * safePerPage;
+
+    const notes = await db.note.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: safePerPage,
+      include: {
+        user: {
+          select: { firstName: true, lastName: true, displayName: true },
+        },
+      },
+    });
+
+    /**
+     * Whether the asset has ANY notes, ignoring the active filter — lets the UI
+     * keep the "Export activity CSV" action visible when a filter matches zero
+     * notes (an empty filtered view is not an empty activity log). Only pay for
+     * the extra unfiltered count when a filter is active; otherwise `totalItems`
+     * already is the unfiltered total.
+     */
+    const hasActiveFilter = Boolean(typeFilter || search);
+    const hasNotes = hasActiveFilter
+      ? (await db.note.count({
+          where: { assetId, asset: { organizationId } },
+        })) > 0
+      : totalItems > 0;
+
+    return {
+      page: currentPage,
+      perPage: safePerPage,
+      search,
+      items: notes,
+      totalItems,
+      totalPages,
+      hasNotes,
+      cookie,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the asset's notes",
+      additionalData: { assetId, organizationId },
       label,
     });
   }
