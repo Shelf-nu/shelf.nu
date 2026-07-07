@@ -369,14 +369,34 @@ describe("partialCheckoutBooking", () => {
         );
       }
     );
-    // why: `computeBookingAssetRemainingToCheckOut` reads the BookingAsset
+    // why: `computeBookingAssetsRemainingToCheckOut` reads the BookingAsset
     // pivot to compute the per-asset booked total. The legacy INDIVIDUAL
     // fixtures don't carry an explicit `quantity` on the asset, so model
     // each as a single 1-unit slice — that's what production writes for
-    // INDIVIDUAL pivot rows.
+    // INDIVIDUAL pivot rows. The batched helper filters `assetId: { in: [...] }`
+    // and, for a multi-asset request, attributes each returned pivot to its own
+    // `assetId`, so the mock echoes ONE 1-unit pivot per queried asset id
+    // (a fixed `[{ quantity: 1 }]` would credit only the phantom `undefined`
+    // asset and report every asset as fully checked out).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ quantity: 1 }]);
+    ).mockImplementation(
+      (args?: { where?: { assetId?: { in?: string[] } | string } }) => {
+        const assetIdFilter = args?.where?.assetId;
+        const ids =
+          assetIdFilter && typeof assetIdFilter === "object"
+            ? assetIdFilter.in
+            : undefined;
+        if (Array.isArray(ids)) {
+          return Promise.resolve(
+            ids.map((assetId) => ({ assetId, quantity: 1 }))
+          );
+        }
+        // Scalar / no assetId filter (single-asset shortcut in the helper sums
+        // all returned rows) → the legacy single 1-unit slice shape.
+        return Promise.resolve([{ quantity: 1 }]);
+      }
+    );
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 1 });
@@ -827,6 +847,58 @@ describe("partialCheckoutBooking", () => {
 
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
+
+  it("reads checkout sessions a BOUNDED number of times regardless of booking size (no O(M) query fan-out)", async () => {
+    expect.assertions(3);
+
+    // Regression guard for Sentry SHELF-WEBAPP-217: partial-checking-out ONE
+    // item on a LARGE booking used to fire three sequential queries PER asset on
+    // the booking (the per-asset `computeBookingAssetRemainingToCheckOut` loop
+    // that derives `remainingAssetCount`), so an interactive tx did O(3·M)
+    // round-trips and blew the 5s timeout with a Prisma P2028. The fix reads the
+    // booking-level checkout sessions ONCE via the batched helper, so the
+    // `partialBookingCheckout.findMany` call count must stay flat — independent
+    // of how many assets the booking holds. Against the pre-fix code this test
+    // observes ~BOOKING_SIZE+1 reads and fails; after the fix it is a small
+    // constant.
+    const BOOKING_SIZE = 60;
+    const manyBookingAssets = Array.from({ length: BOOKING_SIZE }, (_, i) => ({
+      asset: {
+        id: `asset-${i}`,
+        status: AssetStatus.AVAILABLE,
+        assetKits: [],
+      },
+    }));
+    const largeBooking = {
+      ...reservedBooking,
+      _count: { bookingAssets: BOOKING_SIZE },
+      bookingAssets: manyBookingAssets,
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(largeBooking);
+
+    const result = await partialCheckoutBooking({
+      ...baseParams,
+      // Check out a SINGLE asset out of the 60 on the booking.
+      assetIds: ["asset-0"],
+    });
+
+    // The batched read is O(1) in booking size: one pre-tx idempotency read
+    // (`getPartiallyCheckedOutAssetIds`) + one in-tx batched completion read.
+    // Bound generously at 5 — the point is it does NOT scale with BOOKING_SIZE.
+    const findManyCalls = (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.length;
+    expect(findManyCalls).toBeLessThanOrEqual(5);
+    expect(findManyCalls).toBeLessThan(BOOKING_SIZE);
+
+    // Sanity: batching still computes the right completion — 59 of 60 remain.
+    expect(result).toMatchObject({
+      remainingAssetCount: BOOKING_SIZE - 1,
+      isComplete: false,
+    });
+  });
 });
 
 describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
@@ -909,16 +981,26 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       unitOfMeasure: null,
       quantity: 50,
     });
-    // why: computeBookingAssetRemainingToCheckOut reads tx.bookingAsset.findMany
-    // for the pivot rows (`booked = Σ quantity`). Default to a single qty=50
-    // pivot so `remaining = 50 - claimedSoFar`. Tests override per-need.
+    // why: both the asset-level (`computeBookingAssetsRemainingToCheckOut`, sums
+    // `quantity`) and the per-slice (`computeBookingAssetsSliceRemainingToCheckOut`,
+    // reads `id`/`assetId`/`assetKitId`) batched helpers read
+    // tx.bookingAsset.findMany. Default to the single qty=50 slice of the qty-only
+    // fixture fully shaped so BOTH query shapes (`id: { in }` for requested slices,
+    // `assetId: { in }` for the full per-asset set) resolve it; tests override
+    // when they model different slices (kit + standalone, multiple slices, etc.).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ quantity: 50 }]);
-    // why: computeBookingAssetSliceRemaining reads tx.bookingAsset.findUnique
-    // for the per-slice cap. Default to the same qty=50 slice so the per-slice
-    // cap = full booked quantity for qty-only fixtures; tests override when
-    // they model a different slice (kit + standalone, multiple slices, etc.).
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-qty-1",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
+    // why: legacy per-slice cap read shape (`computeBookingAssetSliceRemaining`,
+    // the check-IN helper) still uses findUnique elsewhere; keep the default so
+    // any check-in-adjacent path in these fixtures stays healthy.
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 50 });
@@ -1051,15 +1133,24 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     ).mockResolvedValue(multiSliceBooking);
 
     // Booked total across both slices = 10 + 20 = 30 (asset-level remaining).
+    // Fully-shaped so the batched slice helper resolves each slice by id and
+    // pools claims across the two same-asset slices.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ quantity: 10 }, { quantity: 20 }]);
-    // why: the per-slice cap read (`computeBookingAssetSliceRemaining`) returns
-    // the same shape for every slice in this mock; 20 is >= both claims so
-    // neither slice trips its cap.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 20 });
+    ).mockResolvedValue([
+      {
+        id: "ba-standalone",
+        assetId: "asset-battery",
+        quantity: 10,
+        assetKitId: null,
+      },
+      {
+        id: "ba-kit",
+        assetId: "asset-battery",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+    ]);
     // why: the qty loop locks the asset per disposition; return the battery.
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
@@ -1172,9 +1263,24 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
     beforeEach(() => {
       // Asset-level booked total across both slices = 22 + 100 = 122.
+      // Fully-shaped so the batched slice helper resolves each Gloves slice by id
+      // and pools claims across the standalone + kit slices of the same asset.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([{ quantity: 22 }, { quantity: 100 }]);
+      ).mockResolvedValue([
+        {
+          id: "ba-standalone",
+          assetId: "asset-gloves",
+          quantity: 22,
+          assetKitId: null,
+        },
+        {
+          id: "ba-kit",
+          assetId: "asset-gloves",
+          quantity: 100,
+          assetKitId: "ak-kittington",
+        },
+      ]);
       // Per-slice cap reads (`computeBookingAssetSliceRemaining`) resolve each
       // slice's booked quantity by id; no prior consumption → full cap.
       (
@@ -1395,12 +1501,24 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         }
         return Promise.resolve(null);
       });
-      // Both slices of the asset, for the attributor's full slice set.
+      // Both slices of the asset, for the attributor's full slice set. Carry
+      // `assetId` so the batched slice helper resolves the requested slice and
+      // pools prior claims across the two same-asset slices.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue([
-        { id: "ba-standalone", quantity: 22, assetKitId: null },
-        { id: "ba-kit", quantity: 100, assetKitId: "ak-kittington" },
+        {
+          id: "ba-standalone",
+          assetId: "asset-gloves",
+          quantity: 22,
+          assetKitId: null,
+        },
+        {
+          id: "ba-kit",
+          assetId: "asset-gloves",
+          quantity: 100,
+          assetKitId: "ak-kittington",
+        },
       ]);
 
       await expect(
@@ -1778,10 +1896,18 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(smallQtyBooking);
-    // Match the smaller booked total inside the qty loop.
+    // Match the smaller booked total inside the qty loop. Fully-shaped so the
+    // batched slice helper resolves ba-qty-1 (10 booked, 10 prior claim → 0 left).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ quantity: 10 }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-qty-1",
+        quantity: 10,
+        assetKitId: null,
+      },
+    ]);
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 10 });
@@ -1880,6 +2006,127 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     // INDIVIDUAL row: `assetQtyMeta` returns {} → meta has no `quantity` key,
     // only the session id.
     expect(individualEvent?.meta).not.toHaveProperty("quantity");
+  });
+
+  it("reads sessions/slices a BOUNDED number of times regardless of how many QT slices are checked out (no O(K) per-slice fan-out)", async () => {
+    expect.assertions(5);
+
+    // Regression guard for Sentry SHELF-WEBAPP-217 (slice level): partial-checking
+    // out MANY slice-tagged QUANTITY_TRACKED dispositions in one batch used to
+    // call the singular per-slice remaining helper — three sequential queries
+    // each — once per slice inside the interactive transaction, so the tx did
+    // O(3·K) round-trips and could blow the timeout with a Prisma P2028. The fix
+    // reads every slice's committed remaining in ONE batched call, so the
+    // `partialBookingCheckout.findMany` and `bookingAsset.findMany` call counts
+    // must stay flat — independent of the number of QT slices in the batch.
+    const SLICE_COUNT = 30;
+    const slices = Array.from({ length: SLICE_COUNT }, (_, i) => ({
+      id: `ba-${i}`,
+      assetId: `asset-${i}`,
+      quantity: 10,
+      assetKitId: null as string | null,
+    }));
+
+    const largeQtyBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFrom,
+      to: futureTo,
+      _count: { bookingAssets: SLICE_COUNT },
+      bookingAssets: slices.map((s) => ({
+        id: s.id,
+        quantity: s.quantity,
+        asset: {
+          id: s.assetId,
+          status: AssetStatus.AVAILABLE,
+          type: AssetType.QUANTITY_TRACKED,
+          title: `Asset ${s.assetId}`,
+          unitOfMeasure: null,
+          assetKits: [],
+        },
+      })),
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(largeQtyBooking);
+
+    // Args-aware slice source: the batched helpers query bookingAsset.findMany by
+    // `id: { in }` (requested slices) AND by `assetId: { in }` (each involved
+    // asset's full slice set) AND (asset-level remaining) by `assetId: { in }`.
+    // One registry serves all three shapes.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(
+      (args?: {
+        where?: {
+          id?: { in?: string[] };
+          assetId?: { in?: string[] } | string;
+        };
+      }) => {
+        const where = args?.where ?? {};
+        const idIn = where.id?.in;
+        if (Array.isArray(idIn)) {
+          return Promise.resolve(slices.filter((s) => idIn.includes(s.id)));
+        }
+        const assetId = where.assetId;
+        if (
+          assetId &&
+          typeof assetId === "object" &&
+          Array.isArray(assetId.in)
+        ) {
+          const wanted = assetId.in;
+          return Promise.resolve(
+            slices.filter((s) => wanted.includes(s.assetId))
+          );
+        }
+        return Promise.resolve(slices);
+      }
+    );
+    // The qty loop row-locks each asset; return a matching QT shape per assetId.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockImplementation((_tx: unknown, assetId: string) =>
+      Promise.resolve({
+        id: assetId,
+        title: `Asset ${assetId}`,
+        type: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: null,
+        quantity: 10,
+      })
+    );
+
+    // Check out ONE unit of each of the 30 slices in a single call.
+    const result = await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: slices.map((s) => ({
+        assetId: s.assetId,
+        bookingAssetId: s.id,
+        quantity: 1,
+      })),
+    });
+
+    // Session reads are O(1) in slice count: a handful of batched booking-level
+    // reads (pre-tx idempotency + slice precompute + asset-level precompute +
+    // post-tx completion), NOT one+ per slice. Bound generously — the point is
+    // it does NOT scale with SLICE_COUNT.
+    const pbcFindManyCalls = (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.length;
+    const bookingAssetFindManyCalls = (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.length;
+
+    expect(pbcFindManyCalls).toBeLessThanOrEqual(6);
+    expect(pbcFindManyCalls).toBeLessThan(SLICE_COUNT);
+    expect(bookingAssetFindManyCalls).toBeLessThanOrEqual(8);
+    expect(bookingAssetFindManyCalls).toBeLessThan(SLICE_COUNT);
+
+    // Sanity: the batch still records every slice (1 of 10 each → none complete).
+    expect(result.isComplete).toBe(false);
   });
 });
 
@@ -2002,7 +2249,14 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     });
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ id: "ba-qty-1", quantity: 50, assetKitId: null }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-qty-1",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [5] },
@@ -2030,7 +2284,14 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     });
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ id: "ba-qty-1", quantity: 50, assetKitId: null }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-qty-1",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
 
     const remaining = await computeBookingAssetSliceRemainingToCheckOut(
       db,
@@ -2053,8 +2314,18 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
-      { id: "ba-kit", quantity: 40, assetKitId: "kit-1" },
-      { id: "ba-standalone", quantity: 10, assetKitId: null },
+      {
+        id: "ba-kit",
+        assetId: "asset-qty-1",
+        quantity: 40,
+        assetKitId: "kit-1",
+      },
+      {
+        id: "ba-standalone",
+        assetId: "asset-qty-1",
+        quantity: 10,
+        assetKitId: null,
+      },
     ]);
     // Legacy seed — no `bookingAssetIds` → the whole 30-unit pool is greedy.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2109,8 +2380,18 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
-      { id: "ba-kit", quantity: 20, assetKitId: "kit-1" },
-      { id: "ba-standalone", quantity: 10, assetKitId: null },
+      {
+        id: "ba-kit",
+        assetId: "asset-batt",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+      {
+        id: "ba-standalone",
+        assetId: "asset-batt",
+        quantity: 10,
+        assetKitId: null,
+      },
     ]);
     // Tagged session: 10 units checked out against the standalone slice.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2169,8 +2450,18 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
-      { id: "ba-kit", quantity: 20, assetKitId: "kit-1" },
-      { id: "ba-standalone", quantity: 10, assetKitId: null },
+      {
+        id: "ba-kit",
+        assetId: "asset-batt",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+      {
+        id: "ba-standalone",
+        assetId: "asset-batt",
+        quantity: 10,
+        assetKitId: null,
+      },
     ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).__seedPbcSessions?.([
@@ -2277,7 +2568,14 @@ describe("getRemainingCheckoutPayload", () => {
     });
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ id: "ba-qty-1", quantity: 50, assetKitId: null }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).__seedPbcSessions?.([
       { assetIds: ["asset-pencils"], quantities: [5] },
@@ -2328,7 +2626,14 @@ describe("getRemainingCheckoutPayload", () => {
     });
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ id: "ba-qty-1", quantity: 50, assetKitId: null }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).__seedPbcSessions?.([
       { assetIds: ["asset-pencils"], quantities: [5] },
@@ -2378,11 +2683,19 @@ describe("getRemainingCheckoutPayload", () => {
       unitOfMeasure: null,
       quantity: 50,
     });
-    // partialCheckoutBooking reads tx.bookingAsset.findMany for per-asset
-    // totals (booked = Σ quantity). Single 50-unit slice.
+    // partialCheckoutBooking reads tx.bookingAsset.findMany for per-asset totals
+    // (booked = Σ quantity) AND per-slice remaining (by id). Single 50-unit slice,
+    // fully-shaped so both batched helpers resolve it.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ quantity: 50 }]);
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
 
     // Should NOT throw — the per-slice payload (45) sits inside the per-asset
     // remaining (50 − 5 = 45) cap, so the second-pass guard accepts it.
