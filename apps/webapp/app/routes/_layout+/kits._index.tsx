@@ -12,6 +12,7 @@ import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
+import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -349,21 +350,14 @@ export default function KitsIndexPage() {
                       alt: resource.title,
                     }}
                     alt={resource.title}
-                    className="size-14 rounded border object-cover"
+                    className="size-14 shrink-0 rounded border object-cover"
                     withPreview
                   />
-                  <div className="flex flex-col gap-1">
-                    <div className="min-w-0 flex-1 truncate">
-                      <Button
-                        to={`/kits/${resource.id}/assets`}
-                        variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
-                        target={"_blank"}
-                        onlyNewTabIconOnHover={true}
-                      >
-                        {resource.title}
-                      </Button>
-                    </div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <ResourceTitleLink
+                      to={`/kits/${resource.id}/assets`}
+                      title={resource.title}
+                    />
                     <div className="flex items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
