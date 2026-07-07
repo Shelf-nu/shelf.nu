@@ -134,10 +134,12 @@ export default function AddBookingAssetsScreen() {
       else if (data) setKits(data.kits);
     } else {
       // Book-by-model: availability is computed server-side over the booking's
-      // window; there's no server-side search, so we client-filter by name.
+      // window. Search is ALSO server-side (the list is capped at ~50, so a
+      // client-only filter could never reach a model that sorts past the cap).
       const { data, error: err } = await api.availableModels(
         currentOrg.id,
-        bookingId
+        bookingId,
+        debouncedSearch || undefined
       );
       if (reqId !== requestIdRef.current) return; // superseded by a newer load
       if (err) setError(err);
@@ -342,13 +344,6 @@ export default function AddBookingAssetsScreen() {
     [selectedKitIds, toggleKit, colors, styles]
   );
 
-  // Client-side name filter for models (the endpoint has no server search).
-  const filteredModels = debouncedSearch
-    ? models.filter((m) =>
-        m.name.toLowerCase().includes(debouncedSearch.toLowerCase())
-      )
-    : models;
-
   const renderModel = useCallback(
     ({ item }: { item: AvailableModel }) => {
       const existing = modelRequestsById[item.id];
@@ -532,18 +527,19 @@ export default function AddBookingAssetsScreen() {
         />
       ) : (
         <FlatList
-          data={filteredModels}
+          data={models}
           renderItem={renderModel}
           keyExtractor={modelKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           ListFooterComponent={
-            // The picker returns the first 50 models; tell the user to search
-            // if there are more (mirrors the web "showing N of M" hint).
-            totalModelCount > models.length ? (
+            // The picker returns the first 50 (by name); when there are more and
+            // the user hasn't searched, nudge them to search — which now filters
+            // server-side, so any model past the cap is reachable.
+            !debouncedSearch && totalModelCount > models.length ? (
               <Text style={styles.modelsFooter}>
-                Showing {models.length} of {totalModelCount} models. Search to
-                narrow.
+                Showing {models.length} of {totalModelCount} models. Search by
+                name to find the rest.
               </Text>
             ) : null
           }

@@ -126,6 +126,24 @@ describe("GET /api/mobile/bookings/available-models", () => {
     expect(where).not.toHaveProperty("custodianUserId");
   });
 
+  it("forwards the `s` query param to getBookingModelTabData as `search` (server-side model search)", async () => {
+    // Regression for the >50-models gap: the picker list is capped, so search
+    // must reach the server — a client-only filter can't find later models.
+    withRole(OrganizationRoles.ADMIN);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/bookings/available-models?bookingId=${BOOKING_ID}&s=dell`
+        ),
+      })
+    );
+
+    expect(getTabDataMock).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG_ID, search: "dell" })
+    );
+  });
+
   it("404s when the booking is not visible to the caller", async () => {
     withRole(OrganizationRoles.SELF_SERVICE);
     findFirstMock.mockResolvedValue(null);

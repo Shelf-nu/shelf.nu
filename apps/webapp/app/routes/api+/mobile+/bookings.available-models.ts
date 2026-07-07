@@ -49,6 +49,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { bookingId: url.searchParams.get("bookingId") ?? undefined },
       z.object({ bookingId: z.string().min(1) })
     );
+    // Optional server-side model name search (`s`), so orgs with more than
+    // MODEL_PICKER_LIMIT models can still reach a model that sorts past the
+    // first page — the web picker searches server-side, so the app must too.
+    const search = url.searchParams.get("s") ?? undefined;
 
     // Self-service / base users may only see their OWN bookings — scope the
     // lookup by custodian exactly like the booking detail read, so a booking
@@ -92,6 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const modelTabData = await getBookingModelTabData({
       organizationId,
       booking,
+      search,
     });
 
     // Trim to a mobile-friendly payload. Drop the web-only `initialAssetModels`

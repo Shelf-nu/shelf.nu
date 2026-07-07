@@ -276,12 +276,17 @@ export const bookingsApi = {
   /**
    * Book-by-model picker: the workspace's asset models with how many units are
    * free to reserve in this booking's window, plus the booking's existing
-   * model reservations (to pre-fill inputs). Read-only.
+   * model reservations (to pre-fill inputs). Read-only. `search` filters by
+   * model name server-side so orgs with more than ~50 models can reach any
+   * of them (the list is capped, so a client-only filter can't).
    */
-  availableModels: (orgId: string, bookingId: string) =>
-    apiFetch<AvailableModelsResponse>(
-      `/api/mobile/bookings/available-models?orgId=${orgId}&bookingId=${bookingId}`
-    ),
+  availableModels: (orgId: string, bookingId: string, search?: string) => {
+    const sp = new URLSearchParams({ orgId, bookingId });
+    if (search) sp.set("s", search);
+    return apiFetch<AvailableModelsResponse>(
+      `/api/mobile/bookings/available-models?${sp}`
+    );
+  },
 
   /**
    * Reserve (or edit) `quantity` units of an asset model on a booking.
