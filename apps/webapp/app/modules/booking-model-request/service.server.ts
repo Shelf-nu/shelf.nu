@@ -307,9 +307,17 @@ export async function getBookingModelTabData({
 
     // Case-insensitive name filter, applied to the seed fetch only (not the
     // full-org count/showModelsTab). Trimmed; blank search = no filter.
+    // Escape the LIKE metacharacters (`%` `_` and the escape char `\`) so a
+    // literal search like "model_1" matches literally instead of treating `_`
+    // as a single-char wildcard (Prisma `contains` compiles to ILIKE).
     const trimmedSearch = search?.trim();
     const searchWhere = trimmedSearch
-      ? { name: { contains: trimmedSearch, mode: "insensitive" as const } }
+      ? {
+          name: {
+            contains: trimmedSearch.replace(/[\\%_]/g, "\\$&"),
+            mode: "insensitive" as const,
+          },
+        }
       : {};
 
     let assetModels: BookingModelTabAssetModel[] = [];
