@@ -1174,5 +1174,80 @@ describe("note service", () => {
         })
       ).rejects.toThrow(ShelfError);
     });
+
+    it("clamps an out-of-range page to the last populated page", async () => {
+      // 21 notes at 20/page => 2 pages, so requesting page 5 must land on the
+      // last page (2) and fetch its slice instead of returning an empty list.
+      vi.mocked(db.note.count).mockResolvedValue(21);
+
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?page=5"
+      );
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(result.page).toBe(2);
+      expect(result.totalPages).toBe(2);
+      expect(db.note.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 20 })
+      );
+    });
+
+    it("reports hasNotes=true when a type filter matches zero notes but the asset has some", async () => {
+      // First count is the filtered query (no matching Comments), the second is
+      // the unfiltered fallback proving the asset still has notes.
+      vi.mocked(db.note.count)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(5);
+
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?noteType=Comments"
+      );
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(result.totalItems).toBe(0);
+      expect(result.hasNotes).toBe(true);
+      // The unfiltered fallback count only runs because a filter is active.
+      expect(db.note.count).toHaveBeenCalledTimes(2);
+    });
+
+    it("skips the unfiltered fallback count when no filter is active", async () => {
+      vi.mocked(db.note.count).mockResolvedValue(3);
+
+      const request = new Request("http://localhost/assets/asset-1/activity");
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(result.hasNotes).toBe(true);
+      // No filter => the total count already answers hasNotes; count runs once.
+      expect(db.note.count).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns the per-page cookie for the loader to persist", async () => {
+      const request = new Request("http://localhost/assets/asset-1/activity");
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      // why: updateCookieWithPerPage is mocked to a fixed { perPage: 20 }, so
+      // the value handed to the loader for serialization is deterministic.
+      expect(result.cookie).toEqual({ perPage: 20 });
+    });
   });
 });

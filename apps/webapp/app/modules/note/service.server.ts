@@ -23,6 +23,7 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import { NOTE_TYPE_FILTER_MAP } from "~/modules/note/note-filters";
 import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
@@ -41,16 +42,6 @@ import {
   assertAssetsBelongToOrg,
   type OrgValidationTxClient,
 } from "~/utils/org-validation.server";
-
-/**
- * Maps the user-facing `noteType` filter value (rendered by the shared
- * `StatusFilter`) to the {@link NoteType} stored on a note. Any other value —
- * including the "ALL" sentinel or an absent param — means "no type filter".
- */
-const NOTE_TYPE_FILTER_MAP: Record<string, Note["type"]> = {
-  Comments: "COMMENT",
-  Updates: "UPDATE",
-};
 
 const label = "Note";
 
@@ -208,11 +199,21 @@ export async function deleteNote({
  * - `noteType` — "Comments" (human `COMMENT` notes) or "Updates" (system
  *   `UPDATE` notes); any other value (incl. absent / "ALL") returns both.
  *
+ * The total count is resolved BEFORE the page is fetched so the requested
+ * `page` can be clamped into `[1, totalPages]`: an out-of-range page (deleting
+ * the last note on a page, or a stale bookmarked `?page=N`) returns the last
+ * populated page instead of an empty list that reads as a false "No Notes"
+ * empty state. The clamped value is what's returned as `page`.
+ *
  * `organizationId` is required and scopes the query via `asset.organizationId`,
  * so a note can never be read across tenants even if a foreign `assetId` is
  * supplied (see `.claude/rules/org-scope-user-supplied-ids.md`).
  *
- * @returns Pagination metadata plus the page of notes (`items`), newest first.
+ * @returns Pagination metadata plus the page of notes (`items`, newest first),
+ *   `hasNotes` (whether the asset has ANY notes ignoring the active filter — so
+ *   the UI can keep the "Export activity CSV" action visible even when a filter
+ *   matches zero notes), and the `cookie` for the loader to serialize as a
+ *   `Set-Cookie` header (persists the per-page preference).
  * @throws {ShelfError} If the database query fails.
  */
 export async function getPaginatedAndFilterableAssetNotes({
@@ -239,8 +240,6 @@ export async function getPaginatedAndFilterableAssetNotes({
      * page we actually fetched (200 is the established out-of-range fallback).
      */
     const safePerPage = perPage >= 1 && perPage <= 100 ? perPage : 200;
-    const skip = page > 1 ? (page - 1) * safePerPage : 0;
-    const take = safePerPage;
 
     /** Scope by the asset AND its organization (cross-tenant read guard) */
     const where: Prisma.NoteWhereInput = {
@@ -273,30 +272,52 @@ export async function getPaginatedAndFilterableAssetNotes({
       ];
     }
 
-    const [notes, totalItems] = await Promise.all([
-      db.note.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-        include: {
-          user: {
-            select: { firstName: true, lastName: true, displayName: true },
-          },
-        },
-      }),
-      db.note.count({ where }),
-    ]);
+    // Count first so the requested page can be clamped into range before the
+    // page is fetched (see JSDoc). `totalPages` is at least 1 so an asset with
+    // no matching notes still reports a single, valid page.
+    const totalItems = await db.note.count({ where });
+    const totalPages = Math.max(1, Math.ceil(totalItems / safePerPage));
+    // Clamp the requested page into [1, totalPages] so an out-of-range page
+    // (e.g. deleting the last note on a page, or a stale bookmarked ?page=N)
+    // still returns a populated page instead of an empty list.
+    const currentPage = Math.min(Math.max(page, 1), totalPages);
+    const skip = (currentPage - 1) * safePerPage;
 
-    const totalPages = Math.ceil(totalItems / safePerPage);
+    const notes = await db.note.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: safePerPage,
+      include: {
+        user: {
+          select: { firstName: true, lastName: true, displayName: true },
+        },
+      },
+    });
+
+    /**
+     * Whether the asset has ANY notes, ignoring the active filter — lets the UI
+     * keep the "Export activity CSV" action visible when a filter matches zero
+     * notes (an empty filtered view is not an empty activity log). Only pay for
+     * the extra unfiltered count when a filter is active; otherwise `totalItems`
+     * already is the unfiltered total.
+     */
+    const hasActiveFilter = Boolean(typeFilter || search);
+    const hasNotes = hasActiveFilter
+      ? (await db.note.count({
+          where: { assetId, asset: { organizationId } },
+        })) > 0
+      : totalItems > 0;
 
     return {
-      page,
+      page: currentPage,
       perPage: safePerPage,
       search,
       items: notes,
       totalItems,
       totalPages,
+      hasNotes,
+      cookie,
     };
   } catch (cause) {
     throw new ShelfError({

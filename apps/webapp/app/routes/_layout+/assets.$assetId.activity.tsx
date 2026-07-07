@@ -9,6 +9,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { getPaginatedAndFilterableAssetNotes } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import {
@@ -41,20 +42,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * so the activity log behaves like every other list in the app. Both are
      * independently org-scoped, so they can run concurrently.
      */
-    const [asset, { page, perPage, search, items, totalItems, totalPages }] =
-      await Promise.all([
-        getAsset({
-          id,
-          organizationId,
-          userOrganizations,
-          request,
-        }),
-        getPaginatedAndFilterableAssetNotes({
-          assetId: id,
-          organizationId,
-          request,
-        }),
-      ]);
+    const [
+      asset,
+      {
+        page,
+        perPage,
+        search,
+        items,
+        totalItems,
+        totalPages,
+        hasNotes,
+        cookie,
+      },
+    ] = await Promise.all([
+      getAsset({
+        id,
+        organizationId,
+        userOrganizations,
+        request,
+      }),
+      getPaginatedAndFilterableAssetNotes({
+        assetId: id,
+        organizationId,
+        request,
+      }),
+    ]);
 
     const header: HeaderData = {
       title: `${asset.title}'s activity`,
@@ -65,18 +77,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "notes",
     };
 
-    return payload({
-      asset,
-      header,
-      items,
-      totalItems,
-      page,
-      perPage,
-      search,
-      totalPages,
-      modelName,
-      searchFieldLabel: "Search notes",
-    });
+    return data(
+      payload({
+        asset,
+        header,
+        items,
+        totalItems,
+        page,
+        perPage,
+        search,
+        totalPages,
+        hasNotes,
+        modelName,
+        searchFieldLabel: "Search notes",
+      }),
+      {
+        // Persist the per-page preference the service resolved for this request.
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

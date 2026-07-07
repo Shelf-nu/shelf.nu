@@ -18,24 +18,13 @@ import { Pagination } from "~/components/list/pagination";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";
+import { NOTE_TYPE_FILTER_ITEMS } from "~/modules/note/note-filters";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";
 import { isFormProcessing } from "~/utils/form";
 import { ActionsDropdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 import type { NoteWithUser } from "./note";
 import { Note } from "./note";
-
-/**
- * User-facing options for the note-type filter. The `StatusFilter` prepends an
- * "ALL" option automatically; these values are mapped back to the `NoteType`
- * enum server-side in `getPaginatedAndFilterableAssetNotes`.
- * - Comments: human-authored notes (`COMMENT`)
- * - Updates: system activity entries (`UPDATE`)
- */
-const NOTE_TYPE_FILTER_ITEMS = {
-  Comments: "Comments",
-  Updates: "Updates",
-} as const;
 
 /**
  * The asset activity log.
@@ -46,7 +35,8 @@ const NOTE_TYPE_FILTER_ITEMS = {
  * so this composes the toolbar primitives directly rather than via `<List>`.
  */
 export const Notes = () => {
-  const { asset, items, totalItems, search } = useLoaderData<typeof loader>();
+  const { asset, items, search, hasNotes, page } =
+    useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
@@ -70,13 +60,19 @@ export const Notes = () => {
   }
 
   /**
-   * A new note is always a COMMENT, so only show the optimistic placeholder
-   * when the current filter would include comments (i.e. not the "Updates"
-   * filter) — otherwise it would briefly appear in a view that excludes it.
+   * A new note is always a COMMENT and, because comments are ordered
+   * newest-first and are unfiltered by search/page, it lands on page 1. So the
+   * optimistic placeholder is only shown when it would actually appear in the
+   * current view: a comments-inclusive filter (not "Updates"), no active search
+   * term, and page 1. Showing it in any other view would make it flash in and
+   * then disappear on revalidation, once the real (absent-from-this-view) list
+   * comes back from the server.
    */
   const filterIncludesComments = noteTypeFilter !== "Updates";
   const optimisticNote: NoteWithUser | null =
     filterIncludesComments &&
+    !search &&
+    page === 1 &&
     isFormProcessing(fetcher.state) &&
     onSubmissionContent
       ? {
@@ -107,7 +103,7 @@ export const Notes = () => {
           ),
         }}
       >
-        {totalItems > 0 ? (
+        {hasNotes ? (
           <Button
             to={`/assets/${asset.id}/activity.csv`}
             variant="secondary"
