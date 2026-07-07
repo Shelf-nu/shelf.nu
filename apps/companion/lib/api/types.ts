@@ -472,6 +472,22 @@ export type BookingAsset = {
   kit: { id: string; name: string } | null;
 };
 
+/**
+ * A book-by-model reservation on a booking: intent to reserve `quantity` units
+ * of an `AssetModel` without picking specific assets upfront. `outstanding` is
+ * how many are still waiting to be assigned via scan-to-assign;
+ * `fulfilledAt` non-null means every unit has been assigned (read-only history).
+ */
+export type BookingModelRequest = {
+  id: string;
+  assetModelId: string;
+  assetModelName: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  outstandingQuantity: number;
+  fulfilledAt: string | null;
+};
+
 export type BookingDetail = {
   id: string;
   name: string;
@@ -500,6 +516,12 @@ export type BookingDetail = {
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
+  /** Book-by-model reservations (outstanding + fulfilled), matching the web. */
+  modelRequests: BookingModelRequest[];
+  /** Number of distinct models reserved (rows in `modelRequests`). */
+  modelRequestCount: number;
+  /** Total units still to assign across all model requests. */
+  outstandingModelUnitCount: number;
 };
 
 export type BookingDetailResponse = {
@@ -641,6 +663,51 @@ export type AvailableKitsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+/**
+ * A bookable asset model in the book-by-model picker, with how many units are
+ * free to reserve in the booking's window. `available` = total − in-custody −
+ * reserved (concrete + via other model requests). Server-computed; the app
+ * caps the reserve input at `available` + the amount already fulfilled.
+ */
+export type AvailableModel = {
+  id: string;
+  name: string;
+  total: number;
+  available: number;
+  inCustody: number;
+  reservedConcrete: number;
+  reservedViaRequest: number;
+};
+
+/**
+ * The booking's existing model-level reservations as returned by the picker
+ * (leaner than {@link BookingModelRequest} — no id/outstanding, since the
+ * picker only needs current amounts to pre-fill inputs).
+ */
+export type AvailableModelExistingRequest = {
+  assetModelId: string;
+  assetModelName: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: string | null;
+};
+
+export type AvailableModelsResponse = {
+  /** False when the workspace has no AssetModel at all — hide the picker. */
+  showModelsTab: boolean;
+  /** Per-model availability for this booking's window (first 50 by name). */
+  assetModels: AvailableModel[];
+  /** Full workspace model count (the list above is capped at 50). */
+  totalAssetModels: number;
+  /** This booking's existing model reservations, to pre-fill the inputs. */
+  modelRequests: AvailableModelExistingRequest[];
+};
+
+/** Response from the model-request upsert/remove endpoint. */
+export type ModelRequestMutationResponse = {
+  success: boolean;
 };
 
 export type BookingTag = { id: string; name: string };

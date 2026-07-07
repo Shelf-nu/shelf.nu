@@ -10,6 +10,10 @@
  */
 
 import { AssetStatus } from "@prisma/client";
+import {
+  ASSET_STATUS_LABELS,
+  ASSET_BOOKING_PSEUDO_STATUS_LABELS,
+} from "@shelf/labels";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 
@@ -17,37 +21,40 @@ import type { ExtendedAssetStatus } from "~/utils/booking-assets";
  * Maps a status (including the booking-context-only `PARTIALLY_CHECKED_IN`
  * pseudo-statuses) to its user-facing label.
  *
+ * All label strings come from the shared `@shelf/labels` package so the
+ * companion app renders the exact same wording (single source of truth).
+ *
  * @param status The asset status, or a booking-context pseudo-status
  * @returns Short human-readable label suitable for a badge
  */
 export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
-      return "In custody";
+      return ASSET_STATUS_LABELS.IN_CUSTODY;
     case AssetStatus.CHECKED_OUT:
-      return "Checked out";
+      return ASSET_STATUS_LABELS.CHECKED_OUT;
     case "PARTIALLY_CHECKED_IN":
-      return "Already checked in";
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN;
     case "PARTIALLY_CHECKED_IN_QTY":
       // Legacy Phase 3c label — kept for any caller that still needs the
       // "partially in" wording. Booking rows use PARTIALLY_CHECKED_OUT_QTY
       // instead to emphasise "work still outstanding".
-      return "Partially checked in";
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_IN;
     case "PARTIALLY_CHECKED_OUT_QTY":
       // Qty-tracked: some units of THIS row dispositioned, some still
       // outstanding. Wording matches the global qty-aware breakdown so
       // a row that's partly returned reads consistently with how it
       // looks on the asset index / asset overview.
-      return "Partially checked out";
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_OUT;
     case "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN":
       // Qty-tracked: some units progressively checked out, but no
       // disposition (return/consume/loss/damage) recorded yet. Same
       // user-facing wording as the violet "Partially checked out" state —
       // the amber colour carries the "no returns yet, action required"
       // semantic without inventing a second label users have to learn.
-      return "Partially checked out";
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_OUT;
     default:
-      return "Available";
+      return ASSET_STATUS_LABELS.AVAILABLE;
   }
 };
 

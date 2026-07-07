@@ -29,6 +29,7 @@ import {
   spacing,
   borderRadius,
   formatStatus,
+  getQuantityStatusLabel,
   formatDate,
   formatCurrency,
 } from "@/lib/constants";
@@ -283,6 +284,13 @@ export default function AssetDetailScreen() {
   // activity (server's getQuantityData null contract) — we fall back to the
   // plain total in that case.
   const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
+  // Status pill label. For a QUANTITY_TRACKED asset whose units span states
+  // (e.g. some held, some free), the raw enum ("IN_CUSTODY") reads wrong — the
+  // web shows a derived "Partial custody". Use the shared quantity-aware label
+  // (identical precedence to web getQuantityBadgeLabelAndColor); fall back to
+  // the plain enum label for INDIVIDUAL assets or QT assets with no breakdown.
+  const statusLabel =
+    getQuantityStatusLabel(breakdown) ?? formatStatus(asset.status);
   const unitSuffix = asset.unitOfMeasure?.trim()
     ? ` ${asset.unitOfMeasure.trim()}`
     : "";
@@ -348,7 +356,7 @@ export default function AssetDetailScreen() {
                 style={[styles.statusDot, { backgroundColor: badge.text }]}
               />
               <Text style={[styles.statusText, { color: badge.text }]}>
-                {formatStatus(asset.status)}
+                {statusLabel}
               </Text>
             </View>
           </View>

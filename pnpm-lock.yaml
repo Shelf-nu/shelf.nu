@@ -79,6 +79,9 @@ importers:
       '@sentry/react-native':
         specifier: ~7.2.0
         version: 7.2.0(expo@54.0.33)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+      '@shelf/labels':
+        specifier: workspace:*
+        version: link:../../packages/labels
       '@supabase/supabase-js':
         specifier: ^2.49.1
         version: 2.98.0
@@ -281,6 +284,9 @@ importers:
       '@shelf/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@shelf/labels':
+        specifier: workspace:*
+        version: link:../../packages/labels
       '@supabase/supabase-js':
         specifier: ^2.103.0
         version: 2.105.1
@@ -703,6 +709,8 @@ importers:
       typescript:
         specifier: ^6.0.2
         version: 6.0.3
+
+  packages/labels: {}
 
   tooling/typescript: {}
 
@@ -1972,7 +1980,6 @@ packages:
 
   '@evilmartians/lefthook@2.1.6':
     resolution: {integrity: sha512-ysZbzryf74wlISmgm0PH/n1lJ0HD7AHmI6DoJgWO9qzIETQknhGdmKbkOi0MjLYtiOHWQl8Dr2qwg0ksDpNZjA==}
-    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
