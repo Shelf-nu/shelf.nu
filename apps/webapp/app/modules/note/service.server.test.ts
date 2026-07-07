@@ -1197,6 +1197,26 @@ describe("note service", () => {
       );
     });
 
+    it("reports totalPages=0 for an empty result and clamps the page to 1", async () => {
+      // Empty activity log: totalPages follows the shared list contract (0),
+      // while an out-of-range ?page=N still resolves to a valid page 1.
+      vi.mocked(db.note.count).mockResolvedValue(0);
+
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?page=3"
+      );
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(result.totalItems).toBe(0);
+      expect(result.totalPages).toBe(0);
+      expect(result.page).toBe(1);
+    });
+
     it("reports hasNotes=true when a type filter matches zero notes but the asset has some", async () => {
       // First count is the filtered query (no matching Comments), the second is
       // the unfiltered fallback proving the asset still has notes.

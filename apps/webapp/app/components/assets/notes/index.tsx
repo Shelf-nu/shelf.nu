@@ -68,7 +68,8 @@ export const Notes = () => {
    * then disappear on revalidation, once the real (absent-from-this-view) list
    * comes back from the server.
    */
-  const filterIncludesComments = noteTypeFilter !== "Updates";
+  const filterIncludesComments =
+    noteTypeFilter !== NOTE_TYPE_FILTER_ITEMS.Updates;
   const optimisticNote: NoteWithUser | null =
     filterIncludesComments &&
     !search &&

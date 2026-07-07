@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, useFetcher, useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,7 +39,9 @@ vi.mock("~/hooks/search-params", () => ({
 // own tests; stub them so this stays a focused test of the activity log.
 // Filters renders its children so the export button remains assertable.
 vi.mock("~/components/list/filters", () => ({
-  Filters: ({ children }: any) => <div data-testid="filters">{children}</div>,
+  Filters: ({ children }: { children: ReactNode }) => (
+    <div data-testid="filters">{children}</div>
+  ),
 }));
 vi.mock("~/components/list/pagination", () => ({
   Pagination: () => <div data-testid="pagination" />,

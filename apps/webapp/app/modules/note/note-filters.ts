@@ -38,8 +38,12 @@ export const NOTE_TYPE_FILTER_ITEMS = {
  * `StatusFilter`) to the {@link Note.type} stored on a note. Derived from
  * {@link NOTE_TYPE_FILTER_ITEMS} so the two stay in sync. Any other value —
  * including the "ALL" sentinel or an absent param — means "no type filter".
+ *
+ * Typed as a `Partial` record so indexing with an arbitrary/unknown key (e.g.
+ * `""`, `"ALL"`) yields `Note["type"] | undefined`, matching runtime and
+ * keeping the server-side `if (typeFilter)` narrowing type-safe.
  */
-export const NOTE_TYPE_FILTER_MAP: Record<string, Note["type"]> = {
+export const NOTE_TYPE_FILTER_MAP: Partial<Record<string, Note["type"]>> = {
   [NOTE_TYPE_FILTER_ITEMS.Comments]: "COMMENT",
   [NOTE_TYPE_FILTER_ITEMS.Updates]: "UPDATE",
 };

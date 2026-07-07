@@ -200,10 +200,11 @@ export async function deleteNote({
  *   `UPDATE` notes); any other value (incl. absent / "ALL") returns both.
  *
  * The total count is resolved BEFORE the page is fetched so the requested
- * `page` can be clamped into `[1, totalPages]`: an out-of-range page (deleting
- * the last note on a page, or a stale bookmarked `?page=N`) returns the last
- * populated page instead of an empty list that reads as a false "No Notes"
- * empty state. The clamped value is what's returned as `page`.
+ * The requested `page` is clamped to the last populated page: an out-of-range
+ * page (deleting the last note on a page, or a stale bookmarked `?page=N`)
+ * returns that page instead of an empty list that reads as a false "No Notes"
+ * empty state. The clamped value is what's returned as `page`. `totalPages`
+ * itself follows the shared list contract (`0` when nothing matches).
  *
  * `organizationId` is required and scopes the query via `asset.organizationId`,
  * so a note can never be read across tenants even if a foreign `assetId` is
@@ -273,14 +274,16 @@ export async function getPaginatedAndFilterableAssetNotes({
     }
 
     // Count first so the requested page can be clamped into range before the
-    // page is fetched (see JSDoc). `totalPages` is at least 1 so an asset with
-    // no matching notes still reports a single, valid page.
+    // page is fetched (see JSDoc). `totalPages` follows the shared list contract
+    // (`0` when nothing matches, like the other paginated services), so clamp
+    // against a separate `lastPage` ceiling instead of inflating the metadata.
     const totalItems = await db.note.count({ where });
-    const totalPages = Math.max(1, Math.ceil(totalItems / safePerPage));
-    // Clamp the requested page into [1, totalPages] so an out-of-range page
+    const totalPages = Math.ceil(totalItems / safePerPage);
+    // Clamp the requested page into [1, lastPage] so an out-of-range page
     // (e.g. deleting the last note on a page, or a stale bookmarked ?page=N)
     // still returns a populated page instead of an empty list.
-    const currentPage = Math.min(Math.max(page, 1), totalPages);
+    const lastPage = Math.max(1, totalPages);
+    const currentPage = Math.min(Math.max(page, 1), lastPage);
     const skip = (currentPage - 1) * safePerPage;
 
     const notes = await db.note.findMany({
