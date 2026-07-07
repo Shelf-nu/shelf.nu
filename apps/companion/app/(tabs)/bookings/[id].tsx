@@ -757,6 +757,40 @@ export default function BookingDetailScreen() {
     reservedCount > 0 &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
+  // Book-by-model reservations still awaiting assignment. Fulfilled rows
+  // (`fulfilledAt` set) are hidden here — the concrete assets they became
+  // already appear in the assets list, so showing them too would double up.
+  // Mirrors the web booking overview (booking-assets-column.tsx). The `?? []`
+  // matches the web guard + this file's cross-version convention: a booking
+  // detail from a not-yet-updated server (rolling deploy) omits the field, and
+  // an unguarded `.filter` would crash the whole screen to the error boundary.
+  const outstandingModelRequests = (booking.modelRequests ?? []).filter(
+    (mr) => mr.fulfilledAt === null
+  );
+
+  // Same gate the manage buttons use: an editable booking, and self-service
+  // users only on their own DRAFTs (server re-checks ownership + status).
+  const canManageModels =
+    !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+    (!isSelfService || booking.status === "DRAFT");
+
+  /**
+   * Open the model-reservation manager (the picker's Models tab) for this
+   * booking. Editing quantity / adding / removing all live there so the
+   * availability cap is computed in one place.
+   */
+  const openModelManager = () => {
+    router.push(
+      `/(tabs)/bookings/add-assets?bookingId=${
+        booking.id
+      }&bookingName=${encodeURIComponent(
+        booking.name
+      )}&from=${encodeURIComponent(booking.from)}&to=${encodeURIComponent(
+        booking.to
+      )}&mode=models`
+    );
+  };
+
   return (
     <View style={styles.container}>
       {isActioning && (
@@ -1231,6 +1265,107 @@ export default function BookingDetailScreen() {
               </View>
             )}
 
+            {/* Reserved models (book-by-model): outstanding reservations that
+                still need assets assigned via scan/browse. Shown above the
+                assets list, matching the web booking overview. */}
+            {outstandingModelRequests.length > 0 && (
+              <View style={styles.modelsSection}>
+                <View style={styles.modelsSectionHeader}>
+                  <Text style={styles.sectionTitle}>
+                    Reserved models ({outstandingModelRequests.length})
+                  </Text>
+                  {canManageModels && (
+                    <TouchableOpacity
+                      onPress={openModelManager}
+                      accessibilityLabel="Manage reserved models"
+                      accessibilityRole="button"
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.modelsManageLink}>Manage</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {booking.outstandingModelUnitCount > 0 && (
+                  <Text style={styles.modelsSubtitle}>
+                    {booking.outstandingModelUnitCount} unit
+                    {booking.outstandingModelUnitCount === 1 ? "" : "s"} still
+                    to assign. Scan or browse to add matching assets.
+                  </Text>
+                )}
+                {outstandingModelRequests.map((mr) => {
+                  const remaining = mr.outstandingQuantity;
+                  const row = (
+                    <>
+                      <View
+                        style={[
+                          styles.modelIcon,
+                          { backgroundColor: colors.warningBg },
+                        ]}
+                      >
+                        <Ionicons
+                          name="cube-outline"
+                          size={18}
+                          color={colors.warning}
+                        />
+                      </View>
+                      <View style={styles.modelInfo}>
+                        <Text style={styles.modelName} numberOfLines={1}>
+                          {mr.assetModelName}
+                        </Text>
+                        <View
+                          style={[
+                            styles.modelBadge,
+                            { backgroundColor: colors.warningBg },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.modelBadgeText,
+                              { color: colors.warning },
+                            ]}
+                          >
+                            Reserved model
+                          </Text>
+                        </View>
+                        {mr.fulfilledQuantity > 0 && (
+                          <Text style={styles.modelProgress}>
+                            {mr.fulfilledQuantity} of {mr.quantity} assigned
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={styles.modelQty}>× {remaining}</Text>
+                      {canManageModels && (
+                        <Ionicons
+                          name="chevron-forward"
+                          size={18}
+                          color={colors.muted}
+                        />
+                      )}
+                    </>
+                  );
+                  return canManageModels ? (
+                    <TouchableOpacity
+                      key={mr.id}
+                      style={styles.modelCard}
+                      onPress={openModelManager}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment. Tap to manage.`}
+                    >
+                      {row}
+                    </TouchableOpacity>
+                  ) : (
+                    <View
+                      key={mr.id}
+                      style={styles.modelCard}
+                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment`}
+                    >
+                      {row}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             {/* Assets section header */}
             <Text style={styles.sectionTitle}>
               Assets ({booking.assetCount})
@@ -1575,6 +1710,73 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "600",
     color: colors.foreground,
     marginTop: spacing.xs,
+  },
+
+  // Reserved-models (book-by-model) section
+  modelsSection: {
+    gap: spacing.sm,
+  },
+  modelsSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  modelsManageLink: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
+    marginTop: spacing.xs,
+  },
+  modelsSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    lineHeight: 16,
+  },
+  modelCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  modelIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.sm,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modelInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  modelName: {
+    fontSize: fontSize.base,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  modelBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: borderRadius.pill,
+  },
+  modelBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+  },
+  modelProgress: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  modelQty: {
+    fontSize: fontSize.base,
+    fontWeight: "700",
+    color: colors.foreground,
   },
 
   // Asset cards

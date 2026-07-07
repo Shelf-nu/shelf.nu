@@ -11,6 +11,8 @@ import type {
   RemoveBookingAssetsResponse,
   AvailableAssetsResponse,
   AvailableKitsResponse,
+  AvailableModelsResponse,
+  ModelRequestMutationResponse,
   BookingTagsResponse,
 } from "./types";
 
@@ -270,4 +272,51 @@ export const bookingsApi = {
   /** Tags assignable to bookings (for the booking-form tag picker). */
   bookingTags: (orgId: string) =>
     apiFetch<BookingTagsResponse>(`/api/mobile/bookings/tags?orgId=${orgId}`),
+
+  /**
+   * Book-by-model picker: the workspace's asset models with how many units are
+   * free to reserve in this booking's window, plus the booking's existing
+   * model reservations (to pre-fill inputs). Read-only.
+   */
+  availableModels: (orgId: string, bookingId: string) =>
+    apiFetch<AvailableModelsResponse>(
+      `/api/mobile/bookings/available-models?orgId=${orgId}&bookingId=${bookingId}`
+    ),
+
+  /**
+   * Reserve (or edit) `quantity` units of an asset model on a booking.
+   * `quantity` is the ABSOLUTE reserved total, not a delta — the server upserts
+   * to it. DRAFT/RESERVED only; availability + ownership enforced server-side.
+   */
+  upsertModelRequest: (
+    orgId: string,
+    bookingId: string,
+    assetModelId: string,
+    quantity: number
+  ) =>
+    apiFetch<ModelRequestMutationResponse>(
+      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetModelId, quantity }),
+      }
+    ),
+
+  /**
+   * Cancel a model-level reservation on a booking. Idempotent; blocked
+   * server-side if units have already been assigned (edit the quantity down
+   * instead). DRAFT/RESERVED only.
+   */
+  removeModelRequest: (
+    orgId: string,
+    bookingId: string,
+    assetModelId: string
+  ) =>
+    apiFetch<ModelRequestMutationResponse>(
+      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ assetModelId }),
+      }
+    ),
 };
