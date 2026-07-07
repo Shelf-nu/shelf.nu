@@ -874,6 +874,9 @@ describe("partialCheckoutBooking", () => {
       _count: { bookingAssets: BOOKING_SIZE },
       bookingAssets: manyBookingAssets,
     };
+    // why: stands in for the booking read that drives partialCheckoutBooking;
+    // sized to BOOKING_SIZE assets so the test can assert the session-read count
+    // stays flat instead of scaling with the booking's asset count.
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(largeBooking);
@@ -1201,9 +1204,9 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(multiSliceBooking);
 
-    // Booked total across both slices = 10 + 20 = 30 (asset-level remaining).
-    // Fully-shaped so the batched slice helper resolves each slice by id and
-    // pools claims across the two same-asset slices.
+    // why: fully-shaped BookingAsset pivot rows so the batched slice helper
+    // resolves each slice by id and pools claims across the two same-asset
+    // slices. Booked total across both = 10 + 20 = 30 (asset-level remaining).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -1331,9 +1334,9 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
 
     beforeEach(() => {
-      // Asset-level booked total across both slices = 22 + 100 = 122.
-      // Fully-shaped so the batched slice helper resolves each Gloves slice by id
-      // and pools claims across the standalone + kit slices of the same asset.
+      // why: fully-shaped BookingAsset pivot rows so the batched slice helper
+      // resolves each Gloves slice by id and pools claims across the standalone
+      // + kit slices of the same asset. Booked total = 22 + 100 = 122.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue([
@@ -1570,9 +1573,9 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         }
         return Promise.resolve(null);
       });
-      // Both slices of the asset, for the attributor's full slice set. Carry
-      // `assetId` so the batched slice helper resolves the requested slice and
-      // pools prior claims across the two same-asset slices.
+      // why: both slices of the asset stand in for the attributor's full slice
+      // set; carry `assetId` so the batched slice helper resolves the requested
+      // slice and pools prior claims across the two same-asset slices.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue([
@@ -1965,8 +1968,9 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(smallQtyBooking);
-    // Match the smaller booked total inside the qty loop. Fully-shaped so the
-    // batched slice helper resolves ba-qty-1 (10 booked, 10 prior claim → 0 left).
+    // why: matches the smaller booked total inside the qty loop; fully-shaped so
+    // the batched slice helper resolves ba-qty-1 (10 booked, 10 prior claim → 0
+    // left).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2169,14 +2173,17 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         },
       })),
     };
+    // why: stands in for the booking read that drives the QT checkout; sized to
+    // SLICE_COUNT slices so the test can assert the session/slice read counts stay
+    // flat instead of scaling with how many slices are in the batch.
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(largeQtyBooking);
 
-    // Args-aware slice source: the batched helpers query bookingAsset.findMany by
-    // `id: { in }` (requested slices) AND by `assetId: { in }` (each involved
-    // asset's full slice set) AND (asset-level remaining) by `assetId: { in }`.
-    // One registry serves all three shapes.
+    // why: args-aware slice source standing in for bookingAsset.findMany — the
+    // batched helpers query it by `id: { in }` (requested slices) AND by
+    // `assetId: { in }` (each involved asset's full slice set) AND (asset-level
+    // remaining) by `assetId: { in }`. One registry serves all three shapes.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockImplementation(
@@ -2205,7 +2212,8 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         return Promise.resolve(slices);
       }
     );
-    // The qty loop row-locks each asset; return a matching QT shape per assetId.
+    // why: the qty loop row-locks each asset; return a matching QT shape per
+    // assetId so the loop proceeds for every slice in the batch.
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockImplementation((_tx: unknown, assetId: string) =>
@@ -2366,6 +2374,8 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
       quantity: 50,
       assetKitId: null,
     });
+    // why: stands in for the single-slice BookingAsset pivot the OUT-side
+    // per-slice helper reads; one 50-unit slice so remaining = 50 − prior claim.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2401,6 +2411,8 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
       quantity: 50,
       assetKitId: null,
     });
+    // why: stands in for the single-slice BookingAsset pivot; one 50-unit slice
+    // with no prior claims → the helper returns the full slice cap.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2430,6 +2442,8 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     // greedy fill rule is STANDALONE-first (loose items are scanned
     // individually; kits are handled as a whole), so the standalone slice
     // (10 cap) drains fully first and the kit slice absorbs the overflow 20.
+    // why: stands in for the two same-asset pivot slices (kit + standalone) the
+    // batched slice helper reads to distribute the untagged legacy claim pool.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2496,6 +2510,8 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     // with the STANDALONE slice's `bookingAssetId`. Per-slice attribution must
     // credit the standalone slice EXACTLY (remaining 0) and leave the kit slice
     // fully outstanding (remaining 20), NOT pool-and-greedy the two.
+    // why: stands in for the two same-asset pivot slices the batched slice helper
+    // reads so a standalone-tagged claim credits exactly that slice.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2566,6 +2582,9 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
     // tagged to the KIT slice, so the kit must be credited (remaining 15) and
     // the standalone left fully outstanding (remaining 10) — proving the exact
     // `bookingAssetId` wins over the standalone-first default.
+    // why: stands in for the two same-asset pivot slices the batched slice helper
+    // reads so a kit-tagged claim credits the kit slice, beating the greedy
+    // standalone-first default.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2685,6 +2704,9 @@ describe("getRemainingCheckoutPayload", () => {
       quantity: 50,
       assetKitId: null,
     });
+    // why: stands in for the single 50-unit BookingAsset pivot slice that
+    // getRemainingCheckoutPayload reads to compute the per-slice check-out
+    // remaining (50 − prior claim 5 = 45).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2743,6 +2765,9 @@ describe("getRemainingCheckoutPayload", () => {
       quantity: 50,
       assetKitId: null,
     });
+    // why: stands in for the single 50-unit BookingAsset pivot slice
+    // getRemainingCheckoutPayload reads to derive the per-slice payload it hands
+    // to partialCheckoutBooking.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -2802,9 +2827,9 @@ describe("getRemainingCheckoutPayload", () => {
       unitOfMeasure: null,
       quantity: 50,
     });
-    // partialCheckoutBooking reads tx.bookingAsset.findMany for per-asset totals
-    // (booked = Σ quantity) AND per-slice remaining (by id). Single 50-unit slice,
-    // fully-shaped so both batched helpers resolve it.
+    // why: partialCheckoutBooking reads tx.bookingAsset.findMany for per-asset
+    // totals (booked = Σ quantity) AND per-slice remaining (by id). Single
+    // 50-unit slice, fully-shaped so both batched helpers resolve it.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([

@@ -26,7 +26,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { partialCheckoutAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkout-drawer";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
@@ -3058,6 +3058,19 @@ export async function computeBookingAssetSliceRemaining(
 }
 
 /**
+ * Minimal Prisma surface the batched checkout "remaining" helpers touch. Both
+ * the extended top-level client (`db`) and an interactive transaction client
+ * satisfy this structurally, so callers can pass either without a cast — mirrors
+ * the `OrgValidationTxClient` / `RecordEventTxClient` pattern used elsewhere for
+ * the extended client, whose interactive-tx type does not reduce to the
+ * generated `Prisma.TransactionClient`.
+ */
+type CheckoutRemainingTxClient = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "partialBookingCheckout" | "booking"
+>;
+
+/**
  * Batched sibling of {@link computeBookingAssetRemainingToCheckOut}: computes
  * the still-checkoutable remaining for MANY assets on ONE booking in a FIXED
  * three queries total, regardless of how many assets are requested.
@@ -3087,9 +3100,8 @@ export async function computeBookingAssetSliceRemaining(
  * @returns Map keyed by every requested `assetId` → non-negative remaining
  *          units still checkoutable for that asset on this booking
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function computeBookingAssetsRemainingToCheckOut(
-  tx: any,
+  tx: CheckoutRemainingTxClient,
   bookingId: Booking["id"],
   assetIds: Asset["id"][]
 ): Promise<Map<string, number>> {
@@ -3433,9 +3445,8 @@ export async function computeBookingAssetSliceRemainingToCheckOut(
  *   remaining units still checkoutable for that slice on this booking. Empty
  *   input ⇒ empty map with no query issued.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function computeBookingAssetsSliceRemainingToCheckOut(
-  tx: any,
+  tx: CheckoutRemainingTxClient,
   bookingId: Booking["id"],
   bookingAssetIds: string[]
 ): Promise<Map<string, number>> {
@@ -6500,6 +6511,11 @@ export async function partialCheckoutBooking({
          * disposition, which scaled the transaction's round-trips with the batch
          * (and, via the singular helper's per-call booking-level reads, with the
          * booking size) and blew the tx timeout (Sentry SHELF-WEBAPP-217).
+         *
+         * Sorted so every concurrent checkout acquires the per-asset row locks
+         * in the SAME deterministic order — two batches touching the same assets
+         * in opposite payload order can't take the locks in reverse and deadlock.
+         * Disposition processing below keeps its original `dispositions` order.
          */
         const qtyDispositionAssetIds = [
           ...new Set(
@@ -6510,7 +6526,7 @@ export async function partialCheckoutBooking({
               )
               .map((d) => d.assetId)
           ),
-        ];
+        ].sort();
 
         // Row-lock every qty asset BEFORE reading committed remaining, preserving
         // the lock-before-read ordering the per-disposition loop relied on: a
