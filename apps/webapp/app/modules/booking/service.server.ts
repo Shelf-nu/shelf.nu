@@ -4517,6 +4517,15 @@ export type CheckoutDispositionInput = {
   /** Units to claim from this asset's BookingAsset slice on this booking.
    *  Required for QUANTITY_TRACKED; clamped to [1, remaining-to-check-out]. */
   quantity: number;
+  /**
+   * INTERNAL ONLY — never set by an API caller. The legacy `assetIds[]`
+   * fallback tags a QUANTITY_TRACKED asset scanned with no explicit count so
+   * the in-tx loop resolves it to "all remaining units" (the per-asset cap
+   * under the row lock) instead of the sentinel `quantity: 1`. Mirrors the
+   * "Check Out All" default so a bare mobile scan takes the whole line, not one
+   * unit. Explicit per-unit `quantity` payloads are honored verbatim.
+   */
+  defaultAllRemaining?: boolean;
 };
 
 /**
@@ -4728,6 +4737,14 @@ export async function partialCheckinBooking({
      */
     const seenDispositionKeys = new Set<string>();
     const assetIdsWithDisposition = new Set<string>();
+    /**
+     * Bare (assetIds-only) scans of QUANTITY_TRACKED assets. These carry no
+     * disposition and mean "check in all remaining units" for that asset —
+     * resolved in the tx loop below (mirrors checkinBooking's big-button
+     * default). Tracked so the zero-disposition guard exempts them: only an
+     * EXPLICIT drawer disposition must carry a non-zero amount.
+     */
+    const bareCheckinAssetIds = new Set<string>();
     for (const d of checkins ?? []) {
       const key = `${d.assetId}::${d.bookingAssetId ?? "null"}`;
       if (seenDispositionKeys.has(key)) continue;
@@ -4747,6 +4764,7 @@ export async function partialCheckinBooking({
       if (!assetIdsWithDisposition.has(assetId)) {
         assetIdsWithDisposition.add(assetId);
         dispositions.push({ assetId });
+        bareCheckinAssetIds.add(assetId);
       }
     }
 
@@ -4848,7 +4866,14 @@ export async function partialCheckinBooking({
     // defend server-side too.
     for (const d of dispositions) {
       const isQty = assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED;
-      if (isQty && sumDisposition(d) === 0) {
+      // Bare scans (assetIds-only) auto-default to "all remaining" in the tx
+      // loop below, so exempt them here — only an EXPLICIT drawer disposition
+      // must carry a non-zero amount.
+      if (
+        isQty &&
+        sumDisposition(d) === 0 &&
+        !bareCheckinAssetIds.has(d.assetId)
+      ) {
         throw new ShelfError({
           cause: null,
           status: 400,
@@ -5045,7 +5070,6 @@ export async function partialCheckinBooking({
           id,
           disp.assetId
         );
-        const claimed = sumDisposition(disp);
 
         /**
          * Per-slice cap (Polish-7b): when the drawer targets a specific
@@ -5065,6 +5089,37 @@ export async function partialCheckinBooking({
           );
           cap = Math.min(cap, sliceRemaining);
         }
+
+        // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
+        // default to "all remaining" — return all for a returnable (TWO_WAY)
+        // asset, consume all for a consumable (ONE_WAY) one. Mirrors
+        // checkinBooking's big-button default. Only bare ids reach here with a
+        // zero disposition (the guard above rejects an explicit zero), so this
+        // never overrides an operator's explicit returned/consumed split.
+        if (
+          bareCheckinAssetIds.has(disp.assetId) &&
+          sumDisposition(disp) === 0
+        ) {
+          // Re-scan of an asset with no units left to check in (`cap === 0`):
+          // reject instead of writing a no-op PartialBookingCheckin + event.
+          // Matches the `claimed > cap` rejection an explicit re-scan gets.
+          if (cap <= 0) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot check in "${lockedAsset.title}" — no units remain to check in on this booking.`,
+              shouldBeCaptured: false,
+            });
+          }
+          if (lockedAsset.consumptionType === "ONE_WAY") {
+            disp.consumed = cap;
+          } else {
+            disp.returned = cap;
+          }
+        }
+
+        const claimed = sumDisposition(disp);
 
         if (claimed > cap) {
           throw new ShelfError({
@@ -5680,8 +5735,14 @@ export async function partialCheckoutBooking({
     for (const assetId of assetIds) {
       if (!assetIdsWithDisposition.has(assetId)) {
         assetIdsWithDisposition.add(assetId);
-        // Legacy / INDIVIDUAL fallback: implicit quantity = 1, no slice tag.
-        dispositions.push({ assetId, quantity: 1 });
+        // Legacy / INDIVIDUAL fallback: no slice tag. INDIVIDUAL keeps the
+        // implicit quantity = 1; a QUANTITY_TRACKED asset scanned with no
+        // explicit count is tagged `defaultAllRemaining` so the in-tx loop
+        // resolves it to "all remaining units". The sentinel 1 is still used by
+        // the delegate gate below (where `1 < remaining` keeps a >1-unit QT
+        // asset on this partial path — so it never delegates with a wrong
+        // count). Harmless for INDIVIDUAL: the flag is only read on the QT path.
+        dispositions.push({ assetId, quantity: 1, defaultAllRemaining: true });
       }
     }
 
@@ -6277,6 +6338,21 @@ export async function partialCheckoutBooking({
           cap = Math.min(cap, sliceCap);
         }
 
+        // Bare QUANTITY_TRACKED scan (assetIds-only, no explicit count):
+        // resolve to "all remaining" for this asset — the per-asset `cap`
+        // computed under the row lock above. Mutating the disposition so the
+        // `PartialBookingCheckout.quantities[]` ledger write below records the
+        // real units, not the sentinel 1. Mirrors the "Check Out All" default;
+        // explicit per-unit `quantity` payloads are left untouched.
+        //
+        // Only resolve when units remain. On a re-scan of an already
+        // fully-checked-out asset `cap === 0`; we KEEP the sentinel
+        // `quantity: 1` so the `claimed > cap` guard below throws
+        // "Only 0 units left…" — the same rejection an explicit re-scan gets —
+        // instead of persisting a bogus `quantities: [0]` row + audit events.
+        if (disp.defaultAllRemaining && cap > 0) {
+          disp.quantity = cap;
+        }
         const claimed = disp.quantity;
         if (claimed > cap) {
           // Render `cap` with the asset's unit of measure so qty-tracked rows
