@@ -1620,7 +1620,14 @@ model PartialBookingCheckout {
   // unit count submitted for the matching `bookingAssetId`. Empty default
   // keeps legacy rows (written before Wave B) readable without a backfill.
   quantities    Int[]    @default([])
-  checkoutCount Int // Number of assets checked out (for quick reference)
+  // BookingAsset (slice) IDs per entry in `assetIds` (positional alignment
+  // with `assetIds`/`quantities`). Disambiguates a QUANTITY_TRACKED asset that
+  // is booked as multiple slices (e.g. standalone + kit member). An empty
+  // string `""` element means "no specific slice known → greedy attribution";
+  // Prisma `String[]` cannot hold `null`, so `""` is the sentinel. Empty
+  // default keeps legacy rows readable without a backfill.
+  bookingAssetIds String[] @default([])
+  checkoutCount   Int // Number of assets checked out (for quick reference)
 
   // Metadata
   checkoutTimestamp DateTime @default(now()) @db.Timestamptz(3)

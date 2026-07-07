@@ -53,6 +53,7 @@ import {
   computeBookingAssetRemaining,
   computeBookingAssetSliceRemaining,
   attributeDispositionsByBookingAsset,
+  attributeCategorizedDispositionsByBookingAsset,
   isBookingFullyCheckedIn,
   // Test helper functions
   getActionTextFromTransition,
@@ -5682,11 +5683,11 @@ describe("computeBookingAssetSliceRemaining", () => {
 });
 
 describe("attributeDispositionsByBookingAsset (legacy NULL + tagged mix)", () => {
-  it("attributes tagged logs exactly and greedy-fills NULL logs (kit-driven first)", () => {
+  it("attributes tagged logs exactly and greedy-fills NULL logs (standalone first)", () => {
     // Two slices of the same asset: a kit-driven slice (50) and a
     // standalone slice (33). One NEW log is tagged to the standalone
     // slice (20); one LEGACY log has no bookingAssetId (40) and must be
-    // greedy-filled — kit-driven slice first.
+    // greedy-filled — standalone slice first.
     const result = attributeDispositionsByBookingAsset({
       bookingAssetRows: [
         { id: "ba-standalone", quantity: 33, assetKitId: null },
@@ -5698,10 +5699,50 @@ describe("attributeDispositionsByBookingAsset (legacy NULL + tagged mix)", () =>
       ],
     });
 
-    // Kit-driven slice fills the 40-unit legacy pool first (capacity 50).
-    expect(result.get("ba-kit")).toBe(40);
-    // Standalone slice keeps only its exactly-tagged 20.
-    expect(result.get("ba-standalone")).toBe(20);
+    // Standalone slice takes its exactly-tagged 20 first, then the greedy
+    // pass fills its remaining capacity (33 − 20 = 13) before touching the
+    // kit → 20 + 13 = 33.
+    expect(result.get("ba-standalone")).toBe(33);
+    // Kit-driven slice absorbs the remaining legacy pool (40 − 13 = 27).
+    expect(result.get("ba-kit")).toBe(27);
+  });
+});
+
+describe("attributeCategorizedDispositionsByBookingAsset (legacy NULL + tagged mix)", () => {
+  it("attributes tagged logs exactly and greedy-fills NULL logs standalone-first", () => {
+    // Two slices of the same asset: a kit-driven slice (50) and a
+    // standalone slice (33). One NEW log is tagged to the standalone slice
+    // (RETURN 20); one LEGACY log has no bookingAssetId (RETURN 40) and must
+    // be greedy-filled standalone-first — consistent with the check-out
+    // fallback in `attributeDispositionsByBookingAsset` so both surfaces
+    // credit the same slice for identical untagged data.
+    const result = attributeCategorizedDispositionsByBookingAsset({
+      bookingAssetRows: [
+        { id: "ba-standalone", quantity: 33, assetKitId: null },
+        { id: "ba-kit", quantity: 50, assetKitId: "ak-1" },
+      ],
+      consumptionLogs: [
+        { bookingAssetId: "ba-standalone", category: "RETURN", quantity: 20 },
+        { bookingAssetId: null, category: "RETURN", quantity: 40 },
+      ],
+    });
+
+    // Standalone slice takes its exactly-tagged 20 first, then the greedy
+    // pass fills its remaining capacity (33 − 20 = 13) before touching the
+    // kit → 20 + 13 = 33 returned.
+    expect(result.get("ba-standalone")).toEqual({
+      returned: 33,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
+    // Kit-driven slice absorbs the remaining legacy pool (40 − 13 = 27).
+    expect(result.get("ba-kit")).toEqual({
+      returned: 27,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
   });
 });
 

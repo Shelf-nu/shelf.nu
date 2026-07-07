@@ -266,14 +266,32 @@ export function isAssetCheckableOut(
  * - a direct asset (`title`, no `_count`).
  *
  * Asset entries are merged with their booking-scoped record from
- * `bookingAssets` so `status`/`kitId` are authoritative (the atom entry can be
- * stale). Kit entries are returned flattened (`name`/`_count`) for rendering.
- * This logic was previously duplicated verbatim in both dialogs; extracting it
- * removes the drift that caused the bulk check-in bug.
+ * `bookingAssets` so genuine gaps in the selection are filled. Kit entries are
+ * returned flattened (`name`/`_count`) for rendering. This logic was previously
+ * duplicated verbatim in both dialogs; extracting it removes the drift that
+ * caused the bulk check-in bug.
+ *
+ * ### Per-slice enrichment (multi-slice QT support)
+ *
+ * A single `asset.id` can span MULTIPLE `BookingAsset` slices — e.g. a
+ * QUANTITY_TRACKED asset booked both standalone (`kitId: null`) and inside a
+ * kit (`kitId` set) is two distinct rows sharing one `asset.id`. To keep the
+ * two slices distinct we key the enrichment map by `bookingAssetId` (falling
+ * back to `id` for legacy entries that lack one), and look each selected item
+ * up by `item.bookingAssetId ?? item.id`.
+ *
+ * The merge lets the SELECTED item WIN (`{ ...bookingAsset, ...item }`): the
+ * selection atom holds the full enriched loader row, so its
+ * `bookingAssetId`/`kitId`/`kit` are authoritative — the booking record only
+ * fills genuine gaps. Merging the other way round would let a different slice's
+ * `kitId` clobber the selected standalone slice's `kitId: null`, so the row
+ * would render in neither the kit nor the individual bucket (the multi-slice
+ * checkout bug this fix addresses).
  *
  * @param selectedItems - Raw entries from `selectedBulkItemsAtom`.
- * @param bookingAssets - The booking's assets (`booking.assets`), used to
- *   enrich asset entries by id.
+ * @param bookingAssets - The booking's assets (one entry per `BookingAsset`
+ *   slice, each ideally carrying `bookingAssetId`), used to enrich asset
+ *   entries by slice.
  * @returns The flattened, enriched list (assets + kit entries), UNFILTERED —
  *   callers apply their own eligibility filter.
  */
@@ -281,16 +299,23 @@ export function flattenSelectedBookingItems(
   selectedItems: SelectedBookingItem[],
   bookingAssets: AssetWithStatus[]
 ): SelectedBookingItem[] {
+  // Key by `bookingAssetId` so two slices of the same `asset.id` stay
+  // distinct; fall back to `id` for legacy entries without a slice id.
   const bookingAssetsMap = new Map(
-    bookingAssets.map((asset) => [asset.id, asset])
+    bookingAssets.map((asset) => [asset.bookingAssetId ?? asset.id, asset])
   );
 
-  return selectedItems.flatMap((item: any) => {
-    // Pagination wrapper objects (type "asset" with an assets array).
-    if (item.type === "asset" && item.assets) {
-      return item.assets.map((asset: any) => {
-        const bookingAsset = bookingAssetsMap.get(asset.id);
-        return bookingAsset ? { ...asset, ...bookingAsset } : asset;
+  return selectedItems.flatMap((item) => {
+    // Pagination wrapper objects (type "asset" with an assets array). Guard
+    // that `assets` really is an array before mapping — a malformed entry must
+    // not be treated as a list.
+    if (item.type === "asset" && Array.isArray(item.assets)) {
+      return (item.assets as SelectedBookingItem[]).map((asset) => {
+        const bookingAsset = bookingAssetsMap.get(
+          asset.bookingAssetId ?? asset.id
+        );
+        // Selected item wins so its per-slice bookingAssetId/kitId survive.
+        return bookingAsset ? { ...bookingAsset, ...asset } : asset;
       });
     }
 
@@ -310,8 +335,9 @@ export function flattenSelectedBookingItems(
 
     // Direct asset object (has title, not name) — enrich from booking record.
     if (item.title) {
-      const bookingAsset = bookingAssetsMap.get(item.id);
-      return bookingAsset ? { ...item, ...bookingAsset } : item;
+      const bookingAsset = bookingAssetsMap.get(item.bookingAssetId ?? item.id);
+      // Selected item wins so its per-slice bookingAssetId/kitId survive.
+      return bookingAsset ? { ...bookingAsset, ...item } : item;
     }
 
     // Fallback for any other structure.
