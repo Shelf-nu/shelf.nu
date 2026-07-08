@@ -166,6 +166,10 @@ export default {
             text: "Microsoft Entra",
             link: "/sso/providers/microsoft-entra",
           },
+          {
+            text: "Shibboleth",
+            link: "/sso/providers/shibboleth",
+          },
         ],
       },
       {
