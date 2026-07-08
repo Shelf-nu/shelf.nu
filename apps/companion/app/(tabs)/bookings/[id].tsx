@@ -1685,6 +1685,10 @@ export default function BookingDetailScreen() {
           time, defaulting to "all remaining" so one tap takes the whole line. */}
       {checkoutQueue && (
         <QuantityInputSheet
+          // Remount per asset so the sheet's reset effect (keyed on
+          // max/defaultValue) can't reuse the previous asset's typed value when
+          // two consecutive queued assets share the same remaining quantity.
+          key={checkoutQueue.queue[checkoutQueue.index].id}
           visible
           title="Check out"
           subtitle={`How many of ${
@@ -1728,6 +1732,10 @@ export default function BookingDetailScreen() {
           time, asking returned / consumed / lost / damaged per asset. */}
       {checkinQueue && (
         <CheckinDispositionSheet
+          // Remount per asset so the sheet's reset effect (keyed on
+          // remaining/consumptionType) can't carry the previous asset's typed
+          // disposition into the next queued asset that shares the same values.
+          key={checkinQueue.queue[checkinQueue.index].id}
           visible
           assetTitle={checkinQueue.queue[checkinQueue.index].title}
           // Cap the picker to booked units still to reconcile
