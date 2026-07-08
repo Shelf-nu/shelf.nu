@@ -65,9 +65,14 @@ export default function CalendarSubscribeDialog({
 
   async function copyUrl() {
     if (!url) return;
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // The Clipboard API can reject (non-secure context / denied permission).
+      // The URL input is selectable as a manual fallback, so fail quietly.
+    }
   }
 
   return (

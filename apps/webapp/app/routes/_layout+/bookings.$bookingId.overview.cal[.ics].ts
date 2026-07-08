@@ -57,8 +57,9 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       "Unassigned";
 
     // Reuse the shared iCal builder so this single-booking download and the
-    // subscribable workspace feed emit byte-identical events. Assets are
-    // reached through the `bookingAssets` pivot (`ba.asset.title`).
+    // subscribable workspace feed share one VEVENT format (DTSTAMP now derives
+    // from booking.updatedAt, not fetch time). Assets are reached through the
+    // `bookingAssets` pivot (`ba.asset.title`).
     const ics = buildBookingICalendar([
       buildBookingVEvent({
         id: booking.id,

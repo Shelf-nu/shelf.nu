@@ -2,6 +2,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
+import { canUseBookings } from "~/utils/subscription.server";
 import {
   buildCalendarFeedUrl,
   getCalendarFeedContext,
@@ -20,6 +21,13 @@ vi.mock("~/database/db.server", () => ({
       update: vi.fn(),
     },
   },
+}));
+
+// why: drive the workspace-entitlement gate deterministically, independent of
+// env-derived premium flags (premiumIsEnabled). Defaults to entitled; tests
+// that assert the gate override the return value explicitly.
+vi.mock("~/utils/subscription.server", () => ({
+  canUseBookings: vi.fn(() => true),
 }));
 
 const USER_ID = "user-1";
@@ -173,6 +181,35 @@ describe("calendar feed tokens", () => {
   it("resolves an unknown/revoked token to null", async () => {
     vi.mocked(db.userOrganization.findUnique).mockResolvedValue(null);
     expect(await getCalendarFeedContext("nope")).toBeNull();
+  });
+
+  it("resolves to null when the workspace is no longer entitled to bookings", async () => {
+    vi.mocked(db.userOrganization.findUnique).mockResolvedValue({
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      roles: [OrganizationRoles.OWNER],
+      organization: { name: "W", type: "PERSONAL" },
+    } as never);
+    // Security property: a token minted while entitled must stop working once
+    // the workspace loses Bookings access (the public feed is cookie-bypassed).
+    vi.mocked(canUseBookings).mockReturnValue(false);
+
+    expect(await getCalendarFeedContext("valid-token")).toBeNull();
+  });
+
+  it("returns the member context when the workspace can use bookings", async () => {
+    const membership = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      roles: [OrganizationRoles.OWNER],
+      organization: { name: "W", type: "TEAM" },
+    };
+    vi.mocked(db.userOrganization.findUnique).mockResolvedValue(
+      membership as never
+    );
+    vi.mocked(canUseBookings).mockReturnValue(true);
+
+    expect(await getCalendarFeedContext("valid-token")).toEqual(membership);
   });
 });
 

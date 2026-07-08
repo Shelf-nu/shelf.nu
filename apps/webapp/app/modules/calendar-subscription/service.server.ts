@@ -17,6 +17,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import { canUseBookings } from "~/utils/subscription.server";
 
 /** Bytes of entropy for a feed token (192 bits → 32-char base64url string). */
 const CALENDAR_TOKEN_BYTES = 24;
@@ -113,11 +114,12 @@ export async function getMemberCalendarFeedUrl({
 
 /**
  * Resolves a secret feed token to its member + the org visibility settings
- * needed to scope bookings. Returns `null` for an unknown/revoked token (the
- * route renders a clean 404).
+ * needed to scope bookings. Returns `null` for an unknown/revoked token, or for
+ * a workspace no longer entitled to Bookings — the route renders a clean 404 in
+ * every case.
  */
 export async function getCalendarFeedContext(token: string) {
-  return db.userOrganization.findUnique({
+  const membership = await db.userOrganization.findUnique({
     where: { calendarTokenId: token },
     select: {
       userId: true,
@@ -126,6 +128,7 @@ export async function getCalendarFeedContext(token: string) {
       organization: {
         select: {
           name: true,
+          type: true,
           selfServiceCanSeeBookings: true,
           baseUserCanSeeBookings: true,
           selfServiceCanSeeCustody: true,
@@ -134,6 +137,17 @@ export async function getCalendarFeedContext(token: string) {
       },
     },
   });
+
+  // Entitlement gate: bookings (and their feed) are a Team-workspace feature.
+  // A workspace that generated a token while eligible and later became
+  // ineligible (e.g. downgraded from Team) must stop serving the feed. The
+  // public feed route is cookie-bypassed, so this is the only place the check
+  // can live — the route treats null identically to an unknown/revoked token.
+  if (!membership || !canUseBookings(membership.organization)) {
+    return null;
+  }
+
+  return membership;
 }
 
 /** Resolved feed context for a valid token (non-null result of the lookup). */
