@@ -21,6 +21,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { assertCanUseBookings } from "~/utils/subscription.server";
 
 /**
  * Generates, regenerates or revokes the current member's calendar-feed token,
@@ -38,12 +39,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   try {
     // Booking read access gates the calendar — and therefore its feed.
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
+
+    // Bookings (and their calendar feed) are a Team-workspace feature.
+    // requirePermission only gates by role, so without this a direct POST could
+    // still mint or revoke a feed token on a non-Team workspace. Assert the
+    // workspace type here too, matching the sibling booking routes (e.g.
+    // bookings.export.$fileName[.csv].tsx).
+    assertCanUseBookings(currentOrganization);
 
     const intent = String((await request.formData()).get("intent") ?? "");
     if (

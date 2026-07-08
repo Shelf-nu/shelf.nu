@@ -39,7 +39,12 @@ export default function CalendarSubscribeDialog({
 }: CalendarSubscribeDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const fetcher = useFetcher<{ calendarFeedUrl: string | null }>();
+  // Two-step confirm for "Stop sharing" so an accidental click can't silently
+  // break an already-subscribed external calendar.
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const fetcher = useFetcher<
+    { calendarFeedUrl: string | null } | { error: { message: string } }
+  >();
   const disabled = useDisabled(fetcher);
 
   // A completed fetcher (generate/regenerate/revoke) overrides the loader value.
@@ -49,6 +54,14 @@ export default function CalendarSubscribeDialog({
       ? fetcher.data.calendarFeedUrl
       : calendarFeedUrl;
   const webcalUrl = url ? url.replace(/^https?:\/\//, "webcal://") : null;
+
+  // Server-side failures return an error payload; surface it inline so the
+  // dialog never looks like a no-op when a mutation fails (client-side fallback
+  // to the toast that the action already fires).
+  const fetcherError =
+    fetcher.data && "error" in fetcher.data
+      ? fetcher.data.error?.message
+      : null;
 
   async function copyUrl() {
     if (!url) return;
@@ -65,7 +78,10 @@ export default function CalendarSubscribeDialog({
         <Dialog
           className="overflow-auto py-0 md:max-h-[85vh] lg:w-[600px]"
           open={isOpen}
-          onClose={() => setIsOpen(false)}
+          onClose={() => {
+            setIsOpen(false);
+            setConfirmingRevoke(false);
+          }}
           title={
             <div className="mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
               <LinkIcon />
@@ -130,15 +146,41 @@ export default function CalendarSubscribeDialog({
                       {disabled ? "Working…" : "Regenerate"}
                     </Button>
                   </fetcher.Form>
-                  <fetcher.Form
-                    method="post"
-                    action="/api/calendar-subscription"
-                  >
-                    <input type="hidden" name="intent" value="revoke" />
-                    <Button type="submit" variant="danger" disabled={disabled}>
+                  {confirmingRevoke ? (
+                    <fetcher.Form
+                      method="post"
+                      action="/api/calendar-subscription"
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <input type="hidden" name="intent" value="revoke" />
+                      <span className="text-sm text-gray-600">
+                        Stop updating this link?
+                      </span>
+                      <Button
+                        type="submit"
+                        variant="danger"
+                        disabled={disabled}
+                      >
+                        {disabled ? "Stopping…" : "Yes, stop"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setConfirmingRevoke(false)}
+                        disabled={disabled}
+                      >
+                        Cancel
+                      </Button>
+                    </fetcher.Form>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => setConfirmingRevoke(true)}
+                    >
                       Stop sharing
                     </Button>
-                  </fetcher.Form>
+                  )}
                 </div>
 
                 <p className="text-xs text-gray-500">
@@ -156,6 +198,12 @@ export default function CalendarSubscribeDialog({
                 </Button>
               </fetcher.Form>
             )}
+
+            {fetcherError ? (
+              <p role="alert" className="mt-3 text-sm text-error-500">
+                {fetcherError}
+              </p>
+            ) : null}
           </div>
         </Dialog>
       </DialogPortal>
