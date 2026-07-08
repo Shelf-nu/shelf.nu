@@ -820,6 +820,19 @@ describe("assetQueryFragment", () => {
       expect(sql).toContain("'quantity', cu.quantity");
     });
 
+    it("orders the custody aggregation deterministically for a stable primary", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // The custody sort key (`custody->0->>'name'`) and the rendered badge
+      // (formatCustodyList picks custody[0]) both rely on element 0 being
+      // the primary custodian. jsonb_agg has an undefined input order without
+      // an explicit ORDER BY, so a multi-custodian (qty-tracked) asset's
+      // primary — and thus its sort key — could otherwise vary by plan and
+      // disagree with the badge. Oldest-first (createdAt, id) matches the
+      // kit/location primary-pick convention.
+      expect(sql).toContain('ORDER BY cu."createdAt" ASC, cu.id ASC');
+    });
+
     it("falls back to '[]'::jsonb when an asset has no custody rows", () => {
       const sql = getJoinsSqlString(assetQueryJoins);
 
@@ -1142,5 +1155,20 @@ describe("buildAdvancedAssetsQuery", () => {
     const sql = getQuerySqlString(build());
     expect(sql).toContain('a.value AS "assetValue"');
     expect(sql).not.toContain("a.valuation");
+  });
+
+  it("sorts custody by the first array element with a deterministic primary", () => {
+    // `custody` is a jsonb array; the sort key must index element 0
+    // (`custody->0->>'name'`), and the cheap-phase custody aggregation must
+    // order its jsonb_agg so element 0 is stable and matches the badge.
+    const sql = getQuerySqlString(build({ sortBy: ["custody:asc"] }));
+
+    // Array-indexed sort key (never the object-shaped no-op `custody->>'name'`).
+    expect(sql).toContain("custody->0->>'name'");
+    expect(sql).not.toContain("custody->>'name'");
+    // Cheap-phase custody aggregation is injected for the sort and carries the
+    // deterministic ordering (mirrors the heavy phase).
+    expect(sql).toContain(") custody_agg ON TRUE");
+    expect(sql).toContain('ORDER BY cu."createdAt" ASC, cu.id ASC');
   });
 });

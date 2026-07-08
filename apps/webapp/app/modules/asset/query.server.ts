@@ -1651,8 +1651,12 @@ export function parseSortingOptions(sortBy: string[]): {
       // multi-custodian refactor — see CUSTODY_SORT_CASE. `custody->>'name'`
       // (object-key access) returns NULL on an array, which made this sort a
       // silent no-op (asc == desc, only the id tiebreaker ordered the rows).
-      // Index the first custodian: `custody->0->>'name'`. NULL custody (no
-      // custodian) stays NULL and sorts consistently.
+      // Index the first custodian: `custody->0->>'name'`. Element 0 is the
+      // primary custodian shown in the badge (formatCustodyList picks
+      // custody[0]); the custody aggregations order their jsonb_agg by
+      // (createdAt, id) so element 0 is deterministic and the sort key agrees
+      // with the rendered badge. NULL custody (no custodian) stays NULL and
+      // sorts consistently.
       orderByParts.push(
         getNormalizedSortExpression(`custody->0->>'name'`, field.direction)
       );
@@ -2244,6 +2248,16 @@ export const assetQueryJoins = Prisma.sql`
     -- array. Replaces the previous direct LEFT JOINs on Custody +
     -- TeamMember + User which caused per-custody-row duplication for
     -- qty-tracked assets with multiple custodians (Issue A).
+    --
+    -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic:
+    -- element 0 is the "primary" custodian both for display
+    -- (formatCustodyList picks custody[0]) and for sorting (the custody
+    -- ORDER BY key indexes custody->0->>'name'). jsonb_agg without an
+    -- explicit ORDER BY has an undefined input order, so the primary
+    -- could differ between rows/plans and the sort key could disagree
+    -- with the rendered badge. Order by oldest custody first
+    -- (createdAt, id) — the same primary-pick convention the kit /
+    -- location LATERALs use. Must stay identical to CHEAP_CUSTODY_JOINS.
     SELECT COALESCE(
       jsonb_agg(
         jsonb_build_object(
@@ -2264,6 +2278,7 @@ export const assetQueryJoins = Prisma.sql`
             END
           )
         )
+        ORDER BY cu."createdAt" ASC, cu.id ASC
       ),
       '[]'::jsonb
     ) AS custody
@@ -2490,7 +2505,10 @@ const CHEAP_LOCATION_JOIN = Prisma.sql`
  * Injected only when a custody FILTER or a custody SORT is active — the custody
  * WHERE predicates reference `jsonb_array_length(custody_agg.custody)` and the
  * custody sort key references the full CASE (which needs `b`/`bu`/`btm`).
- * Verbatim mirror of the custody joins in {@link assetQueryJoins}.
+ * Verbatim mirror of the custody joins in {@link assetQueryJoins} — including
+ * the `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` that makes
+ * element 0 (the primary custodian used by the sort key `custody->0->>'name'`)
+ * deterministic and consistent with the heavy phase's rendered badge.
  */
 const CHEAP_CUSTODY_JOINS = Prisma.sql`
     LEFT JOIN LATERAL (
@@ -2514,6 +2532,7 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
               END
             )
           )
+          ORDER BY cu."createdAt" ASC, cu.id ASC
         ),
         '[]'::jsonb
       ) AS custody
