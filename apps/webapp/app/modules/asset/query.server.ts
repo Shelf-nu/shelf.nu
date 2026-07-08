@@ -1647,8 +1647,14 @@ export function parseSortingOptions(sortBy: string[]): {
         getNormalizedSortExpression(`"locationName"`, field.direction)
       );
     } else if (field.name === "custody") {
+      // `custody` is a jsonb ARRAY (`Custody[]`) since the quantity-tracked
+      // multi-custodian refactor — see CUSTODY_SORT_CASE. `custody->>'name'`
+      // (object-key access) returns NULL on an array, which made this sort a
+      // silent no-op (asc == desc, only the id tiebreaker ordered the rows).
+      // Index the first custodian: `custody->0->>'name'`. NULL custody (no
+      // custodian) stays NULL and sorts consistently.
       orderByParts.push(
-        getNormalizedSortExpression(`custody->>'name'`, field.direction)
+        getNormalizedSortExpression(`custody->0->>'name'`, field.direction)
       );
     } else if (field.name.startsWith("barcode_")) {
       // The suffix is interpolated into a SQL identifier (`barcode_<suffix>`),
@@ -2409,7 +2415,7 @@ const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
  * custody for CHECKED_OUT assets otherwise; NULL). Verbatim copy of the heavy
  * projection's custody CASE, including the NRM-name guard (CONCAT vs btm.name,
  * never COALESCE(CONCAT(...))). Emitted `AS custody` in the cheap phase only
- * when a custody sort is active — the `custody->>'name'` sort term needs it.
+ * when a custody sort is active — the `custody->0->>'name'` sort term needs it.
  */
 const CUSTODY_SORT_CASE = Prisma.sql`CASE
         WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody

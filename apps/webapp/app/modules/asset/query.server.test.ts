@@ -235,7 +235,15 @@ describe("parseSortingOptions", () => {
 
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
-      expect(orderByClause).toContain("custody->>'name'");
+      // Regression (custody-sort no-op): the `custody` column is a jsonb
+      // ARRAY (`Custody[]`) since the quantity-tracked multi-custodian
+      // refactor, not a single object. `custody->>'name'` on an array
+      // returns NULL for every row (asc == desc, only the id tiebreaker
+      // orders), so we must index the first element: `custody->0->>'name'`.
+      expect(orderByClause).toContain("custody->0->>'name'");
+      // Guard against a regression back to the object-shaped key that
+      // silently no-ops on the array.
+      expect(orderByClause).not.toContain("custody->>'name'");
       expect(orderByClause).toContain("desc");
     });
 
