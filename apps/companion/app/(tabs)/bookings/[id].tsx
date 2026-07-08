@@ -22,7 +22,13 @@ import {
 } from "@/lib/booking-refresh";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type BookingDetail, type BookingAsset } from "@/lib/api";
+import {
+  api,
+  type BookingDetail,
+  type BookingAsset,
+  type CheckoutDisposition,
+  type CheckinDisposition,
+} from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
   fontSize,
@@ -34,10 +40,69 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { BookingDetailSkeleton } from "@/components/skeleton-loader";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { QuantityBadge } from "@/components/quantity-badge";
+import {
+  CheckinDispositionSheet,
+  type CheckinDispositionValue,
+} from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 
 const bookingAssetKeyExtractor = (item: BookingAsset) => item.id;
+
+/**
+ * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
+ * GLOBAL status ("Available") is meaningless on a booking — what matters is how
+ * many of the booked units are reserved / checked out / returned. Derived from
+ * the server's per-asset remaining counts. `key` indexes the shared
+ * `bookingStatusBadge` colours so the row reuses the booking colour vocabulary
+ * (blue reserved, orange in-progress, green complete).
+ *
+ * @param args - booked units, remaining-to-check-out/in, and the parent
+ *   booking's status (to tell a DRAFT line apart from a reserved one).
+ * @returns The badge `{ key, label }` for this asset on this booking.
+ */
+function getBookingAssetState({
+  booked,
+  remOut,
+  remIn,
+  bookingStatus,
+}: {
+  booked: number;
+  remOut?: number;
+  remIn?: number;
+  bookingStatus: string;
+}): { key: string; label: string } {
+  const clampedOut = Math.min(Math.max(remOut ?? booked, 0), booked);
+  const clampedIn = Math.min(Math.max(remIn ?? booked, 0), booked);
+  const checkedOut = booked - clampedOut; // units taken from the workspace
+  const checkedIn = booked - clampedIn; // units reconciled back in
+
+  if (booked <= 0 || checkedOut <= 0) {
+    return bookingStatus === "DRAFT"
+      ? { key: "DRAFT", label: "Draft" }
+      : { key: "RESERVED", label: "Reserved" };
+  }
+  if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
+  if (checkedIn > 0)
+    return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
+  if (checkedOut >= booked) return { key: "ONGOING", label: "Checked out" };
+  return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
+}
+
+/**
+ * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
+ * the web `BookingLifecycleProgress` component so the bar reads identically on
+ * both platforms: booked = grey, partial = amber, fully out = violet,
+ * returned = green.
+ */
+const LIFECYCLE_COLORS = {
+  booked: "#D1D5DB",
+  partial: "#F59E0B",
+  out: "#7C3AED",
+  returned: "#22C55E",
+} as const;
 
 export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,6 +148,25 @@ export default function BookingDetailScreen() {
     "checkin" | "checkout" | "remove" | null
   >(null);
   const isSelectMode = selectMode !== null;
+
+  // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
+  // user selects the rows, then we walk each QT asset asking "how many units?"
+  // (defaulting to all remaining), collect the dispositions, then submit.
+  const [checkoutQueue, setCheckoutQueue] = useState<{
+    queue: BookingAsset[];
+    index: number;
+    collected: CheckoutDisposition[];
+    individualIds: string[];
+  } | null>(null);
+
+  // Sequential disposition picker for checking IN quantity-tracked assets:
+  // walk each QT asset asking returned/consumed/lost/damaged, then submit.
+  const [checkinQueue, setCheckinQueue] = useState<{
+    queue: BookingAsset[];
+    index: number;
+    collected: CheckinDisposition[];
+    individualIds: string[];
+  } | null>(null);
 
   const lastFetchedAt = useRef(0);
 
@@ -173,7 +257,7 @@ export default function BookingDetailScreen() {
     if (!booking || !currentOrg) return;
     Alert.alert(
       "Check In All",
-      `Check in all assets for "${booking.name}"?\n\nAll ${booking.checkedOutCount} checked-out assets will be returned.`,
+      `Check in all assets for "${booking.name}"?\n\nAll remaining units will be returned and the booking completed.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -210,98 +294,158 @@ export default function BookingDetailScreen() {
     );
   };
 
+  // Send the check-in. `assetIds` = INDIVIDUAL rows (a bare QT id would default
+  // to all-remaining server-side); `checkins` = per-QT-asset dispositions.
+  const submitCheckin = async (
+    assetIds: string[],
+    checkins: CheckinDisposition[]
+  ) => {
+    if (!booking || !currentOrg) return;
+    setIsActioning(true);
+    const { data, error: err } = await api.partialCheckinBooking(
+      currentOrg.id,
+      booking.id,
+      assetIds,
+      getTimeZone(),
+      checkins.length > 0 ? checkins : undefined
+    );
+    setIsActioning(false);
+    if (err) {
+      Alert.alert("Error", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking — force the list to refetch.
+    markBookingsListDirty();
+    const msg = data?.isComplete
+      ? `All assets checked in. "${booking.name}" is now complete.`
+      : `${data?.checkedInCount ?? "Some"} checked in, ${
+          data?.remainingCount ?? "some"
+        } remaining.`;
+    Alert.alert("Checked In", msg, [
+      {
+        text: "OK",
+        onPress: () => {
+          setSelectedAssetIds(new Set());
+          setSelectMode(null);
+          fetchBooking();
+        },
+      },
+    ]);
+  };
+
   const handlePartialCheckin = () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
-    const count = selectedAssetIds.size;
-    Alert.alert(
-      "Check In Selected",
-      `Check in ${count} selected ${count === 1 ? "asset" : "assets"}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Check In",
-          onPress: async () => {
-            setIsActioning(true);
-            const { data, error: err } = await api.partialCheckinBooking(
-              currentOrg.id,
-              booking.id,
-              Array.from(selectedAssetIds),
-              getTimeZone()
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            const msg = data?.isComplete
-              ? `All assets checked in. "${booking.name}" is now complete.`
-              : `${data?.checkedInCount ?? count} checked in, ${
-                  data?.remainingCount ?? "some"
-                } remaining.`;
-            Alert.alert("Checked In", msg, [
-              {
-                text: "OK",
-                onPress: () => {
-                  setSelectedAssetIds(new Set());
-                  setSelectMode(null);
-                  fetchBooking();
-                },
-              },
-            ]);
-          },
-        },
-      ]
+    const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
+    // QT assets get a returned/consumed/lost/damaged split; INDIVIDUAL rows
+    // just flip back to available. Checkinable = booked units still to
+    // reconcile (remainingToCheckIn > 0), matching the web check-in drawer.
+    const qtAssets = selected.filter(
+      (a) => a.type === "QUANTITY_TRACKED" && (a.remainingToCheckIn ?? 0) > 0
     );
+    const individualIds = selected
+      .filter((a) => a.type !== "QUANTITY_TRACKED")
+      .map((a) => a.id);
+    if (qtAssets.length === 0) {
+      // No disposition to collect (INDIVIDUAL-only, or the server didn't send
+      // QT metadata) — keep the simple confirm + bare send.
+      const count = selectedAssetIds.size;
+      Alert.alert(
+        "Check In Selected",
+        `Check in ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Check In",
+            onPress: () => void submitCheckin(individualIds, []),
+          },
+        ]
+      );
+      return;
+    }
+    // Walk each QT asset through the disposition picker before submitting.
+    setCheckinQueue({
+      queue: qtAssets,
+      index: 0,
+      collected: [],
+      individualIds,
+    });
+  };
+
+  // Send the check-out. `assetIds` = INDIVIDUAL rows (implicit 1 unit);
+  // `checkouts` = per-QT-asset quantities the picker collected.
+  const submitCheckout = async (
+    assetIds: string[],
+    checkouts: CheckoutDisposition[]
+  ) => {
+    if (!booking || !currentOrg) return;
+    setIsActioning(true);
+    const { data, error: err } = await api.partialCheckoutBooking(
+      currentOrg.id,
+      booking.id,
+      assetIds,
+      getTimeZone(),
+      checkouts.length > 0 ? checkouts : undefined
+    );
+    setIsActioning(false);
+    if (err) {
+      Alert.alert("Error", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking — force the list to refetch.
+    markBookingsListDirty();
+    const msg = data?.isComplete
+      ? `All assets are now checked out for "${booking.name}".`
+      : `${data?.checkedOutCount ?? "Some"} checked out, ${
+          data?.remainingCount ?? "some"
+        } still reserved.`;
+    Alert.alert("Checked Out", msg, [
+      {
+        text: "OK",
+        onPress: () => {
+          setSelectedAssetIds(new Set());
+          setSelectMode(null);
+          fetchBooking();
+        },
+      },
+    ]);
   };
 
   const handlePartialCheckout = () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
-    const count = selectedAssetIds.size;
-    Alert.alert(
-      "Check Out Selected",
-      `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: async () => {
-            setIsActioning(true);
-            const { data, error: err } = await api.partialCheckoutBooking(
-              currentOrg.id,
-              booking.id,
-              Array.from(selectedAssetIds),
-              getTimeZone()
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            const msg = data?.isComplete
-              ? `All assets are now checked out for "${booking.name}".`
-              : `${data?.checkedOutCount ?? count} checked out, ${
-                  data?.remainingCount ?? "some"
-                } still reserved.`;
-            Alert.alert("Checked Out", msg, [
-              {
-                text: "OK",
-                onPress: () => {
-                  setSelectedAssetIds(new Set());
-                  setSelectMode(null);
-                  fetchBooking();
-                },
-              },
-            ]);
-          },
-        },
-      ]
+    const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
+    // QT assets need an explicit quantity; INDIVIDUAL rows are implicit 1 unit.
+    const qtAssets = selected.filter(
+      (a) => a.type === "QUANTITY_TRACKED" && (a.remainingToCheckOut ?? 0) > 0
     );
+    const individualIds = selected
+      .filter((a) => a.type !== "QUANTITY_TRACKED")
+      .map((a) => a.id);
+    if (qtAssets.length === 0) {
+      // No quantity to pick (INDIVIDUAL-only, or the server didn't send QT
+      // metadata) — keep the simple confirm + bare send.
+      const count = selectedAssetIds.size;
+      Alert.alert(
+        "Check Out Selected",
+        `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Check Out",
+            onPress: () => void submitCheckout(individualIds, []),
+          },
+        ]
+      );
+      return;
+    }
+    // Walk each QT asset through the quantity picker before submitting.
+    setCheckoutQueue({
+      queue: qtAssets,
+      index: 0,
+      collected: [],
+      individualIds,
+    });
   };
 
   const handleReserve = () => {
@@ -580,22 +724,50 @@ export default function BookingDetailScreen() {
 
   const renderAsset = useCallback(
     ({ item }: { item: BookingAsset }) => {
-      const badge = statusBadge[item.status] ?? {
+      const fallbackBadge = {
         bg: colors.backgroundTertiary,
         text: colors.muted,
       };
+      // QUANTITY_TRACKED rows get a booking-scoped state (reserved / N out /
+      // returned) instead of the asset's global status, which is meaningless on
+      // a booking. INDIVIDUAL rows keep the existing status badge.
+      const qtState =
+        item.type === "QUANTITY_TRACKED"
+          ? getBookingAssetState({
+              booked: item.quantity ?? 0,
+              remOut: item.remainingToCheckOut,
+              remIn: item.remainingToCheckIn,
+              bookingStatus: booking?.status ?? "",
+            })
+          : null;
+      const badge = qtState
+        ? bookingStatusBadge[qtState.key] ?? fallbackBadge
+        : statusBadge[item.status] ?? fallbackBadge;
+      const stateLabel = qtState ? qtState.label : formatStatus(item.status);
       const isCheckedIn = checkedInAssetIds.includes(item.id);
       const isCheckedOut = item.status === "CHECKED_OUT";
       const isSelected = selectedAssetIds.has(item.id);
-      // What's selectable depends on the mode: returning checked-out assets
-      // (check-in) vs. taking never-checked-out assets (check-out). A returned
-      // asset is back to AVAILABLE, so `!isCheckedOut` alone would re-offer it
-      // for check-out — exclude the already-returned ones with `!isCheckedIn`.
+      // QUANTITY_TRACKED selectability is quantity-based, not status-based: a
+      // partially-checked-out QT asset stays AVAILABLE while units remain, so
+      // the global-status test wrongly excluded it. Check-in = booked units
+      // still to reconcile (remainingToCheckIn, the SAME "remaining" the web
+      // check-in drawer caps at); check-out = units still to take
+      // (remainingToCheckOut).
+      const isQt = item.type === "QUANTITY_TRACKED";
+      const qtRemainingIn = isQt ? item.remainingToCheckIn ?? 0 : 0;
+      const qtRemainingOut = isQt ? item.remainingToCheckOut ?? 0 : 0;
+      // What's selectable depends on the mode. A returned INDIVIDUAL asset is
+      // back to AVAILABLE, so `!isCheckedOut` alone would re-offer it for
+      // check-out — exclude the already-returned ones with `!isCheckedIn`.
       const selectable =
         selectMode === "checkin"
-          ? isCheckedOut && !isCheckedIn
+          ? isQt
+            ? qtRemainingIn > 0
+            : isCheckedOut && !isCheckedIn
           : selectMode === "checkout"
-          ? !isCheckedOut && !isCheckedIn
+          ? isQt
+            ? qtRemainingOut > 0
+            : !isCheckedOut && !isCheckedIn
           : selectMode === "remove"
           ? true
           : false;
@@ -615,7 +787,7 @@ export default function BookingDetailScreen() {
               pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`);
             }
           }}
-          accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
+          accessibilityLabel={`${item.title}, ${stateLabel}${
             isCheckedIn ? ", checked in" : ""
           }${isSelected ? ", selected" : ""}${
             selectable ? ". Tap to select" : ""
@@ -660,6 +832,13 @@ export default function BookingDetailScreen() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.title}
             </Text>
+            {item.type === "QUANTITY_TRACKED" && (
+              <QuantityBadge
+                value={item.quantity}
+                unitOfMeasure={item.unitOfMeasure}
+                label="booked"
+              />
+            )}
             {item.kit && (
               <Text style={styles.assetKit} numberOfLines={1}>
                 Kit: {item.kit.name}
@@ -675,7 +854,7 @@ export default function BookingDetailScreen() {
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
             <Text style={[styles.statusText, { color: badge.text }]}>
-              {formatStatus(item.status)}
+              {stateLabel}
             </Text>
           </View>
         </TouchableOpacity>
@@ -691,6 +870,8 @@ export default function BookingDetailScreen() {
       router,
       colors,
       statusBadge,
+      bookingStatusBadge,
+      booking?.status,
       styles,
     ]
   );
@@ -746,6 +927,10 @@ export default function BookingDetailScreen() {
     (booking.checkedOutCount > 0 ||
       checkedInCount > 0 ||
       ["ONGOING", "OVERDUE", "COMPLETE"].includes(booking.status));
+  // Segmented lifecycle progress from the server's shared helper (identical
+  // numbers to the web bar). Guarded so an older server (field absent) simply
+  // omits the card rather than crashing.
+  const lp = booking.lifecycleProgress ?? null;
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
@@ -891,39 +1076,54 @@ export default function BookingDetailScreen() {
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
-            {showProgress && (
+            {showProgress && lp && (
               <View style={styles.progressCard}>
                 <View style={styles.progressLabelRow}>
-                  <Text style={styles.progressTitle}>Check-out progress</Text>
+                  <Text style={styles.progressTitle}>
+                    {lp.bookedCount > 0
+                      ? "Check-out progress"
+                      : "Check-in progress"}
+                  </Text>
                   <Text style={styles.progressCount}>
-                    {checkedInCount}/{booking.assetCount} returned
+                    {lp.bookedCount > 0
+                      ? lp.checkoutProgressCount
+                      : lp.checkinProgressCount}{" "}
+                    / {lp.totalUnits}
                   </Text>
                 </View>
                 <View
                   style={styles.progressBar}
-                  accessibilityLabel={`${reservedCount} reserved, ${onJobCount} checked out, ${checkedInCount} returned`}
+                  accessibilityLabel={`${lp.bookedCount} booked, ${lp.partialCount} partial, ${lp.checkedOutCount} fully out, ${lp.returnedCount} returned, of ${lp.totalUnits}`}
                 >
-                  {reservedCount > 0 && (
+                  {lp.bookedCount > 0 && (
                     <View
                       style={{
-                        flex: reservedCount,
-                        backgroundColor: colors.backgroundTertiary,
+                        flex: lp.bookedCount,
+                        backgroundColor: LIFECYCLE_COLORS.booked,
                       }}
                     />
                   )}
-                  {onJobCount > 0 && (
+                  {lp.partialCount > 0 && (
                     <View
                       style={{
-                        flex: onJobCount,
-                        backgroundColor: colors.primary,
+                        flex: lp.partialCount,
+                        backgroundColor: LIFECYCLE_COLORS.partial,
                       }}
                     />
                   )}
-                  {checkedInCount > 0 && (
+                  {lp.checkedOutCount > 0 && (
                     <View
                       style={{
-                        flex: checkedInCount,
-                        backgroundColor: colors.success,
+                        flex: lp.checkedOutCount,
+                        backgroundColor: LIFECYCLE_COLORS.out,
+                      }}
+                    />
+                  )}
+                  {lp.returnedCount > 0 && (
+                    <View
+                      style={{
+                        flex: lp.returnedCount,
+                        backgroundColor: LIFECYCLE_COLORS.returned,
                       }}
                     />
                   )}
@@ -933,31 +1133,46 @@ export default function BookingDetailScreen() {
                     <View
                       style={[
                         styles.legendDot,
-                        { backgroundColor: colors.backgroundTertiary },
+                        { backgroundColor: LIFECYCLE_COLORS.booked },
                       ]}
                     />
                     <Text style={styles.legendText}>
-                      {reservedCount} reserved
+                      Booked {lp.bookedCount}
+                    </Text>
+                  </View>
+                  {lp.partialCount > 0 && (
+                    <View style={styles.legendItem}>
+                      <View
+                        style={[
+                          styles.legendDot,
+                          { backgroundColor: LIFECYCLE_COLORS.partial },
+                        ]}
+                      />
+                      <Text style={styles.legendText}>
+                        Partial {lp.partialCount}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.legendItem}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: LIFECYCLE_COLORS.out },
+                      ]}
+                    />
+                    <Text style={styles.legendText}>
+                      Fully out {lp.checkedOutCount}
                     </Text>
                   </View>
                   <View style={styles.legendItem}>
                     <View
                       style={[
                         styles.legendDot,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    />
-                    <Text style={styles.legendText}>{onJobCount} out</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View
-                      style={[
-                        styles.legendDot,
-                        { backgroundColor: colors.success },
+                        { backgroundColor: LIFECYCLE_COLORS.returned },
                       ]}
                     />
                     <Text style={styles.legendText}>
-                      {checkedInCount} returned
+                      Returned {lp.returnedCount}
                     </Text>
                   </View>
                 </View>
@@ -1186,7 +1401,10 @@ export default function BookingDetailScreen() {
               <View style={styles.checkinActions}>
                 {/* Quick "Check In All" is hidden when the workspace requires
                     explicit check-in for this role — the scan/select paths
-                    below remain (they ARE explicit check-in). Mirrors web. */}
+                    below remain (they ARE explicit check-in). Mirrors web's
+                    CheckinDropdown, which offers this "Quick check-in" (full
+                    checkinBooking = return all remaining) on any ongoing
+                    booking, partial included. */}
                 {canQuickCheckin && (
                   <TouchableOpacity
                     style={styles.actionButton}
@@ -1462,6 +1680,94 @@ export default function BookingDetailScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Check-out quantity picker — walks the selected QT assets one at a
+          time, defaulting to "all remaining" so one tap takes the whole line. */}
+      {checkoutQueue && (
+        <QuantityInputSheet
+          visible
+          title="Check out"
+          subtitle={`How many of ${
+            checkoutQueue.queue[checkoutQueue.index].title
+          } are you taking?`}
+          max={
+            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
+          }
+          defaultValue={
+            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
+          }
+          unitOfMeasure={checkoutQueue.queue[checkoutQueue.index].unitOfMeasure}
+          confirmLabel={
+            checkoutQueue.index + 1 < checkoutQueue.queue.length
+              ? "Next"
+              : "Check out"
+          }
+          onSubmit={(quantity) => {
+            const cur = checkoutQueue.queue[checkoutQueue.index];
+            const collected = [
+              ...checkoutQueue.collected,
+              { assetId: cur.id, quantity },
+            ];
+            if (checkoutQueue.index + 1 < checkoutQueue.queue.length) {
+              setCheckoutQueue({
+                ...checkoutQueue,
+                index: checkoutQueue.index + 1,
+                collected,
+              });
+            } else {
+              const { individualIds } = checkoutQueue;
+              setCheckoutQueue(null);
+              void submitCheckout(individualIds, collected);
+            }
+          }}
+          onClose={() => setCheckoutQueue(null)}
+        />
+      )}
+
+      {/* Check-in disposition picker — walks the selected QT assets one at a
+          time, asking returned / consumed / lost / damaged per asset. */}
+      {checkinQueue && (
+        <CheckinDispositionSheet
+          visible
+          assetTitle={checkinQueue.queue[checkinQueue.index].title}
+          // Cap the picker to booked units still to reconcile
+          // (remainingToCheckIn = booked − returned/consumed/lost/damaged), the
+          // SAME "remaining" the web check-in drawer uses.
+          remaining={
+            checkinQueue.queue[checkinQueue.index].remainingToCheckIn ?? 1
+          }
+          consumptionType={
+            checkinQueue.queue[checkinQueue.index].consumptionType
+          }
+          unitOfMeasure={checkinQueue.queue[checkinQueue.index].unitOfMeasure}
+          isLast={checkinQueue.index + 1 >= checkinQueue.queue.length}
+          onSubmit={(value: CheckinDispositionValue) => {
+            const cur = checkinQueue.queue[checkinQueue.index];
+            const collected = [
+              ...checkinQueue.collected,
+              {
+                assetId: cur.id,
+                returned: value.returned,
+                consumed: value.consumed,
+                lost: value.lost,
+                damaged: value.damaged,
+              },
+            ];
+            if (checkinQueue.index + 1 < checkinQueue.queue.length) {
+              setCheckinQueue({
+                ...checkinQueue,
+                index: checkinQueue.index + 1,
+                collected,
+              });
+            } else {
+              const { individualIds } = checkinQueue;
+              setCheckinQueue(null);
+              void submitCheckin(individualIds, collected);
+            }
+          }}
+          onClose={() => setCheckinQueue(null)}
+        />
+      )}
     </View>
   );
 }

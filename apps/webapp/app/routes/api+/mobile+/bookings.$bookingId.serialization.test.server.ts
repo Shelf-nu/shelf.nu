@@ -27,7 +27,14 @@ import { assertIsDataWithResponseInit } from "../../../../test/helpers/assertion
 // @vitest-environment node
 
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findFirst: vi.fn() } },
+  db: {
+    booking: { findFirst: vi.fn() },
+    // Lifecycle-progress roll-up queries the partial-checkout log to decide
+    // whether an asset was ever checked out. Not relevant to the model-request
+    // serialization under test — stub to an empty log. (Survives
+    // `clearAllMocks`, which clears call history but keeps implementations.)
+    partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
+  },
 }));
 
 vi.mock("~/modules/api/mobile-auth.server", async () => {

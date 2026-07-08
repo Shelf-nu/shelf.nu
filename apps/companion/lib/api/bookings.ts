@@ -3,6 +3,8 @@ import type {
   BookingsResponse,
   BookingDetailResponse,
   BookingActionResponse,
+  CheckinDisposition,
+  CheckoutDisposition,
   PartialCheckinResponse,
   PartialCheckoutResponse,
   BookingMutationResponse,
@@ -89,13 +91,14 @@ export const bookingsApi = {
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    timeZone?: string
+    timeZone?: string,
+    checkins?: CheckinDisposition[]
   ) =>
     apiFetch<PartialCheckinResponse>(
       `/api/mobile/bookings/partial-checkin?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, timeZone }),
+        body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
       }
     ),
 
@@ -109,13 +112,14 @@ export const bookingsApi = {
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    timeZone?: string
+    timeZone?: string,
+    checkouts?: CheckoutDisposition[]
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, timeZone }),
+        body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
       }
     ),
 
