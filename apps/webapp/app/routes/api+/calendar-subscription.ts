@@ -1,14 +1,22 @@
 /**
  * Calendar subscription management (resource route).
  *
- * Cookie-authenticated `action` to generate / regenerate / revoke the current
- * member's iCal feed token. The public, token-authenticated feed itself lives
- * at `api+/calendar.feed.$token[.ics].ts`.
+ * Cookie-authenticated `action` to generate / regenerate / revoke a member's
+ * iCal feed token for a caller-supplied workspace (`organizationId` form
+ * field) — not necessarily the cookie's active workspace. This lets the
+ * Calendars settings tab manage the feed for any workspace the member
+ * belongs to, without requiring them to switch their active org first.
+ * Authorization for the target workspace is proven by
+ * `assertMemberCanManageCalendar` (membership + Team-workspace entitlement),
+ * not by `requirePermission` against the active org. The public,
+ * token-authenticated feed itself lives at
+ * `api+/calendar.feed.$token[.ics].ts`.
  *
  * @see {@link file://./../../modules/calendar-subscription/service.server.ts}
  */
 import { type ActionFunctionArgs, data } from "react-router";
 import {
+  assertMemberCanManageCalendar,
   buildCalendarFeedUrl,
   getOrCreateCalendarToken,
   revokeCalendarToken,
@@ -16,19 +24,14 @@ import {
 } from "~/modules/calendar-subscription/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
-import { assertCanUseBookings } from "~/utils/subscription.server";
 
 /**
- * Generates, regenerates or revokes the current member's calendar-feed token,
- * selected by the `intent` form field.
+ * Generates, regenerates or revokes a member's calendar-feed token for the
+ * workspace identified by the `organizationId` form field, selected by the
+ * `intent` form field.
  *
- * @param args.request - Carries the cookie session and the `intent` form field
- *   (`generate` | `regenerate` | `revoke`).
+ * @param args.request - Carries the cookie session and the `organizationId` /
+ *   `intent` (`generate` | `regenerate` | `revoke`) form fields.
  * @param args.context - Load context providing the auth session.
  * @returns `data({ calendarFeedUrl })` — the new feed URL, or `null` after a
  *   revoke — or an error payload (with status) on failure.
@@ -38,22 +41,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    // Booking read access gates the calendar — and therefore its feed.
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const formData = await request.formData();
+    const organizationId = String(formData.get("organizationId") ?? "");
+    const intent = String(formData.get("intent") ?? "");
 
-    // Bookings (and their calendar feed) are a Team-workspace feature.
-    // requirePermission only gates by role, so without this a direct POST could
-    // still mint or revoke a feed token on a non-Team workspace. Assert the
-    // workspace type here too, matching the sibling booking routes (e.g.
-    // bookings.export.$fileName[.csv].tsx).
-    assertCanUseBookings(currentOrganization);
-
-    const intent = String((await request.formData()).get("intent") ?? "");
+    if (!organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Missing workspace.",
+        label: "Booking",
+        status: 400,
+      });
+    }
     if (
       intent !== "generate" &&
       intent !== "regenerate" &&
@@ -66,6 +65,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         status: 400,
       });
     }
+
+    // Prove the caller may manage THIS workspace's feed (membership + entitlement)
+    // — organizationId is user-supplied, so this is the org-scope guard.
+    await assertMemberCanManageCalendar({ userId, organizationId });
 
     if (intent === "revoke") {
       await revokeCalendarToken({ userId, organizationId });

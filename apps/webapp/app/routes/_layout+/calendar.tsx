@@ -180,6 +180,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     return payload({
       header,
       events,
+      organizationId,
       ...teamMembersData,
       // For BASE/SELF_SERVICE users, provide dedicated form team members
       // For ADMIN users, reuse the filter team members
@@ -211,7 +212,9 @@ export default function Calendar() {
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const { events, calendarFeedUrl } = useLoaderData<typeof loader>();
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
+  const { events, calendarFeedUrl, organizationId } =
+    useLoaderData<typeof loader>();
   const isLoading = useDisabled();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -278,18 +281,6 @@ export default function Calendar() {
             </Button>
           }
         />
-        <CalendarSubscribeDialog
-          calendarFeedUrl={calendarFeedUrl}
-          trigger={
-            <Button
-              type="button"
-              variant="secondary"
-              aria-label="subscribe to calendar"
-            >
-              Subscribe
-            </Button>
-          }
-        />
       </Header>
 
       <BookingFilters className="mt-4" hideSortBy />
@@ -326,6 +317,16 @@ export default function Calendar() {
                 onViewChange={handleViewChange}
               />
             ) : null}
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="ml-3"
+              onClick={() => setSubscribeOpen(true)}
+            >
+              Subscribe
+            </Button>
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
@@ -396,6 +397,13 @@ export default function Calendar() {
           )}
         </ClientOnly>
       </div>
+
+      <CalendarSubscribeDialog
+        organizationId={organizationId}
+        calendarFeedUrl={calendarFeedUrl}
+        open={subscribeOpen}
+        onClose={() => setSubscribeOpen(false)}
+      />
     </>
   );
 }

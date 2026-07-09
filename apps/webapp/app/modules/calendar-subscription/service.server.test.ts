@@ -2,11 +2,16 @@
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
-import { canUseBookings } from "~/utils/subscription.server";
 import {
+  assertCanUseBookings,
+  canUseBookings,
+} from "~/utils/subscription.server";
+import {
+  assertMemberCanManageCalendar,
   buildCalendarFeedUrl,
   getCalendarFeedContext,
   getMemberCalendarFeedUrl,
+  getMemberCalendarFeeds,
   getOrCreateCalendarToken,
   resolveCalendarVisibility,
   revokeCalendarToken,
@@ -20,6 +25,7 @@ vi.mock("~/database/db.server", () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    user: { findUnique: vi.fn() },
   },
 }));
 
@@ -28,6 +34,7 @@ vi.mock("~/database/db.server", () => ({
 // that assert the gate override the return value explicitly.
 vi.mock("~/utils/subscription.server", () => ({
   canUseBookings: vi.fn(() => true),
+  assertCanUseBookings: vi.fn(),
 }));
 
 const USER_ID = "user-1";
@@ -244,5 +251,76 @@ describe("calendar feed URL helpers", () => {
         organizationId: ORG_ID,
       })
     ).toContain("/api/calendar/feed/tok-xyz.ics");
+  });
+});
+
+describe("assertMemberCanManageCalendar", () => {
+  it("throws 403 when the user is not a member of the target workspace", async () => {
+    vi.mocked(db.userOrganization.findUnique).mockResolvedValue(null);
+    await expect(
+      assertMemberCanManageCalendar({ userId: USER_ID, organizationId: ORG_ID })
+    ).rejects.toThrow();
+    expect(vi.mocked(assertCanUseBookings)).not.toHaveBeenCalled();
+  });
+
+  it("delegates to assertCanUseBookings for an entitled member", async () => {
+    vi.mocked(db.userOrganization.findUnique).mockResolvedValue({
+      organization: { type: "TEAM" },
+    } as never);
+    await assertMemberCanManageCalendar({
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+    expect(vi.mocked(assertCanUseBookings)).toHaveBeenCalledWith({
+      type: "TEAM",
+    });
+  });
+});
+
+describe("getMemberCalendarFeeds", () => {
+  it("lists eligible workspaces alphabetically and maps token -> feed URL / null", async () => {
+    vi.mocked(canUseBookings).mockImplementation(
+      (o: { type: string }) => o.type === "TEAM"
+    );
+    // Input is intentionally NOT alphabetical (Rentals before Acme) to prove the
+    // result is sorted by name — the underlying order follows updatedAt.
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      sso: true,
+      userOrganizations: [
+        {
+          roles: ["SELF_SERVICE"],
+          calendarTokenId: null,
+          organization: { id: "o2", name: "Rentals", type: "TEAM" },
+        },
+        {
+          roles: ["OWNER"],
+          calendarTokenId: "tok-a",
+          organization: { id: "o1", name: "Acme", type: "TEAM" },
+        },
+        {
+          roles: ["OWNER"],
+          calendarTokenId: "tok-p",
+          organization: { id: "o3", name: "Personal", type: "PERSONAL" },
+        }, // SSO -> dropped
+      ],
+    } as never);
+
+    const feeds = await getMemberCalendarFeeds({ userId: USER_ID });
+
+    // Sorted alphabetically: Acme before Rentals (Personal excluded).
+    expect(feeds).toEqual([
+      {
+        organizationId: "o1",
+        name: "Acme",
+        role: "OWNER",
+        feedUrl: expect.stringContaining("/api/calendar/feed/tok-a.ics"),
+      },
+      {
+        organizationId: "o2",
+        name: "Rentals",
+        role: "SELF_SERVICE",
+        feedUrl: null,
+      },
+    ]);
   });
 });

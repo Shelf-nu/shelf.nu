@@ -17,7 +17,10 @@ import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
-import { canUseBookings } from "~/utils/subscription.server";
+import {
+  assertCanUseBookings,
+  canUseBookings,
+} from "~/utils/subscription.server";
 
 /** Bytes of entropy for a feed token (192 bits → 32-char base64url string). */
 const CALENDAR_TOKEN_BYTES = 24;
@@ -110,6 +113,97 @@ export async function getMemberCalendarFeedUrl({
   return membership?.calendarTokenId
     ? buildCalendarFeedUrl(membership.calendarTokenId)
     : null;
+}
+
+/**
+ * Asserts the caller may manage a specific workspace's calendar feed: they must
+ * be a member of it AND the workspace must be entitled to bookings. Guards the
+ * action against a user-supplied organizationId being used to mint/revoke a
+ * token in a workspace the caller doesn't belong to (cross-org IDOR).
+ *
+ * @throws {ShelfError} 403 when the user is not a member of the workspace
+ * @throws {ShelfError} when the workspace cannot use bookings
+ */
+export async function assertMemberCanManageCalendar({
+  userId,
+  organizationId,
+}: MembershipArgs): Promise<void> {
+  const membership = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { organization: { select: { type: true } } },
+  });
+
+  if (!membership) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not a member",
+      message: "You are not a member of this workspace.",
+      status: 403,
+      label: "Booking",
+    });
+  }
+
+  assertCanUseBookings(membership.organization);
+}
+
+/** One workspace's calendar-feed summary for the Calendars settings tab. */
+export type MemberCalendarFeed = {
+  organizationId: string;
+  name: string;
+  role: OrganizationRoles;
+  /** Absolute feed URL, or null when the member hasn't generated one yet. */
+  feedUrl: string | null;
+};
+
+/**
+ * Lists the member's workspaces that can have a booking calendar, each with its
+ * current feed URL (or null). Excludes an SSO user's personal workspace and any
+ * workspace not entitled to bookings, so the settings tab shows no dead rows.
+ */
+export async function getMemberCalendarFeeds({
+  userId,
+}: {
+  userId: string;
+}): Promise<MemberCalendarFeed[]> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      sso: true,
+      userOrganizations: {
+        select: {
+          roles: true,
+          calendarTokenId: true,
+          organization: { select: { id: true, name: true, type: true } },
+        },
+      },
+    },
+  });
+
+  if (!user) return [];
+
+  return (
+    user.userOrganizations
+      .filter((m) => {
+        // SSO users never see their personal workspace.
+        if (user.sso && m.organization.type === "PERSONAL") return false;
+        // Only workspaces entitled to bookings can have a feed.
+        return canUseBookings(m.organization);
+      })
+      .map((m) => ({
+        organizationId: m.organization.id,
+        name: m.organization.name,
+        role: m.roles[0] ?? OrganizationRoles.BASE,
+        feedUrl: m.calendarTokenId
+          ? buildCalendarFeedUrl(m.calendarTokenId)
+          : null,
+      }))
+      // Stable alphabetical order by workspace name so the list never reshuffles.
+      // The underlying UserOrganization order follows updatedAt, which changes
+      // when a member generates/rotates a token — jarring to watch rows jump.
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      )
+  );
 }
 
 /**
