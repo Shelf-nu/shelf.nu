@@ -1,39 +1,46 @@
 # Set Up SSO with Shibboleth
 
-Shelf supports single sign-on (SSO) using [Shibboleth](https://www.shibboleth.net/), the self-hosted, open-source SAML 2.0 identity provider widely used across higher education and research institutions.
+Shelf supports SSO with Shibboleth over SAML 2.0. This guide covers the Shelf-specific configuration your identity team adds to your IdP, and how your workspace owner maps your groups to Shelf roles.
 
-Unlike Google Workspace or Microsoft Entra, Shibboleth has no hosted admin console — everything is configured through XML files on your IdP server (`saml-nameid.xml`, `attribute-filter.xml`, `attribute-resolver.xml`, and friends). This guide therefore shows annotated config snippets instead of console screenshots, and points out the couple of settings that differ from a typical Shibboleth deployment and trip up first-time Shelf integrations.
+## Who does what [#](#who-does-what)
 
-Shelf connects to Shibboleth the same way it connects to every other identity provider: through the standard SAML 2.0 flow, brokered by Supabase Auth.
+| Who                          | Task                                          | Where                                |
+| ---------------------------- | --------------------------------------------- | ------------------------------------ |
+| Your **identity / IdP team** | Trust Shelf's SP and release attributes       | Shibboleth XML config (§1–§6)        |
+| Your **Shelf contact**       | Register your IdP in Shelf, enable encryption | Handled by Shelf                     |
+| Your **workspace owner**     | Map released groups to Shelf roles            | Shelf workspace settings, a GUI (§7) |
+| Your **users**               | Sign in                                       | Your Shibboleth login page           |
 
 ## Prerequisites [#](#prerequisites)
 
-Before you start, make sure you've read the general [SSO prerequisites](../index.md#before-you-start-prerequisites) — in particular:
+Read the general [SSO prerequisites](../index.md#before-you-start-prerequisites) first — in particular:
 
 - You have a **non-SSO owner account** ready to own the Shelf workspace.
 - Any existing **standard accounts** on your SSO domain are ready to be removed.
-- You've planned which of your Shibboleth attributes/groups map to which Shelf role (Administrator, Self service, Base).
+- You've planned which of your groups/affiliations map to which Shelf role (Administrator, Self service, Base).
 
-## Service provider (SP) details [#](#service-provider-sp-details)
+## 1. Service provider (SP) details [#](#service-provider-sp-details)
 
-Shelf's SAML layer is handled by Supabase Auth, so the values you register in your Shibboleth relying-party (SP) metadata are Supabase's, not Shelf's directly.
+Register these Shelf SP values in your `metadata-providers.xml`:
 
-| Detail                   | Value                                                     |
-| ------------------------ | --------------------------------------------------------- |
-| ACS URL                  | `https://<project>.supabase.co/auth/v1/sso/saml/acs`      |
-| Entity ID / Metadata URL | `https://<project>.supabase.co/auth/v1/sso/saml/metadata` |
-| Relay State              | `https://app.shelf.nu/oauthcallback`                      |
+| Detail                   | Value                                                                |
+| ------------------------ | -------------------------------------------------------------------- |
+| ACS URL                  | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/acs`      |
+| Entity ID / Metadata URL | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata` |
+| Relay State              | `https://app.shelf.nu/oauthcallback`                                 |
 
 > [!NOTE]
-> The `<project>` placeholder is the Supabase project host for your Shelf
-> instance. Your Shelf contact will give you the exact value to substitute —
-> do not guess it.
+> Shelf's SP metadata is a live URL, so add it as an `HTTPMetadataProvider` (or download it once as a `FilesystemMetadataProvider`).
 
-## Configure a persistent NameID (required) [#](#configure-a-persistent-nameid-required)
+```xml
+<!-- conf/metadata-providers.xml (excerpt) -->
+<MetadataProvider id="ShelfSP" xsi:type="HTTPMetadataProvider"
+    metadataURL="https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata" />
+```
 
-Supabase identifies a returning user by the SAML `NameID`. Shibboleth's out-of-the-box default `NameIDFormat` is `transient` — a value that changes on every login. Supabase **rejects** transient NameIDs (the login fails with a "no user id" error), so you must configure a **`persistent`** NameID for the Shelf relying party. The `emailAddress` format is also acceptable if you'd rather key off email.
+## 2. Configure a persistent NameID (required) [#](#persistent-nameid-required)
 
-Add (or edit) the NameID precedence for the Shelf/Supabase relying party in `conf/saml-nameid.xml` and `conf/relying-party.xml`:
+Shelf identifies a returning user by the SAML `NameID`. Shibboleth's default is `transient`, which changes on every login — Shelf **rejects** it, and sign-in fails immediately after authentication. Configure a **`persistent`** NameID for the Shelf relying party (`emailAddress` is also accepted).
 
 ```xml
 <!-- conf/saml-nameid.xml -->
@@ -43,10 +50,10 @@ Add (or edit) the NameID precedence for the Shelf/Supabase relying party in `con
 ```
 
 ```xml
-<!-- conf/relying-party.xml (excerpt) -->
+<!-- conf/relying-party.xml (excerpt) — pin persistent for the Shelf SP -->
 <util:list id="shibboleth.RelyingPartyOverrides">
     <bean parent="RelyingPartyByName"
-          c:relyingPartyIds="#{ {'https://&lt;project&gt;.supabase.co/auth/v1/sso/saml/metadata'} }">
+          c:relyingPartyIds="#{ {'https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata'} }">
         <property name="profileConfigurations">
             <list>
                 <bean parent="SAML2.SSO"
@@ -58,184 +65,100 @@ Add (or edit) the NameID precedence for the Shelf/Supabase relying party in `con
 ```
 
 > [!IMPORTANT]
-> If you skip this step, users will be able to reach the Shibboleth login screen but sign-in will fail immediately afterward on the Supabase side. If you've verified everything else and login still fails at that point, this is almost always the cause.
+> If you skip this, users reach the login screen but sign-in fails right afterward. If everything else checks out and login still fails at that point, this is almost always why.
 
-## Release the required attributes [#](#release-the-required-attributes)
+## 3. Release the required attributes [#](#release-attributes)
 
-Shibboleth releases **no attributes by default** — every attribute has to be explicitly permitted to a relying party via an `AttributeFilterPolicy`. This is the single most common gotcha when connecting a new Shibboleth SP: if you skip it, Shelf will see an empty (or near-empty) SAML assertion and the user will fail to sign in with no email or name.
-
-Add a policy in `conf/attribute-filter.xml` scoped to the Supabase entity ID, releasing `mail`, `givenName`, `sn`, and whichever group attribute you've chosen (see the next section — this example uses `isMemberOf`):
+Add an `AttributeFilterPolicy` scoped to Shelf's entity ID, releasing `mail`, `givenName`, `sn`, and your chosen group attribute (see §6). Without a release policy the assertion is empty and sign-in fails with "no email".
 
 ```xml
-<!-- conf/attribute-filter.xml (excerpt) -->
-<afp:AttributeFilterPolicy id="releaseToShelf">
-    <afp:PolicyRequirementRule xsi:type="basic:AttributeRequesterString"
-        value="https://<project>.supabase.co/auth/v1/sso/saml/metadata" />
+<!-- conf/attribute-filter.xml (excerpt) — Shibboleth IdP v5 -->
+<AttributeFilterPolicyGroup id="ShelfPolicy"
+    xmlns="urn:mace:shibboleth:2.0:afp"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="urn:mace:shibboleth:2.0:afp http://shibboleth.net/schema/idp/shibboleth-afp.xsd">
 
-    <afp:AttributeRule attributeID="mail">
-        <afp:PermitValueRule xsi:type="basic:ANY" />
-    </afp:AttributeRule>
+  <AttributeFilterPolicy id="releaseToShelf">
+    <PolicyRequirementRule xsi:type="Requester"
+        value="https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata" />
 
-    <afp:AttributeRule attributeID="givenName">
-        <afp:PermitValueRule xsi:type="basic:ANY" />
-    </afp:AttributeRule>
-
-    <afp:AttributeRule attributeID="sn">
-        <afp:PermitValueRule xsi:type="basic:ANY" />
-    </afp:AttributeRule>
-
-    <afp:AttributeRule attributeID="isMemberOf">
-        <afp:PermitValueRule xsi:type="basic:ANY" />
-    </afp:AttributeRule>
-</afp:AttributeFilterPolicy>
-```
-
-> [!IMPORTANT]
-> "No email" or "missing name/groups after login" almost always means the attribute isn't being **released** to the Shelf/Supabase entity ID — it's rarely a resolver problem. Check `attribute-filter.xml` first.
-
-## Choose a group strategy [#](#choose-a-group-strategy)
-
-Shelf maps users to roles (Administrator, Self service, Base) based on group values in the `groups` claim. Shibboleth deployments commonly source that claim from one of three attributes — pick whichever your institution already populates. All three work the same way on the Shelf side; you only need one.
-
-| Strategy                     | SAML Name (OID)                    | Value example                   |
-| ---------------------------- | ---------------------------------- | ------------------------------- |
-| `isMemberOf` (recommended)   | `urn:oid:1.3.6.1.4.1.5923.1.5.1.1` | `university:apps:shelf:admins`  |
-| `eduPersonEntitlement`       | `urn:oid:1.3.6.1.4.1.5923.1.1.1.7` | `urn:mace:your.edu:shelf:admin` |
-| `eduPersonScopedAffiliation` | `urn:oid:1.3.6.1.4.1.5923.1.1.1.9` | `staff@your.edu`                |
-
-### `isMemberOf` (recommended) [#](#ismemberof-recommended)
-
-Most Shibboleth/Grouper deployments already resolve group membership (often from LDAP `memberOf` or a Grouper registry) into `isMemberOf`. It's the most direct fit for "map a real IdP group to a Shelf role."
-
-```xml
-<!-- conf/attribute-resolver.xml (excerpt) -->
-<resolver:AttributeDefinition xsi:type="ad:Mapped" id="isMemberOf" sourceAttributeID="memberOf">
-    <resolver:Dependency ref="myLDAP" />
-    <resolver:AttributeEncoder xsi:type="enc:SAML2StringAttributeEncoder"
-        name="urn:oid:1.3.6.1.4.1.5923.1.5.1.1" friendlyName="isMemberOf" />
-    <ad:ValueMap>
-        <ad:ReturnValue>university:apps:shelf:admins</ad:ReturnValue>
-        <ad:SourceValue>cn=shelf-admins,ou=groups,dc=your,dc=edu</ad:SourceValue>
-    </ad:ValueMap>
-</resolver:AttributeDefinition>
-```
-
-Then permit it in `attribute-filter.xml` alongside `mail`/`givenName`/`sn` (see the example above).
-
-### `eduPersonEntitlement` [#](#edupersonentitlement)
-
-Use this if your institution already expresses application-level entitlements as URNs (common in eduGAIN/InCommon federations).
-
-```xml
-<!-- conf/attribute-resolver.xml (excerpt) -->
-<resolver:AttributeDefinition xsi:type="ad:Mapped" id="eduPersonEntitlement" sourceAttributeID="memberOf">
-    <resolver:Dependency ref="myLDAP" />
-    <resolver:AttributeEncoder xsi:type="enc:SAML2StringAttributeEncoder"
-        name="urn:oid:1.3.6.1.4.1.5923.1.1.1.7" friendlyName="eduPersonEntitlement" />
-    <ad:ValueMap>
-        <ad:ReturnValue>urn:mace:your.edu:shelf:admin</ad:ReturnValue>
-        <ad:SourceValue>cn=shelf-admins,ou=groups,dc=your,dc=edu</ad:SourceValue>
-    </ad:ValueMap>
-</resolver:AttributeDefinition>
-```
-
-```xml
-<!-- conf/attribute-filter.xml (excerpt) -->
-<afp:AttributeRule attributeID="eduPersonEntitlement">
-    <afp:PermitValueRule xsi:type="basic:ANY" />
-</afp:AttributeRule>
-```
-
-### `eduPersonScopedAffiliation` [#](#edupersonscopedaffiliation)
-
-Use this if you want a coarse role split (e.g. all `staff` get Admin, all `student` get Base) rather than a dedicated Shelf group. This is usually already populated from `eduPersonAffiliation` and doesn't require any new group provisioning.
-
-```xml
-<!-- conf/attribute-resolver.xml (excerpt) -->
-<resolver:AttributeDefinition xsi:type="ad:Scoped" id="eduPersonScopedAffiliation"
-    scope="%{idp.scope}" sourceAttributeID="eduPersonAffiliation">
-    <resolver:Dependency ref="myLDAP" />
-    <resolver:AttributeEncoder xsi:type="enc:SAML2ScopedStringAttributeEncoder"
-        name="urn:oid:1.3.6.1.4.1.5923.1.1.1.9" friendlyName="eduPersonScopedAffiliation" />
-</resolver:AttributeDefinition>
-```
-
-```xml
-<!-- conf/attribute-filter.xml (excerpt) -->
-<afp:AttributeRule attributeID="eduPersonScopedAffiliation">
-    <afp:PermitValueRule xsi:type="basic:ANY" />
-</afp:AttributeRule>
+    <AttributeRule attributeID="mail"><PermitValueRule xsi:type="ANY" /></AttributeRule>
+    <AttributeRule attributeID="givenName"><PermitValueRule xsi:type="ANY" /></AttributeRule>
+    <AttributeRule attributeID="sn"><PermitValueRule xsi:type="ANY" /></AttributeRule>
+    <AttributeRule attributeID="isMemberOf"><PermitValueRule xsi:type="ANY" /></AttributeRule>
+  </AttributeFilterPolicy>
+</AttributeFilterPolicyGroup>
 ```
 
 > [!NOTE]
-> Whichever strategy you pick, the released **value** (e.g. `university:apps:shelf:admins`, `urn:mace:your.edu:shelf:admin`, or `staff@your.edu`) is exactly what you'll paste into Shelf's group-mapping fields later — see [Map your groups in Shelf](#map-your-groups-in-shelf).
+> On v5, SAML encoding lives in the attribute registry (`conf/attributes/`) — `mail`, `givenName`, `sn`, `eduPersonScopedAffiliation`, and `eduPersonEntitlement` ship pre-registered. `isMemberOf` (eduMember schema) may need its own registry rule if your deployment doesn't already release it.
 
-## Attribute mapping (what Shelf configures in Supabase) [#](#attribute-mapping-what-shelf-configures-in-supabase)
+## 4. Assertion encryption — automatic [#](#assertion-encryption)
 
-On the Shelf side, we register your Shibboleth provider in Supabase with a dedicated attribute-mapping preset that already knows how to read Shibboleth's `urn:oid:…`-named attributes. You don't need to configure this yourself — it's shown here so you understand what happens to the attributes you release.
+Shelf publishes an encryption certificate in its metadata and accepts encrypted assertions, so your IdP encrypts automatically (Shibboleth's default when the SP advertises an encryption key). Nothing to configure — assertions are encrypted end-to-end.
 
-```json
-{
-  "keys": {
-    "email": { "names": ["urn:oid:0.9.2342.19200300.100.1.3", "mail"] },
-    "firstName": { "names": ["urn:oid:2.5.4.42", "givenName"] },
-    "lastName": { "names": ["urn:oid:2.5.4.4", "sn"] },
-    "groups": {
-      "names": ["urn:oid:1.3.6.1.4.1.5923.1.5.1.1", "isMemberOf"],
-      "array": true
-    }
-  }
-}
-```
+## 5. Send us your metadata [#](#send-metadata)
 
-A few notes on how to read this:
+Send your Shelf contact:
 
-- **OID sources** — Shibboleth assertions typically carry attributes under their formal `urn:oid:…` name (e.g. `mail` is `urn:oid:0.9.2342.19200300.100.1.3`). Supabase matches attributes by SAML `Name` **or** `FriendlyName`, case-insensitively, so listing both the OID and the friendly name (`names: [...]`) means the mapping works whether your `attribute-resolver.xml` encodes the OID, the friendly name, or both.
-- **`groups.array`** — the `groups` key is declared as a multi-valued array claim (`"array": true`), because a user can belong to more than one group and Shelf's role matcher (`getRoleFromGroupId`) accepts multiple values.
-- **Swapping the group source** — the `groups.names` list above pairs the `isMemberOf` OID (`urn:oid:1.3.6.1.4.1.5923.1.5.1.1`) with its friendly name. If you chose `eduPersonEntitlement` or `eduPersonScopedAffiliation` instead, tell your Shelf contact — they'll swap those two values to `urn:oid:1.3.6.1.4.1.5923.1.1.1.7` / `eduPersonEntitlement` or `urn:oid:1.3.6.1.4.1.5923.1.1.1.9` / `eduPersonScopedAffiliation` respectively when they register your provider. Everything else in the mapping stays the same.
+- Your **IdP metadata** — the metadata URL (e.g. `https://idp.your.edu/idp/shibboleth`, or your federation metadata) or an exported XML file.
+- The **domain** your users sign in with.
+- Which **group strategy** you chose (§6).
 
-> [!NOTE]
-> These target key names (`firstName`, `lastName`, `groups`) are intentionally non-standard. Supabase promotes _standard_ OIDC claim names (like `given_name` or `name`) straight into the user's top-level profile and strips them out of the `custom_claims` object that Shelf actually reads — so the preset avoids them everywhere except `email`.
+We register the provider and confirm once it's live — usually about **1 business day**. Don't test sign-in until you hear back.
 
-## Send us your metadata [#](#send-us-your-metadata)
+## 6. Choose a group strategy [#](#group-strategy)
 
-Once your IdP is configured, send your Shelf contact:
+Shelf assigns roles from the group values you release. Pick whichever your institution already populates — all three work identically on the Shelf side; you only need one.
 
-- Your **IdP metadata** — either the metadata URL (e.g. `https://idp.your.edu/idp/shibboleth`) or the exported XML file.
-- The **domain** your users will sign in with (the one they'll type on Shelf's SSO login screen).
-- Which **group strategy** you chose (`isMemberOf`, `eduPersonEntitlement`, or `eduPersonScopedAffiliation`), so we register the matching attribute mapping.
+| Strategy                       | SAML Name (OID)                    | Example value                                                                         |
+| ------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------- |
+| **`isMemberOf`** (recommended) | `urn:oid:1.3.6.1.4.1.5923.1.5.1.1` | `cn=shelf-admins,ou=groups,dc=your,dc=edu` or a Grouper path `your:apps:shelf:admins` |
+| `eduPersonEntitlement`         | `urn:oid:1.3.6.1.4.1.5923.1.1.1.7` | `urn:mace:your.edu:shelf:admin`                                                       |
+| `eduPersonScopedAffiliation`   | `urn:oid:1.3.6.1.4.1.5923.1.1.1.9` | `staff@your.edu`, `faculty@your.edu`                                                  |
 
-If you're not sure where to send this, reach us at [hello@shelf.nu](mailto:hello@shelf.nu).
+- **`isMemberOf`** — best when you can create dedicated Shelf groups in Grouper/LDAP. The most flexible.
+- **`eduPersonEntitlement`** — application-specific entitlement URIs.
+- **`eduPersonScopedAffiliation`** — coarse mapping by affiliation (e.g. all `staff` → one role). No new groups needed.
 
-We'll register the provider in Supabase and confirm once it's live — this usually takes about **1 business day**. Don't test sign-in until you've heard back.
+Whichever you pick, release it via the `attribute-filter.xml` policy in §3 (swap `isMemberOf` for your attribute id), and tell your Shelf contact so we point the mapping at the right OID.
 
-## Map your groups in Shelf [#](#map-your-groups-in-shelf)
+## 7. Map your groups to Shelf roles [#](#map-groups)
 
-<!-- TODO: screenshot from local Shibboleth rig — workspace SSO settings group mapping fields -->
+Once your provider is registered, your **workspace owner** maps each group value to a Shelf role in **workspace settings → SSO**.
 
-Once we've confirmed your provider is registered, go to your workspace SSO settings in Shelf and enter the group value for each role you use: Administrator, Self service, Base.
+![Shelf workspace SSO settings — mapping Shibboleth groups to Administrator, Self service, and Base roles](../../img/shibboleth-sso-details.png)
 
-- Each field accepts **one or more values, comma-separated** — for example `staff@your.edu, faculty@your.edu` if two different affiliation values should both grant the same role.
-- Paste the value(s) **exactly** as your IdP releases them. Matching is trimmed and case-insensitive on Shelf's side, but the safest approach is always to copy the real released value rather than retype it.
-- You only need to fill in the roles you actually use — leave the rest blank, but at least one group must be mapped.
-- Precedence is **Administrator > Self service > Base**: if a user's claim matches groups mapped to more than one role, the highest one wins.
+Enter the value your IdP releases next to each role you use:
 
-## Test single sign-on [#](#test-single-sign-on)
+| Shelf role        | Paste the group value that should grant it      |
+| ----------------- | ----------------------------------------------- |
+| **Administrator** | e.g. `cn=shelf-admins,ou=groups,dc=your,dc=edu` |
+| **Self service**  | e.g. `cn=shelf-staff,ou=groups,dc=your,dc=edu`  |
+| **Base**          | e.g. `cn=shelf-users,ou=groups,dc=your,dc=edu`  |
 
-Go to `/sso-login`, enter your domain, and sign in as a test user who belongs to one of the groups you mapped.
+Rules to know:
 
-- A user whose groups match a mapped role should land straight in the workspace with that role.
-- A user with **no matching group** lands on the pending-assignment screen rather than being denied outright — this is expected, and resolves itself as soon as an admin maps their group (or adds them to a mapped one).
+- **Paste the value exactly** as your IdP releases it. If unsure, ask your identity team for a sample assertion (or check the IdP audit log) for the precise string.
+- **Multiple groups → one role:** each field accepts **several values, comma-separated** (e.g. `cn=it-staff,…, cn=av-services,…`) — anyone in _any_ of them gets that role. Useful for reusing existing groups.
+- **Matching is trimmed and case-insensitive** — but a leading/trailing scope difference still counts as a mismatch, so copy the real value.
+- **Precedence is Administrator > Self service > Base.** A user whose groups match more than one role gets the highest. A user still only ever holds one role per workspace.
+- Users can be members of **many** groups — Shelf matches any mapped one regardless of its position in the list. You only need to map the roles you actually use, but at least one must be mapped.
 
-If sign-in doesn't work as expected, see the troubleshooting section below, then reach out to your support contact at Shelf.
+## 8. Test single sign-on [#](#test)
+
+Go to `/sso-login`, enter your domain, and sign in as a test user:
+
+- A user whose groups match a mapped role lands in the workspace with that role.
+- A user with **no matching group** lands on the pending-assignment screen (expected) rather than being denied — it resolves as soon as an admin maps their group.
 
 ## Troubleshooting [#](#troubleshooting)
 
 **No email, or missing name/groups after a successful redirect back from Shibboleth.**
-This is almost always a missing (or mis-scoped) `attribute-filter.xml` policy — the attribute resolver may have the value, but Shibboleth doesn't release anything to a relying party unless a filter policy explicitly permits it. Double-check the `AttributeFilterPolicy` covers the Supabase entity ID and includes `mail`, `givenName`, `sn`, and your chosen group attribute.
+Almost always a missing or mis-scoped `attribute-filter.xml` policy — the resolver may have the value, but nothing is released until a filter policy permits it to Shelf's entity ID. Check §3 first.
 
-**Login fails right after the Shibboleth screen, with no clear error on Shelf's side.**
-Check the `NameIDFormat` your IdP is issuing for the Shelf/Supabase relying party — the Shibboleth default is `transient`, which Supabase rejects. It must be `persistent` (or `emailAddress`). See [Configure a persistent NameID](#configure-a-persistent-nameid-required).
+**Login fails immediately after the Shibboleth screen, with no clear error.**
+Your IdP is issuing a `transient` NameID (the default). It must be `persistent` (or `emailAddress`) for the Shelf relying party — see §2.
 
-**User logs in but always lands on the pending-assignment screen, even though you mapped their group.**
-This is a group **value mismatch** — the string Shibboleth actually released doesn't match what's pasted in Shelf's settings byte-for-byte (matching is case-insensitive/trimmed, but not fuzzy). Ask your identity team for a sample SAML assertion (or check the IdP's audit log) to confirm the exact value being released for that user, then update the mapping in Shelf to match it exactly.
+**A user always lands on the pending-assignment screen even though you mapped their group.**
+The string the IdP released doesn't match what's pasted in Shelf. Matching is case-insensitive and trimmed, but not fuzzy. Get a sample assertion for that user and paste the exact value.
