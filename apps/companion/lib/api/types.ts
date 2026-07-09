@@ -470,6 +470,43 @@ export type BookingAsset = {
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
   kit: { id: string; name: string } | null;
+  // Quantity-tracked fields. The server sends `quantity` for every asset;
+  // `type`/`unitOfMeasure`/`consumptionType` + the `remaining*` counts are what
+  // the check-in / check-out pickers use. Optional for back-compat with older
+  // server responses (the app falls back to bare-scan behaviour when absent).
+  type?: AssetType;
+  quantity?: number;
+  unitOfMeasure?: string | null;
+  consumptionType?: ConsumptionType | null;
+  assetKitId?: string | null;
+  /** Units currently checked out on this booking that can still be checked in. */
+  remainingToCheckIn?: number;
+  /** Units still reserved on this booking that can still be checked out. */
+  remainingToCheckOut?: number;
+};
+
+/**
+ * Per-asset check-in disposition for a QUANTITY_TRACKED asset: how many of the
+ * checked-out units were returned / consumed / lost / damaged. Sum must be
+ * <= the asset's `remainingToCheckIn`. Mirrors the web check-in drawer.
+ */
+export type CheckinDisposition = {
+  assetId: string;
+  bookingAssetId?: string | null;
+  returned?: number;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+};
+
+/**
+ * Per-asset check-out disposition for a QUANTITY_TRACKED asset: how many units
+ * to take now. `quantity` must be <= the asset's `remainingToCheckOut`.
+ */
+export type CheckoutDisposition = {
+  assetId: string;
+  bookingAssetId?: string | null;
+  quantity: number;
 };
 
 /**
@@ -522,6 +559,26 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
+   * computed server-side by the SAME shared helper the web booking overview
+   * uses, so the mobile progress bar shows identical numbers to web. `null` /
+   * absent from an older server (rolling deploy) — the card is then omitted.
+   */
+  lifecycleProgress?: {
+    totalUnits: number;
+    bookedCount: number;
+    partialCount: number;
+    checkedOutCount: number;
+    returnedCount: number;
+    checkoutProgressCount: number;
+    checkoutProgressPercentage: number;
+    checkinProgressCount: number;
+    checkinProgressPercentage: number;
+    hasPartialCheckouts: boolean;
+    hasPartialCheckins: boolean;
+    countMode: "assets" | "units";
+  } | null;
 };
 
 export type BookingDetailResponse = {
