@@ -8579,6 +8579,13 @@ export async function getBookings(params: {
   orderDirection?: SortingDirection;
   kitId?: string;
   tags?: Tag["id"][];
+  /**
+   * Skip the `db.booking.count` companion query and return `bookingCount: 0`.
+   * For callers that only need the rows and never read the total (e.g. the
+   * iCal feed), this avoids a wasted aggregate on every call. Defaults to
+   * `false`, so paginated callers are unaffected.
+   */
+  skipCount?: boolean;
 }) {
   const {
     organizationId,
@@ -8599,6 +8606,7 @@ export async function getBookings(params: {
     orderDirection = "asc",
     kitId,
     tags,
+    skipCount = false,
   } = params;
 
   try {
@@ -8865,7 +8873,9 @@ export async function getBookings(params: {
           ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
         ],
       }),
-      db.booking.count({ where }),
+      // Callers that never read the total (skipCount) avoid the aggregate
+      // while the row fetch above still runs; the normal path is unchanged.
+      skipCount ? Promise.resolve(0) : db.booking.count({ where }),
     ]);
 
     return { bookings, bookingCount };
@@ -9851,6 +9861,127 @@ export async function getBookingsForCalendar(params: {
       message:
         "Something went wrong while fetching the bookings for the calendar. Please try again or contact support.",
       additionalData: { ...params },
+      label,
+    });
+  }
+}
+
+/**
+ * A booking shaped for the iCal feed: scalars + custodian + asset titles.
+ * The literal `include` keeps the Prisma payload type precise for the route.
+ * Assets are reached through the `bookingAssets` pivot (`ba.asset.title`).
+ */
+export type ICalFeedBooking = Prisma.BookingGetPayload<{
+  include: {
+    custodianUser: true;
+    custodianTeamMember: true;
+    bookingAssets: { select: { asset: { select: { title: true } } } };
+  };
+}>;
+
+/**
+ * Fetches the bookings to render into a member's subscribable iCal feed.
+ *
+ * Scoping (minus unconfirmed DRAFTs): members who can see all bookings get the
+ * whole workspace; self-service/base members are restricted to their own —
+ * matched by custodian user OR their linked team member — which can only ever
+ * *narrow* visibility to this member, never widen it. DRAFT, ARCHIVED and
+ * CANCELLED bookings are excluded, and results are windowed (~last month → next
+ * year) so the feed stays bounded.
+ *
+ * @param params.organizationId - Workspace the feed belongs to
+ * @param params.userId - The subscribing member
+ * @param params.canSeeAllBookings - Derived from the member's role + org settings
+ * @returns Bookings with custodian + asset titles for VEVENT rendering
+ * @throws {ShelfError} If a restricted member has no team-member record, or on a DB error
+ */
+export async function getBookingsForICalFeed(params: {
+  organizationId: Organization["id"];
+  userId: string;
+  canSeeAllBookings: boolean;
+}): Promise<ICalFeedBooking[]> {
+  const { organizationId, userId, canSeeAllBookings } = params;
+
+  // Bounded window: recent past through ~1 year out.
+  const now = new Date();
+  const bookingFrom = new Date(now);
+  bookingFrom.setMonth(bookingFrom.getMonth() - 1);
+  const bookingTo = new Date(now);
+  bookingTo.setFullYear(bookingTo.getFullYear() + 1);
+
+  // Members without the "see all bookings" override only get their own bookings,
+  // matched by custodian user OR their linked team member (the documented legacy
+  // case in getBookingsFilterData where a booking is assigned to the team member
+  // but custodianUserId is null). getBookings ORs the two, so this can only ever
+  // narrow visibility to this member's own bookings — never widen it.
+  let custodianUserId: string | null = null;
+  let custodianTeamMemberIds: string[] | null = null;
+  if (!canSeeAllBookings) {
+    const teamMember = await db.teamMember.findFirst({
+      where: { userId, organizationId },
+      select: { id: true },
+    });
+    if (!teamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message:
+          "You are not part of a team in this organization. Please contact your organization admin to resolve this.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+    custodianUserId = userId;
+    custodianTeamMemberIds = [teamMember.id];
+  }
+
+  try {
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      // Return every matching booking in the window (takeAll ignores perPage).
+      // Bounded by the ~13-month window for a single workspace, and the public
+      // feed route is rate-limited per feed (calendarFeedRateLimit, keyed by the
+      // secret-token path — not by IP, since calendar providers share rotating
+      // egress IPs), so this is not an amplification vector. Revisit with
+      // windowed pagination only if a workspace ever has an impractically large
+      // booking volume.
+      takeAll: true,
+      // The feed renders rows only; skip the wasted COUNT companion query.
+      skipCount: true,
+      custodianUserId,
+      custodianTeamMemberIds,
+      statuses: [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+        BookingStatus.COMPLETE,
+      ],
+      bookingFrom,
+      bookingTo,
+      // Assets come through the `bookingAssets` pivot; a tight nested select
+      // (title only) overrides getBookings' heavier default assets payload.
+      extraInclude: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        bookingAssets: { select: { asset: { select: { title: true } } } },
+      },
+    });
+
+    // `getBookings`' declared return type is computed from its literal
+    // `include`, not the `extraInclude` we pass, so the runtime shape (custodian
+    // relations + title-only bookingAssets) is narrower/wider than the static
+    // type in ways TS can't reconcile with a direct assertion. Cast through
+    // `unknown` — the `extraInclude` above is what actually guarantees the
+    // ICalFeedBooking shape at runtime.
+    return bookings as unknown as ICalFeedBooking[];
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings for the calendar feed.",
+      additionalData: { organizationId, userId },
       label,
     });
   }
