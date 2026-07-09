@@ -1,4 +1,4 @@
-import { AssetStatus, OrganizationRoles } from "@prisma/client";
+import { AssetStatus, AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -8,7 +8,12 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { getPartiallyCheckedInAssetIds } from "~/modules/booking/service.server";
+import {
+  computeBookingAssetRemaining,
+  computeBookingAssetRemainingToCheckOut,
+  getPartiallyCheckedInAssetIds,
+} from "~/modules/booking/service.server";
+import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -99,6 +104,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // Quantity-tracked metadata so the app can render the
+                // check-in / check-out quantity + disposition pickers: `type`
+                // gates the picker to QT assets, `consumptionType` decides
+                // return-vs-consume wording, `unitOfMeasure` labels the count.
+                type: true,
+                unitOfMeasure: true,
+                consumptionType: true,
                 mainImage: true,
                 category: {
                   select: { id: true, name: true, color: true },
@@ -207,6 +219,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     });
 
+    // Per-QUANTITY_TRACKED-asset remaining, computed up-front so the capability
+    // flags below can reason about UNITS, not the asset's global status.
+    const qtRemaining = await Promise.all(
+      assets
+        .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+        .map(async (a) => {
+          const [remainingToCheckIn, remainingToCheckOut] = await Promise.all([
+            computeBookingAssetRemaining(db, booking.id, a.id),
+            computeBookingAssetRemainingToCheckOut(db, booking.id, a.id),
+          ]);
+          return { assetId: a.id, remainingToCheckIn, remainingToCheckOut };
+        })
+    );
+    const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
+
     // Compute booking capability flags
     const checkedOutCount = assets.filter(
       (a) => a.status === AssetStatus.CHECKED_OUT
@@ -214,9 +241,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const totalAssets = assets.length;
 
     const canCheckout = booking.status === "RESERVED" && totalAssets > 0;
+    // Checkinable while ONGOING/OVERDUE AND something is still to check in.
+    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
+    // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
+    // damaged) — the SAME "remaining" the web check-in drawer caps at. The old
+    // `checkedOutCount > 0` gate hid check-in on a partially-checked-out QT
+    // booking, whose asset status stays AVAILABLE while units are still booked.
+    const hasCheckinable = assets.some((a) => {
+      if (a.type === AssetType.QUANTITY_TRACKED) {
+        const rem = remainingByAsset.get(a.id);
+        return rem ? rem.remainingToCheckIn > 0 : false;
+      }
+      return a.status === AssetStatus.CHECKED_OUT;
+    });
     const canCheckin =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
-      checkedOutCount > 0;
+      hasCheckinable;
 
     // Quick "check in all" is disallowed when the workspace requires EXPLICIT
     // (scan/select) check-in for the caller's role — mirror the web policy
@@ -316,6 +356,62 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       0
     );
 
+    // Attach the per-asset remaining (computed up-front, above) to each QT
+    // asset so the app's pickers can cap inputs; INDIVIDUAL rows pass through
+    // unchanged.
+    const assetsForResponse = assets.map((a) => {
+      const rem = remainingByAsset.get(a.id);
+      return rem
+        ? {
+            ...a,
+            remainingToCheckIn: rem.remainingToCheckIn,
+            remainingToCheckOut: rem.remainingToCheckOut,
+          }
+        : a;
+    });
+
+    // Segmented lifecycle progress (Booked / Partial / Checked out / Returned)
+    // for the booking's progress bar — computed with the SAME shared helper the
+    // web booking overview uses (`calculateBookingLifecycleProgress`), so the
+    // mobile bar and the web bar can never disagree. QT rows bucket by their
+    // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
+    // `checkedOutAssetIds` (assets with a PartialBookingCheckout record) drives
+    // the COMPLETE-branch "was it ever out?" test; an empty list means an
+    // all-at-once checkout.
+    const partialCheckoutRows = await db.partialBookingCheckout.findMany({
+      where: { bookingId: booking.id },
+      select: { assetIds: true },
+    });
+    const checkedOutAssetIds = [
+      ...new Set(partialCheckoutRows.flatMap((r) => r.assetIds)),
+    ];
+    const lifecycleProgress = calculateBookingLifecycleProgress({
+      bookingAssets: assets.map((a) => {
+        const isQty = a.type === AssetType.QUANTITY_TRACKED;
+        const rem = remainingByAsset.get(a.id);
+        const booked = a.quantity ?? 0;
+        return {
+          id: a.id,
+          kitId: a.kitId,
+          status: a.status,
+          assetType: a.type,
+          bookedQuantity: isQty ? booked : undefined,
+          // checked-out = booked − still-to-check-out; dispositioned =
+          // booked − still-to-check-in. Both from the per-asset remaining
+          // computed above (asset-level sum across slices — exact for the
+          // standalone QT rows that are the mobile-common case).
+          checkedOutQuantity:
+            isQty && rem ? Math.max(0, booked - rem.remainingToCheckOut) : 0,
+          dispositionedQuantity:
+            isQty && rem ? Math.max(0, booked - rem.remainingToCheckIn) : 0,
+        };
+      }),
+      checkedInAssetIds,
+      checkedOutAssetIds,
+      bookingStatus: booking.status,
+      countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
+    });
+
     return data({
       booking: {
         id: booking.id,
@@ -330,12 +426,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianUser: booking.custodianUser,
         custodianTeamMember: booking.custodianTeamMember,
         tags: booking.tags,
-        assets,
+        assets: assetsForResponse,
         assetCount: totalAssets,
         checkedOutCount,
         modelRequests,
         modelRequestCount,
         outstandingModelUnitCount,
+        lifecycleProgress,
       },
       checkedInAssetIds,
       canCheckout,
