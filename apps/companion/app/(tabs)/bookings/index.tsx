@@ -370,19 +370,33 @@ function BookingsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
+              {/* A RESERVED booking is only "ready to check out" when it has
+                  concrete assets AND no outstanding book-by-model reservations
+                  (the server hard-blocks checkout until every reserved unit is
+                  assigned). Otherwise the honest next step is to assign/add
+                  assets, so the hint points there instead of promising a
+                  checkout that isn't possible yet. */}
               <Ionicons
                 name={
-                  item.status === "RESERVED"
+                  item.status !== "RESERVED"
+                    ? "log-in-outline"
+                    : (item.outstandingModelCount ?? 0) > 0
+                    ? "cube-outline"
+                    : item.assetCount > 0
                     ? "log-out-outline"
-                    : "log-in-outline"
+                    : "add-outline"
                 }
                 size={14}
                 color={colors.iconDefault}
               />
               <Text style={styles.actionHintText}>
-                {item.status === "RESERVED"
+                {item.status !== "RESERVED"
+                  ? "Tap to check in"
+                  : (item.outstandingModelCount ?? 0) > 0
+                  ? "Assign assets to check out"
+                  : item.assetCount > 0
                   ? "Ready to check out"
-                  : "Tap to check in"}
+                  : "Add assets to check out"}
               </Text>
             </View>
           )}

@@ -932,16 +932,6 @@ export default function BookingDetailScreen() {
   // omits the card rather than crashing.
   const lp = booking.lifecycleProgress ?? null;
 
-  // Progressive check-out stays available while the booking is active AND still
-  // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
-  // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
-  // gates the full "Check Out All" button), so we derive our own flag for the
-  // partial path — otherwise "Select to Check Out" disappears the moment the
-  // first batch flips the booking to ONGOING.
-  const canPartialCheckout =
-    reservedCount > 0 &&
-    ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
-
   // Book-by-model reservations still awaiting assignment. Fulfilled rows
   // (`fulfilledAt` set) are hidden here — the concrete assets they became
   // already appear in the assets list, so showing them too would double up.
@@ -952,6 +942,24 @@ export default function BookingDetailScreen() {
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
     (mr) => mr.fulfilledAt === null
   );
+  // A booking with unfulfilled model reservations can't be checked out at all
+  // (full OR partial): the shared checkout service hard-blocks RESERVED →
+  // ONGOING until every request is assigned to concrete assets. So gate BOTH
+  // checkout paths on this — the app surfaces an "Assign to check out" CTA
+  // instead of a checkout the server would reject. (`canCheckout` from the
+  // loader already accounts for this; `canPartialCheckout` is derived here.)
+  const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
+
+  // Progressive check-out stays available while the booking is active AND still
+  // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
+  // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
+  // gates the full "Check Out All" button), so we derive our own flag for the
+  // partial path — otherwise "Select to Check Out" disappears the moment the
+  // first batch flips the booking to ONGOING.
+  const canPartialCheckout =
+    reservedCount > 0 &&
+    !hasOutstandingModelRequests &&
+    ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   // Same gate the manage buttons use: an editable booking, and self-service
   // users only on their own DRAFTs (server re-checks ownership + status).
@@ -1058,6 +1066,11 @@ export default function BookingDetailScreen() {
                     {booking.assetCount} total
                     {booking.checkedOutCount > 0 &&
                       `, ${booking.checkedOutCount} checked out`}
+                    {/* Book-by-model: surface reserved-but-not-yet-assigned
+                        units so "0 total" never reads as an empty booking when
+                        it actually holds a reservation. */}
+                    {booking.outstandingModelUnitCount > 0 &&
+                      `, ${booking.outstandingModelUnitCount} reserved`}
                   </Text>
                 </View>
 
@@ -1393,6 +1406,41 @@ export default function BookingDetailScreen() {
                   ]}
                 >
                   {selectMode === "checkout" ? "Cancel" : "Select to Check Out"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Book-by-model: a RESERVED booking with unfulfilled reservations
+                has no checkout button (the server hard-blocks checkout until
+                every reserved unit is assigned to a concrete asset). Instead of
+                a dead-end, point the operator straight at the assign step — the
+                actual path to checkout — mirroring web's fulfil-and-checkout. */}
+            {booking.status === "RESERVED" && hasOutstandingModelRequests && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/bookings/add-assets?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&from=${encodeURIComponent(
+                      booking.from
+                    )}&to=${encodeURIComponent(booking.to)}`
+                  )
+                }
+                accessibilityLabel={`Assign ${booking.outstandingModelUnitCount} reserved units to check out`}
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="cube-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>
+                  Assign {booking.outstandingModelUnitCount} unit
+                  {booking.outstandingModelUnitCount === 1 ? "" : "s"} to check
+                  out
                 </Text>
               </TouchableOpacity>
             )}
