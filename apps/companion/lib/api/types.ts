@@ -704,6 +704,13 @@ export type AvailableAsset = {
   mainImageExpiration: string | null;
   thumbnailImage: string | null;
   kitId: string | null;
+  /**
+   * The workspace's display code for this asset (QR Code ID by default, or a
+   * SAM ID / barcode per the org preference), resolved server-side. Shown on
+   * the picker row so the operator can match a physical label by eye and toggle
+   * the exact unit. Null when the asset has no resolvable code.
+   */
+  displayCode?: { value: string; label: string } | null;
 };
 
 export type AvailableAssetsResponse = {
