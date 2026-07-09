@@ -1411,19 +1411,21 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations
-                has no checkout button (the server hard-blocks checkout until
-                every reserved unit is assigned to a concrete asset). Route the
-                operator to the SCANNER — each matching scan materialises the
-                reservation (materializeModelRequestForAsset in the shared
-                add-scanned path), draining it toward checkout. Scan-first
-                matches web's fulfil-and-checkout, and it IS the point of
-                book-by-model: reserve the count now, scan the physical items
-                when you grab them. (Browse to Add above stays for hand-picking.)
-                Gated `!isSelfService` to match the add/browse affordances above:
-                a self-service custodian can only edit a DRAFT booking, and the
-                mobile add-scanned-assets action rejects their non-DRAFT edits,
-                so on a RESERVED booking the assign flow can't succeed for them —
-                showing the CTA would just lead to a rejected submit. */}
+                has no plain checkout button (the server hard-blocks checkout
+                until every reserved unit is assigned to a concrete asset).
+                Route the operator to the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, they scan
+                the physical units, and on submit the reservations are
+                materialised AND the booking is checked out in one atomic call
+                (`fulfilModelRequestsAndCheckout`) — full web parity with the
+                web `fulfil-and-checkout` scanner. Scan-first IS the point of
+                book-by-model: reserve the count now, scan the items when you
+                grab them, no browse picker. (Browse to Add above stays for
+                hand-picking.) Gated `!isSelfService` to match the add/browse
+                affordances above: a self-service custodian can only edit a
+                DRAFT booking, so on a RESERVED booking the assign+checkout flow
+                can't succeed for them — showing the CTA would just lead to a
+                rejected submit. */}
             {!isSelfService &&
               booking.status === "RESERVED" &&
               hasOutstandingModelRequests && (
@@ -1435,10 +1437,14 @@ export default function BookingDetailScreen() {
                         booking.id
                       }&bookingName=${encodeURIComponent(
                         booking.name
-                      )}&bookingAction=add`
+                      )}&bookingAction=fulfil`
                     )
                   }
-                  accessibilityLabel={`Scan to assign ${booking.outstandingModelUnitCount} reserved units and check out`}
+                  accessibilityLabel={`Scan to assign ${
+                    booking.outstandingModelUnitCount
+                  } reserved unit${
+                    booking.outstandingModelUnitCount === 1 ? "" : "s"
+                  } and check out`}
                   accessibilityRole="button"
                 >
                   <Ionicons
@@ -1447,8 +1453,7 @@ export default function BookingDetailScreen() {
                     color={colors.primaryForeground}
                   />
                   <Text style={styles.actionButtonText}>
-                    Scan to assign {booking.outstandingModelUnitCount} unit
-                    {booking.outstandingModelUnitCount === 1 ? "" : "s"}
+                    Scan to assign & check out
                   </Text>
                 </TouchableOpacity>
               )}
