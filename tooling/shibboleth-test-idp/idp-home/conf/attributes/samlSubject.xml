@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    Note that all built-in Attribute rules rely on URI-naming and thus include the implied settings:
+    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:2.0:attrname-format:uri</prop>
+
+    NameID rules are decode-only and apply primarily to SAML proxying as well as future SP plugins.
+    -->
+
+    <!--
+    http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+    https://wiki.oasis-open.org/security/SAMLSubjectIDAttr
+    -->
+
+    <bean parent="shibboleth.TranscodingRuleLoader">
+    <constructor-arg>
+    <list>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">samlSubjectID</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oasis:names:tc:SAML:attribute:subject-id</prop>
+                    <prop key="displayName.en">Unique ID</prop>
+                    <prop key="displayName.de">Eindeutige ID</prop>
+                    <prop key="displayName.fr">ID unique</prop>
+                    <prop key="displayName.it">ID unico</prop>
+                    <prop key="displayName.ja">サブジェクトID</prop>
+                    <prop key="displayName.sk">Jedinečné ID</prop>
+                    <prop key="description.en">A unique identifier for a person, mainly for inter-institutional user identification</prop>
+                    <prop key="description.de">Eindeutige Benutzeridentifikation</prop>
+                    <prop key="description.de-ch">Eindeutige Benützeridentifikation</prop>
+                    <prop key="description.fr">Identifiant unique de l'utilisateur</prop>
+                    <prop key="description.it">Un identificativo personale che identifica chiaramente l'utente in seno alla sua organizzazione</prop>
+                    <prop key="description.ja">フェデレーション内で一意で永続的かつ難読化された利用者識別子(eduPersonUniqueIdの後継)</prop>
+                    <prop key="description.sk">Jedinečný identifikátor osoby, najmä na účely medziinštitucionálnej identifikácie používateľa.</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">samlPairwiseID</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oasis:names:tc:SAML:attribute:pairwise-id</prop>
+                    <prop key="displayName.en">Pairwise ID</prop>
+                    <prop key="displayName.de">Pairwise ID</prop>
+                    <prop key="displayName.fr">Pairwise ID</prop>
+                    <prop key="displayName.it">Pairwise ID</prop>
+                    <prop key="displayName.ja">ペアワイズID</prop>
+                    <prop key="displayName.sk">Párové ID</prop>
+                    <prop key="description.en">Pairwise ID: A unique identifier for a person, different for each service provider</prop>
+                    <prop key="description.de">Pairwise ID: Eindeutige Benutzeridentifikation, unterschiedlich pro Service Provider</prop>
+                    <prop key="description.de-ch">Pairwise ID: Eindeutige Benützeridentifikation, unterschiedlich pro Service Provider</prop>
+                    <prop key="description.fr">Pairwise ID: Un identifiant unique de l'utilisateur, différent pour chaque fournisseur de service</prop>
+                    <prop key="description.it">Pairwise ID: identificativo unico della persona, differente per ogni fornitore di servizio</prop>
+                    <prop key="description.ja">フェデレーション内で一意かつSP毎に送出される値が異なる利用者識別子(eduPersonTargetedIDの後継)</prop>
+                    <prop key="description.sk">Párové ID: Jedinečný identifikátor osoby, odlišný pre každého poskytovateľa služieb</prop>
+                </props>
+            </property>
+        </bean>
+
+        <!-- The most common SAML NameID Formats encountered in the wild. -->
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">persistent-id</prop>
+                    <prop key="transcoder">SAML2StringNameIDTranscoder</prop>
+                    <prop key="encoder">false</prop>
+                    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</prop>
+                    <prop key="saml2.defaultQualifiers">true</prop>
+                    <prop key="saml2.valueTemplate">$Name!!$NameQualifier!!$SPNameQualifier</prop>
+                    <prop key="displayName.en">Persistent ID</prop>
+                    <prop key="displayName.de">Persistent ID</prop>
+                    <prop key="displayName.fr">Persistent ID</prop>
+                    <prop key="displayName.it">Persistent ID</prop>
+                    <prop key="displayName.ja">ペアワイズID</prop>
+                    <prop key="description.en">Persistent ID: A unique identifier for a person, different for each service provider</prop>
+                    <prop key="description.de">Persistent ID: Eindeutige Benutzeridentifikation, unterschiedlich pro Service Provider</prop>
+                    <prop key="description.de-ch">Persistent ID: Eindeutige Benützeridentifikation, unterschiedlich pro Service Provider</prop>
+                    <prop key="description.fr">Persistent ID: Un identifiant unique de l'utilisateur, différent pour chaque fournisseur de service</prop>
+                    <prop key="description.it">Persistent ID: identificativo unico della persona, differente per ogni fornitore di servizio</prop>
+                    <prop key="description.ja">フェデレーション内で一意かつSP毎に送出される値が異なる利用者識別子(eduPersonTargetedIDの後継)</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">mail</prop>
+                    <prop key="transcoder">SAML2StringNameIDTranscoder</prop>
+                    <prop key="encoder">false</prop>
+                    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</prop>
+                    <prop key="saml2.defaultQualifiers">false</prop>
+                    <prop key="saml2.valueTemplate">$Name</prop>
+                    <prop key="displayName.en">E-mail</prop>
+                    <prop key="displayName.de">E-Mail</prop>
+                    <prop key="displayName.fr">Email</prop>
+                    <prop key="displayName.it">E-mail</prop>
+                    <prop key="displayName.ja">メールアドレス</prop>
+                    <prop key="displayName.sk">E-mail</prop>
+                    <prop key="description.en">E-Mail: Preferred address for e-mail to be sent to this person</prop>
+                    <prop key="description.de">E-Mail-Adresse</prop>
+                    <prop key="description.de-ch">E-Mail Adresse</prop>
+                    <prop key="description.fr">Adresse de courrier électronique</prop>
+                    <prop key="description.it">E-Mail: l'indirizzo e-mail preferito dall'utente</prop>
+                    <prop key="description.ja">メールアドレス</prop>
+                    <prop key="description.sk">E-mail</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">distinguishedName</prop>
+                    <prop key="transcoder">SAML2StringNameIDTranscoder</prop>
+                    <prop key="encoder">false</prop>
+                    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName</prop>
+                    <prop key="saml2.defaultQualifiers">false</prop>
+                    <prop key="saml2.valueTemplate">$Name</prop>
+                    <prop key="displayName.en">Distinguished name</prop>
+                </props>
+            </property>
+        </bean>
+
+    </list>
+    </constructor-arg>
+    </bean>
+    
+</beans>

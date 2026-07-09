@@ -113,8 +113,10 @@ Once you have the groups ready, you need to add their **names** in the workspace
 
 Go to the workspace settings and place the **name** of each group next to its matching role (Administrator, Self service, Base). You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
 
+Each field also accepts **more than one group name, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Self service > Base).
+
 > [!IMPORTANT]
-> These fields are case sensitive. The name must be entered exactly as the group name appears in Google Workspace.
+> Enter each group name exactly as it appears in Google Workspace. Matching ignores letter case and surrounding spaces, but copying the exact name is the safest way to avoid a mismatch.
 
 ![step-9](../../img/google-workspace-step-9.png)
 
