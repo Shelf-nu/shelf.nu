@@ -140,7 +140,7 @@ Enter the value your IdP releases next to each role you use:
 Rules to know:
 
 - **Paste the value exactly** as your IdP releases it. If unsure, ask your identity team for a sample assertion (or check the IdP audit log) for the precise string.
-- **Multiple groups → one role:** each field accepts **several values, comma-separated** (e.g. `cn=it-staff,…, cn=av-services,…`) — anyone in _any_ of them gets that role. Useful for reusing existing groups.
+- **Multiple groups → one role:** each field accepts **several values, comma-separated** (e.g. Grouper paths `your:apps:shelf:it-staff, your:apps:shelf:av-services`) — anyone in _any_ of them gets that role. Note: a value that itself contains commas (a full LDAP **DN** like `cn=…,ou=…,dc=…`) can only be used **on its own**, not comma-listed — to grant one role from several DN-shaped groups, release a comma-free identifier (a Grouper path or an `eduPersonEntitlement`) for them instead.
 - **Matching is trimmed and case-insensitive** — but a leading/trailing scope difference still counts as a mismatch, so copy the real value.
 - **Precedence is Administrator > Self service > Base.** A user whose groups match more than one role gets the highest. A user still only ever holds one role per workspace.
 - Users can be members of **many** groups — Shelf matches any mapped one regardless of its position in the list. You only need to map the roles you actually use, but at least one must be mapped.

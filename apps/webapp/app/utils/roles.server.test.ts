@@ -66,7 +66,7 @@ describe("getRoleFromGroupId", () => {
     );
   });
 
-  it("matches a full LDAP DN / scoped-affinity string value", () => {
+  it("matches a full LDAP DN as a single whole-field value", () => {
     const sso = makeSso({
       baseUserGroupId: "cn=shelf-base,ou=groups,dc=example,dc=edu",
     });
