@@ -549,13 +549,22 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
             required, the rest can be left blank.
           </p>
           <p className="mt-2">
-            Enter the exact value your identity provider sends in the user's{" "}
+            Enter the value(s) your identity provider sends in the user's{" "}
             <b>groups</b> claim. <b>Google Workspace</b> returns group{" "}
             <b>names</b>. <b>Microsoft Entra</b> returns the group{" "}
             <b>Object ID</b>. <b>Okta</b> and most other providers return the
             group <b>name</b> (depending on how your groups attribute statement
-            is configured). Values are case-sensitive and must match your IdP
-            exactly.
+            is configured). <b>Shibboleth</b> releases the value from your{" "}
+            <b>isMemberOf</b>, <b>eduPersonEntitlement</b>, or{" "}
+            <b>eduPersonScopedAffiliation</b> attribute (e.g.{" "}
+            <b>staff@your.edu</b>, a Grouper path, or a group name/DN). Matching
+            is trimmed and case-insensitive, but paste the value(s) exactly as
+            your IdP sends them.
+          </p>
+          <p className="mt-2">
+            Each field accepts <b>one or more group IDs, separated by commas</b>{" "}
+            (e.g. <b>it-admins, shelf-admins</b>) — useful when more than one
+            IdP group should map to the same role.
           </p>
         </div>
 

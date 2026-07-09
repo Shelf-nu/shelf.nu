@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:util="http://www.springframework.org/schema/util" xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:c="http://www.springframework.org/schema/c" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                        http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+
+    default-init-method="initialize"
+    default-destroy-method="destroy">
+
+    <!--
+    This bean defines a mapping between audit log categories and formatting strings.
+    -->
+    <util:map id="shibboleth.AuditFormattingMap">
+        <entry key="Shibboleth-Audit" value="%a|%ST|%T|%u|%SP|%i|%ac|%t|%attr|%n|%f|%SSO|%XX|%XA|%b|%bb|%e|%S|%SS|%s|%UA" />
+    </util:map>
+
+    <!-- Override the format of date/time fields in the log and/or convert to default time zone. -->
+    <!--
+    <bean id="shibboleth.AuditDateTimeFormat" class="java.lang.String" c:_0="yyyy-MM-dd'T'HH:mm:ss.SSSZZ" />
+    <util:constant id="shibboleth.AuditDefaultTimeZone" static-field="java.lang.Boolean.TRUE" />
+    -->
+
+    <!-- Allows auditing to be disabled selectively for particular profiles/flows. -->
+    <util:list id="shibboleth.AuditSuppressedProfiles">
+        <value>http://shibboleth.net/ns/profiles/status</value>
+        <value>http://shibboleth.net/ns/profiles/mdquery</value>
+    </util:list>
+
+    <!--
+    You can freely add/change this map to map constants or frequently appearing strings into
+    shorter values in the audit log.
+    -->
+    <util:map id="shibboleth.AuditFieldReplacementMap">
+        <entry key="urn:oasis:names:tc:SAML:1.0:am:password" value="password" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:ac:classes:Password" value="password" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" value="password" />
+        <entry key="urn:mace:shibboleth:1.0:nameIdentifier" value="transient" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" value="transient" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" value="persistent" />
+        <entry key="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" value="emailAddress" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:status:Success" value="Success" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:status:Requester" value="Requester" />
+        <entry key="urn:oasis:names:tc:SAML:2.0:status:Responder" value="Responder" />
+        <entry key="http://www.w3.org/2009/xmlenc11#aes128-gcm" value="AES128-GCM" />
+        <entry key="http://www.w3.org/2009/xmlenc11#aes192-gcm" value="AES192-GCM" />
+        <entry key="http://www.w3.org/2009/xmlenc11#aes256-gcm" value="AES256-GCM" />
+        <entry key="http://www.w3.org/2001/04/xmlenc#aes128-cbc" value="AES128-CBC" />
+        <entry key="http://www.w3.org/2001/04/xmlenc#aes192-cbc" value="AES192-CBC" />
+        <entry key="http://www.w3.org/2001/04/xmlenc#aes256-cbc" value="AES256-CBC" />
+    </util:map>
+
+</beans>
