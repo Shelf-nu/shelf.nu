@@ -28,6 +28,7 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { QuantityBadge } from "@/components/quantity-badge";
 import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
@@ -292,18 +293,13 @@ function AssetsListContent() {
                   </Text>
                 </View>
               )}
-              {/* Quantity badge — QUANTITY_TRACKED assets only (additive) */}
+              {/* Quantity chip — shared QuantityBadge (QUANTITY_TRACKED only).
+                  The number here is workspace stock. */}
               {quantityLabel && (
-                <View style={styles.quantityBadge}>
-                  <Ionicons
-                    name="layers-outline"
-                    size={11}
-                    color={colors.muted}
-                  />
-                  <Text style={styles.quantityBadgeText} numberOfLines={1}>
-                    {quantityLabel}
-                  </Text>
-                </View>
+                <QuantityBadge
+                  value={item.quantity}
+                  unitOfMeasure={item.unitOfMeasure}
+                />
               )}
             </View>
           </View>
@@ -657,26 +653,6 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
-  },
-
-  // Quantity badge — compact pill for QUANTITY_TRACKED assets. Neutral
-  // (background-tertiary) so it reads as info, not a status. Self-sized via
-  // alignSelf so it hugs its content instead of stretching the meta column.
-  quantityBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: colors.backgroundTertiary,
-    borderRadius: borderRadius.pill,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    marginTop: 2,
-    gap: 3,
-  },
-  quantityBadgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: "500",
-    color: colors.muted,
   },
 
   // Status badge — pill shape like webapp
