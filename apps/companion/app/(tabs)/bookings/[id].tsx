@@ -1412,9 +1412,13 @@ export default function BookingDetailScreen() {
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations
                 has no checkout button (the server hard-blocks checkout until
-                every reserved unit is assigned to a concrete asset). Instead of
-                a dead-end, point the operator straight at the assign step — the
-                actual path to checkout — mirroring web's fulfil-and-checkout.
+                every reserved unit is assigned to a concrete asset). Route the
+                operator to the SCANNER — each matching scan materialises the
+                reservation (materializeModelRequestForAsset in the shared
+                add-scanned path), draining it toward checkout. Scan-first
+                matches web's fulfil-and-checkout, and it IS the point of
+                book-by-model: reserve the count now, scan the physical items
+                when you grab them. (Browse to Add above stays for hand-picking.)
                 Gated `!isSelfService` to match the add/browse affordances above:
                 a self-service custodian can only edit a DRAFT booking, and the
                 mobile add-scanned-assets action rejects their non-DRAFT edits,
@@ -1427,27 +1431,24 @@ export default function BookingDetailScreen() {
                   style={styles.actionButton}
                   onPress={() =>
                     router.push(
-                      `/(tabs)/bookings/add-assets?bookingId=${
+                      `/(tabs)/scanner?bookingId=${
                         booking.id
                       }&bookingName=${encodeURIComponent(
                         booking.name
-                      )}&from=${encodeURIComponent(
-                        booking.from
-                      )}&to=${encodeURIComponent(booking.to)}`
+                      )}&bookingAction=add`
                     )
                   }
-                  accessibilityLabel={`Assign ${booking.outstandingModelUnitCount} reserved units to check out`}
+                  accessibilityLabel={`Scan to assign ${booking.outstandingModelUnitCount} reserved units and check out`}
                   accessibilityRole="button"
                 >
                   <Ionicons
-                    name="cube-outline"
+                    name="scan"
                     size={18}
                     color={colors.primaryForeground}
                   />
                   <Text style={styles.actionButtonText}>
-                    Assign {booking.outstandingModelUnitCount} unit
-                    {booking.outstandingModelUnitCount === 1 ? "" : "s"} to
-                    check out
+                    Scan to assign {booking.outstandingModelUnitCount} unit
+                    {booking.outstandingModelUnitCount === 1 ? "" : "s"}
                   </Text>
                 </TouchableOpacity>
               )}
