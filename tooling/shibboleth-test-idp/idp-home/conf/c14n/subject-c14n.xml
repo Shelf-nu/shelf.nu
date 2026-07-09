@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+    
+    <!-- ========================= Java Subject -> Principal Mapping ========================= -->
+
+    <!--
+    Most of the simple settings that configure these features are in subject-c14n.properties.
+    
+    You can override/extend/supplement the built-in c14n flow settings by defining additional
+    descriptors in this file, which allows for example the use of multiple "copies" of the same
+    underlying implementations to be configured to run at the same time. See docs for details.
+    -->
+
+    <!--
+    This is now a legacy bean left in place for compatibility with pre-5.2 plugins and configurations.
+    Authentication flows can directly control which free-standing c14n flows to use via new properties
+    of the form "idp.authn.Password.c14n.flows", etc. See documentation for details.
+    -->
+    <util:list id="shibboleth.PostLoginSubjectCanonicalizationFlows">
+        <ref bean="c14n/simple" />
+    </util:list>
+    
+    <!-- What SAML NameID formats do you want to support direct transformations for while proxying? -->
+    <util:list id="shibboleth.ProxyNameTransformFormats">
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:WindowsDomainQualifiedName</value>
+        <value>urn:oasis:names:tc:SAML:2.0:nameid-format:kerberos</value>
+    </util:list>
+    
+    <!--
+    Under what conditions should direct NameID mapping during proxying be allowed? By default, never.
+    Any condition can be used here; the example is suitable for enumerating a number of IdPs to allow.
+    -->
+    <bean id="shibboleth.ProxyNameTransformPredicate" parent="shibboleth.Conditions.ProxyAuthentication">
+        <constructor-arg name="collection">
+            <list>
+                <!-- <value>https://idp-proxy.example.org</value> -->
+            </list>
+        </constructor-arg>
+    </bean>
+    
+    <!--
+    Regular expression transforms to apply to incoming proxied subject names. The default empty list just
+    echoes the name through unmodified.
+    -->
+    <util:list id="shibboleth.ProxyNameTransforms">
+        <!--
+        <bean parent="shibboleth.Pair" p:first="^(.+)@example\.org$" p:second="$1" />
+        -->
+    </util:list>
+    
+    
+    <!--
+    =======================================================================
+    Flows used during SAML requests to reverse-map NameIdentifiers/NameIDs.
+    Below the list are some settings that might be useful to adjust.
+    =======================================================================
+    -->
+    <util:list id="shibboleth.SAMLSubjectCanonicalizationFlows">
+
+        <!-- The next four are for handling transient IDs (in-storage and stateless variants). -->
+        <ref bean="c14n/SAML2Transient" />
+        <ref bean="c14n/SAML2CryptoTransient" />
+        <ref bean="c14n/SAML1Transient" /> 
+        <ref bean="c14n/SAML1CryptoTransient" /> 
+        
+        <!-- Handle a SAML 2 persistent ID, provided a stored strategy is in use. -->
+        <!-- <ref bean="c14n/SAML2Persistent" /> -->
+        
+        <!--
+        Finally we have beans for decoding arbitrary SAML formats directly. By default, these are turned off,
+        having *no* circumstances for which they apply (see shibboleth.TransformNamePredicate below).
+        -->
+        <ref bean="c14n/SAML2Transform" />
+        <ref bean="c14n/SAML1Transform" />
+    </util:list>
+    
+    <!-- What SAML NameID formats do you want to support direct transformations for? -->
+    <util:list id="shibboleth.NameTransformFormats">
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName</value>
+        <value>urn:oasis:names:tc:SAML:1.1:nameid-format:WindowsDomainQualifiedName</value>
+        <value>urn:oasis:names:tc:SAML:2.0:nameid-format:kerberos</value>
+    </util:list>
+
+    <!--
+    Under what conditions should direct NameID mapping be allowed? By default, never.
+    Any condition can be used here; the example is suitable for enumerating a number of SPs to allow.
+    -->
+    <bean id="shibboleth.NameTransformPredicate" parent="shibboleth.Conditions.RelyingPartyId">
+        <constructor-arg name="candidates">
+            <list>
+                <!-- <value>https://sp.example.org</value> -->
+            </list>
+        </constructor-arg>
+    </bean>
+    
+    <!--
+    Regular expression transforms to apply to incoming subject names. The default empty list just
+    echoes the name through unmodified.
+    -->
+    <util:list id="shibboleth.NameTransforms">
+        <!--
+        <bean parent="shibboleth.Pair" p:first="^(.+)@example\.org$" p:second="$1" />
+        -->
+    </util:list>
+    
+</beans>
