@@ -28,10 +28,12 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { QuantityBadge } from "@/components/quantity-badge";
 import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -238,14 +240,23 @@ function AssetsListContent() {
         text: colors.muted,
       };
 
+      // Quantity indicator (additive) — only for QUANTITY_TRACKED assets that
+      // actually carry a quantity. INDIVIDUAL assets and pre-quantity servers
+      // resolve to null here, so the row renders exactly as before.
+      const quantityLabel = isQuantityTracked(item)
+        ? formatQuantity(item.quantity, item.unitOfMeasure)
+        : null;
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}`}
+            quantityLabel ? `, quantity ${quantityLabel}` : ""
+          }${item.category ? `, ${item.category.name}` : ""}${
+            item.location ? `, ${item.location.name}` : ""
+          }`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -281,6 +292,14 @@ function AssetsListContent() {
                     {item.location.name}
                   </Text>
                 </View>
+              )}
+              {/* Quantity chip — shared QuantityBadge (QUANTITY_TRACKED only).
+                  The number here is workspace stock. */}
+              {quantityLabel && (
+                <QuantityBadge
+                  value={item.quantity}
+                  unitOfMeasure={item.unitOfMeasure}
+                />
               )}
             </View>
           </View>

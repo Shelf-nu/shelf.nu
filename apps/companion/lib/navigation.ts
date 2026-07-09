@@ -1,4 +1,5 @@
 import { router, type Href } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 
 /**
  * Tab index routes. Pushing one of these roots that tab's stack at its list
@@ -45,4 +46,24 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
   // is the documented in-app mechanism; a bare push or a push("/tab")
   // then push(detail) does NOT anchor the list and strands the user.
   router.navigate(nestedHref ?? tabRoot, { withAnchor: true });
+}
+
+/**
+ * Open a `shelf.nu` web URL in an in-app browser (Custom Tab on Android,
+ * SFSafariViewController on iOS).
+ *
+ * Use this — NOT `Linking.openURL` — for any `https://app.shelf.nu/...` link
+ * whose path the app claims as a Universal Link / App Link (`/qr`, `/assets`,
+ * `/bookings`, `/audits`). On Android, `Linking.openURL` of a *verified*
+ * app-link is re-intercepted by the system and re-launches this app — so a
+ * deep link that fails to resolve in-app and falls back to its own web URL
+ * would loop straight back into the failing handler. An in-app browser renders
+ * the page directly without re-triggering link interception, making web
+ * fallbacks loop-safe on both platforms.
+ *
+ * @param url - the absolute https URL to open
+ * @returns the `WebBrowser.openBrowserAsync` promise (resolves when dismissed)
+ */
+export function openShelfWebUrl(url: string) {
+  return WebBrowser.openBrowserAsync(url);
 }

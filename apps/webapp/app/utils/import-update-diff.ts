@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
   AssetForUpdate,
@@ -129,8 +130,11 @@ export function analyzeUpdateHeaders(
   const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
 
   // Set of internal field names used as identifiers — skip them during
-  // column classification so they aren't treated as updatable or ignored
-  const identifierFields = new Set(
+  // column classification so they aren't treated as updatable or ignored.
+  // Typed as `Set<string>` so it accepts the now-widened
+  // `EXPORT_HEADER_TO_FIELD_MAP` lookup result (the map gained
+  // import-only aliases that aren't in `ColumnLabelKey`).
+  const identifierFields = new Set<string>(
     IDENTIFIER_COLUMNS.map((c) => c.internalField)
   );
 
@@ -351,6 +355,129 @@ export function compareCoreField(
           field: displayName,
           currentValue: asset.availableToBook ? "Yes" : "No",
           newValue: csvBool ? "Yes" : "No",
+        };
+      }
+      return null;
+    }
+
+    // ── Qty-tracked + AssetModel preview comparisons ──────────────────
+    // These fields are ONLY meaningful on the type that owns them:
+    // qty / minQuantity / unitOfMeasure / consumptionType apply to
+    // QUANTITY_TRACKED; assetModel applies to INDIVIDUAL. When the cell
+    // exists on the "wrong" type the row's other cells still apply —
+    // the actual drop happens in the apply path. The preview here
+    // surfaces the change for the matching type and silently no-ops
+    // for the other so the diff doesn't show ghost "changes" the
+    // import will silently ignore.
+    case "quantity": {
+      // Silently no-op on INDIVIDUAL rows — the apply path drops these.
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const currentQty = asset.quantity ?? 0;
+      const n = Number(csvValue);
+      if (!Number.isInteger(n) || n < 0) {
+        return {
+          field: displayName,
+          currentValue: String(currentQty),
+          newValue: csvValue,
+          warning: `"${csvValue}" is not a valid quantity (must be a non-negative whole number)`,
+        };
+      }
+      if (n !== currentQty) {
+        return {
+          field: displayName,
+          currentValue: String(currentQty),
+          newValue: String(n),
+        };
+      }
+      return null;
+    }
+
+    case "minQuantity": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const n = Number(csvValue);
+      if (!Number.isInteger(n) || n < 0) {
+        return {
+          field: displayName,
+          currentValue:
+            asset.minQuantity != null ? String(asset.minQuantity) : "(none)",
+          newValue: csvValue,
+          warning: `"${csvValue}" is not a valid min quantity (must be a non-negative whole number)`,
+        };
+      }
+      if (n !== (asset.minQuantity ?? null)) {
+        return {
+          field: displayName,
+          currentValue:
+            asset.minQuantity != null ? String(asset.minQuantity) : "(none)",
+          newValue: String(n),
+        };
+      }
+      return null;
+    }
+
+    case "unitOfMeasure": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const current = asset.unitOfMeasure ?? "";
+      if (csvValue !== current) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
+        };
+      }
+      return null;
+    }
+
+    case "consumptionType": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const upper = csvValue.toUpperCase();
+      if (upper !== "ONE_WAY" && upper !== "TWO_WAY") {
+        return {
+          field: displayName,
+          currentValue: asset.consumptionType ?? "(none)",
+          newValue: csvValue,
+          warning: `Unrecognized consumption type "${csvValue}" — must be "ONE_WAY" or "TWO_WAY"`,
+        };
+      }
+      if (upper !== asset.consumptionType) {
+        return {
+          field: displayName,
+          currentValue: asset.consumptionType ?? "(none)",
+          newValue: upper,
+        };
+      }
+      return null;
+    }
+
+    case "assetModel": {
+      // QUANTITY_TRACKED rows: emit a warning-marked FieldChange instead
+      // of swallowing the cell silently. The apply layer skips fields
+      // with `.warning` set (mirrors invalid-quantity / invalid-enum
+      // behaviour) AND the apply layer's per-row post-pass forwards the
+      // text into `result.warnings`, so the user sees the dropped cell
+      // in both the per-row summary AND the top-level "Warnings" pill.
+      // Previously this returned `null`, which meant a row carrying
+      // ONLY an assetModel cell on a QUANTITY_TRACKED asset landed in
+      // `skippedAssets` with the generic "No changes detected" reason —
+      // hiding from the user that their intent didn't take effect.
+      if (asset.type !== "INDIVIDUAL") {
+        return {
+          field: displayName,
+          currentValue: "(quantity-tracked)",
+          newValue: csvValue,
+          warning:
+            "Asset model can only be set on INDIVIDUAL assets — this asset is quantity-tracked, so the cell was ignored.",
+        };
+      }
+      // Preview can't pre-resolve the model name → id; surface the cell
+      // value vs current model id so the user sees a change is queued.
+      // The apply path does the real resolution.
+      const current = asset.assetModelId ?? "";
+      if (csvValue !== current) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
         };
       }
       return null;
@@ -823,4 +950,61 @@ export function computeAssetDiffs({
     skippedAssets,
     failedRows,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Failure Reporting
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a diagnosable per-row failure message for the bulk-update report.
+ *
+ * When `updateAsset` hits an unexpected database error it rethrows a *generic*
+ * ShelfError whose `message` is a fixed fallback ("We could not create or
+ * update this Asset. Please try again or contact support.") and which is not
+ * captured to Sentry. That fallback hides the real reason (e.g. a Prisma error
+ * code), so a failed bulk-import row currently carries no diagnosable signal.
+ *
+ * The original error is preserved on the ShelfError's `cause`. When that
+ * underlying error is present, we append its code + first line so the
+ * downloadable report explains *why* the row failed instead of repeating the
+ * opaque fallback.
+ *
+ * @param cause - The error thrown while applying a single row's update
+ * @returns A report-friendly message, including the underlying reason when available
+ */
+export function describeBulkUpdateRowFailure(cause: unknown): string {
+  const baseMessage = isLikeShelfError(cause)
+    ? (cause as ShelfError).message
+    : cause instanceof Error
+    ? cause.message
+    : "Unknown error";
+
+  // Unwrap one level: the generic ShelfError stores the original error (often a
+  // Prisma error) on `.cause`.
+  const underlying = isLikeShelfError(cause)
+    ? (cause as ShelfError).cause
+    : null;
+
+  if (underlying instanceof Error) {
+    const code =
+      "code" in underlying &&
+      typeof (underlying as { code?: unknown }).code === "string"
+        ? `${(underlying as { code: string }).code}: `
+        : "";
+    // Prisma messages prefix the reason with an "Invalid `prisma...` invocation"
+    // line plus a file path; the actionable reason is the LAST non-empty line.
+    // Surface only that, so the report stays concise and doesn't leak the
+    // invocation preamble or internal paths.
+    const lines = underlying.message
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const detail = (lines[lines.length - 1] ?? "").slice(0, 300);
+    if (detail && detail !== baseMessage) {
+      return `${baseMessage} (${code}${detail})`;
+    }
+  }
+
+  return baseMessage;
 }

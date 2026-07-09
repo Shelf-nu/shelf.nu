@@ -89,3 +89,26 @@ export const appLoaderRateLimit = (limit = 60) =>
         429
       ),
   });
+
+/**
+ * Per-feed rate limit for the subscribable iCal feed (`/api/calendar/feed/*`).
+ *
+ * The feed is in `publicPaths` (cookie-bypassed, secret-token auth) and runs an
+ * unpaginated, windowed booking query per request. We key on the request PATH
+ * (which embeds the secret token) rather than the client IP, because:
+ *  - calendar providers (Google/Apple/Outlook) fetch many unrelated feeds from
+ *    shared, rotating egress IPs — per-IP keying would cross-throttle them; and
+ *  - a leaked URL can be polled from many IPs — per-path caps that single feed.
+ * Each feed gets its own budget; clients legitimately poll only every few hours.
+ *
+ * Same in-memory MemoryStore caveat as `mobileIpRateLimit`. Generic floods of
+ * random (invalid-token) paths are cheap indexed 404s, best absorbed at the edge.
+ */
+export const calendarFeedRateLimit = () =>
+  rateLimiter({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-7",
+    keyGenerator: (c) => `calendar:${c.req.path}`,
+    handler: (c) => c.text("Too many requests. Please try again later.", 429),
+  });

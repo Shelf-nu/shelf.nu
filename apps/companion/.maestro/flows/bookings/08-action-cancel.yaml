@@ -1,0 +1,120 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Cancel action (mobile)"
+tags:
+  - bookings
+  - cancel
+  - actions
+
+---
+# Verifies the booking-detail overflow "Cancel booking" action end-to-end.
+# Creates a disposable booking, reserves it (DRAFT -> RESERVED so Cancel is
+# offered), cancels it, asserts the CANCELLED badge, then deletes it
+# (idempotent + self-cleaning — no shared fixtures mutated).
+#
+# Requires GRANULAR WORKSPACE (TEAM) + team member "Dr. Sarah Mitchell"
+# (same fixtures as 06/07). Action steps verified live on-device 2026-06-23;
+# the login + workspace-switch preamble is copied verbatim from 06.
+#
+# GOTCHA: the Cancel confirm button text is the TWO-WORD "Cancel booking".
+# Maestro's text matcher does not reliably press multi-word native iOS alert
+# buttons (single-word confirms like Delete/Duplicate/Archive tap fine), so the
+# confirm is pressed by POINT — the destructive confirm is the UPPER of the two
+# alert buttons ("Keep booking" is below it).
+
+- runFlow: ../../shared/login.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+# Switch to the GRANULAR (TEAM) workspace — bookings are TEAM-only.
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# Create a disposable booking.
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Cancel Test"
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "QA Cancel Test"
+    timeout: 20000
+
+# Reserve (DRAFT -> RESERVED) so Cancel becomes available.
+- extendedWaitUntil:
+    visible: "Reserve this booking"
+    timeout: 15000
+- tapOn: "Reserve this booking"
+- extendedWaitUntil:
+    visible: "Reserve Booking"
+    timeout: 10000
+- tapOn: "Reserve"
+- extendedWaitUntil:
+    visible: "Reserved"
+    timeout: 20000
+- tapOn: "OK"
+
+# Cancel: overflow -> action-sheet "Cancel booking" -> confirm by point.
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Cancel booking"
+    timeout: 10000
+- tapOn:
+    text: "^Cancel booking$"
+- extendedWaitUntil:
+    visible: "Cancel Booking"
+    timeout: 10000
+- waitForAnimationToEnd
+- tapOn:
+    point: "50%,54%"
+- extendedWaitUntil:
+    visible: "Cancelled"
+    timeout: 20000
+- takeScreenshot: cancel-action-cancelled
+
+# Cleanup: delete the cancelled disposable booking (single-word "Delete" taps fine).
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Delete booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete booking$"
+- extendedWaitUntil:
+    visible: "Delete Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete$"
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 20000

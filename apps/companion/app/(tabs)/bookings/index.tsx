@@ -34,6 +34,10 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import {
+  consumeBookingsListDirty,
+  markBookingsListDirty,
+} from "@/lib/booking-refresh";
 
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
@@ -124,8 +128,8 @@ function BookingsListContent() {
   }, [activeFilter, syncIndex]);
 
   const fetchBookings = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
+    async (pageNum: number, reset: boolean): Promise<boolean> => {
+      if (!currentOrg) return false;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
         search: debouncedSearch || undefined,
@@ -134,17 +138,20 @@ function BookingsListContent() {
         page: pageNum,
         perPage: PAGE_SIZE,
       });
-      // Request cancelled (navigation) — ignore
-      if (!data && !fetchErr) return;
+      // Request cancelled (navigation): ignore, treat as not-refreshed.
+      if (!data && !fetchErr) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load bookings");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
-      if (reset) setBookings(data.bookings);
-      else setBookings((prev) => [...prev, ...data.bookings]);
+      if (reset) {
+        setBookings(data.bookings);
+        lastLoadedCountRef.current = data.bookings.length;
+      } else setBookings((prev) => [...prev, ...data.bookings]);
+      return true;
     },
     [currentOrg, activeFilter, debouncedSearch, sortIndex]
   );
@@ -152,6 +159,9 @@ function BookingsListContent() {
   // Refresh on tab focus — skip if data is fresh (< 60s old)
   const hasFetchedBookings = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Count from the latest successful reset fetch, used for the first-load a11y
+  // summary without reading state inside a setBookings updater (impure).
+  const lastLoadedCountRef = useRef(0);
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
@@ -180,7 +190,12 @@ function BookingsListContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
+      // A lifecycle mutation on the detail screen (reserve/cancel/archive/
+      // delete/duplicate) marks the list dirty; bypass the freshness gate so we
+      // don't show stale rows on return.
+      const mustRefresh = consumeBookingsListDirty();
       if (
+        !mustRefresh &&
         hasFetchedBookings.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )
@@ -190,21 +205,29 @@ function BookingsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedBookings.current;
-      fetchBookings(1, true).finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        if (isFirstLoad) {
-          hasFetchedBookings.current = true;
-          setBookings((current) => {
+      fetchBookings(1, true)
+        .then((ok) => {
+          // If a forced (list-dirty) refresh failed or was cancelled, re-mark
+          // so the next focus retries instead of falling back to the 60s gate.
+          if (mustRefresh && !ok) markBookingsListDirty();
+          // First-load a11y summary, only when the fetch succeeded so screen
+          // readers don't announce "No bookings found" while the error/Retry
+          // view is what's actually on screen.
+          if (isFirstLoad && ok) {
             announce(
-              current.length === 0
+              lastLoadedCountRef.current === 0
                 ? "No bookings found"
-                : current.length + " bookings loaded"
+                : lastLoadedCountRef.current + " bookings loaded"
             );
-            return current;
-          });
-        }
-      });
+          }
+        })
+        .finally(() => {
+          setIsLoading(false);
+          lastFetchedAt.current = Date.now();
+          if (isFirstLoad) {
+            hasFetchedBookings.current = true;
+          }
+        });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, activeFilter, fetchBookings])
@@ -347,19 +370,33 @@ function BookingsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
+              {/* A RESERVED booking is only "ready to check out" when it has
+                  concrete assets AND no outstanding book-by-model reservations
+                  (the server hard-blocks checkout until every reserved unit is
+                  assigned). Otherwise the honest next step is to assign/add
+                  assets, so the hint points there instead of promising a
+                  checkout that isn't possible yet. */}
               <Ionicons
                 name={
-                  item.status === "RESERVED"
+                  item.status !== "RESERVED"
+                    ? "log-in-outline"
+                    : (item.outstandingModelCount ?? 0) > 0
+                    ? "cube-outline"
+                    : item.assetCount > 0
                     ? "log-out-outline"
-                    : "log-in-outline"
+                    : "add-outline"
                 }
                 size={14}
                 color={colors.iconDefault}
               />
               <Text style={styles.actionHintText}>
-                {item.status === "RESERVED"
+                {item.status !== "RESERVED"
+                  ? "Tap to check in"
+                  : (item.outstandingModelCount ?? 0) > 0
+                  ? "Assign assets to check out"
+                  : item.assetCount > 0
                   ? "Ready to check out"
-                  : "Tap to check in"}
+                  : "Add assets to check out"}
               </Text>
             </View>
           )}
@@ -562,11 +599,27 @@ function BookingsListContent() {
           )}
         </Animated.View>
       </View>
+
+      {/* Create booking — only TEAM workspaces can use bookings (matches the
+          server premium gate; personal workspaces 403 on create). */}
+      {currentOrg?.type === "TEAM" && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/(tabs)/bookings/new");
+          }}
+          accessibilityLabel="Create booking"
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={28} color={colors.primaryForeground} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
 
-const useStyles = createStyles((colors) => ({
+const useStyles = createStyles((colors, shadows) => ({
   flexFill: {
     flex: 1,
   },
@@ -764,5 +817,17 @@ const useStyles = createStyles((colors) => ({
   },
   footer: {
     paddingVertical: spacing.lg,
+  },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    bottom: spacing.xl,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.lg,
   },
 }));

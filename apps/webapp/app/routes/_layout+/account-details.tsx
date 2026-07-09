@@ -52,6 +52,7 @@ export default function AccountDetailsPage() {
   const items = [
     { to: "general", content: "General" },
     { to: "workspace", content: "Workspaces" },
+    { to: "calendars", content: "Calendars" },
   ];
 
   const enablePremium = useRouteLoaderData<typeof layoutLoader>(

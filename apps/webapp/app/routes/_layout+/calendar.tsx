@@ -11,6 +11,7 @@ import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
+import CalendarSubscribeDialog from "~/components/calendar/calendar-subscribe-dialog";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
@@ -25,6 +26,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -61,6 +63,15 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
+/** One folded BookingAsset pivot slice on a collapsed availability bar.
+ * `assetKitId === null` ⇒ standalone (free pool); non-null ⇒ kit-driven.
+ * `quantity` is booked units (BookingAsset.quantity). Availability view only. */
+export type AvailabilitySlice = {
+  assetKitId: string | null;
+  kitName: string | null;
+  quantity: number;
+};
+
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
@@ -71,6 +82,17 @@ export type CalendarExtendedProps = {
   custodian: TeamMemberForBadge;
   creator: TeamMemberForBadge;
   tags: Pick<Tag, "id" | "name">[];
+  /** Availability view only: per-slice breakdown of one (asset, booking).
+   * Absent on the booking calendar (which never sets it). */
+  slices?: AvailabilitySlice[];
+  /** Number of folded slices (>1 ⇒ show glyph count on the bar). */
+  sliceCount?: number;
+  /** Sum of BookingAsset.quantity across folded slices (booked-units total). */
+  bookedTotal?: number;
+  /** True only for QUANTITY_TRACKED assets. INDIVIDUAL assets are single
+   * physical units (always qty 1), so the calendar hides the per-slice `Qty`
+   * and the booked-units total for them — the number is redundant noise. */
+  quantityTracked?: boolean;
 };
 
 // Loader Function to Return Bookings Data
@@ -109,40 +131,46 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, teamMembersForFormData, tagsData, events] =
-      await Promise.all([
-        // Team members for filters - when canSeeAllCustody is false, only current user's team member
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          selectedTeamMembers: teamMemberIds,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody,
-          userId,
-        }),
-        // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-        isSelfServiceOrBase
-          ? getTeamMemberForForm({
-              organizationId,
-              userId,
-              isSelfServiceOrBase,
-              getAll:
-                searchParams.has("getAll") &&
-                hasGetAllValue(searchParams, "teamMember"),
-            })
-          : Promise.resolve(null), // ADMIN users reuse teamMembersData
-        getTagsForBookingTagsFilter({
-          organizationId,
-        }),
-        getBookingsForCalendar({
-          request,
-          organizationId,
-          userId,
-          canSeeAllBookings,
-          canSeeAllCustody,
-        }),
-      ]);
+    const [
+      teamMembersData,
+      teamMembersForFormData,
+      tagsData,
+      events,
+      calendarFeedUrl,
+    ] = await Promise.all([
+      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: !canSeeAllCustody,
+        userId,
+      }),
+      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
+            organizationId,
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
+      getBookingsForCalendar({
+        request,
+        organizationId,
+        userId,
+        canSeeAllBookings,
+        canSeeAllCustody,
+      }),
+      getMemberCalendarFeedUrl({ organizationId, userId }),
+    ]);
 
     const modelName = {
       singular: "booking",
@@ -152,6 +180,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     return payload({
       header,
       events,
+      organizationId,
       ...teamMembersData,
       // For BASE/SELF_SERVICE users, provide dedicated form team members
       // For ADMIN users, reuse the filter team members
@@ -162,6 +191,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       modelName,
       isSelfServiceOrBase,
       userId,
+      calendarFeedUrl,
       searchFieldTooltip: {
         title: "Search your bookings",
         text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
@@ -182,7 +212,9 @@ export default function Calendar() {
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const { events } = useLoaderData<typeof loader>();
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
+  const { events, calendarFeedUrl, organizationId } =
+    useLoaderData<typeof loader>();
   const isLoading = useDisabled();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -285,6 +317,16 @@ export default function Calendar() {
                 onViewChange={handleViewChange}
               />
             ) : null}
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="ml-3"
+              onClick={() => setSubscribeOpen(true)}
+            >
+              Subscribe
+            </Button>
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
@@ -355,6 +397,13 @@ export default function Calendar() {
           )}
         </ClientOnly>
       </div>
+
+      <CalendarSubscribeDialog
+        organizationId={organizationId}
+        calendarFeedUrl={calendarFeedUrl}
+        open={subscribeOpen}
+        onClose={() => setSubscribeOpen(false)}
+      />
     </>
   );
 }

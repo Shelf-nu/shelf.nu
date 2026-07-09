@@ -165,7 +165,12 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
           <Divider className="my-2" />
           <BookingOverviewPDF
-            booking={booking}
+            booking={{
+              ...booking,
+              assets: booking.bookingAssets.map(
+                (ba: { asset: { id: string } }) => ba.asset
+              ),
+            }}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

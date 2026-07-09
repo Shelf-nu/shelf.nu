@@ -17,6 +17,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getAssetTotalValue } from "~/utils/asset-value";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -84,18 +85,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             },
           },
         },
-        assets: {
+        // Kit ↔ Asset membership is the AssetKit pivot (see schema).
+        // Select through the pivot and synthesise a flat `assets` array
+        // below so the mobile JSON contract stays unchanged for the
+        // companion app (kit screen still receives `kit.assets[]`).
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            status: true,
-            valuation: true,
-            mainImage: true,
-            thumbnailImage: true,
-            category: { select: { id: true, name: true } },
-            location: { select: { id: true, name: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                valuation: true,
+                // QT-aware total value: quantity is needed so the reducer
+                // below can multiply per-unit valuation × quantity for
+                // QUANTITY_TRACKED assets. INDIVIDUAL assets are always
+                // quantity: 1, so the math collapses to the prior behaviour.
+                quantity: true,
+                mainImage: true,
+                thumbnailImage: true,
+                category: { select: { id: true, name: true } },
+                // Post-Phase-4b: `Asset.location` was replaced by the
+                // `AssetLocation` pivot. Project the primary placement
+                // through the pivot and flatten back to a single `location`
+                // field below so the mobile JSON contract stays unchanged.
+                assetLocations: {
+                  select: { location: { select: { id: true, name: true } } },
+                  take: 1,
+                },
+              },
+            },
           },
-          orderBy: { title: "asc" },
+          orderBy: { asset: { title: "asc" } },
         },
       },
     });
@@ -107,14 +128,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
+    // Flatten the AssetKit pivot into the asset list the companion expects.
+    // Also flatten the `assetLocations[0]` pivot back into the singular
+    // `location` field the companion's kit screen still reads (preserves
+    // the existing mobile JSON contract).
+    const { assetKits, ...kitData } = kit;
+    const assets = assetKits.map((ak) => {
+      const { assetLocations, ...rest } = ak.asset;
+      return { ...rest, location: assetLocations[0]?.location ?? null };
+    });
+
     // Total value = sum of the contained assets' valuation (a kit has no own
     // value field), mirroring the web kit overview's summed valuation.
-    const totalValue = kit.assets.reduce(
-      (sum, asset) => sum + (asset.valuation ?? 0),
+    // QT-aware: multiplies valuation × quantity. Non-breaking — same response
+    // field, more accurate value for kits containing QT assets.
+    const totalValue = assets.reduce(
+      (sum, asset) => sum + getAssetTotalValue(asset),
       0
     );
 
-    return data({ kit: { ...kit, totalValue } });
+    return data({ kit: { ...kitData, assets, totalValue } });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
