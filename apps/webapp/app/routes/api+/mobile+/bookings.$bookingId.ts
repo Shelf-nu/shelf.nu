@@ -240,7 +240,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ).length;
     const totalAssets = assets.length;
 
-    const canCheckout = booking.status === "RESERVED" && totalAssets > 0;
+    // Book-by-model: a booking with unfulfilled model reservations cannot be
+    // checked out. The shared checkout service hard-blocks the RESERVED →
+    // ONGOING transition until every `BookingModelRequest` is assigned to
+    // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
+    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
+    // never offers a "Check Out" the server would reject — the app instead
+    // guides the operator to assign the reserved units first (see the
+    // booking-detail "Assign to check out" CTA).
+    const hasOutstandingModelRequests = booking.modelRequests.some(
+      (mr) => mr.fulfilledAt === null
+    );
+
+    const canCheckout =
+      booking.status === "RESERVED" &&
+      totalAssets > 0 &&
+      !hasOutstandingModelRequests;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
     // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
     // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/

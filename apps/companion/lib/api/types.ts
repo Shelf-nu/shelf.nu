@@ -452,6 +452,13 @@ export type BookingListItem = {
   custodianName: string | null;
   custodianImage: string | null;
   assetCount: number;
+  /**
+   * Outstanding book-by-model reservations still to assign (units reserved at
+   * the model level with no concrete asset behind them yet). > 0 means the
+   * booking can't be checked out until matching assets are assigned. Optional
+   * for back-compat with an older server response.
+   */
+  outstandingModelCount?: number;
 };
 
 export type BookingsResponse = {
