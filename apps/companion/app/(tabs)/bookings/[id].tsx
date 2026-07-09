@@ -1414,36 +1414,43 @@ export default function BookingDetailScreen() {
                 has no checkout button (the server hard-blocks checkout until
                 every reserved unit is assigned to a concrete asset). Instead of
                 a dead-end, point the operator straight at the assign step — the
-                actual path to checkout — mirroring web's fulfil-and-checkout. */}
-            {booking.status === "RESERVED" && hasOutstandingModelRequests && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() =>
-                  router.push(
-                    `/(tabs)/bookings/add-assets?bookingId=${
-                      booking.id
-                    }&bookingName=${encodeURIComponent(
-                      booking.name
-                    )}&from=${encodeURIComponent(
-                      booking.from
-                    )}&to=${encodeURIComponent(booking.to)}`
-                  )
-                }
-                accessibilityLabel={`Assign ${booking.outstandingModelUnitCount} reserved units to check out`}
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name="cube-outline"
-                  size={18}
-                  color={colors.primaryForeground}
-                />
-                <Text style={styles.actionButtonText}>
-                  Assign {booking.outstandingModelUnitCount} unit
-                  {booking.outstandingModelUnitCount === 1 ? "" : "s"} to check
-                  out
-                </Text>
-              </TouchableOpacity>
-            )}
+                actual path to checkout — mirroring web's fulfil-and-checkout.
+                Gated `!isSelfService` to match the add/browse affordances above:
+                a self-service custodian can only edit a DRAFT booking, and the
+                mobile add-scanned-assets action rejects their non-DRAFT edits,
+                so on a RESERVED booking the assign flow can't succeed for them —
+                showing the CTA would just lead to a rejected submit. */}
+            {!isSelfService &&
+              booking.status === "RESERVED" &&
+              hasOutstandingModelRequests && (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/bookings/add-assets?bookingId=${
+                        booking.id
+                      }&bookingName=${encodeURIComponent(
+                        booking.name
+                      )}&from=${encodeURIComponent(
+                        booking.from
+                      )}&to=${encodeURIComponent(booking.to)}`
+                    )
+                  }
+                  accessibilityLabel={`Assign ${booking.outstandingModelUnitCount} reserved units to check out`}
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="cube-outline"
+                    size={18}
+                    color={colors.primaryForeground}
+                  />
+                  <Text style={styles.actionButtonText}>
+                    Assign {booking.outstandingModelUnitCount} unit
+                    {booking.outstandingModelUnitCount === 1 ? "" : "s"} to
+                    check out
+                  </Text>
+                </TouchableOpacity>
+              )}
 
             {canCheckin && (
               <View style={styles.checkinActions}>
