@@ -238,6 +238,25 @@ async function fetchAssetBeforeUpdate({
 /**
  * Sets kit custody for imported assets after all assets have been created
  */
+/**
+ * Assigns kit custody for imported assets after all assets have been created.
+ *
+ * A CSV row carrying both a `kit` and a `custodian` means the KIT is in that
+ * person's custody (`validateKitCustodyConflicts` has already guaranteed a single
+ * custodian per kit). This groups the affected kits by custodian and delegates to
+ * the canonical {@link bulkAssignKitCustody} flow — one call per custodian —
+ * which creates the `KitCustody`, sets the kit and its member assets to
+ * `IN_CUSTODY`, inherits a kit-driven `Custody` row onto every member asset, and
+ * records the matching notes + `CUSTODY_ASSIGNED` events. Rows lacking either a
+ * kit or a custodian are ignored. Must run after the create loop because it
+ * relies on the `AssetKit` pivot rows already existing.
+ *
+ * @param args.data - The parsed import rows (source of kit/custodian names).
+ * @param args.kits - Kit-name → Kit, from the org-scoped `createKitsIfNotExists` map.
+ * @param args.teamMembers - Custodian-name → TeamMember (org-scoped).
+ * @param args.userId - The importing user (actor for the custody events/notes).
+ * @param args.organizationId - The workspace the import runs in.
+ */
 export async function setKitCustodyAfterAssetImport({
   data,
   kits,
