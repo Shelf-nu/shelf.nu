@@ -11,6 +11,7 @@ import { getCategory } from "~/modules/category/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -21,8 +22,10 @@ import {
   bulkCreateAssetsFromModel,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
+  buildAssetKitCreateData,
   checkOutQuantity,
   createAsset,
+  setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
   getAssets,
@@ -173,6 +176,13 @@ vitest.mock("~/modules/category/service.server", async () => {
 // why: avoid real QR lookup during relink tests
 vitest.mock("~/modules/qr/service.server", () => ({
   getQr: vitest.fn(),
+}));
+
+// why: setKitCustodyAfterAssetImport delegates to the canonical bulkAssignKitCustody
+// flow (kit/service). Mock it so we can assert the delegation (grouping by
+// custodian) without running the full kit-custody transaction.
+vitest.mock("~/modules/kit/service.server", () => ({
+  bulkAssignKitCustody: vitest.fn(),
 }));
 
 // why: avoid hitting Supabase storage during uploadDuplicateAssetMainImage tests
@@ -2722,5 +2732,135 @@ describe("getAssets search fallback", () => {
     expect(secondWhere.OR).toContainEqual({
       custody: { some: { teamMemberId: { in: ["tm-1"] } } },
     });
+  });
+});
+
+describe("buildAssetKitCreateData — AssetKit pivot for create-with-kit", () => {
+  it("builds the AssetKit pivot nested-create and never emits a `kit` relation", () => {
+    // why: `Asset.kit` was replaced by the `assetKits` pivot; a `kit: { connect }`
+    // throws `Unknown argument kit` at runtime (the import-crash bug). This guards
+    // against that regression.
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 1,
+        },
+      },
+    });
+    expect("kit" in result).toBe(false);
+  });
+
+  it("uses the full tracked pool for QUANTITY_TRACKED assets", () => {
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 50,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 50,
+        },
+      },
+    });
+  });
+
+  it("defaults quantity to 1 for a QUANTITY_TRACKED asset with no quantity", () => {
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: null,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 1,
+        },
+      },
+    });
+  });
+});
+
+describe("setKitCustodyAfterAssetImport — kit custody + member inheritance", () => {
+  const mockBulkAssignKitCustody = vi.mocked(bulkAssignKitCustody);
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("assigns each kit to its row custodian via bulkAssignKitCustody, grouped by custodian", async () => {
+    // why: custody lives on the kit; members inherit through the canonical flow.
+    const kits = {
+      "Camera Kit": { id: "kit-1", name: "Camera Kit" },
+      "Audio Kit": { id: "kit-2", name: "Audio Kit" },
+    } as never;
+    const teamMembers = {
+      Alice: { id: "tm-1", name: "Alice" },
+      Bob: { id: "tm-2", name: "Bob" },
+    } as never;
+    const data = [
+      { title: "A", key: "1", kit: "Camera Kit", custodian: "Alice" },
+      { title: "B", key: "2", kit: "Camera Kit", custodian: "Alice" },
+      { title: "C", key: "3", kit: "Audio Kit", custodian: "Bob" },
+      { title: "D", key: "4" }, // no kit / custodian -> ignored
+    ] as never;
+
+    await setKitCustodyAfterAssetImport({
+      data,
+      kits,
+      teamMembers,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledTimes(2);
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitIds: ["kit-1"],
+        custodianId: "tm-1",
+        custodianName: "Alice",
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    );
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitIds: ["kit-2"],
+        custodianId: "tm-2",
+        custodianName: "Bob",
+      })
+    );
+  });
+
+  it("does nothing when no row carries both a kit and a custodian", async () => {
+    await setKitCustodyAfterAssetImport({
+      data: [
+        { title: "A", key: "1", kit: "Camera Kit" },
+        { title: "B", key: "2", custodian: "Alice" },
+      ] as never,
+      kits: {} as never,
+      teamMembers: {} as never,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockBulkAssignKitCustody).not.toHaveBeenCalled();
   });
 });
