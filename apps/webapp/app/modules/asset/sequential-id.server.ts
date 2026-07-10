@@ -70,36 +70,63 @@ export async function estimateNextSequentialId(
   prefix: string = DEFAULT_PREFIX
 ): Promise<string> {
   try {
-    // Ensure sequence exists without consuming a value
+    // Ensure the sequence exists (this does not consume a value).
     await createOrganizationSequence(organizationId);
 
-    // Get current sequence value without incrementing
-    const result = await db.$queryRaw<[{ currval: bigint }]>`
-      SELECT currval('org_' || ${organizationId} || '_asset_sequence') as currval
+    // Read the sequence's persisted counter from the pg_sequences catalog rather than
+    // calling currval(). currval() is SESSION-LOCAL: it only returns a value when
+    // nextval() was already called in the *same* backend session. Behind Supabase's
+    // Supavisor connection pooler (transaction mode) each statement can run on a
+    // different backend, so this page's session had almost never run nextval() for the
+    // org's sequence — currval() then threw "currval of sequence ... is not yet defined
+    // in this session" (SQLSTATE 55000) on every New Asset page load, flooding the
+    // Postgres error logs. pg_sequences.last_value is session-independent and works in
+    // every pooling mode. It is NULL when the sequence has never been advanced (i.e. the
+    // org has not created any assets yet), in which case we fall through to the
+    // max-based estimate below.
+    const seqResult = await db.$queryRaw<{ last_value: bigint | null }[]>`
+      SELECT last_value
+      FROM pg_sequences
+      WHERE schemaname = 'public'
+        AND sequencename = 'org_' || ${organizationId} || '_asset_sequence'
     `;
 
-    const nextValue = Number(result[0].currval) + 1;
-    return formatSequentialId(nextValue, prefix);
-  } catch (_error) {
-    // If currval fails, sequence might not have been used yet
-    // Find the highest existing sequential ID using proper numeric extraction
-    // This avoids string sorting issues when IDs go beyond 9999
-    const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
-      SELECT COALESCE(MAX(
-        CASE 
-          WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
-          THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
-          ELSE 0 
-        END
-      ), 0) as max_num
-      FROM "Asset"
-      WHERE "organizationId" = ${organizationId} 
-      AND "sequentialId" IS NOT NULL
-    `;
-
-    const highestNumber = maxExisting[0]?.max_num || 0;
-    return formatSequentialId(highestNumber + 1, prefix);
+    const lastValue = seqResult[0]?.last_value;
+    if (lastValue != null) {
+      // The sequence has been advanced; the next value nextval() will hand out is
+      // last_value + 1 (the sequences are created with the default CACHE 1, so
+      // last_value reflects the real last value dispensed).
+      return formatSequentialId(Number(lastValue) + 1, prefix);
+    }
+    // Sequence exists but has never been advanced -> fall through to the max-based
+    // estimate (handles the "org has no assets yet" case).
+  } catch (error) {
+    // Non-fatal: any failure reading the sequence just falls back to the max-based
+    // estimate below. Logged (not swallowed) so a genuinely broken catalog read is
+    // still visible, while no longer emitting a Postgres ERROR on every page load.
+    console.error(
+      `Failed to read asset sequence for organization ${organizationId}, falling back to max scan:`,
+      error
+    );
   }
+
+  // Fallback: derive the estimate from the highest existing sequential ID using proper
+  // numeric extraction. This avoids string-sorting issues once IDs grow beyond 9999.
+  const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
+    SELECT COALESCE(MAX(
+      CASE
+        WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
+        THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
+        ELSE 0
+      END
+    ), 0) as max_num
+    FROM "Asset"
+    WHERE "organizationId" = ${organizationId}
+    AND "sequentialId" IS NOT NULL
+  `;
+
+  const highestNumber = maxExisting[0]?.max_num || 0;
+  return formatSequentialId(highestNumber + 1, prefix);
 }
 
 /**
