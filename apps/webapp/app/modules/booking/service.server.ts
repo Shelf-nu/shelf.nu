@@ -412,11 +412,25 @@ export async function scheduleExpiryArchiveJob({
   to,
   autoArchiveDays,
   hints,
+  dedupe = true,
 }: {
   bookingId: Booking["id"];
   to: NonNullable<Booking["to"]>;
   autoArchiveDays: number;
   hints: ClientHint;
+  /**
+   * Whether to attach the per-booking `singletonKey` (pg-boss keeps at most one
+   * pending job per booking). Defaults to `true` for the external hooks
+   * (reserve + on-enable backlog sweep) that could otherwise queue duplicates.
+   *
+   * The handler's own not-yet-due reschedule MUST pass `false`: it runs while
+   * its job is still `active` and thus already holds that singletonKey, so a
+   * keyed re-queue collides with pg-boss's unique-incomplete-job index and is
+   * silently dropped — which would leave the booking never auto-archived. An
+   * unkeyed enqueue can't be suppressed, and the handler's idempotent
+   * re-validation bounds this to at most one extra no-op fire.
+   */
+  dedupe?: boolean;
 }) {
   // Fire `autoArchiveDays` after the end date. A `when` in the past makes
   // pg-boss run the job on the next tick — exactly what we want when enabling
@@ -431,11 +445,12 @@ export async function scheduleExpiryArchiveJob({
       hints,
       eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler,
     },
-    // Per-booking singleton: the handler re-queues on not-yet-due, and both the
-    // reserve hook and the on-enable backlog sweep can target the same booking.
-    // Without this they'd pile up duplicate pending jobs (queue bloat + repeated
-    // no-op fires); singletonKey keeps at most one pending job per booking.
-    { singletonKey: `booking-auto-archive-expired:${bookingId}` },
+    // Per-booking singleton (external hooks only): the reserve hook and the
+    // on-enable backlog sweep can both target the same booking; without this
+    // they'd pile up duplicate pending jobs (queue bloat + repeated no-op
+    // fires). The handler's self-reschedule opts out via `dedupe: false` —
+    // it can't key against its own still-active job (see `dedupe` above).
+    dedupe ? { singletonKey: `booking-auto-archive-expired:${bookingId}` } : {},
     when
   );
 }
@@ -10541,8 +10556,9 @@ export async function bulkArchiveBookings({
       .filter((b) => b.status === BookingStatus.COMPLETE)
       .map((b) => b.id);
 
+    let archivedCompleteCount = 0;
     if (completeIds.length > 0) {
-      await db.booking.updateMany({
+      const { count } = await db.booking.updateMany({
         // status guard: only rows still COMPLETE are archived, in case one was
         // transitioned between the findMany above and this write.
         where: {
@@ -10552,10 +10568,12 @@ export async function bulkArchiveBookings({
         },
         data: { status: BookingStatus.ARCHIVED },
       });
+      archivedCompleteCount = count;
     }
 
+    let archivedReservedCount = 0;
     if (reservedIds.length > 0) {
-      await db.booking.updateMany({
+      const { count } = await db.booking.updateMany({
         // status guard: a reservation checked out between the findMany above and
         // this write is no longer RESERVED, so it is skipped — its now
         // checked-out assets keep their active booking (no orphaned custody).
@@ -10566,16 +10584,45 @@ export async function bulkArchiveBookings({
         },
         data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
       });
+      archivedReservedCount = count;
     }
 
     /**
-     * Per-booking lifecycle event — mirrors the single `archiveBooking`
-     * emission so reports treat bulk + single archival identically.
-     * Best-effort (same as the notes below); the updateMany already
-     * committed so a recordEvents failure cannot undo the archival.
+     * Reconcile the follow-up writes (activity events, transition notes,
+     * scheduler cleanup) against the rows the status-guarded updateMany
+     * ACTUALLY flipped — not the rows originally fetched. If a booking's status
+     * changed between the findMany and the guarded write (e.g. a RESERVED
+     * booking was checked out mid-batch), its row is skipped by the guard;
+     * without this we'd log a phantom "archived" note + BOOKING_ARCHIVED event
+     * for a booking that is still ONGOING, and cancel a scheduler it still
+     * needs. Every eligible booking is COMPLETE or past-due RESERVED (asserted
+     * above), so the candidate count equals `bookings.length`; when the archived
+     * count matches, no row was skipped and we reuse `bookings` without an extra
+     * read. Only the rare concurrent-transition case pays the reconciling query.
      */
+    const archivedCount = archivedCompleteCount + archivedReservedCount;
+    let archivedBookings = bookings;
+    if (archivedCount !== completeIds.length + reservedIds.length) {
+      const archivedRows = await db.booking.findMany({
+        where: {
+          id: { in: bookings.map((b) => b.id) },
+          organizationId,
+          status: BookingStatus.ARCHIVED,
+        },
+        select: { id: true },
+      });
+      const archivedIds = new Set(archivedRows.map((b) => b.id));
+      archivedBookings = bookings.filter((b) => archivedIds.has(b.id));
+    }
+
+    /**
+     * One BOOKING_ARCHIVED activity event per booking ACTUALLY archived —
+     * parity with the single `archiveBooking` path so reports counting
+     * BOOKING_ARCHIVED treat bulk + single archival identically. Best-effort:
+     * the updateMany already committed, so a recordEvents failure can't undo it.
+     * `recordEvents([])` is a no-op, so an all-skipped batch writes nothing. */
     await recordEvents(
-      bookings.map((booking) => ({
+      archivedBookings.map((booking) => ({
         organizationId,
         actorUserId: userId ?? null,
         action: "BOOKING_ARCHIVED" as const,
@@ -10585,7 +10632,7 @@ export async function bulkArchiveBookings({
       }))
     );
 
-    /** Create booking status transition notes for each booking.
+    /** Create booking status transition notes for each archived booking.
      *
      * Done AFTER the status update, NOT inside an interactive transaction:
      * `createStatusTransitionNote` writes via the global `db` (not a passed
@@ -10593,7 +10640,7 @@ export async function bulkArchiveBookings({
      * the status change. It only held the interactive-tx connection open across
      * N sequential note writes, which on large selections blew past Prisma's
      * 5s default and aborted the commit with P2028 (Sentry SHELF-WEBAPP-1KQ). */
-    for (const booking of bookings) {
+    for (const booking of archivedBookings) {
       await createStatusTransitionNote({
         bookingId: booking.id,
         organizationId,
@@ -10604,23 +10651,8 @@ export async function bulkArchiveBookings({
       });
     }
 
-    /**
-     * Semantic BOOKING_ARCHIVED events — one per booking — for parity with the
-     * single-booking archive path (see {@link archiveBooking}). Without these,
-     * reports that count BOOKING_ARCHIVED would silently miss bulk archives. */
-    await recordEvents(
-      bookings.map((b) => ({
-        organizationId,
-        actorUserId: userId ?? null,
-        action: "BOOKING_ARCHIVED" as const,
-        entityType: "BOOKING" as const,
-        entityId: b.id,
-        bookingId: b.id,
-      }))
-    );
-
-    /** Cancel any active schedulers */
-    await Promise.all(bookings.map((b) => cancelScheduler(b)));
+    /** Cancel active schedulers only for the bookings actually archived. */
+    await Promise.all(archivedBookings.map((b) => cancelScheduler(b)));
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 

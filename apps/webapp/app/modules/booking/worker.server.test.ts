@@ -9,6 +9,7 @@ import {
 } from "./service.server";
 import type { SchedulerData } from "./types";
 import { registerBookingWorkers } from "./worker.server";
+import { recordEvent } from "../activity-event/service.server";
 
 // @vitest-environment node
 
@@ -47,6 +48,11 @@ vitest.mock("./service.server", () => ({
 // why: avoiding actual booking note creation during worker tests
 vitest.mock("../booking-note/service.server", () => ({
   createSystemBookingNote: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: asserting the BOOKING_ARCHIVED activity event without touching the DB
+vitest.mock("../activity-event/service.server", () => ({
+  recordEvent: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: preventing actual email template rendering during tests
@@ -318,6 +324,19 @@ describe("autoArchiveExpiredHandler", () => {
     expect(Logger.info).toHaveBeenCalledWith(
       "Auto-archived expired reservation booking-1"
     );
+    // Parity with the manual archiveBooking path: a semantic BOOKING_ARCHIVED
+    // event is emitted so reports counting it also see auto-archived
+    // reservations. System action → no human actor.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_ARCHIVED",
+        entityType: "BOOKING",
+        entityId: "booking-1",
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        actorUserId: null,
+      })
+    );
   });
 
   it("skips a booking that is no longer RESERVED (e.g. checked out)", async () => {
@@ -362,8 +381,11 @@ describe("autoArchiveExpiredHandler", () => {
     await workerHandler(mockJob);
 
     expect(db.booking.update).not.toHaveBeenCalled();
+    // dedupe:false is load-bearing — the reschedule runs while this job is still
+    // `active` and holds the per-booking singletonKey, so a keyed re-queue would
+    // be dropped by pg-boss and the booking would never be auto-archived.
     expect(scheduleExpiryArchiveJob).toHaveBeenCalledWith(
-      expect.objectContaining({ bookingId: "booking-1" })
+      expect.objectContaining({ bookingId: "booking-1", dedupe: false })
     );
   });
 });

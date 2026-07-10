@@ -26,6 +26,7 @@ import {
   scheduleNextBookingJob,
 } from "./service.server";
 import type { SchedulerData } from "./types";
+import { recordEvent } from "../activity-event/service.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
@@ -327,7 +328,10 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
  * delete. Instead it RE-VALIDATES at fire time — still RESERVED, setting still
  * on, and the end-date-plus-grace has actually elapsed against the booking's
  * CURRENT `to` — and no-ops otherwise. So it can never archive a booking that
- * was acted on, and an extended booking simply gets a fresh job.
+ * was acted on. If the booking's `to` was pushed out (or the org raised the
+ * grace days) the not-yet-due branch re-queues a fresh job for the new time —
+ * enqueued WITHOUT the singletonKey, so it isn't suppressed by this
+ * still-`active` job that already holds that key.
  *
  * @see {@link autoArchiveHandler} — the completed-booking counterpart.
  */
@@ -376,8 +380,8 @@ const autoArchiveExpiredHandler = async ({
     }
 
     // Re-validate the delay against the booking's CURRENT end date. If it was
-    // extended after this job was scheduled, the grace window hasn't elapsed
-    // and we no-op (a fresh job is scheduled when the dates change).
+    // pushed out after this job was scheduled, the grace window hasn't elapsed
+    // yet — we re-queue for the new time below instead of archiving early.
     const archiveAfter = new Date(booking.to);
     archiveAfter.setDate(
       archiveAfter.getDate() + bookingSettings.autoArchiveDays
@@ -397,6 +401,13 @@ const autoArchiveExpiredHandler = async ({
         to: booking.to,
         autoArchiveDays: bookingSettings.autoArchiveDays,
         hints: data.hints,
+        // dedupe:false — this reschedule runs while THIS job is still `active`
+        // and thus already holds the per-booking singletonKey. A keyed re-queue
+        // would collide with pg-boss's unique-incomplete-job index and be
+        // silently dropped, leaving the booking never auto-archived. An unkeyed
+        // enqueue can't be suppressed; the handler is idempotent, so this costs
+        // at most one extra no-op fire.
+        dedupe: false,
       });
       return;
     }
@@ -429,6 +440,35 @@ const autoArchiveExpiredHandler = async ({
       toStatus: BookingStatus.ARCHIVED,
       custodianUserId: booking.custodianUserId || undefined,
     });
+
+    /**
+     * Semantic BOOKING_ARCHIVED event — parity with the manual `archiveBooking`
+     * and `bulkArchiveBookings` paths, so reports that count BOOKING_ARCHIVED
+     * also see auto-archived expired reservations. This is a system action with
+     * no human actor, so `actorUserId` is null. Best-effort: the archive already
+     * committed above, so an event-write failure must not surface as a handler
+     * error (which would trigger a pg-boss retry of an already-archived booking).
+     */
+    try {
+      await recordEvent({
+        organizationId: booking.organizationId,
+        actorUserId: null,
+        action: "BOOKING_ARCHIVED",
+        entityType: "BOOKING",
+        entityId: booking.id,
+        bookingId: booking.id,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to record BOOKING_ARCHIVED event for an auto-archived expired reservation",
+          additionalData: { bookingId: booking.id },
+          label: "Booking",
+        })
+      );
+    }
 
     Logger.info(`Auto-archived expired reservation ${booking.id}`);
   } catch (cause) {

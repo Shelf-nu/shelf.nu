@@ -7143,6 +7143,66 @@ describe("bulkArchiveBookings", () => {
       ])
     );
   });
+
+  // Regression for the phantom-archive race: the status-guarded updateMany can
+  // skip a row whose status changed between the findMany and the write (e.g. a
+  // RESERVED booking checked out mid-batch). The follow-up events + notes must
+  // reflect only the rows actually flipped — never the originally-fetched set —
+  // or we'd log a booking as archived while it is still ONGOING.
+  it("emits events + notes only for bookings the status guard actually archived", async () => {
+    expect.assertions(3);
+
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany
+      // main fetch: b1 (COMPLETE) + r1 (past-due RESERVED) both look eligible
+      .mockResolvedValueOnce([
+        {
+          id: "b1",
+          status: BookingStatus.COMPLETE,
+          to: new Date("2020-01-01T00:00:00Z"),
+          custodianUserId: null,
+          activeSchedulerReference: null,
+        },
+        {
+          id: "r1",
+          status: BookingStatus.RESERVED,
+          to: new Date("2020-01-01T00:00:00Z"),
+          custodianUserId: null,
+          activeSchedulerReference: null,
+        },
+      ])
+      // reconcile read: only b1 ended up ARCHIVED — r1 was checked out and its
+      // RESERVED-guarded updateMany matched no row.
+      .mockResolvedValueOnce([{ id: "b1" }]);
+
+    const updateMany = db.booking.updateMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    updateMany
+      .mockResolvedValueOnce({ count: 1 }) // completeIds → b1 archived
+      .mockResolvedValueOnce({ count: 0 }); // reservedIds → r1 skipped
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith([
+      expect.objectContaining({ action: "BOOKING_ARCHIVED", bookingId: "b1" }),
+    ]);
+    // Status note for the archived booking …
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b1" })
+    );
+    // … but never for the concurrently-skipped one.
+    expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "r1" })
+    );
+  });
 });
 
 describe("bulkCancelBookings", () => {
