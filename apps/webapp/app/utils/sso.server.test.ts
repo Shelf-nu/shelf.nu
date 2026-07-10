@@ -25,12 +25,6 @@ vi.mock("~/modules/user/service.server", () => ({
   updateUserFromSSO: vi.fn(),
 }));
 
-// why: organization helpers are imported at module load but not exercised here
-vi.mock("~/modules/organization/service.server", () => ({
-  emailMatchesDomains: vi.fn(),
-  parseDomains: vi.fn(),
-}));
-
 const mockDb = await import("~/database/db.server");
 const mockAuth = await import("~/modules/auth/service.server");
 const mockUser = await import("~/modules/user/service.server");

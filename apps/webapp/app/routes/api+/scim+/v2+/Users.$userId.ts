@@ -8,17 +8,26 @@ import {
   replaceScimUser,
 } from "~/modules/scim/service.server";
 import { SCIM_CONTENT_TYPE } from "~/modules/scim/types";
-import type { ScimPatchOp, ScimUserInput } from "~/modules/scim/types";
+import {
+  parseScimJsonBody,
+  scimPatchOpSchema,
+  scimUserInputSchema,
+} from "~/modules/scim/validation.server";
 
 /**
  * GET /api/scim/v2/Users/:userId — Get a specific user
+ *
+ * The `:userId` path segment is the SCIM resource id, which is the per-org
+ * external id (the IdP object id) — NOT the Shelf `User.id`. See
+ * `findScimResourceOrThrow` for why the two are decoupled.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { organizationId } = await authenticateScimRequest(request);
-    const userId = params.userId!;
+    // The route param is the SCIM external id, not the Shelf User.id.
+    const scimId = params.userId!;
 
-    const user = await getScimUser(organizationId, userId);
+    const user = await getScimUser(organizationId, scimId);
 
     return new Response(JSON.stringify(user), {
       status: 200,
@@ -35,13 +44,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 export async function action({ request, params }: ActionFunctionArgs) {
   try {
     const { organizationId } = await authenticateScimRequest(request);
-    const userId = params.userId!;
+    // The route param is the SCIM external id, not the Shelf User.id.
+    const scimId = params.userId!;
     const method = request.method.toUpperCase();
 
     switch (method) {
       case "PUT": {
-        const body = (await request.json()) as ScimUserInput;
-        const user = await replaceScimUser(organizationId, userId, body);
+        const body = await parseScimJsonBody(request, scimUserInputSchema);
+        const user = await replaceScimUser(organizationId, scimId, body);
         return new Response(JSON.stringify(user), {
           status: 200,
           headers: { "Content-Type": SCIM_CONTENT_TYPE },
@@ -49,8 +59,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
 
       case "PATCH": {
-        const body = (await request.json()) as ScimPatchOp;
-        const user = await patchScimUser(organizationId, userId, body);
+        const body = await parseScimJsonBody(request, scimPatchOpSchema);
+        const user = await patchScimUser(organizationId, scimId, body);
         return new Response(JSON.stringify(user), {
           status: 200,
           headers: { "Content-Type": SCIM_CONTENT_TYPE },
@@ -58,7 +68,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
 
       case "DELETE": {
-        await deactivateScimUser(organizationId, userId);
+        await deactivateScimUser(organizationId, scimId);
         return new Response(null, { status: 204 });
       }
 

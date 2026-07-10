@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ScimError } from "~/modules/scim/errors.server";
 import { userToScimResource } from "~/modules/scim/mappers.server";
 import { SCIM_SCHEMA_USER } from "~/modules/scim/types";
 
@@ -18,7 +19,8 @@ describe("userToScimResource", () => {
 
     expect(result).toEqual({
       schemas: [SCIM_SCHEMA_USER],
-      id: "user-abc-123",
+      // The SCIM id is the per-org external id, NOT the Shelf User.id.
+      id: "entra-id-456",
       externalId: "entra-id-456",
       userName: "jane@example.com",
       name: {
@@ -33,7 +35,7 @@ describe("userToScimResource", () => {
         resourceType: "User",
         created: "2024-06-01T10:00:00.000Z",
         lastModified: "2024-06-15T12:00:00.000Z",
-        location: "http://localhost:3000/api/scim/v2/Users/user-abc-123",
+        location: "http://localhost:3000/api/scim/v2/Users/entra-id-456",
       },
     });
   });
@@ -44,11 +46,12 @@ describe("userToScimResource", () => {
     expect(result.active).toBe(false);
   });
 
-  it("should omit externalId when null", () => {
+  it("should throw when the user has no external id (SCIM id source)", () => {
+    // The external id IS the SCIM resource id, so a mapped user must always
+    // carry one; its absence indicates a caller bug, not a valid resource.
     const user = { ...baseUser, scimExternalIds: [] };
-    const result = userToScimResource(user, true);
 
-    expect(result.externalId).toBeUndefined();
+    expect(() => userToScimResource(user, true)).toThrow(ScimError);
   });
 
   it("should use email as displayName when no name is present", () => {
@@ -97,11 +100,11 @@ describe("userToScimResource", () => {
     expect(result.name?.familyName).toBeUndefined();
   });
 
-  it("should include correct meta.location URL", () => {
+  it("should include correct meta.location URL (keyed off the external id)", () => {
     const result = userToScimResource(baseUser, true);
 
     expect(result.meta.location).toBe(
-      "http://localhost:3000/api/scim/v2/Users/user-abc-123"
+      "http://localhost:3000/api/scim/v2/Users/entra-id-456"
     );
   });
 

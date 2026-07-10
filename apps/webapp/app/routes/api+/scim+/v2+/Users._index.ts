@@ -3,7 +3,10 @@ import { authenticateScimRequest } from "~/modules/scim/auth.server";
 import { handleScimError, ScimError } from "~/modules/scim/errors.server";
 import { createScimUser, listScimUsers } from "~/modules/scim/service.server";
 import { SCIM_CONTENT_TYPE } from "~/modules/scim/types";
-import type { ScimUserInput } from "~/modules/scim/types";
+import {
+  parseScimJsonBody,
+  scimUserInputSchema,
+} from "~/modules/scim/validation.server";
 
 /**
  * GET /api/scim/v2/Users — List or search users in the organization
@@ -42,7 +45,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { organizationId } = await authenticateScimRequest(request);
-    const body = (await request.json()) as ScimUserInput;
+    const body = await parseScimJsonBody(request, scimUserInputSchema);
 
     const user = await createScimUser(organizationId, body);
 

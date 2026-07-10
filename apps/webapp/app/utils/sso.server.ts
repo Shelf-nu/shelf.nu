@@ -6,10 +6,6 @@ import {
   deleteAuthAccount,
   getAuthUserById,
 } from "~/modules/auth/service.server";
-import {
-  emailMatchesDomains,
-  parseDomains,
-} from "~/modules/organization/service.server";
 import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
@@ -17,7 +13,7 @@ import {
 } from "~/modules/user/service.server";
 import { DISABLE_SSO } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
-import { isValidDomain } from "./misc";
+import { emailMatchesDomains, isValidDomain, parseDomains } from "./misc";
 
 /**
  * This resolves the correct org we should redirect the user to

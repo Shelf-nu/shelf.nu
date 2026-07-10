@@ -5,6 +5,14 @@ export const SCIM_SCHEMA_PATCH_OP =
   "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 export const SCIM_SCHEMA_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error";
 
+// Discovery-endpoint schema URNs (RFC 7643 §5–§7)
+export const SCIM_SCHEMA_SERVICE_PROVIDER_CONFIG =
+  "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
+export const SCIM_SCHEMA_RESOURCE_TYPE =
+  "urn:ietf:params:scim:schemas:core:2.0:ResourceType";
+export const SCIM_SCHEMA_SCHEMA =
+  "urn:ietf:params:scim:schemas:core:2.0:Schema";
+
 export const SCIM_CONTENT_TYPE = "application/scim+json";
 
 export interface ScimName {
@@ -44,26 +52,4 @@ export interface ScimListResponse {
   startIndex: number;
   itemsPerPage: number;
   Resources: ScimUser[];
-}
-
-export interface ScimPatchOperation {
-  op: "replace" | "add" | "remove";
-  path?: string;
-  value?: unknown;
-}
-
-export interface ScimPatchOp {
-  schemas: [typeof SCIM_SCHEMA_PATCH_OP];
-  Operations: ScimPatchOperation[];
-}
-
-/** The shape of a SCIM User resource in a POST/PUT request body */
-export interface ScimUserInput {
-  schemas?: string[];
-  externalId?: string;
-  userName: string;
-  name?: ScimName;
-  displayName?: string;
-  emails?: ScimEmail[];
-  active?: boolean;
 }

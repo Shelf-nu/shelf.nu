@@ -1080,6 +1080,9 @@ model UserScimExternalId {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([userId, organizationId])
+  // The SCIM-facing resource id is the per-org external id (the IdP object id),
+  // so it must be unique within an org and safe to resolve `/Users/{id}` against.
+  @@unique([organizationId, scimExternalId])
   @@index([organizationId])
 }
 
