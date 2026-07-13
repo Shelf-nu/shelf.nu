@@ -64,6 +64,15 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 /**
+ * `RequestInit` plus companion-specific knobs. `retry: false` opts a request
+ * out of the automatic timeout/network retry — required for non-idempotent
+ * mutations (e.g. quantity custody assign/release) where a timed-out-but-
+ * landed first request must not be re-sent and double-applied. Reads and
+ * idempotent calls keep the default retry behaviour.
+ */
+export type ApiFetchOptions = RequestInit & { retry?: boolean };
+
+/**
  * Makes an authenticated API call to the Shelf webapp.
  * Automatically attaches the current Supabase session JWT.
  * - Returns structured { data, error } -- never throws.
@@ -72,7 +81,7 @@ export async function getAccessToken(): Promise<string | null> {
  */
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiFetchOptions = {},
   _retryCount = 0
 ): Promise<{ data: T | null; error: string | null }> {
   // Declared outside try so catch block can read it
@@ -164,11 +173,14 @@ export async function apiFetch<T>(
 
     if (__DEV__) console.error("[API] Fetch error:", err);
 
-    // Auto-retry on timeout or network errors (not on auth/permission errors)
+    // Auto-retry on timeout or network errors (not on auth/permission
+    // errors). Requests sent with `retry: false` are exempt: a timed-out
+    // POST may have landed server-side, and re-sending a non-idempotent
+    // mutation would double-apply it.
     const isRetryable =
       (err instanceof Error && err.name === "AbortError" && timedOut) ||
       err instanceof TypeError; // TypeError = network failure
-    if (isRetryable && _retryCount < MAX_RETRIES) {
+    if (isRetryable && options.retry !== false && _retryCount < MAX_RETRIES) {
       if (__DEV__) console.log("[API] Retrying…", path);
       return apiFetch<T>(path, options, _retryCount + 1);
     }

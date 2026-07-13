@@ -6,7 +6,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -20,7 +20,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * POST /api/mobile/bulk-assign-custody
  *
  * Assigns custody of multiple assets to a team member.
- * Uses the same `bulkAssignCustody` service as the webapp to ensure
+ * Uses the same `bulkCheckOutAssets` service as the webapp to ensure
  * consistent behavior (status updates, notes, validation).
  *
  * Body: { assetIds: string[], custodianId: string }
@@ -80,7 +80,12 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    await bulkAssignCustody({
+    /**
+     * Pass `role` so the service-level SELF_SERVICE guard fires.
+     * Without it, a SELF_SERVICE user could assign custody to any
+     * team member (hex-security r3202162994).
+     */
+    const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId: user.id,
       role,
       assetIds,
@@ -91,7 +96,13 @@ export async function action({ request }: ActionFunctionArgs) {
       settings,
     });
 
-    return data({ success: true });
+    // Additive: the service silently skips QUANTITY_TRACKED assets on mixed
+    // selections (they need a per-asset quantity — use
+    // /api/mobile/custody/assign-quantity). Forward the count so the app can
+    // report it honestly, mirroring the web's assets.bulk-assign-custody.ts.
+    // An ALL-quantity-tracked selection throws in the service instead and
+    // surfaces through the error envelope.
+    return data({ success: true, skippedQuantityTracked });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

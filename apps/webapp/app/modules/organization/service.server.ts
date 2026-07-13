@@ -272,9 +272,9 @@ export async function updateOrganization({
   userId: User["id"];
   image?: File | null;
   ssoDetails?: {
-    selfServiceGroupId: string;
-    adminGroupId: string;
-    baseUserGroupId: string;
+    selfServiceGroupId: string | null;
+    adminGroupId: string | null;
+    baseUserGroupId: string | null;
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];

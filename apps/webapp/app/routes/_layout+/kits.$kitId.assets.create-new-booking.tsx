@@ -62,7 +62,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const kit = await getKit({
       id: kitId,
       organizationId,
-      extraInclude: { assets: true },
+      extraInclude: {
+        assetKits: { select: { asset: { select: { id: true } } } },
+      },
       userOrganizations,
       request,
     });
@@ -107,7 +109,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...teamMembersData,
       // For consistency, also provide teamMembersForForm
       teamMembersForForm: teamMembersData.teamMembers,
-      assetIds: kit.assets.map((a) => a.id),
+      // Kit member asset ids — still surfaced so the form can render them as
+      // hidden `assetIds[]` inputs (used for display/count). The shared
+      // `bookings.new` action moves these member ids into kit-driven slices so
+      // they become kit-grouped `BookingAsset` rows, not loose standalone rows.
+      assetIds: kit.assetKits.map((ak) => ak.asset.id),
+      // The originating kit id. Submitted as a hidden `kitId` input so the
+      // action can resolve the kit's memberships into kit slices, preserving
+      // the kit grouping in the new booking.
+      kitId,
       ...tagsData,
     });
   } catch (cause) {

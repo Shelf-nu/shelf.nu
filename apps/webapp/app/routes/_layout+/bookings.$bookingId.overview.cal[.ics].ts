@@ -2,11 +2,10 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { formatDateForICal } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
-import { escapeICalText, foldLine } from "~/utils/ics";
+import { buildBookingICalendar, buildBookingVEvent } from "~/utils/ics";
 import {
   PermissionAction,
   PermissionEntity,
@@ -48,10 +47,6 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       });
     }
 
-    const formattedFromDate = formatDateForICal(booking.from as Date);
-    const formattedToDate = formatDateForICal(booking.to as Date);
-    const formattedDTSTAMP = formatDateForICal(new Date());
-
     const bookingUrl = `${SERVER_URL}/bookings/${bookingId}`;
 
     // Build custodian display name, falling through to team member
@@ -61,55 +56,22 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       booking.custodianTeamMember?.name ||
       "Unassigned";
 
-    // Build asset list
-    const assetNames = booking.assets?.map((a) => a.title) ?? [];
-    const assetCount = assetNames.length;
-    const assetLabel = assetCount === 1 ? "asset" : "assets";
-    const assetList =
-      assetCount > 0 ? assetNames.join(", ") : "No assets assigned";
-
-    // Build SUMMARY with asset count
-    const summary = escapeICalText(
-      assetCount > 0
-        ? `${booking.name} (${assetCount} ${assetLabel})`
-        : booking.name
-    );
-
-    // Build rich DESCRIPTION
-    const description = escapeICalText(
-      `Custodian: ${custodianName}\n` +
-        `Assets (${assetCount}): ${assetList}\n\n` +
-        `View booking: ${bookingUrl}`
-    );
-
-    const lines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//Shelf.nu//Shelf Calendar 1.0//EN",
-      "CALSCALE:GREGORIAN",
-      "METHOD:PUBLISH",
-      "BEGIN:VEVENT",
-      `SUMMARY:${summary}`,
-      `UID:${booking.id}`,
-      `SEQUENCE:0`,
-      "STATUS:CONFIRMED",
-      "TRANSP:TRANSPARENT",
-      `DTSTART:${formattedFromDate}`,
-      `DTEND:${formattedToDate}`,
-      `DTSTAMP:${formattedDTSTAMP}`,
-      "CATEGORIES:Shelf.nu booking",
-      `DESCRIPTION:${description}`,
-      `URL:${bookingUrl}`,
-      "BEGIN:VALARM",
-      "TRIGGER;RELATED=END:-P1D",
-      "ACTION:DISPLAY",
-      "DESCRIPTION:Equipment due back tomorrow",
-      "END:VALARM",
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ];
-
-    const ics = lines.map(foldLine).join("\r\n");
+    // Reuse the shared iCal builder so this single-booking download and the
+    // subscribable workspace feed share one VEVENT format (DTSTAMP now derives
+    // from booking.updatedAt, not fetch time). Assets are reached through the
+    // `bookingAssets` pivot (`ba.asset.title`).
+    const ics = buildBookingICalendar([
+      buildBookingVEvent({
+        id: booking.id,
+        name: booking.name,
+        from: booking.from as Date,
+        to: booking.to as Date,
+        custodianName,
+        assetTitles: booking.bookingAssets?.map((ba) => ba.asset.title) ?? [],
+        bookingUrl,
+        updatedAt: booking.updatedAt,
+      }),
+    ]);
 
     // Use ASCII-safe filename for the basic filename parameter, and
     // RFC 5987 filename* for non-ASCII booking names (e.g. Thai, Chinese)

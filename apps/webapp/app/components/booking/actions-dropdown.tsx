@@ -10,6 +10,7 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
@@ -102,7 +103,12 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               currentEndDate={dateForDateTimeInputValue(new Date(booking.to))}
             />
           </When>
-          <When truthy={isCompleted && canArchiveBooking}>
+          <When
+            truthy={
+              isBookingArchivable({ status: booking.status, to: booking.to }) &&
+              canArchiveBooking
+            }
+          >
             <DropdownMenuItem asChild>
               <Button
                 type="button"
@@ -159,7 +165,12 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
           <Divider className="my-2" />
           <BookingOverviewPDF
-            booking={booking}
+            booking={{
+              ...booking,
+              assets: booking.bookingAssets.map(
+                (ba: { asset: { id: string } }) => ba.asset
+              ),
+            }}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

@@ -11,6 +11,7 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
 
 /**
@@ -249,9 +250,13 @@ export async function fetchAllAuditPdfRelatedData(
                   color: true,
                 },
               },
-              location: {
+              assetLocations: {
                 select: {
-                  name: true,
+                  location: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
               },
               qrCodes: true,
@@ -283,6 +288,7 @@ export async function fetchAllAuditPdfRelatedData(
     const assetsWithAuditStatus: AssetWithAuditStatus[] = assets.map(
       (asset) => ({
         ...asset,
+        location: getPrimaryLocation(asset),
         auditData: auditStatusMap.get(asset.id) || {
           expected: false,
           auditStatus: null,

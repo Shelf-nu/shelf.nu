@@ -1,0 +1,79 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Check-in enforcement (mobile) [ROLE+FIXTURE-DEPENDENT]"
+tags:
+  - bookings
+  - checkin
+  - enforcement
+  - fixture-dependent
+env:
+  BOOKING_NAME: "REPLACE WITH ONGOING BOOKING NAME"
+
+---
+# Verifies the requireExplicitCheckin enforcement fix: when "require explicit
+# check-in" is ON for the signed-in user's role, an ONGOING (checked-out)
+# booking's detail HIDES the one-tap "Check In All" and forces the explicit
+# scan/select flow.
+#
+# !! PRECONDITIONS — the fix is UNOBSERVABLE unless ALL of these hold:
+#   0. WORKSPACE MEMBERSHIP: the self-service account MUST be a member of the
+#      workspace under test. As of 2026-06-24 the `+selfself` QA account has NO
+#      workspace ("No workspace" on its Settings screen), so this flow cannot
+#      run until it is provisioned into GRANULAR WORKSPACE as a self-service
+#      member. Pass its creds via -e SHELF_TEST_SELF_SERVICE_EMAIL / PASSWORD.
+#   1. ROLE: run as a SELF_SERVICE (or ADMIN) member, NOT the workspace OWNER.
+#      There is no owner toggle, so an owner ALWAYS sees "Check In All" and this
+#      test false-fails. Hence runFlow login-self-service (NOT login).
+#   2. SETTING: "Require explicit check-in" must be ON for that role in the web
+#      Settings > Bookings (BookingSettings.requireExplicitCheckinForSelfService).
+#   3. FIXTURE: an ONGOING booking with >0 checked-out assets must exist; put
+#      its exact name in BOOKING_NAME below.
+#   Read-only (asserts visibility only — no mutations, no cleanup).
+#   Keep OUT of the idempotent smoke suite; run only in a seeded env.
+#
+# Selectors verified from app/(tabs)/bookings/[id].tsx 2026-06-23.
+
+- runFlow: ../../shared/login-self-service.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after the login flow's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+- extendedWaitUntil:
+    visible: "Filter: Ongoing.*"
+    timeout: 30000
+- tapOn: "Filter: Ongoing.*"
+- scrollUntilVisible:
+    element:
+      text: "Booking: ${BOOKING_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: "Booking: ${BOOKING_NAME}.*"
+- extendedWaitUntil:
+    visible: "More booking actions"
+    timeout: 20000
+
+# CORE: the one-tap quick check-in must be ABSENT when enforcement is ON...
+- assertNotVisible: "Check in all assets"
+- assertNotVisible: "Check In All"
+# ...while the explicit-flow entry points REMAIN (proves the booking is truly
+# checked-out and the panel rendered — guards against a false "absent" pass).
+- assertVisible: "Scan assets to check in"
+- assertVisible: "Select assets to check in"
+- takeScreenshot: checkin-enforcement-forced

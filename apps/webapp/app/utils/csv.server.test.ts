@@ -281,12 +281,14 @@ describe("buildCsvExportDataFromAssets", () => {
         valuation: 1234.5,
         availableToBook: true,
         createdAt: new Date("2024-01-02T03:04:05Z"),
-        custody: {
-          custodian: {
-            name: "Fallback Name",
-            user: { firstName: "Jane", lastName: "Doe" },
+        custody: [
+          {
+            custodian: {
+              name: "Fallback Name",
+              user: { firstName: "Jane", lastName: "Doe" },
+            },
           },
-        },
+        ],
         customFields: [
           {
             customField: { name: "isInsured" },
@@ -402,6 +404,47 @@ describe("buildCsvExportDataFromAssets", () => {
       '""',
     ]);
   });
+
+  it("emits per-unit valuation and qty-aware total_value side by side", () => {
+    // QT asset: 100 boxes at €1/each. `valuation` column stays per-unit
+    // (CSV round-trip safe — re-import won't inflate it), while the new
+    // synthetic `total_value` column reports the qty-aware total (€100).
+    const assets = [
+      {
+        id: "asset-pens",
+        title: "Pens",
+        valuation: 1,
+        quantity: 100,
+        type: "QUANTITY_TRACKED",
+        unitOfMeasure: "boxes",
+        tags: [],
+        custody: [],
+        customFields: [],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      // Injected by the export caller at MAX_SAFE_INTEGER; here we pin
+      // it to position 2 for a stable assertion.
+      { name: "total_value", visible: true, position: 2 },
+    ];
+
+    const [headers, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      request: baseRequest,
+    });
+
+    expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
+    expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
 });
 
 describe("buildCsvExportDataFromBookings", () => {
@@ -422,7 +465,10 @@ describe("buildCsvExportDataFromBookings", () => {
       },
       description: "Studio session",
       tags: [{ name: "commercial" }],
-      assets: [{ title: "Primary Asset" }, { title: "Secondary Asset" }],
+      bookingAssets: [
+        { asset: { title: "Primary Asset" } },
+        { asset: { title: "Secondary Asset" } },
+      ],
     };
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
@@ -483,9 +529,16 @@ describe("buildCsvExportDataFromBookings", () => {
       custodianUser: null,
       description: "",
       tags: [],
-      assets: [
-        { id: "asset-returned", title: "Returned Camera" },
-        { id: "asset-out", title: "Still-Out Tripod" },
+      // why: bookings carry their assets via the `BookingAsset` pivot
+      // (one row per slice, with a per-slice `quantity`) post-3a, so the
+      // CSV builder feeds off `booking.bookingAssets[].asset` not the
+      // legacy direct `assets` relation.
+      bookingAssets: [
+        {
+          quantity: 1,
+          asset: { id: "asset-returned", title: "Returned Camera" },
+        },
+        { quantity: 1, asset: { id: "asset-out", title: "Still-Out Tripod" } },
       ],
     };
 

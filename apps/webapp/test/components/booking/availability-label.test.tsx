@@ -51,7 +51,7 @@ function createAsset(
     barcode: null,
     availableToBook: true,
     requireLabelOnCheckout: false,
-    bookings: [],
+    bookingAssets: [],
     tags: [],
     qrCodes: [],
     qrScanned: "",
@@ -74,20 +74,24 @@ describe("AvailabilityLabel", () => {
 
   it("shows the newest conflicting booking in the tooltip", async () => {
     const asset = createAsset({
-      bookings: [
+      bookingAssets: [
         {
-          id: "old-booking",
-          name: "Old Booking",
-          status: BookingStatus.RESERVED,
-          from: new Date("2024-01-01T10:00:00Z"),
-          to: new Date("2024-01-02T10:00:00Z"),
+          booking: {
+            id: "old-booking",
+            name: "Old Booking",
+            status: BookingStatus.RESERVED,
+            from: new Date("2024-01-01T10:00:00Z"),
+            to: new Date("2024-01-02T10:00:00Z"),
+          },
         } as any,
         {
-          id: "new-booking",
-          name: "New Booking",
-          status: BookingStatus.ONGOING,
-          from: new Date("2024-02-01T10:00:00Z"),
-          to: new Date("2024-02-02T10:00:00Z"),
+          booking: {
+            id: "new-booking",
+            name: "New Booking",
+            status: BookingStatus.ONGOING,
+            from: new Date("2024-02-01T10:00:00Z"),
+            to: new Date("2024-02-02T10:00:00Z"),
+          },
         } as any,
       ],
     });
@@ -115,20 +119,24 @@ describe("AvailabilityLabel", () => {
 
   it("skips the current booking when selecting the conflicting booking", async () => {
     const asset = createAsset({
-      bookings: [
+      bookingAssets: [
         {
-          id: "current-booking",
-          name: "Current Booking",
-          status: BookingStatus.ONGOING,
-          from: new Date("2024-03-01T10:00:00Z"),
-          to: new Date("2024-03-02T10:00:00Z"),
+          booking: {
+            id: "current-booking",
+            name: "Current Booking",
+            status: BookingStatus.ONGOING,
+            from: new Date("2024-03-01T10:00:00Z"),
+            to: new Date("2024-03-02T10:00:00Z"),
+          },
         } as any,
         {
-          id: "other-booking",
-          name: "Other Booking",
-          status: BookingStatus.OVERDUE,
-          from: new Date("2024-02-01T10:00:00Z"),
-          to: new Date("2024-02-02T10:00:00Z"),
+          booking: {
+            id: "other-booking",
+            name: "Other Booking",
+            status: BookingStatus.OVERDUE,
+            from: new Date("2024-02-01T10:00:00Z"),
+            to: new Date("2024-02-02T10:00:00Z"),
+          },
         } as any,
       ],
     });

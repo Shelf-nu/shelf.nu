@@ -50,11 +50,10 @@ export function BookingStatistics({
           <span className="text-right font-medium">{duration}</span>
         </div>
 
-        <Separator />
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Assets</span>
-          <span className="text-right font-medium">{assetsCount}</span>
-        </div>
+        {/* Check-out/check-in progress sits directly under Booking duration so
+            the three composition counts (Assets / Kits / Total assets) stay
+            grouped together below it. Conditionally rendered — only once the
+            booking has partial checkout/check-in activity. */}
         {lifecycleProgress &&
           lifecycleProgress.totalUnits > 0 &&
           (lifecycleProgress.hasPartialCheckouts ||
@@ -64,6 +63,11 @@ export function BookingStatistics({
               <BookingLifecycleProgressBar progress={lifecycleProgress} />
             </>
           )}
+        <Separator />
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">Assets</span>
+          <span className="text-right font-medium">{assetsCount}</span>
+        </div>
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Kits</span>

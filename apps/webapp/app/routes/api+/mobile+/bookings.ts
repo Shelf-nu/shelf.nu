@@ -122,7 +122,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: { name: true },
           },
           _count: {
-            select: { assets: true },
+            select: {
+              bookingAssets: true,
+              // Outstanding book-by-model reservations (units reserved but not
+              // yet assigned to concrete assets). Lets the list card tell a
+              // "reserved but nothing physical to check out yet" booking apart
+              // from a genuinely check-out-ready one, so it never mislabels a
+              // model-only reservation as "Ready to check out".
+              modelRequests: { where: { fulfilledAt: null } },
+            },
           },
         },
         orderBy: [{ [sortBy]: sortOrder }],
@@ -147,7 +155,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
             .join(" ") ||
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
-        assetCount: b._count.assets,
+        assetCount: b._count.bookingAssets,
+        // Outstanding book-by-model reservations still to assign. > 0 means the
+        // booking holds reserved units with no concrete assets behind them yet.
+        outstandingModelCount: b._count.modelRequests,
       })),
       page,
       perPage,

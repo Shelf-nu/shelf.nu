@@ -1,6 +1,10 @@
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
-import { BookingFormSchema, ExtendBookingSchema } from "./forms-schema";
+import {
+  BookingFormSchema,
+  DuplicateBookingSchema,
+  ExtendBookingSchema,
+} from "./forms-schema";
 
 /**
  * These tests verify that booking time restrictions (bufferStartTime and maxBookingLength)
@@ -681,5 +685,325 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
         )
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * Tests for the booking "duplicate" dialog schema.
+ *
+ * `DuplicateBookingSchema` validates ONLY `startDate`/`endDate` (name, custodian
+ * and tags are carried over from the source booking) but it reuses the same
+ * shared date builder (`buildBookingDateSchemas`) as `BookingFormSchema`. These
+ * tests assert that every date rule the new-booking form enforces — buffer,
+ * working-hours/closed-day/non-working-day, end-after-start, and max-length —
+ * also fires in the duplicate dialog, and that ADMIN/OWNER callers bypass the
+ * time restrictions exactly as they do on the new-booking form. The final
+ * PARITY test pins the two schemas to the same accept/reject verdict so the
+ * shared builder can't drift between the two surfaces.
+ */
+describe("DuplicateBookingSchema - date validation", () => {
+  const baseBookingSettings = {
+    bufferStartTime: 24, // 24 hours minimum advance notice
+    tagsRequired: false,
+    maxBookingLength: 48, // Maximum 48 hours
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  const disabledWorkingHours = {
+    enabled: false,
+    weeklySchedule: {},
+    overrides: [],
+  };
+
+  // 24/7 open schedule with a single closed-day override on 2099-04-24. Stored
+  // the way createWorkingHoursOverride does: new Date("2099-04-24") => UTC
+  // midnight on April 24.
+  const workingHoursWith424Closed = {
+    enabled: true,
+    weeklySchedule: {
+      "0": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "1": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "2": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "3": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "4": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "5": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "6": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+    },
+    overrides: [
+      {
+        id: "override-1",
+        date: new Date("2099-04-24").toISOString(),
+        isOpen: false,
+        openTime: null,
+        closeTime: null,
+        reason: "Closed",
+      },
+    ],
+  };
+
+  // Weekdays (Mon–Fri) open round the clock; weekend (Sat/Sun) closed. In
+  // America/Chicago, 2099-04-25 is a Saturday — a non-working day.
+  const weekdaysOnlyWorkingHours = {
+    enabled: true,
+    weeklySchedule: {
+      "0": { isOpen: false, openTime: null, closeTime: null }, // Sunday
+      "1": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "2": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "3": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "4": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "5": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "6": { isOpen: false, openTime: null, closeTime: null }, // Saturday
+    },
+    overrides: [],
+  };
+
+  describe("bufferStartTime restriction", () => {
+    it("enforces buffer time for BASE/SELF_SERVICE users", () => {
+      const schema = DuplicateBookingSchema({
+        workingHours: disabledWorkingHours,
+        bookingSettings: baseBookingSettings,
+        isAdminOrOwner: false, // BASE/SELF_SERVICE user
+      });
+
+      // Start in 1 hour — well inside the 24 hour buffer.
+      const startDate = addHours(new Date(), 1);
+      const endDate = addHours(startDate, 4);
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const errorMessages = result.error.errors.map((e) => e.message);
+        expect(
+          errorMessages.some((msg) => msg.includes("at least 24 hour"))
+        ).toBe(true);
+      }
+    });
+
+    it("bypasses buffer time for ADMIN/OWNER users", () => {
+      const schema = DuplicateBookingSchema({
+        workingHours: disabledWorkingHours,
+        bookingSettings: baseBookingSettings,
+        isAdminOrOwner: true, // ADMIN/OWNER user
+      });
+
+      // 30 minutes from now — inside the buffer, but admins bypass it.
+      const startDate = addMinutes(new Date(), 30);
+      const endDate = addHours(startDate, 4);
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("working hours restrictions", () => {
+    it("rejects a closed-day override with the real closed message", () => {
+      const schema = DuplicateBookingSchema({
+        hints: { timeZone: "America/Chicago" } as any,
+        workingHours: workingHoursWith424Closed,
+        bookingSettings: {
+          ...baseBookingSettings,
+          bufferStartTime: 0,
+          maxBookingLength: null,
+        },
+        isAdminOrOwner: true, // Bypass buffer so we isolate the override logic
+      });
+
+      // Booking squarely on the closed 4/24 in the user's local time.
+      const startDate = new Date("2099-04-24T10:00:00-05:00");
+      const endDate = new Date("2099-04-24T11:00:00-05:00");
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const errorMessages = result.error.errors.map((e) => e.message);
+        expect(
+          errorMessages.some((msg) => msg.toLowerCase().includes("closed"))
+        ).toBe(true);
+      }
+    });
+
+    it("rejects a non-working weekday", () => {
+      const schema = DuplicateBookingSchema({
+        hints: { timeZone: "America/Chicago" } as any,
+        workingHours: weekdaysOnlyWorkingHours,
+        bookingSettings: {
+          ...baseBookingSettings,
+          bufferStartTime: 0,
+          maxBookingLength: null,
+        },
+        isAdminOrOwner: true, // Isolate the weekday rule from the buffer
+      });
+
+      // 2099-04-25 is a Saturday in America/Chicago — a closed weekday.
+      const startDate = new Date("2099-04-25T10:00:00-05:00");
+      const endDate = new Date("2099-04-25T11:00:00-05:00");
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const errorMessages = result.error.errors.map((e) => e.message);
+        expect(
+          errorMessages.some((msg) => msg.includes("not a working day"))
+        ).toBe(true);
+      }
+    });
+
+    it("accepts any future date when working hours are disabled", () => {
+      const schema = DuplicateBookingSchema({
+        hints: { timeZone: "America/Chicago" } as any,
+        workingHours: disabledWorkingHours,
+        bookingSettings: {
+          ...baseBookingSettings,
+          bufferStartTime: 0,
+          maxBookingLength: null,
+        },
+        isAdminOrOwner: false, // Even a BASE user is unrestricted by hours here
+      });
+
+      // A weekend, late-night future date that any enabled schedule would
+      // reject — disabled working hours must let it through.
+      const startDate = new Date("2099-04-25T22:00:00-05:00");
+      const endDate = new Date("2099-04-26T02:00:00-05:00");
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("cross-field date validation", () => {
+    it("rejects endDate <= startDate with the exact cross-field message on the endDate path", () => {
+      const schema = DuplicateBookingSchema({
+        workingHours: disabledWorkingHours,
+        bookingSettings: {
+          ...baseBookingSettings,
+          bufferStartTime: 0,
+          maxBookingLength: null,
+        },
+        isAdminOrOwner: true,
+      });
+
+      const startDate = addDays(new Date(), 1);
+      const endDate = subDays(startDate, 1); // End before start
+
+      const result = schema.safeParse({ startDate, endDate });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // The cross-field issue must land on the endDate path with the exact
+        // message the form uses — guarding the shared `crossFieldDateValidation`.
+        const endDateIssue = result.error.errors.find(
+          (e) => e.path.join(".") === "endDate"
+        );
+        expect(endDateIssue?.message).toBe(
+          "End date cannot be earlier than start date"
+        );
+      }
+    });
+
+    it("rejects bookings exceeding max length for BASE users but bypasses for ADMIN/OWNER", () => {
+      const baseSchema = DuplicateBookingSchema({
+        workingHours: disabledWorkingHours,
+        bookingSettings: baseBookingSettings,
+        isAdminOrOwner: false,
+      });
+
+      // Start in 2 days to clear the 24h buffer, then run 72h (over the 48h max).
+      const startDate = addDays(new Date(), 2);
+      const endDate = addHours(startDate, 72);
+
+      const baseResult = baseSchema.safeParse({ startDate, endDate });
+
+      expect(baseResult.success).toBe(false);
+      if (!baseResult.success) {
+        const errorMessages = baseResult.error.errors.map((e) => e.message);
+        expect(
+          errorMessages.some((msg) =>
+            msg.includes("Booking duration cannot exceed 48 hours")
+          )
+        ).toBe(true);
+      }
+
+      // Same 72h window passes for an admin (buffer + max-length bypassed).
+      const adminSchema = DuplicateBookingSchema({
+        workingHours: disabledWorkingHours,
+        bookingSettings: baseBookingSettings,
+        isAdminOrOwner: true,
+      });
+      const adminStart = addHours(new Date(), 1);
+      const adminEnd = addHours(adminStart, 72);
+
+      const adminResult = adminSchema.safeParse({
+        startDate: adminStart,
+        endDate: adminEnd,
+      });
+
+      expect(adminResult.success).toBe(true);
+    });
+  });
+
+  /**
+   * Parity guard: the duplicate dialog and the new-booking form consume the
+   * SAME shared date builder, so for any given start/end pair they must reach
+   * the same accept/reject verdict. If the builder ever drifts (or one surface
+   * stops calling it), one of these assertions fails.
+   */
+  describe("parity with BookingFormSchema (action: new)", () => {
+    const sharedSettings = baseBookingSettings;
+    const dupSchema = DuplicateBookingSchema({
+      workingHours: disabledWorkingHours,
+      bookingSettings: sharedSettings,
+      isAdminOrOwner: true,
+    });
+    const formSchema = BookingFormSchema({
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: sharedSettings,
+      isAdminOrOwner: true,
+    });
+
+    // BookingFormSchema validates more than dates (name/custodian), so supply
+    // valid values for those — the dates are the only variable under test.
+    const validCustodian = JSON.stringify({
+      id: "tm-1",
+      name: "Test User",
+      userId: "user-1",
+    });
+
+    it("both accept the same valid start/end pair", () => {
+      const startDate = addHours(new Date(), 1);
+      const endDate = addHours(startDate, 5);
+
+      const dupResult = dupSchema.safeParse({ startDate, endDate });
+      const formResult = formSchema.safeParse({
+        name: "Parity Booking",
+        startDate,
+        endDate,
+        custodian: validCustodian,
+      });
+
+      expect(dupResult.success).toBe(true);
+      expect(formResult.success).toBe(dupResult.success);
+    });
+
+    it("both reject the same invalid (end-before-start) pair", () => {
+      const startDate = addDays(new Date(), 1);
+      const endDate = subDays(startDate, 1); // End before start
+
+      const dupResult = dupSchema.safeParse({ startDate, endDate });
+      const formResult = formSchema.safeParse({
+        name: "Parity Booking",
+        startDate,
+        endDate,
+        custodian: validCustodian,
+      });
+
+      expect(dupResult.success).toBe(false);
+      expect(formResult.success).toBe(dupResult.success);
+    });
   });
 });

@@ -600,6 +600,11 @@ export default function AuditOverview() {
   );
 }
 
+// The audit asset row was extracted to its own component —
+// `~/components/audit/audit-asset-list-item.tsx` (imported as
+// `AuditAssetListItem` and passed to `List`). The previously-inline
+// `AssetListItem` body that lived here is removed in favour of the
+// extracted component so the route has one source of truth.
 function ClearFilterButton() {
   const [, setSearchParams] = useSearchParams();
 

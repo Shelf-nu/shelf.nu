@@ -65,13 +65,37 @@ The Shelf Team
 };
 
 /**
- * This is the content of the email sent to the custodian when a booking is reserved.
+ * This is the content of the email sent to the custodian when a booking
+ * is reserved.
+ *
+ * Phase 3d (Book-by-Model): when the booking has outstanding
+ * `BookingModelRequest` rows, the plain-text email appends a
+ * "Requested models" block that mirrors the HTML template. The list is
+ * omitted when empty so the plain-text output stays identical for
+ * bookings that don't use model-level reservations.
+ *
+ * @param args.modelRequests - Optional list of `{ quantity, modelName }`
+ *   rows. Must be pre-filtered so only entries with `quantity > 0`
+ *   reach this helper.
  */
-export const assetReservedEmailContent = (args: BasicEmailContentArgs) =>
-  baseBookingTextEmailContent({
+export const assetReservedEmailContent = ({
+  modelRequests,
+  ...args
+}: BasicEmailContentArgs & {
+  modelRequests?: { quantity: number; modelName: string }[];
+}) => {
+  const modelRequestsBlock =
+    modelRequests && modelRequests.length > 0
+      ? `\n\nRequested models:\n${modelRequests
+          .map((req) => `- ${req.quantity} × ${req.modelName}`)
+          .join("\n")}`
+      : "";
+
+  return baseBookingTextEmailContent({
     ...args,
-    emailContent: `Booking reservation for ${args.custodian}.`,
+    emailContent: `Booking reservation for ${args.custodian}.${modelRequestsBlock}`,
   });
+};
 
 /**
  * This is the content of the email sent to the custodian when a booking is checked out.
@@ -311,7 +335,7 @@ export async function sendBookingUpdatedEmail({
 
     const emailArgs: BasicEmailContentArgs = {
       bookingName: booking.name,
-      assetsCount: booking._count.assets,
+      assetsCount: booking._count.bookingAssets,
       custodian,
       from: booking.from!,
       to: booking.to!,
@@ -336,7 +360,7 @@ export async function sendBookingUpdatedEmail({
       const html = await bookingUpdatesTemplateString({
         booking,
         heading: `Your booking "${booking.name}" has been updated`,
-        assetCount: booking._count.assets,
+        assetCount: booking._count.bookingAssets,
         hints,
         changes,
         recipientReason: recipient.reason,
@@ -366,7 +390,7 @@ export async function sendBookingUpdatedEmail({
           const html = await bookingUpdatesTemplateString({
             booking,
             heading: `Your booking "${booking.name}" has been updated`,
-            assetCount: booking._count.assets,
+            assetCount: booking._count.bookingAssets,
             hints,
             changes,
             recipientReason: "custodian",

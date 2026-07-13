@@ -1,4 +1,4 @@
-import { KitStatus } from "@prisma/client";
+import { AssetType, KitStatus } from "@prisma/client";
 import {
   data,
   type ActionFunctionArgs,
@@ -8,7 +8,7 @@ import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -69,20 +69,55 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     );
 
+    /**
+     * Filter out QUANTITY_TRACKED assets — they require a per-asset slice
+     * quantity that the bulk dialog has no UX to collect (the kit's own
+     * manage-assets picker is the canonical place for that). The dialog
+     * already shows a `WarningBox` listing how many will be skipped; here
+     * we enforce the skip server-side and refuse the request when the
+     * entire selection is qty-tracked. Mirror of `bulkUpdateAssetLocation`
+     * (asset/service.server.ts).
+     */
+    const selectedAssets = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, type: true },
+    });
+    const individualAssetIds = selectedAssets
+      .filter((a) => a.type !== AssetType.QUANTITY_TRACKED)
+      .map((a) => a.id);
+    const skippedQuantityTracked =
+      selectedAssets.length - individualAssetIds.length;
+
+    if (individualAssetIds.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must be added to a kit individually with a specific quantity from the kit's manage-assets page.",
+        additionalData: { userId, organizationId, assetIds, kit },
+        label: "Kit",
+        shouldBeCaptured: false,
+      });
+    }
+
     const updatedKit = await updateKitAssets({
       kitId: kit,
-      assetIds,
+      assetIds: individualAssetIds,
       organizationId,
       userId,
       request,
       addOnly: true, // Only add assets, don't remove existing ones
     });
 
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — add them individually from the kit's manage-assets page.`
+        : "";
+
     sendNotification({
       icon: { name: "success", variant: "success" },
       senderId: userId,
       title: "Bulk assets added to kit",
-      message: `Successfully added ${assetIds.length} assets to kit "${updatedKit.name}".`,
+      message: `Successfully added ${individualAssetIds.length} assets to kit "${updatedKit.name}".${skippedNote}`,
     });
 
     return data(payload({ success: true }));

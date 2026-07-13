@@ -199,6 +199,7 @@ export default function AvailabilityCalendar({
               ]}
               slotLabelClassNames="font-normal text-gray-600"
               slotMinWidth={100}
+              resourceAreaWidth="35%"
               resourceLabelContent={resourceLabelContent}
               eventContent={renderEventCard}
               eventClassNames={(eventInfo) => {

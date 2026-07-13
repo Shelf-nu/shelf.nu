@@ -19,7 +19,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -140,9 +140,18 @@ function ScannerContent() {
 
   // Booking check-in mode
   const isBookingMode = !!bookingId;
+  // Fulfil-and-check-out flow (book-by-model): the booking reserved N units of
+  // a model up front; the operator scans the concrete units to assign them and
+  // check the booking out in one atomic motion (web parity — see the web
+  // `fulfil-and-checkout` scanner). It scans exactly like add mode; it only
+  // differs on submit (assign + checkout instead of add) and in its labels.
+  const isBookingFulfilMode = isBookingMode && bookingAction === "fulfil";
   // Scan-to-build flow: same booking header, but scans ADD items (assets and
-  // kits) to the booking instead of checking them in.
-  const isBookingAddMode = isBookingMode && bookingAction === "add";
+  // kits) to the booking instead of checking them in. Fulfil mode is a
+  // superset — it too captures scans into the add list, then checks out — so
+  // all the add-mode scan capture / blockers / list rendering apply to both.
+  const isBookingAddMode =
+    isBookingMode && (bookingAction === "add" || bookingAction === "fulfil");
 
   // Filter scanner actions based on the user's role in the current org
   const availableActions = useMemo(
@@ -209,6 +218,13 @@ function ScannerContent() {
     bookingStatus: string;
     bookedAssets: BookingAsset[];
     checkedInAssetIds: Set<string>;
+    // Book-by-model reservations still awaiting concrete units, so fulfil mode
+    // can tell the operator exactly what (and how many) to scan.
+    outstandingModelRequests: {
+      assetModelName: string;
+      outstandingQuantity: number;
+    }[];
+    outstandingModelUnitCount: number;
   } | null>(null);
 
   // Also called from the scan paths when a code arrives before the first
@@ -222,6 +238,13 @@ function ScannerContent() {
         bookingStatus: data.booking.status,
         bookedAssets: data.booking.assets,
         checkedInAssetIds: new Set(data.checkedInAssetIds),
+        outstandingModelRequests: (data.booking.modelRequests ?? [])
+          .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
+          .map((r) => ({
+            assetModelName: r.assetModelName,
+            outstandingQuantity: r.outstandingQuantity,
+          })),
+        outstandingModelUnitCount: data.booking.outstandingModelUnitCount ?? 0,
       });
     });
   }, [isBookingMode, bookingId, currentOrg]);
@@ -450,7 +473,7 @@ function ScannerContent() {
                   label: "Link in Browser",
                   icon: "open-outline",
                   onPress: () => {
-                    Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                    void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                     dismissResult();
                   },
                 },
@@ -808,7 +831,7 @@ function ScannerContent() {
               label: "Open in Browser",
               icon: "open-outline",
               onPress: () => {
-                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -831,7 +854,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1182,7 +1205,7 @@ function ScannerContent() {
           const [assetResult, kitResult] = await Promise.all([
             assetIds.length > 0
               ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-              : Promise.resolve({ error: null }),
+              : Promise.resolve({ data: null, error: null }),
             kitIds.length > 0
               ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
               : Promise.resolve({ error: null }),
@@ -1195,7 +1218,23 @@ function ScannerContent() {
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            Alert.alert("Done", `Assigned ${confirmLabel} to ${displayName}.`);
+            // Honest partial success: mixed batches skip QUANTITY_TRACKED
+            // assets server-side (their custody is per-unit), so say both
+            // numbers instead of implying everything was assigned. Absent
+            // field (older server) or all-INDIVIDUAL batches read 0 and the
+            // alert body is unchanged. All-QT batches error out server-side
+            // and never reach this branch.
+            const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+            const skippedNote =
+              skipped > 0
+                ? `\n\n${skipped} quantity-tracked asset${
+                    skipped === 1 ? "" : "s"
+                  } skipped. Assign quantities from the asset's detail screen.`
+                : "";
+            Alert.alert(
+              "Done",
+              `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
+            );
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -1212,7 +1251,7 @@ function ScannerContent() {
     const [assetResult, kitResult] = await Promise.all([
       assetIds.length > 0
         ? api.bulkReleaseCustody(currentOrg.id, assetIds)
-        : Promise.resolve({ error: null }),
+        : Promise.resolve({ data: null, error: null }),
       kitIds.length > 0
         ? api.bulkReleaseKitCustody(currentOrg.id, kitIds)
         : Promise.resolve({ error: null }),
@@ -1225,7 +1264,19 @@ function ScannerContent() {
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      Alert.alert("Done", `Released custody of ${releasedLabel}.`);
+      // Honest partial success — mirrors performBulkAssign: the server skips
+      // QUANTITY_TRACKED assets in mixed batches and reports the count.
+      const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+      const skippedNote =
+        skipped > 0
+          ? `\n\n${skipped} quantity-tracked asset${
+              skipped === 1 ? "" : "s"
+            } skipped. Release quantities from the asset's detail screen.`
+          : "";
+      Alert.alert(
+        "Done",
+        `Released custody of ${releasedLabel}.${skippedNote}`
+      );
       setScannedItems([]);
       lastScanRef.current = "";
     }
@@ -1352,6 +1403,101 @@ function ScannerContent() {
                     // navigation transition into an endless render-commit
                     // loop (JS thread pegged at ~125% CPU, network
                     // callbacks starve) — verified by process sampling.
+                    InteractionManager.runAfterInteractions(() => {
+                      pushIntoTab(
+                        "/(tabs)/bookings",
+                        `/(tabs)/bookings/${bookingId}`
+                      );
+                    });
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  /**
+   * Submit the fulfil-and-check-out list: the scanned assets are matched
+   * against the booking's outstanding model reservations (materialising them)
+   * AND the booking is checked out (RESERVED -> ONGOING) in one atomic call.
+   * Mirrors the web `fulfil-and-checkout` scanner. The server rejects the
+   * submit if any reservation is still unassigned, so the operator gets a clear
+   * "still N to assign" error rather than a silent partial checkout.
+   */
+  const handleBookingFulfil = () => {
+    if (
+      !bookingId ||
+      !currentOrg ||
+      bookingCheckinItems.length === 0 ||
+      // Same guard as add: don't submit before the booking context has loaded
+      // (blockers are empty until then, which would bypass the eligibility
+      // checks) or while any blocker is unresolved.
+      !bookingCtx ||
+      bookingBlockers.length > 0
+    ) {
+      return;
+    }
+
+    const assetIds = bookingCheckinItems
+      .filter((i) => i.type === "asset")
+      .map((i) => i.targetId);
+    const kitIds = bookingCheckinItems
+      .filter((i) => i.type === "kit")
+      .map((i) => i.targetId);
+    const count = bookingCheckinItems.length;
+
+    Alert.alert(
+      "Assign & check out",
+      `Assign ${count} scanned unit${count === 1 ? "" : "s"} and check out "${
+        bookingName || "this booking"
+      }"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Check out",
+          onPress: async () => {
+            setIsBookingSubmitting(true);
+            const timeZone = (() => {
+              try {
+                return (
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+                );
+              } catch {
+                return "UTC";
+              }
+            })();
+
+            const { error } = await api.fulfilAndCheckoutBooking(
+              currentOrg.id,
+              bookingId,
+              assetIds,
+              kitIds,
+              timeZone
+            );
+            setIsBookingSubmitting(false);
+
+            if (error) {
+              Alert.alert("Couldn't check out", error);
+              return;
+            }
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            Alert.alert(
+              "Checked out",
+              `Assigned ${count} unit${
+                count === 1 ? "" : "s"
+              } and checked out "${bookingName || "the booking"}".`,
+              [
+                {
+                  text: "OK",
+                  onPress: () => {
+                    setBookingCheckinItems([]);
+                    lastScanRef.current = "";
+                    markBookingDirty(bookingId);
                     InteractionManager.runAfterInteractions(() => {
                       pushIntoTab(
                         "/(tabs)/bookings",
@@ -1582,11 +1728,29 @@ function ScannerContent() {
                 </TouchableOpacity>
                 <View style={styles.bookingModeInfo}>
                   <Text style={styles.bookingModeLabel}>
-                    {isBookingAddMode ? "Add to Booking" : "Booking Check-In"}
+                    {isBookingFulfilMode
+                      ? "Fulfil & Check Out"
+                      : isBookingAddMode
+                      ? "Add to Booking"
+                      : "Booking Check-In"}
                   </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
                     {bookingName || "Scan assets to check in"}
                   </Text>
+                  {isBookingFulfilMode &&
+                    bookingCtx &&
+                    bookingCtx.outstandingModelRequests.length > 0 && (
+                      <Text style={styles.bookingFulfilHint} numberOfLines={2}>
+                        {`Reserved: ${bookingCtx.outstandingModelRequests
+                          .map(
+                            (r) =>
+                              `${r.assetModelName} ×${r.outstandingQuantity}`
+                          )
+                          .join(", ")}  ·  ${bookingCheckinItems.length}/${
+                          bookingCtx.outstandingModelUnitCount
+                        } scanned`}
+                      </Text>
+                    )}
                 </View>
               </View>
             </View>
@@ -1652,7 +1816,9 @@ function ScannerContent() {
             ) : (
               <Text style={styles.instructionText}>
                 {isBookingMode
-                  ? isBookingAddMode
+                  ? isBookingFulfilMode
+                    ? "Scan the reserved units to assign"
+                    : isBookingAddMode
                     ? "Scan assets or kits to add"
                     : "Scan assets to check in"
                   : instructionMap[action]}
@@ -1802,7 +1968,7 @@ function ScannerContent() {
               keyField="targetId"
               title={
                 isBookingAddMode
-                  ? `${bookingCheckinItems.length} item${
+                  ? `${bookingCheckinItems.length} unit${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } scanned`
                   : `${bookingCheckinItems.length} asset${
@@ -1810,20 +1976,32 @@ function ScannerContent() {
                     } to check in`
               }
               submitLabel={
-                isBookingAddMode
+                isBookingFulfilMode
+                  ? `Assign & check out ${bookingCheckinItems.length} unit${
+                      bookingCheckinItems.length === 1 ? "" : "s"
+                    }`
+                  : isBookingAddMode
                   ? "Add to Booking"
                   : `Check In ${bookingCheckinItems.length} ${
                       bookingCheckinItems.length === 1 ? "Asset" : "Assets"
                     }`
               }
               submitIcon={
-                isBookingAddMode ? "add-circle-outline" : "log-in-outline"
+                isBookingFulfilMode
+                  ? "log-out-outline"
+                  : isBookingAddMode
+                  ? "add-circle-outline"
+                  : "log-in-outline"
               }
               isSubmitting={isBookingSubmitting}
               onRemove={removeBookingItem}
               onClear={clearBookingItems}
               onSubmit={
-                isBookingAddMode ? handleBookingAdd : handleBookingCheckin
+                isBookingFulfilMode
+                  ? handleBookingFulfil
+                  : isBookingAddMode
+                  ? handleBookingAdd
+                  : handleBookingCheckin
               }
               showStatus={isBookingAddMode}
               blockers={isBookingAddMode ? bookingBlockers : []}
@@ -1992,6 +2170,12 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.lg,
     color: "#fff",
     fontWeight: "700",
+  },
+  bookingFulfilHint: {
+    marginTop: 2,
+    fontSize: fontSize.xs,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "600",
   },
   middleRow: {
     flexDirection: "row",

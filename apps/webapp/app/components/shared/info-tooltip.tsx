@@ -12,10 +12,18 @@ export const InfoTooltip = ({
   icon,
   iconClassName,
   content,
+  contentClassName,
 }: {
   icon?: ReactNode;
   iconClassName?: string;
   content: ReactNode;
+  /**
+   * Extra classes for the tooltip content wrapper. Use this to raise the
+   * z-index when the tooltip lives inside another portalled overlay (e.g. a
+   * Popover with `z-[100]`), whose stacking context would otherwise hide the
+   * default `z-50` tooltip behind it.
+   */
+  contentClassName?: string;
 }) => (
   <TooltipProvider delayDuration={100}>
     <Tooltip>
@@ -24,7 +32,7 @@ export const InfoTooltip = ({
           {icon ? icon : <Info className={tw("size-5", iconClassName)} />}
         </i>
       </TooltipTrigger>
-      <TooltipContent side="bottom">
+      <TooltipContent side="bottom" className={contentClassName}>
         <div className="max-w-[260px] rounded text-left sm:max-w-[320px]">
           {content}
         </div>

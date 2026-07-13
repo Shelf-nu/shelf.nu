@@ -125,6 +125,10 @@ export default {
         collapsed: true,
         items: [
           {
+            text: "Asset Import (CSV)",
+            link: "/asset-import",
+          },
+          {
             text: "Advanced Asset Index",
             link: "/advanced-index/",
           },
@@ -161,6 +165,10 @@ export default {
           {
             text: "Microsoft Entra",
             link: "/sso/providers/microsoft-entra",
+          },
+          {
+            text: "Shibboleth",
+            link: "/sso/providers/shibboleth",
           },
         ],
       },

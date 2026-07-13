@@ -1,0 +1,99 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Delete action (mobile)"
+tags:
+  - bookings
+  - delete
+  - actions
+
+---
+# Verifies the booking-detail overflow "Delete booking" action. Creates a
+# disposable DRAFT booking and deletes it, then asserts it's gone against a
+# FRESH fetch (the list does not refetch after router.back(), so we relaunch
+# and search). Idempotent + self-cleaning.
+#
+# Requires GRANULAR WORKSPACE (TEAM) + team member "Dr. Sarah Mitchell".
+# Action steps verified live on-device 2026-06-23; preamble copied from 06.
+
+- runFlow: ../../shared/login.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# Create a disposable DRAFT booking.
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Delete Test"
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "QA Delete Test"
+    timeout: 20000
+
+# Delete from the DRAFT detail.
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Delete booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete booking$"
+- extendedWaitUntil:
+    visible: "Delete Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete$"
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 20000
+
+# Verify gone against a fresh fetch (relaunch keeps the session + workspace).
+- launchApp
+- tapOn:
+    text: "http://localhost:8081"
+    optional: true
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 90000
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Search bookings"
+    timeout: 20000
+- tapOn: "Search bookings"
+- inputText: "QA Delete Test"
+- extendedWaitUntil:
+    notVisible: "Booking: QA Delete Test.*"
+    timeout: 15000
+- takeScreenshot: delete-action-verified

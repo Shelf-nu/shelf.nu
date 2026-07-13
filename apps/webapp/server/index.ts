@@ -2,6 +2,7 @@
 // It is important to import it as .js for this to work, even if the file is .ts
 import "./instrument.server.js";
 
+import type { Context } from "hono";
 import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
@@ -17,7 +18,11 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
-import { mobileIpRateLimit } from "./rate-limit";
+import {
+  appLoaderRateLimit,
+  calendarFeedRateLimit,
+  mobileIpRateLimit,
+} from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { securityHeaders } from "./security-headers";
 import { authSessionKey, createSessionStorage } from "./session";
@@ -133,6 +138,14 @@ export default createHonoServer<ServerEnv>({
     server.use("/api/mobile/*", mobileIpRateLimit());
 
     /**
+     * Calendar iCal feed rate limit. Scoped to the feed route; the feed is
+     * public (secret-token auth, in publicPaths) and runs an unpaginated
+     * windowed query, so cap each feed (keyed by its token path) before the
+     * handler runs.
+     */
+    server.use("/api/calendar/feed/*", calendarFeedRateLimit());
+
+    /**
      * Add session middleware
      */
     server.use(
@@ -153,6 +166,35 @@ export default createHonoServer<ServerEnv>({
         },
       })
     );
+
+    /**
+     * Guard single-fetch loader (`*.data`) revalidations against runaway client
+     * loops that can exhaust the DB connection pool. Keyed per (user, path) so
+     * normal navigation (varied paths) is unaffected; `/__*` (manifest) and SSE
+     * streams are not `.data`, so they are excluded.
+     *
+     * Registered BEFORE refreshSession()/protect() on purpose: protect() runs
+     * validateSession(), a Prisma query against `auth.refresh_tokens`, on every
+     * request. If the limiter ran after it, each over-limit request would still
+     * burn a DB connection before being rejected — defeating the guard, whose
+     * whole point is to keep a runaway loop off the DB hot path. Here it reads
+     * the user id straight from the parsed cookie session and 429s with zero DB
+     * work.
+     *
+     * The limiter is instantiated ONCE so its in-memory store accumulates counts
+     * across requests; a per-request instance would reset the count every time.
+     * A manual matcher (not `server.use(pattern, ...)`) is needed because the
+     * match is a `.data` *suffix*, not a path prefix.
+     */
+    const appLoaderLimiter = appLoaderRateLimit();
+    server.use("*", async (c, next) => {
+      const p = c.req.path;
+      if (!p.endsWith(".data") || p.startsWith("/__")) return next();
+      // `appLoaderLimiter` is typed with hono's default `Env`; our server uses a
+      // custom `ServerEnv`. Cast to bridge the generic — the runtime context is
+      // the same object Hono passes to every middleware.
+      return appLoaderLimiter(c as unknown as Context, next);
+    });
 
     /**
      * Add refresh session middleware
@@ -184,6 +226,11 @@ export default createHonoServer<ServerEnv>({
           "/reset-password",
           "/send-otp",
           "/healthcheck",
+          // Native-app deep-link association files (iOS Universal Links /
+          // Android App Links). Must be publicly reachable — the OS fetches
+          // them unauthenticated to verify the Companion app's domain claim.
+          "/.well-known/apple-app-site-association",
+          "/.well-known/assetlinks.json",
           "/api/public-stats",
           "/api/oss-friends",
           "/api/stripe-webhook",
@@ -192,6 +239,11 @@ export default createHonoServer<ServerEnv>({
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
           "/api/mobile/*path", // Mobile companion app API (JWT auth, not cookie)
+          // why: auth-bypassed. The iCal feed authenticates via a secret URL
+          // token (calendar clients can't send cookies). Scoped to the feed
+          // route only — cookie-authed routes like /api/calendar-subscription
+          // stay OUT of this prefix.
+          "/api/calendar/feed/*path",
         ],
       })
     );
