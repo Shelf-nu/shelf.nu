@@ -256,7 +256,12 @@ export type AdvancedIndexAsset = Pick<
   })[];
   upcomingReminder?: Pick<
     AssetReminder,
-    "id" | "alertDateTime" | "name" | "message"
+    | "id"
+    | "alertDateTime"
+    | "name"
+    | "message"
+    | "recurrenceUnit"
+    | "recurrenceInterval"
   >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;

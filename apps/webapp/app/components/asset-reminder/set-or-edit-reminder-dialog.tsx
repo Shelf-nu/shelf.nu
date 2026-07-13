@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { Form, useNavigation, useLocation, useActionData } from "react-router";
+import { useEffect, useState } from "react";
+import { DateTime } from "luxon";
+import { Form, useLoaderData, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -7,31 +8,132 @@ import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useDisabled } from "~/hooks/use-disabled";
+import {
+  REMINDER_REPEAT_VALUES,
+  resolveRecurrenceZone,
+  type ReminderRepeatValue,
+} from "~/modules/asset-reminder/recurrence";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import ReminderRecurrenceFields from "./reminder-recurrence-fields";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
-export const setReminderSchema = z.object({
+const baseReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),
   message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce
-    .date()
-    .min(new Date(), "Please select a date in the future"),
+  alertDateTime: z.coerce.date(),
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),
+  repeat: z.enum(REMINDER_REPEAT_VALUES).default("never"),
+  // why preprocess: an empty optional date input submits "" through the
+  // multipart form, and z.coerce.date() would turn "" into Invalid Date
+  endsAt: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.coerce.date().optional()
+  ),
   redirectTo: z.string().optional(),
+});
+
+/**
+ * CLIENT-ONLY endsAt ordering check, comparing CALENDAR DAYS rather than
+ * instants. The two inputs coerce differently: a type="date" string parses
+ * at UTC midnight while a datetime-local string parses in the browser's
+ * local zone — comparing the raw instants wrongly rejected valid same-day
+ * evening reminders for users west of UTC. The endsAt calendar day is the
+ * UTC date of the coerced value; the reminder's calendar day is its LOCAL
+ * date. The authoritative server check runs on the zone-resolved values in
+ * resolveReminderPayloadDates.
+ */
+function clientEndsAtOrderingRefinement(
+  data: z.infer<typeof baseReminderSchema>,
+  ctx: z.RefinementCtx
+) {
+  if (data.repeat === "never" || !data.endsAt) return;
+
+  const endsDay = data.endsAt.toISOString().slice(0, 10);
+  const alert = data.alertDateTime;
+  const alertDay = `${alert.getFullYear()}-${String(
+    alert.getMonth() + 1
+  ).padStart(2, "0")}-${String(alert.getDate()).padStart(2, "0")}`;
+
+  if (endsDay < alertDay) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["endsAt"],
+      message: "End date must be on or after the reminder date",
+    });
+  }
+}
+
+/**
+ * CLIENT-ONLY future check. In the browser, z.coerce.date() parses the
+ * datetime-local string in the user's own zone, so comparing against
+ * Date.now() is correct. On the SERVER the same coercion runs in the
+ * process zone (UTC in prod) and would wrongly reject valid future times
+ * for users west of UTC — the authoritative server check happens in
+ * resolveReminderPayloadDates against the client-hint-resolved instant.
+ * (Evaluated at parse time; the previous `.min(new Date())` snapshotted
+ * boot time.)
+ */
+function clientFutureRefinement(
+  data: z.infer<typeof baseReminderSchema>,
+  ctx: z.RefinementCtx
+) {
+  if (data.alertDateTime.getTime() <= Date.now()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["alertDateTime"],
+      message: "Please select a date in the future",
+    });
+  }
+}
+
+/** Client-side schema (zorm): calendar-day ordering + zone-correct future check. */
+export const setReminderSchema = baseReminderSchema
+  .superRefine(clientEndsAtOrderingRefinement)
+  .superRefine(clientFutureRefinement);
+
+/**
+ * Server-side parse schemas: NO date refinements — server-side coercion runs
+ * in the process zone, not the user's, so both the future check and the
+ * endsAt ordering check are enforced by resolveReminderPayloadDates on the
+ * client-hint-resolved instants instead.
+ */
+export const setReminderServerSchema = baseReminderSchema;
+
+/** Edit adds the reminder id; consumed by resolveRemindersActions. */
+export const editReminderServerSchema = baseReminderSchema.extend({
+  id: z.string(),
 });
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
   onClose: () => void;
-  reminder?: z.infer<typeof setReminderSchema> & { id: string };
+  reminder?: Omit<z.infer<typeof setReminderSchema>, "repeat" | "endsAt"> & {
+    id: string;
+    repeat?: ReminderRepeatValue;
+    endsAt?: Date | string | null;
+    recurrenceTimezone?: string | null;
+  };
   action?: string;
 };
+
+/**
+ * Reads the tier capability exposed by every route that renders this dialog
+ * (asset detail, global reminders index, asset reminders tab). Fails CLOSED
+ * (locked UI) if a future surface forgets to expose it — the server asserts
+ * independently either way.
+ */
+function useCanUseRecurringReminders(): boolean {
+  const data = useLoaderData() as
+    | { canUseRecurringReminders?: boolean }
+    | undefined;
+  return data?.canUseRecurringReminders ?? false;
+}
 
 export default function SetOrEditReminderDialog({
   open,
@@ -39,11 +141,11 @@ export default function SetOrEditReminderDialog({
   reminder,
   action,
 }: SetOrEditReminderDialogProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
 
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
+  const canUseRecurringReminders = useCanUseRecurringReminders();
 
   const redirectTo = `${pathname}${
     searchParams.size > 0
@@ -60,6 +162,27 @@ export default function SetOrEditReminderDialog({
   );
 
   const isEdit = !!reminder;
+  const initialRepeat: ReminderRepeatValue = reminder?.repeat ?? "never";
+  const [repeat, setRepeat] = useState<ReminderRepeatValue>(initialRepeat);
+
+  /**
+   * Reset the Repeat selection whenever the dialog (re)opens — useState only
+   * seeds once, so without this a changed-then-cancelled cadence would leak
+   * into the next open and could be submitted unintentionally. Uses the
+   * adjust-state-during-render pattern (not an effect) so the reset applies
+   * in the same render pass with no stale flash.
+   */
+  // why: react-doctor flags prop-seeded useState (no-derived-useState), but
+  // this is the React-docs "adjust state during render" pattern — `repeat`
+  // is user-editable state that must RESET on open, not derived state that
+  // could be computed inline. Accepted residual per CLAUDE.md.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      setRepeat(initialRepeat);
+    }
+  }
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
@@ -77,6 +200,16 @@ export default function SetOrEditReminderDialog({
     },
     [onClose, searchParams, setSearchParams]
   );
+
+  // why: recurrenceEndsAt is stored as end-of-day in the reminder's own
+  // timezone. Render the calendar date back in THAT zone (not UTC via
+  // toISOString) so the date shown matches what was picked and does not drift
+  // +1 day per save for west-of-UTC workspaces.
+  const endsAtDefault = reminder?.endsAt
+    ? DateTime.fromJSDate(new Date(reminder.endsAt))
+        .setZone(resolveRecurrenceZone(reminder.recurrenceTimezone ?? null))
+        .toFormat("yyyy-MM-dd")
+    : undefined;
 
   return (
     <DialogPortal>
@@ -157,7 +290,7 @@ export default function SetOrEditReminderDialog({
               </p>
             </div>
 
-            <div>
+            <div className="mb-4">
               <Input
                 defaultValue={
                   reminder?.alertDateTime
@@ -182,6 +315,20 @@ export default function SetOrEditReminderDialog({
                 We will send the reminder at this date/time.
               </p>
             </div>
+
+            <ReminderRecurrenceFields
+              canUseRecurringReminders={canUseRecurringReminders}
+              disabled={disabled}
+              repeat={repeat}
+              onRepeatChange={setRepeat}
+              initialRepeat={initialRepeat}
+              endsAtDefault={endsAtDefault}
+              repeatFieldName={zo.fields.repeat()}
+              endsAtFieldName={zo.fields.endsAt()}
+              endsAtError={
+                validationErrors?.endsAt?.message || zo.errors.endsAt()?.message
+              }
+            />
           </div>
           <div>
             <Separator className="md:hidden" />

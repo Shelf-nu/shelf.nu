@@ -1,4 +1,6 @@
+import { RepeatIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
+import { isRecurringReminder } from "~/modules/asset-reminder/recurrence";
 import type { loader } from "~/routes/_layout+/home";
 import { ClickableTr } from "../dashboard/clickable-tr";
 import { DashboardEmptyState } from "../dashboard/empty-state";
@@ -57,6 +59,12 @@ export default function UpcomingReminders() {
                         options={{ month: "short", day: "numeric" }}
                         includeTime
                       />
+                      {isRecurringReminder(reminder) ? (
+                        <RepeatIcon
+                          className="ml-1 inline size-3 align-[-1px] text-gray-400"
+                          aria-label="Recurring reminder"
+                        />
+                      ) : null}
                     </span>
                   </div>
                 </Td>

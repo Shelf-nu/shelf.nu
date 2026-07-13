@@ -5,10 +5,13 @@ import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
+import { isRecurringReminder, rebaseEndOfDayToZone } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   cancelAssetReminderScheduler,
+  recurringReminderJobOptions,
   scheduleAssetReminder,
 } from "./scheduler.server";
 import { createNote } from "../note/service.server";
@@ -16,6 +19,31 @@ import { getUserByID } from "../user/service.server";
 
 const label = "Asset Reminder";
 
+/**
+ * Cadence payload for a recurring reminder. `null` = one-shot.
+ * Callers derive (unit, interval) from the dialog's Repeat preset and capture
+ * the timezone from client hints; the tier gate is enforced by the caller for
+ * create (assertUserCanUseRecurringReminders) and by editAssetReminder for
+ * edit (compare-to-stored, so downgraded orgs can still edit other fields).
+ */
+export type ReminderRecurrenceInput = {
+  unit: NonNullable<AssetReminder["recurrenceUnit"]>;
+  interval: number;
+  timezone: string | null;
+  endsAt: Date | null;
+} | null;
+
+/**
+ * Creates a reminder (optionally recurring) for an asset and schedules its
+ * pg-boss job. Recurring jobs are sent with retry + singleton options so a
+ * transient failure cannot kill the chain.
+ *
+ * @returns The created AssetReminder.
+ * @throws {ShelfError} 400 when the asset or recipients don't belong to the
+ *         caller's organization or recipients are stale; wrapped errors for
+ *         db/scheduler failures. The tier gate for recurrence is asserted by
+ *         the calling action (assertUserCanUseRecurringReminders).
+ */
 export async function createAssetReminder({
   name,
   message,
@@ -24,6 +52,7 @@ export async function createAssetReminder({
   createdById,
   organizationId,
   teamMembers,
+  recurrence = null,
 }: Pick<
   AssetReminder,
   | "name"
@@ -32,9 +61,18 @@ export async function createAssetReminder({
   | "assetId"
   | "createdById"
   | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+> & {
+  teamMembers: TeamMember["id"][];
+  recurrence?: ReminderRecurrenceInput;
+}) {
   try {
-    await validateTeamMembersForReminder(teamMembers, organizationId);
+    await Promise.all([
+      // why: assetId is user-supplied (route param) — prove it belongs to the
+      // caller's org BEFORE creating, per org-scope-user-supplied-ids rule
+      // (the note write below validates too, but only after the row exists)
+      assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }),
+      validateTeamMembersForReminder(teamMembers, organizationId),
+    ]);
 
     const user = await getUserByID(createdById, {
       select: {
@@ -52,6 +90,10 @@ export async function createAssetReminder({
         assetId,
         createdById,
         organizationId,
+        recurrenceUnit: recurrence?.unit ?? null,
+        recurrenceInterval: recurrence?.interval ?? null,
+        recurrenceTimezone: recurrence?.timezone ?? null,
+        recurrenceEndsAt: recurrence?.endsAt ?? null,
         teamMembers: {
           connect: teamMembers.map((id) => ({ id })),
         },
@@ -83,6 +125,11 @@ export async function createAssetReminder({
           eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
         },
         when: alertDateTime,
+        // why: recurring jobs need retries + singleton dedupe or a transient
+        // failure kills the chain; one-shot jobs keep historical semantics
+        options: recurrence
+          ? recurringReminderJobOptions(assetReminder.id, alertDateTime)
+          : {},
       }),
     ]);
 
@@ -95,6 +142,7 @@ export async function createAssetReminder({
         : "Something went wrong while creating asset reminder.",
       label,
       additionalData: { assetId, organizationId, createdById },
+      shouldBeCaptured: isLikeShelfError(cause) ? cause.shouldBeCaptured : true,
     });
   }
 }
@@ -210,7 +258,10 @@ export async function getPaginatedAndFilterableReminders({
       db.assetReminder.count({ where: finalWhere }),
     ]);
 
-    const totalPages = Math.ceil(totalReminders / perPageParam);
+    // why: divide by `take` — the clamped page size the query actually used
+    // (the raw per_page param defaults to 0 → Infinity, and an out-of-range
+    // cookie perPage wouldn't match the query either)
+    const totalPages = Math.ceil(totalReminders / take);
 
     return {
       reminders,
@@ -229,6 +280,22 @@ export async function getPaginatedAndFilterableReminders({
   }
 }
 
+/**
+ * Edits a reminder, including its recurrence configuration.
+ *
+ * Recurrence timezone semantics: the series' timezone is captured when
+ * recurrence is FIRST enabled and preserved on subsequent edits, even when
+ * the editor is in another timezone. Otherwise a plain edit (message/
+ * recipients) from another zone would silently re-anchor the series'
+ * wall-clock schedule and shift future occurrences across DST boundaries.
+ * The submitted end date's CALENDAR day is re-anchored (end-of-day) into
+ * the stored zone for the same reason.
+ *
+ * @returns The updated AssetReminder.
+ * @throws {ShelfError} 400 stale recipients; not-found for wrong org;
+ *         "Edit is not allowed" for fired one-shots; 403 when the edit adds
+ *         or changes recurrence and the tier lacks the capability.
+ */
 export async function editAssetReminder({
   id,
   name,
@@ -236,10 +303,22 @@ export async function editAssetReminder({
   alertDateTime,
   organizationId,
   teamMembers,
+  recurrence = null,
+  canUseRecurringReminders,
 }: Pick<
   AssetReminder,
   "id" | "name" | "message" | "alertDateTime" | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+> & {
+  teamMembers: TeamMember["id"][];
+  recurrence?: ReminderRecurrenceInput;
+  /**
+   * Whether the org's tier allows recurring reminders. The gate only fires
+   * when this edit ADDS or CHANGES recurrence relative to the stored row —
+   * downgraded orgs can still edit other fields, turn recurrence off, or
+   * delete the reminder.
+   */
+  canUseRecurringReminders: boolean;
+}) {
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
@@ -249,7 +328,13 @@ export async function editAssetReminder({
     });
 
     const now = new Date();
-    if (now > reminder.alertDateTime) {
+    /**
+     * One-shot reminders become immutable after they fire (historical
+     * events). A RECURRING reminder stays editable even when its stored
+     * alertDateTime is briefly in the past (fire-to-fetch poll window) or
+     * the series ended — editing re-arms it with a new future date.
+     */
+    if (now > reminder.alertDateTime && !isRecurringReminder(reminder)) {
       throw new ShelfError({
         cause: null,
         message: "Edit is not allowed for this reminder.",
@@ -259,13 +344,64 @@ export async function editAssetReminder({
       });
     }
 
+    /**
+     * Preserve the series' stored timezone once recurrence exists (see the
+     * function JSDoc), re-anchoring the submitted end date's calendar day
+     * into that zone. Because the timezone is never taken from the request
+     * for an existing series, a downgraded org cannot mutate the schedule
+     * via the zone either.
+     */
+    const effectiveRecurrence =
+      recurrence && isRecurringReminder(reminder)
+        ? {
+            ...recurrence,
+            timezone: reminder.recurrenceTimezone,
+            endsAt: recurrence.endsAt
+              ? rebaseEndOfDayToZone(
+                  recurrence.endsAt,
+                  recurrence.timezone,
+                  reminder.recurrenceTimezone
+                )
+              : null,
+          }
+        : recurrence;
+
+    if (effectiveRecurrence && !canUseRecurringReminders) {
+      const recurrenceChanged =
+        reminder.recurrenceUnit !== effectiveRecurrence.unit ||
+        reminder.recurrenceInterval !== effectiveRecurrence.interval ||
+        (reminder.recurrenceEndsAt?.getTime() ?? null) !==
+          (effectiveRecurrence.endsAt?.getTime() ?? null) ||
+        // why: moving the next fire date re-anchors the whole series — that
+        // is recurring behavior too, so it's gated. Message/recipient edits
+        // round-trip the prefilled date unchanged and still pass.
+        reminder.alertDateTime.getTime() !== alertDateTime.getTime();
+
+      if (!isRecurringReminder(reminder) || recurrenceChanged) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed",
+          message:
+            "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
+          label: "Tier",
+          additionalData: { id, organizationId },
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const updatedReminder = await db.assetReminder.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow on lines 247-249 (where id + organizationId)
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow above (where id + organizationId)
       where: { id: reminder.id },
       data: {
         name,
         message,
         alertDateTime,
+        recurrenceUnit: effectiveRecurrence?.unit ?? null,
+        recurrenceInterval: effectiveRecurrence?.interval ?? null,
+        recurrenceTimezone: effectiveRecurrence?.timezone ?? null,
+        recurrenceEndsAt: effectiveRecurrence?.endsAt ?? null,
         teamMembers: {
           set: [], // set empty so that if any team member is removed, the relation is removed
           connect: teamMembers.map((id) => ({ id })), // then connect
@@ -282,6 +418,9 @@ export async function editAssetReminder({
         eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
       },
       when,
+      options: effectiveRecurrence
+        ? recurringReminderJobOptions(reminder.id, when)
+        : {},
     });
 
     return updatedReminder;
@@ -388,7 +527,9 @@ export async function getRemindersForOverviewPage({
       },
       take: 2,
       include: ASSET_REMINDER_INCLUDE_FIELDS,
-      orderBy: { alertDateTime: "desc" },
+      // why: asc = the NEXT two upcoming reminders (desc showed the two
+      // furthest-future ones; the home widget already uses asc)
+      orderBy: { alertDateTime: "asc" },
     });
 
     return reminders;

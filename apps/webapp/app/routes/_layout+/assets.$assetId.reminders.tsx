@@ -5,6 +5,7 @@ import RemindersTable from "~/components/asset-reminder/reminders-table";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -13,6 +14,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canUseRecurringReminders } from "~/utils/subscription.server";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -27,19 +29,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.assetReminders,
       action: PermissionAction.read,
     });
 
-    const { reminders, totalReminders, page, perPage, totalPages, search } =
-      await getPaginatedAndFilterableReminders({
+    const [
+      { reminders, totalReminders, page, perPage, totalPages, search },
+      tierLimit,
+    ] = await Promise.all([
+      getPaginatedAndFilterableReminders({
         organizationId,
         request,
         where: { assetId },
-      });
+      }),
+      getOrganizationTierLimit({ organizationId, organizations }),
+    ]);
 
     const header: HeaderData = { title: "Reminders" };
     const modelName = {
@@ -56,6 +63,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       search,
+      canUseRecurringReminders: canUseRecurringReminders(tierLimit),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
@@ -68,7 +76,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -78,6 +86,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return await resolveRemindersActions({
       request,
       organizationId,
+      organizations,
       userId,
     });
   } catch (cause) {

@@ -3081,7 +3081,15 @@ export async function deleteAsset({
         where: { id, organizationId },
         select: {
           reminders: {
-            select: { alertDateTime: true, activeSchedulerReference: true },
+            select: {
+              alertDateTime: true,
+              activeSchedulerReference: true,
+              // why: cancelAssetReminderScheduler skips its already-fired
+              // early-return for recurring rows (they can hold a queued job
+              // while alertDateTime is briefly past)
+              recurrenceUnit: true,
+              recurrenceInterval: true,
+            },
           },
         },
       });

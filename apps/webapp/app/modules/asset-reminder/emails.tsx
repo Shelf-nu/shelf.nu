@@ -15,6 +15,7 @@ import { LogoForEmail } from "~/emails/logo";
 import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
+import { describeRecurrence, formatOccurrenceInZone } from "./recurrence";
 
 type AssetAlertEmailProps = {
   user: Pick<User, "email" | "firstName" | "lastName" | "displayName">;
@@ -23,7 +24,28 @@ type AssetAlertEmailProps = {
   workspaceName: string;
   isOwner?: boolean;
   customEmailFooter?: string | null;
+  /** Next occurrence of a recurring series, when one was scheduled. */
+  nextOccurrence?: Date | null;
 };
+
+/**
+ * "Repeats every 3 months. Next reminder: 15 Oct 2026, 09:00 (Europe/Berlin)."
+ * Rendered in the timezone the series was configured in (the worker has no
+ * request context, so the recipient's own zone is unknown) — the zone label
+ * keeps it unambiguous for recipients elsewhere.
+ */
+function recurrenceLine(
+  reminder: AssetReminder,
+  nextOccurrence?: Date | null
+): string | null {
+  const cadence = describeRecurrence(reminder);
+  if (!cadence || !nextOccurrence) return null;
+
+  return `${cadence} reminder. Next reminder: ${formatOccurrenceInZone(
+    nextOccurrence,
+    reminder.recurrenceTimezone
+  )}.`;
+}
 
 export function assetAlertEmailText({
   user,
@@ -32,6 +54,7 @@ export function assetAlertEmailText({
   workspaceName,
   isOwner,
   customEmailFooter,
+  nextOccurrence,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
@@ -39,6 +62,8 @@ export function assetAlertEmailText({
     ? `You are receiving this email because the original person was removed from workspace ${workspaceName}.`
     : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}.
 If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
+
+  const recurrence = recurrenceLine(reminder, nextOccurrence);
 
   return `Asset reminder notice
 
@@ -51,7 +76,7 @@ ${asset.id}
 Reminder - ${reminder.name}
 
 ${reminder.message}
-
+${recurrence ? `\n${recurrence}\n` : ""}
 ${SERVER_URL}/assets/${asset.id}
 
 ${note}
@@ -79,10 +104,13 @@ function AssetAlertEmailTemplate({
   workspaceName,
   isOwner,
   customEmailFooter,
+  nextOccurrence,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
   const isEmailExpired = isAssetImageExpired(asset.mainImageExpiration);
+
+  const recurrence = recurrenceLine(reminder, nextOccurrence);
 
   return (
     <Html>
@@ -165,6 +193,14 @@ function AssetAlertEmailTemplate({
           >
             {reminder.message}
           </Text>
+
+          {recurrence ? (
+            <Text
+              style={{ ...styles.p, marginBottom: "32px", textAlign: "left" }}
+            >
+              {recurrence}
+            </Text>
+          ) : null}
 
           <Button
             href={`${SERVER_URL}/assets/${asset.id}`}
