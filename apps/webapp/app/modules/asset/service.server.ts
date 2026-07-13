@@ -20,7 +20,6 @@ import {
   BookingStatus,
   ConsumptionType,
   ErrorCorrection,
-  KitStatus,
   OrganizationRoles,
   Prisma,
   TagUseFor,
@@ -53,6 +52,7 @@ import {
   upsertCustomField,
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
+import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
   createLocationChangeNote,
   createLocationsIfNotExists,
@@ -116,6 +116,7 @@ import {
   assertAssetModelBelongsToOrg,
   assertAssetsBelongToOrg,
   assertCustomFieldsBelongToOrg,
+  assertKitsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
@@ -237,56 +238,79 @@ async function fetchAssetBeforeUpdate({
 /**
  * Sets kit custody for imported assets after all assets have been created
  */
-async function setKitCustodyAfterAssetImport({
+/**
+ * Assigns kit custody for imported assets after all assets have been created.
+ *
+ * A CSV row carrying both a `kit` and a `custodian` means the KIT is in that
+ * person's custody (`validateKitCustodyConflicts` has already guaranteed a single
+ * custodian per kit). This groups the affected kits by custodian and delegates to
+ * the canonical {@link bulkAssignKitCustody} flow — one call per custodian —
+ * which creates the `KitCustody`, sets the kit and its member assets to
+ * `IN_CUSTODY`, inherits a kit-driven `Custody` row onto every member asset, and
+ * records the matching notes + `CUSTODY_ASSIGNED` events. Rows lacking either a
+ * kit or a custodian are ignored. Must run after the create loop because it
+ * relies on the `AssetKit` pivot rows already existing.
+ *
+ * @param args.data - The parsed import rows (source of kit/custodian names).
+ * @param args.kits - Kit-name → Kit, from the org-scoped `createKitsIfNotExists` map.
+ * @param args.teamMembers - Custodian-name → TeamMember (org-scoped).
+ * @param args.userId - The importing user (actor for the custody events/notes).
+ * @param args.organizationId - The workspace the import runs in.
+ */
+export async function setKitCustodyAfterAssetImport({
   data,
   kits,
   teamMembers,
+  userId,
+  organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
   kits: Record<string, Kit>;
   teamMembers: Record<string, TeamMember>;
+  userId: string;
+  organizationId: string;
 }) {
-  // Normalize kit/custodian names so padded CSV values still map to created records.
-  const assetsWithKitAndCustodian = data
-    .map((asset) => ({
-      kit: asset.kit?.trim(),
-      custodian: asset.custodian?.trim(),
-    }))
-    .filter((asset) => asset.kit && asset.custodian);
+  // A row's `custodian` combined with a `kit` means the KIT is in that person's
+  // custody (validateKitCustodyConflicts already guarantees a single custodian
+  // per kit). Group the kits that need custody by their custodian so we make one
+  // bulkAssignKitCustody call per custodian.
+  const kitIdsByCustodian = new Map<
+    string,
+    { custodianName: string; kitIds: Set<string> }
+  >();
 
-  if (assetsWithKitAndCustodian.length === 0) {
-    return; // Nothing to do
-  }
+  for (const asset of data) {
+    const kitName = asset.kit?.trim();
+    const custodianName = asset.custodian?.trim();
+    if (!kitName || !custodianName) continue;
 
-  // Group by kit name and get the custodian for each kit
-  const kitToCustodianMap = new Map<string, string>();
-  for (const asset of assetsWithKitAndCustodian) {
-    const kitName = asset.kit!;
-    const custodianName = asset.custodian!;
-    if (!kitToCustodianMap.has(kitName)) {
-      kitToCustodianMap.set(kitName, custodianName);
-    }
-  }
-
-  // Update kit custody - one update per kit instead of per asset for performance
-  for (const [kitName, custodianName] of kitToCustodianMap) {
     const kit = kits[kitName];
     const teamMember = teamMembers[custodianName];
+    if (!kit || !teamMember) continue;
 
-    if (kit && teamMember) {
-      await db.kit.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: kit comes from the `kits` map built by createKitsIfNotExists({ organizationId }) at the call site (line ~2657); all ids are already org-scoped
-        where: { id: kit.id },
-        data: {
-          status: KitStatus.IN_CUSTODY,
-          custody: {
-            create: {
-              custodian: { connect: { id: teamMember.id } },
-            },
-          },
-        },
+    const existing = kitIdsByCustodian.get(teamMember.id);
+    if (existing) {
+      existing.kitIds.add(kit.id);
+    } else {
+      kitIdsByCustodian.set(teamMember.id, {
+        custodianName: teamMember.name,
+        kitIds: new Set([kit.id]),
       });
     }
+  }
+
+  // Reuse the canonical kit-custody flow: it creates the KitCustody, sets kit +
+  // member-asset status to IN_CUSTODY, and inherits a kit-driven Custody row to
+  // every member asset (with matching notes + CUSTODY_ASSIGNED events). This
+  // keeps imports in lock-step with the interactive "assign custody to a kit".
+  for (const [custodianId, { custodianName, kitIds }] of kitIdsByCustodian) {
+    await bulkAssignKitCustody({
+      kitIds: [...kitIds],
+      organizationId,
+      custodianId,
+      custodianName,
+      userId,
+    });
   }
 }
 
@@ -1213,6 +1237,45 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   }
 }
 
+/**
+ * Builds the `assetKits` nested-create fragment that attaches a newly-created
+ * asset to a kit via the `AssetKit` pivot.
+ *
+ * `Asset.kit`/`kitId` was replaced by the `AssetKit` pivot, so kit membership
+ * must be written through `assetKits`; a `kit: { connect }` throws
+ * `Unknown argument kit` at runtime (the create-with-kit crash this restores).
+ * The pivot quantity mirrors `addedAssetKitQuantity` in `kit/service.server.ts`:
+ * the asset's full tracked pool for QUANTITY_TRACKED assets, otherwise 1.
+ *
+ * @param args.kitId - The kit to attach to (must be org-scoped by the caller).
+ * @param args.organizationId - The owning workspace.
+ * @param args.type - The asset type (drives the pivot quantity).
+ * @param args.quantity - The asset's tracked quantity (QUANTITY_TRACKED only).
+ * @returns An `AssetCreateInput` fragment: `{ assetKits: { create: {...} } }`.
+ */
+export function buildAssetKitCreateData({
+  kitId,
+  organizationId,
+  type,
+  quantity,
+}: {
+  kitId: string;
+  organizationId: string;
+  type?: AssetType | null;
+  quantity?: number | null;
+}): Pick<Prisma.AssetCreateInput, "assetKits"> {
+  return {
+    assetKits: {
+      create: {
+        kit: { connect: { id: kitId } },
+        organization: { connect: { id: organizationId } },
+        quantity:
+          type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
+      },
+    },
+  };
+}
+
 export async function createAsset({
   title,
   description,
@@ -1365,15 +1428,24 @@ export async function createAsset({
         unitOfMeasure,
       };
 
-      /** If a kitId is passed, link the kit to the asset. */
-      if (kitId && kitId !== "uncategorized") {
-        Object.assign(data, {
-          kit: {
-            connect: {
-              id: kitId,
-            },
-          },
-        });
+      /**
+       * If a kitId is passed, attach the asset to the kit via the `AssetKit`
+       * pivot. `Asset.kit` no longer exists, so a `kit: { connect }` here throws
+       * `Unknown argument kit`. The kit id is proven to belong to this org
+       * inside the transaction below (assertKitsBelongToOrg), matching the
+       * assetModel / custom-field IDOR guards.
+       */
+      const hasKit = Boolean(kitId && kitId !== "uncategorized");
+      if (hasKit) {
+        Object.assign(
+          data,
+          buildAssetKitCreateData({
+            kitId: kitId!,
+            organizationId,
+            type,
+            quantity,
+          })
+        );
       }
 
       /** If a categoryId is passed, link the category to the asset. */
@@ -1516,6 +1588,14 @@ export async function createAsset({
           { customFieldIds: customFieldIdsToValidate, organizationId },
           tx
         );
+
+        // SECURITY (cross-org IDOR): the kitId comes from form/CSV input and is
+        // connected by the assetKits nested create above with no org scoping of
+        // its own. Prove it belongs to this org before the write (same pattern
+        // as the assetModel / custom-field guards).
+        if (hasKit) {
+          await assertKitsBelongToOrg({ kitIds: [kitId!], organizationId }, tx);
+        }
 
         const created = await tx.asset.create({
           data,
@@ -4577,7 +4657,11 @@ export async function createAssetsFromContentImport({
         kitId,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: custodianId,
+        // Kit rows: custody belongs to the kit (assigned + inherited to members
+        // in setKitCustodyAfterAssetImport). Don't also create a direct operator
+        // custody on the asset, or it'd be IN_CUSTODY before the kit assignment
+        // (double-holding + tripping bulkAssignKitCustody's availability guard).
+        custodian: kitId ? undefined : custodianId,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
@@ -4609,6 +4693,8 @@ export async function createAssetsFromContentImport({
       data,
       kits,
       teamMembers,
+      userId,
+      organizationId,
     });
 
     return true;

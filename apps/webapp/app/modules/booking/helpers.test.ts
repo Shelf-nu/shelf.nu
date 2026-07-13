@@ -5,6 +5,7 @@ import {
   filterBookingAssets,
   groupAndSortAssetsByKit,
   isAssetCheckoutEligible,
+  isBookingArchivable,
   shouldPromptEarlyCheckout,
   type SearchableBookingAsset,
 } from "./helpers";
@@ -32,6 +33,70 @@ const createAsset = (
     : null,
   category: categoryName ? { name: categoryName } : null,
   location: locationName ? { name: locationName } : null,
+});
+
+describe("isBookingArchivable", () => {
+  const past = new Date("2020-01-01T00:00:00Z");
+  const future = new Date("2999-01-01T00:00:00Z");
+
+  it("allows COMPLETE bookings regardless of end date", () => {
+    expect(
+      isBookingArchivable({ status: BookingStatus.COMPLETE, to: future })
+    ).toBe(true);
+    expect(
+      isBookingArchivable({ status: BookingStatus.COMPLETE, to: past })
+    ).toBe(true);
+    expect(
+      isBookingArchivable({ status: BookingStatus.COMPLETE, to: null })
+    ).toBe(true);
+  });
+
+  it("allows RESERVED bookings only once their end date has passed", () => {
+    expect(
+      isBookingArchivable({ status: BookingStatus.RESERVED, to: past })
+    ).toBe(true);
+    expect(
+      isBookingArchivable({ status: BookingStatus.RESERVED, to: future })
+    ).toBe(false);
+    expect(
+      isBookingArchivable({ status: BookingStatus.RESERVED, to: null })
+    ).toBe(false);
+  });
+
+  it("never allows checked-out bookings (ONGOING / OVERDUE), even when past due", () => {
+    expect(
+      isBookingArchivable({ status: BookingStatus.ONGOING, to: past })
+    ).toBe(false);
+    expect(
+      isBookingArchivable({ status: BookingStatus.OVERDUE, to: past })
+    ).toBe(false);
+  });
+
+  it("never allows DRAFT or CANCELLED bookings", () => {
+    expect(isBookingArchivable({ status: BookingStatus.DRAFT, to: past })).toBe(
+      false
+    );
+    expect(
+      isBookingArchivable({ status: BookingStatus.CANCELLED, to: past })
+    ).toBe(false);
+  });
+
+  it("handles ISO date strings the same as Date objects", () => {
+    // `to` arrives as a serialized string from client/loader payloads, so the
+    // helper must treat an ISO string identically to a Date.
+    expect(
+      isBookingArchivable({
+        status: BookingStatus.RESERVED,
+        to: "2020-01-01T00:00:00Z",
+      })
+    ).toBe(true);
+    expect(
+      isBookingArchivable({
+        status: BookingStatus.RESERVED,
+        to: "2999-01-01T00:00:00Z",
+      })
+    ).toBe(false);
+  });
 });
 
 describe("groupAndSortAssetsByKit", () => {

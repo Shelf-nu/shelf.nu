@@ -29,7 +29,7 @@ export default function BulkArchiveDialog() {
       arrayFieldId="bookingIds"
       actionUrl="/api/bookings/bulk-actions"
       title={`Archive (${totalSelected}) bookings`}
-      description={`Are you sure you want to archive all (${totalSelected}) bookings?`}
+      description={`Archive these (${totalSelected}) bookings? Completed bookings and past-due reserved bookings will be moved to your archive.`}
     >
       {({ disabled, fetcherError, handleCloseDialog }) => (
         <>
