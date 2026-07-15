@@ -1,5 +1,6 @@
 import type { FC } from "react";
 import { useEffect, useState } from "react";
+import type { TimeFormatPreference } from "@prisma/client";
 import { format, parse } from "date-fns";
 import {
   Select,
@@ -43,6 +44,8 @@ interface TimeSelectProps {
   error?: string;
   /** Aria label for accessibility */
   "aria-label"?: string;
+  /** Display format for the time labels: "H12" (default) or "H24" */
+  timeFormat?: TimeFormatPreference;
 }
 
 const TIME_FORMAT_24H = "HH:mm";
@@ -113,12 +116,22 @@ function generateTimeOptions(): TimeOption[] {
 }
 
 /**
- * Finds the display label for a given 24-hour time value
- * @param value24 - Time in 24-hour format
- * @returns Display label in 12-hour format, or empty string if not found
+ * Finds the display label for a given 24-hour time value.
+ *
+ * @param value24 - Time in 24-hour format (HH:mm)
+ * @param timeFormat - "H12" (default) → "9:00 AM"; "H24" → "09:00"
+ * @returns Display label, or empty string if the value is unparseable
  */
-function getDisplayLabel(value24: string): string {
-  // First check if it's the special 23:59 case
+function getDisplayLabel(
+  value24: string,
+  timeFormat: TimeFormatPreference = "H12"
+): string {
+  // 24h display: the stored value already IS the display string.
+  if (timeFormat === "H24") {
+    return value24;
+  }
+
+  // First check if it's the special 23:59 end-of-day case
   if (value24 === "23:59") {
     return "11:59 PM";
   }
@@ -181,6 +194,7 @@ export const TimeSelect: FC<TimeSelectProps> = ({
   className,
   error,
   "aria-label": ariaLabel,
+  timeFormat = "H12",
 }) => {
   // Determine if we're in controlled mode
   const isControlled = value !== undefined;
@@ -200,7 +214,9 @@ export const TimeSelect: FC<TimeSelectProps> = ({
 
   // The current value to display - always use internal state
   const currentValue = internalValue;
-  const displayValue = currentValue ? getDisplayLabel(currentValue) : undefined;
+  const displayValue = currentValue
+    ? getDisplayLabel(currentValue, timeFormat)
+    : undefined;
 
   const handleValueChange = (selectedValue: string): void => {
     // Always update internal state
@@ -243,7 +259,7 @@ export const TimeSelect: FC<TimeSelectProps> = ({
                 className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
               >
                 <span className="mr-4 block text-[14px] text-gray-700">
-                  {option.label}
+                  {getDisplayLabel(option.value, timeFormat)}
                 </span>
               </SelectItem>
             ))}
@@ -256,7 +272,12 @@ export const TimeSelect: FC<TimeSelectProps> = ({
 };
 
 // Export utility functions for use in other components if needed
-export { convert24To12Hour, convert12To24Hour, generateTimeOptions };
+export {
+  convert24To12Hour,
+  convert12To24Hour,
+  generateTimeOptions,
+  getDisplayLabel,
+};
 
 // Export types for external use
 export type { TimeSelectProps, TimeOption };

@@ -4,6 +4,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
@@ -158,15 +159,15 @@ export default function SetOrEditReminderDialog({
             </div>
 
             <div>
-              <Input
+              <DateTimePicker
+                mode="datetime"
                 defaultValue={
                   reminder?.alertDateTime
                     ? dateForDateTimeInputValue(
                         new Date(reminder.alertDateTime)
-                      )
+                      ).substring(0, 16)
                     : undefined
                 }
-                type="datetime-local"
                 name={zo.fields.alertDateTime()}
                 error={
                   validationErrors?.alertDateTime?.message ||
@@ -175,7 +176,6 @@ export default function SetOrEditReminderDialog({
                 label="Reminder Date"
                 disabled={disabled}
                 required
-                placeholder="Enter description..."
                 className="mb-2"
               />
               <p className="text-gray-500">

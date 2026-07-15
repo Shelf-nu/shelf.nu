@@ -1,3 +1,4 @@
+import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 
 const decodeHtmlEntities = (text: string): string =>
@@ -23,33 +24,11 @@ const parseMarkdocAttributes = (rawAttributes: string) => {
   return attributes;
 };
 
-const createDateOnlyFormatter = (formatter: Intl.DateTimeFormat) => {
-  const resolved =
-    typeof formatter.resolvedOptions === "function"
-      ? formatter.resolvedOptions()
-      : null;
-
-  const options: Intl.DateTimeFormatOptions = {
-    dateStyle: "short",
-  };
-
-  if (resolved?.timeZone) options.timeZone = resolved.timeZone;
-  if (resolved?.numberingSystem)
-    options.numberingSystem = resolved.numberingSystem;
-  if (resolved?.calendar) options.calendar = resolved.calendar;
-
-  const locale = resolved?.locale ?? "en-US";
-
-  return new Intl.DateTimeFormat(locale, options);
-};
-
 const sanitizeMarkdocTags = (
   text: string,
-  formatter: Intl.DateTimeFormat
-): string => {
-  const dateOnlyFormatter = createDateOnlyFormatter(formatter);
-
-  return text.replace(
+  prefs: ResolvedFormatPrefs
+): string =>
+  text.replace(
     MARKDOC_TAG_REGEX,
     (_fullMatch, tagName: string, rawAttributes: string) => {
       const attrs = parseMarkdocAttributes(rawAttributes);
@@ -73,8 +52,8 @@ const sanitizeMarkdocTags = (
 
           try {
             return includeTime
-              ? formatter.format(parsedDate)
-              : dateOnlyFormatter.format(parsedDate);
+              ? formatDate(parsedDate, prefs, { includeTime: true })
+              : formatDate(parsedDate, prefs);
           } catch {
             return value;
           }
@@ -114,15 +93,22 @@ const sanitizeMarkdocTags = (
       }
     }
   );
-};
 
+/**
+ * Strips Markdoc tags from a note and formats any `{% date %}` tags with the
+ * caller's resolved date/time preferences.
+ *
+ * @param content - Raw note content (may contain Markdoc tags + markdown)
+ * @param prefs - Fully-resolved format prefs (acting user for exports/PDFs)
+ * @returns Plain, human-readable text safe for CSV/PDF rendering
+ */
 export const sanitizeNoteContent = (
   content: string,
-  formatter: Intl.DateTimeFormat
+  prefs: ResolvedFormatPrefs
 ): string => {
   if (!content) return "";
 
-  const withoutMarkdoc = sanitizeMarkdocTags(content, formatter);
+  const withoutMarkdoc = sanitizeMarkdocTags(content, prefs);
   const decodedEntities = decodeHtmlEntities(withoutMarkdoc);
 
   return cleanMarkdownFormatting(decodedEntities, {

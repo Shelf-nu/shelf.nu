@@ -8,6 +8,7 @@ import { Switch } from "~/components/forms/switch";
 import { TimeSelect } from "~/components/forms/time-select";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Spinner } from "~/components/shared/spinner";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -141,14 +142,14 @@ export const WorkingHoursOverrideForm = ({
           className="border-b pb-4"
           required
         >
-          <Input
+          <DateTimePicker
             label="Override Date"
             hideLabel
-            type="date"
+            mode="date"
             name={zo.fields.date()}
             disabled={disabled}
             required
-            min={todayAbsolute}
+            min={new Date(todayAbsolute)}
             error={zo.errors.date()?.message}
             className="w-full"
           />

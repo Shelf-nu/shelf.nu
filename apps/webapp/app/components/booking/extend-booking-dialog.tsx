@@ -12,9 +12,9 @@ import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
-import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { DateTimePicker } from "../shared/date-time-picker";
 import When from "../when/when";
 import { WorkingHoursInfo } from "./forms/fields/dates";
 import {
@@ -112,11 +112,11 @@ export default function ExtendBookingDialog({
                 New end date
               </div>
 
-              <Input
+              <DateTimePicker
                 key={currentEndDate}
+                mode="datetime"
                 defaultValue={currentEndDate}
                 label="End Date"
-                type="datetime-local"
                 hideLabel
                 name={zo.fields.endDate()}
                 disabled={disabled || workingHoursDisabled}

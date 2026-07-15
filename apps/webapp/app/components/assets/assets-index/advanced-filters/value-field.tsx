@@ -20,6 +20,7 @@ import {
   PlusIcon,
 } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import {
   Tooltip,
   TooltipContent,
@@ -2211,21 +2212,29 @@ export function DateField({
     return (
       <div className="space-y-2">
         <div className="flex max-w-full items-center justify-normal gap-[2px]">
-          <Input
-            {...commonInputProps}
+          <DateTimePicker
+            mode="date"
             label="Start Date"
-            type="date"
+            hideLabel
             value={localValue[0]}
-            onChange={handleDateChange(0)}
+            onChange={(next) =>
+              handleDateChange(0)({
+                target: { value: next },
+              } as ChangeEvent<HTMLInputElement>)
+            }
             className="w-1/2"
             name={`${name}_start`}
           />
-          <Input
-            {...commonInputProps}
+          <DateTimePicker
+            mode="date"
             label="End Date"
-            type="date"
+            hideLabel
             value={localValue[1]}
-            onChange={handleDateChange(1)}
+            onChange={(next) =>
+              handleDateChange(1)({
+                target: { value: next },
+              } as ChangeEvent<HTMLInputElement>)
+            }
             className="w-1/2"
             name={`${name}_end`}
           />
@@ -2241,20 +2250,24 @@ export function DateField({
         setValue={(value) => setFilter(value)}
         value={typeof filter.value === "string" ? filter.value : ""}
         timeZone={timeZone}
-        commonInputProps={commonInputProps}
         error={combinedError}
         name={name}
       />
     );
   } else {
     return (
-      <Input
-        {...commonInputProps}
-        type="date"
+      <DateTimePicker
+        mode="date"
+        label="Date"
+        hideLabel
         value={localValue[0]}
-        onChange={handleDateChange(0)}
+        onChange={(next) =>
+          handleDateChange(0)({
+            target: { value: next },
+          } as ChangeEvent<HTMLInputElement>)
+        }
         error={combinedError}
-        name={name}
+        name={name ?? ""}
         disabled={disabled}
       />
     );
@@ -2265,19 +2278,12 @@ function MultiDateInput({
   setValue,
   value,
   timeZone,
-  commonInputProps,
   name,
   error,
 }: {
   setValue: (value: string) => void;
   value: string;
   timeZone: string;
-  commonInputProps: {
-    inputClassName: string;
-    hideLabel: boolean;
-    label: string;
-    onKeyUp: (e: KeyboardEvent<HTMLInputElement>) => void;
-  };
   name?: string;
   error?: string;
 }) {
@@ -2334,11 +2340,16 @@ function MultiDateInput({
     <div className="space-y-1">
       {dates.map((entry, index) => (
         <div key={entry.id} className="relative flex items-center gap-2">
-          <Input
-            {...commonInputProps}
-            type="date"
+          <DateTimePicker
+            mode="date"
+            label="Date"
+            hideLabel
             value={entry.value}
-            onChange={handleDateChange(index)}
+            onChange={(next) =>
+              handleDateChange(index)({
+                target: { value: next },
+              } as ChangeEvent<HTMLInputElement>)
+            }
             className="flex-1"
             name={`${name}_${index}`}
           />

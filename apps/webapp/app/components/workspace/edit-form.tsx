@@ -1,7 +1,6 @@
 import {
   type Organization,
   type Currency,
-  type DateFormat,
   OrganizationType,
   type QrIdDisplayPreference,
 } from "@prisma/client";
@@ -21,7 +20,6 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
-import DateFormatSelector from "./date-format-selector";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
@@ -36,7 +34,6 @@ interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
-  dateFormat?: Organization["dateFormat"];
   className?: string;
 }
 
@@ -51,7 +48,6 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
     qrIdDisplayPreference: z.custom<QrIdDisplayPreference>(),
-    dateFormat: z.custom<DateFormat>(),
     showShelfBranding: z
       .union([z.literal("on"), z.literal("off"), z.undefined()])
       .transform((value) => {
@@ -65,7 +61,6 @@ export const WorkspaceEditForms = ({
   name,
   currency,
   qrIdDisplayPreference,
-  dateFormat,
   className,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
@@ -73,7 +68,6 @@ export const WorkspaceEditForms = ({
       name={name}
       currency={currency}
       qrIdDisplayPreference={qrIdDisplayPreference}
-      dateFormat={dateFormat}
     />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
@@ -84,7 +78,6 @@ const WorkspaceGeneralEditForms = ({
   name,
   currency,
   qrIdDisplayPreference,
-  dateFormat,
   className,
 }: Props) => {
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
@@ -189,20 +182,6 @@ const WorkspaceGeneralEditForms = ({
             <CurrencySelector
               defaultValue={currency || "USD"}
               name={zo.fields.currency()}
-            />
-          </FormRow>
-        </div>
-
-        <div>
-          <FormRow
-            rowLabel={"Date format"}
-            className={"border-b-0"}
-            subHeading="How dates are displayed across the workspace (lists, detail pages, reports). Automatic follows each user's browser language."
-          >
-            <InnerLabel hideLg>Date format</InnerLabel>
-            <DateFormatSelector
-              defaultValue={dateFormat || "AUTO"}
-              name={zo.fields.dateFormat()}
             />
           </FormRow>
         </div>

@@ -28,6 +28,11 @@ vi.mock("~/database/db.server", () => ({
     bookingNote: {
       findMany: vi.fn(),
     },
+    // why: exportNotesToCsv now resolves the acting user's format prefs via
+    // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS.
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -142,10 +147,8 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(
-      '"formatted-2024-02-10T08:15:00.000Z","Alex Stone","COMMENT","Packed ""Lens"" set Verify inventory"'
+      '"02/10/2024, 8:15 AM","Alex Stone","COMMENT","Packed ""Lens"" set Verify inventory"'
     );
-    expect(rows[2]).toBe(
-      '"formatted-2024-02-09T12:00:00.000Z","","UPDATE","System update"'
-    );
+    expect(rows[2]).toBe('"02/09/2024, 12:00 PM","","UPDATE","System update"');
   });
 });

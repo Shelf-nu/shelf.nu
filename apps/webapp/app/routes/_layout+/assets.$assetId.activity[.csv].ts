@@ -40,6 +40,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const csv = await exportAssetNotesToCsv({
       request,
+      userId,
       assetId,
       organizationId,
     });

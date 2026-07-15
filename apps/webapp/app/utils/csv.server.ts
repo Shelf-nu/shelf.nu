@@ -47,9 +47,11 @@ import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
-import { getDateTimeFormat } from "./client-hints";
+import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
+import { formatDate, type ResolvedFormatPrefs } from "./date-format";
+import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
@@ -301,12 +303,14 @@ export async function exportAssetsBackupToCsv({
 
 export async function exportAssetsFromIndexToCsv({
   request,
+  userId,
   assetIds,
   settings,
   currentOrganization,
   assetIndexCurrentSearchParams,
 }: {
   request: Request;
+  userId: string;
   assetIds: string;
   settings: AssetIndexSettings;
   currentOrganization: Pick<
@@ -343,6 +347,13 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
+  // Acting user's prefs: this export was triggered by userId, so their
+  // date/time preferences drive every humanized column.
+  const prefs = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   const csvData = buildCsvExportDataFromAssets({
     assets,
     columns: [
@@ -357,7 +368,7 @@ export async function exportAssetsFromIndexToCsv({
       { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
     ],
     currentOrganization,
-    request,
+    prefs,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -368,14 +379,14 @@ export async function exportAssetsFromIndexToCsv({
  * Builds CSV export data from assets using the column settings to maintain order
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
- * @param request - Request object for locale/timezone formatting
+ * @param prefs - Acting user's resolved date/time preferences for humanized columns
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
   currentOrganization,
-  request,
+  prefs,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -383,7 +394,7 @@ export const buildCsvExportDataFromAssets = ({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
-  request: Request;
+  prefs: ResolvedFormatPrefs;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -397,11 +408,9 @@ export const buildCsvExportDataFromAssets = ({
     formatValueForCsv(parseColumnName(col.name))
   );
 
-  // Create date formatter for reminder dates
-  const formatDate = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format;
+  // Create date formatter for reminder dates (acting user's prefs)
+  const formatDateForCsv = (date: Date | string) =>
+    formatDate(date, prefs, { includeTime: true });
 
   // Create data rows
   const rows = assets.map((asset) =>
@@ -456,11 +465,16 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.status;
             break;
           case "createdAt":
+            // why: kept ISO/English on purpose — CSV timestamps stay
+            // machine-readable ISO 8601 so export → re-import round-trips
+            // losslessly regardless of the user's display date format.
             value = asset.createdAt
               ? new Date(asset.createdAt).toISOString()
               : "";
             break;
           case "updatedAt":
+            // why: kept ISO/English on purpose — see createdAt above; ISO
+            // preserves the import round-trip contract.
             value = asset.updatedAt
               ? new Date(asset.updatedAt).toISOString()
               : "";
@@ -504,7 +518,7 @@ export const buildCsvExportDataFromAssets = ({
                 const date = new Date(asset.upcomingReminder.alertDateTime);
                 // Check if date is valid
                 if (!isNaN(date.getTime())) {
-                  value = formatDate(date);
+                  value = formatDateForCsv(date);
                 } else {
                   value = "";
                 }
@@ -609,6 +623,9 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   }
 
   // For dates, ensure consistent format
+  // why: kept ISO/English on purpose — generic CSV date serialization stays
+  // ISO (yyyy-MM-dd) so exported data round-trips losslessly on re-import,
+  // independent of the user's display date format.
   if (value instanceof Date) {
     stringValue = value.toISOString().split("T")[0];
   }
@@ -651,6 +668,9 @@ const formatCustomFieldForCsv = (
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
       try {
+        // why: kept ISO/English on purpose — custom-field dates export as
+        // ISO (yyyy-MM-dd) so the CSV import round-trip stays lossless,
+        // independent of the user's display date format.
         return format(new Date(fieldValue.valueDate), "yyyy-MM-dd");
       } catch {
         return String(fieldValue.raw);
@@ -774,10 +794,17 @@ export async function exportBookingsFromIndexToCsv({
       bookings.map((booking) => booking.id)
     );
 
+    // Acting user's prefs: this export was triggered by userId, so their
+    // date/time preferences drive every humanized column.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     // Pass both assets and columns to the build function
     const csvData = buildCsvExportDataFromBookings(
       bookings as FlexibleBooking[],
-      request,
+      prefs,
       checkinsByBooking
     );
 
@@ -810,7 +837,7 @@ type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
 const sanitizeCsvValue = (value: string | null | undefined) =>
   formatValueForCsv((value ?? "").replace(/\r?\n/g, " "));
 
-const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
+const notesToCsv = (notes: ActivityNote[], prefs: ResolvedFormatPrefs) => {
   const rows = notes.map((note) => {
     const author = note.user
       ? [note.user.firstName, note.user.lastName]
@@ -820,10 +847,12 @@ const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
       : "";
 
     return [
-      sanitizeCsvValue(formatter.format(note.createdAt)),
+      sanitizeCsvValue(
+        formatDate(note.createdAt, prefs, { includeTime: true })
+      ),
       sanitizeCsvValue(author),
       sanitizeCsvValue(note.type),
-      sanitizeCsvValue(sanitizeNoteContent(note.content ?? "", formatter)),
+      sanitizeCsvValue(sanitizeNoteContent(note.content ?? "", prefs)),
     ].join(",");
   });
 
@@ -858,19 +887,24 @@ type NoteFetcher<Where> = (args: {
 
 type ExportNotesToCsvArgs<Where> = {
   request: Request;
+  userId: string;
   where: Where;
   findMany: NoteFetcher<Where>;
 };
 
 async function exportNotesToCsv<Where>({
   request,
+  userId,
   where,
   findMany,
 }: ExportNotesToCsvArgs<Where>) {
-  const formatter = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+  // Acting user's prefs: this export was triggered by userId, so their
+  // date/time preferences drive the note timestamps and any `{% date %}`
+  // tags inside note content.
+  const prefs = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
 
   const notes = await findMany({
     where,
@@ -900,20 +934,23 @@ async function exportNotesToCsv<Where>({
       : null,
   }));
 
-  return notesToCsv(activityNotes, formatter);
+  return notesToCsv(activityNotes, prefs);
 }
 
 export async function exportAssetNotesToCsv({
   request,
+  userId,
   assetId,
   organizationId,
 }: {
   request: Request;
+  userId: string;
   assetId: string;
   organizationId: string;
 }) {
   return exportNotesToCsv<Prisma.NoteWhereInput>({
     request,
+    userId,
     where: {
       assetId,
       asset: { organizationId },
@@ -924,15 +961,18 @@ export async function exportAssetNotesToCsv({
 
 export async function exportBookingNotesToCsv({
   request,
+  userId,
   bookingId,
   organizationId,
 }: {
   request: Request;
+  userId: string;
   bookingId: string;
   organizationId: string;
 }) {
   return exportNotesToCsv<Prisma.BookingNoteWhereInput>({
     request,
+    userId,
     where: {
       bookingId,
       booking: { organizationId },
@@ -944,15 +984,18 @@ export async function exportBookingNotesToCsv({
 
 export async function exportAuditNotesToCsv({
   request,
+  userId,
   auditId,
   organizationId,
 }: {
   request: Request;
+  userId: string;
   auditId: string;
   organizationId: string;
 }) {
   return exportNotesToCsv<Prisma.AuditNoteWhereInput>({
     request,
+    userId,
     where: {
       auditSessionId: auditId,
       auditSession: { organizationId },
@@ -964,15 +1007,18 @@ export async function exportAuditNotesToCsv({
 
 export async function exportLocationNotesToCsv({
   request,
+  userId,
   locationId,
   organizationId,
 }: {
   request: Request;
+  userId: string;
   locationId: string;
   organizationId: string;
 }) {
   return exportNotesToCsv<Prisma.LocationNoteWhereInput>({
     request,
+    userId,
     where: {
       locationId,
       location: { organizationId },
@@ -1075,7 +1121,7 @@ async function buildBookingCheckinMap(
  * row only and left blank on the trailing asset rows.
  *
  * @param bookings - Array of bookings to export
- * @param request - Request object for locale/timezone formatting
+ * @param prefs - Acting user's resolved date/time preferences for humanized columns
  * @param checkinsByBooking - Per-booking partial check-in state, from
  *   {@link buildBookingCheckinMap}. Used to derive the per-asset check-in
  *   status/date columns and the booking-level checked-in rollup.
@@ -1106,16 +1152,14 @@ const formatBookingAssetForCsv = (ba: {
 
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
-  request: Request,
+  prefs: ResolvedFormatPrefs,
   checkinsByBooking: Map<string, BookingCheckinInfo> = new Map()
 ): string[][] => {
   if (!bookings.length) return [];
 
-  // Create date formatter for CSV export
-  const format = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format;
+  // Create date formatter for CSV export (acting user's prefs)
+  const format = (date: Date | string) =>
+    formatDate(date, prefs, { includeTime: true });
 
   // Create headers row using column names. The check-in columns are appended
   // last so existing consumers that key off earlier column positions are

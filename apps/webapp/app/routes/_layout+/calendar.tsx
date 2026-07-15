@@ -22,6 +22,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -209,7 +210,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 export default function Calendar() {
   const { isMd } = useViewportHeight();
-  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+  const { prefs } = useDateFormatter();
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+    new Date(),
+    prefs
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [subscribeOpen, setSubscribeOpen] = useState(false);
@@ -242,7 +247,9 @@ export default function Calendar() {
   function updateTitle(viewType = calendarView) {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
+      setCalendarHeader(
+        getCalendarTitleAndSubtitle({ viewType, calendarApi, prefs })
+      );
     }
   }
 

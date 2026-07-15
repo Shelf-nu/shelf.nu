@@ -14,6 +14,7 @@ import {
   createUserFromSSO,
   updateUserFromSSO,
 } from "~/modules/user/service.server";
+import type { DetectedFormatPrefs } from "./date-format";
 import { DISABLE_SSO } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { isValidDomain } from "./misc";
@@ -48,6 +49,7 @@ export async function resolveUserAndOrgForSsoCallback({
   lastName,
   groups,
   contactInfo,
+  formatPrefs,
 }: {
   authSession: AuthSession;
   firstName: string;
@@ -61,6 +63,8 @@ export async function resolveUserAndOrgForSsoCallback({
     zipPostalCode?: string;
     countryRegion?: string;
   };
+  /** Browser-detected prefs; only applied on the new-user (createUserFromSSO) branch. */
+  formatPrefs?: DetectedFormatPrefs;
 }) {
   try {
     // First check if user exists
@@ -97,12 +101,16 @@ export async function resolveUserAndOrgForSsoCallback({
 
     // New user case - create them with SSO
     try {
-      const response = await createUserFromSSO(authSession, {
-        firstName,
-        lastName,
-        groups,
-        contactInfo,
-      });
+      const response = await createUserFromSSO(
+        authSession,
+        {
+          firstName,
+          lastName,
+          groups,
+          contactInfo,
+        },
+        formatPrefs
+      );
       return { user: response.user, org: response.org };
     } catch (createError) {
       // If user creation fails, clean up the auth account

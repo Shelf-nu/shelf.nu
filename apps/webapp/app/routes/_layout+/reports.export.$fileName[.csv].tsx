@@ -38,6 +38,8 @@ import type {
   DistributionBreakdown,
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
@@ -100,10 +102,18 @@ export const loader = async ({
     const customFrom = searchParams.get("from");
     const customTo = searchParams.get("to");
 
+    // Resolve the acting user's date/time formatting preferences so timeframe
+    // labels (e.g. custom ranges) render in their configured format.
+    const formatPrefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     const timeframe = resolveTimeframe(
       timeframePreset,
       customFrom ? new Date(customFrom) : undefined,
-      customTo ? new Date(customTo) : undefined
+      customTo ? new Date(customTo) : undefined,
+      formatPrefs
     );
 
     // Generate CSV based on report type

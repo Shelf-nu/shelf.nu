@@ -3,6 +3,7 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { useDisabled } from "~/hooks/use-disabled";
 
 /** Stable module-scoped default to avoid new array identity on each render */
@@ -94,10 +95,9 @@ export function UpdateForm({
         >
           Publish Date & Time
         </label>
-        <Input
-          label="Publish Date"
+        <DateTimePicker
+          mode="datetime"
           name="publishDate"
-          type="datetime-local"
           defaultValue={defaultPublishDate}
           required
         />

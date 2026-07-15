@@ -22,6 +22,7 @@ import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { resolveTimeframe } from "~/modules/reports/timeframe";
 import type {
   TimeframePreset,
@@ -88,6 +89,7 @@ export function TimeframePicker({
   className,
 }: TimeframePickerProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { prefs, formatDate: formatDatePref } = useDateFormatter();
 
   // Filter out excluded presets
   const visiblePresets = PRESETS.filter((p) => !excludePresets.includes(p.id));
@@ -102,7 +104,7 @@ export function TimeframePicker({
 
   const handlePresetClick = useCallback(
     (preset: TimeframePreset) => {
-      const resolved = resolveTimeframe(preset);
+      const resolved = resolveTimeframe(preset, undefined, undefined, prefs);
 
       if (syncToUrl) {
         const params = new URLSearchParams(searchParams);
@@ -115,7 +117,7 @@ export function TimeframePicker({
 
       onChange?.(resolved);
     },
-    [searchParams, setSearchParams, syncToUrl, onChange]
+    [searchParams, setSearchParams, syncToUrl, onChange, prefs]
   );
 
   const handleCustomApply = useCallback(() => {
@@ -124,7 +126,8 @@ export function TimeframePicker({
     const resolved = resolveTimeframe(
       "custom",
       customRange.from,
-      customRange.to
+      customRange.to,
+      prefs
     );
 
     if (syncToUrl) {
@@ -138,7 +141,7 @@ export function TimeframePicker({
 
     onChange?.(resolved);
     setCustomOpen(false);
-  }, [customRange, searchParams, setSearchParams, syncToUrl, onChange]);
+  }, [customRange, searchParams, setSearchParams, syncToUrl, onChange, prefs]);
 
   /** Clears custom selection and reverts to default preset (Last 30 days) */
   const handleClear = useCallback(() => {
@@ -264,8 +267,17 @@ export function TimeframePicker({
                   <div className="text-xs text-gray-500">
                     {customRange.from && customRange.to && (
                       <>
-                        {formatDate(customRange.from)} –{" "}
-                        {formatDate(customRange.to)}
+                        {formatDatePref(customRange.from, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}{" "}
+                        –{" "}
+                        {formatDatePref(customRange.to, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
                       </>
                     )}
                   </div>
@@ -303,14 +315,6 @@ export function TimeframePicker({
       </Popover.Root>
     </div>
   );
-}
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 export default TimeframePicker;

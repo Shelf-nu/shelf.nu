@@ -1,5 +1,6 @@
 import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 export function getDifferenceInSeconds(
   dateLeft: Date,
@@ -75,7 +76,18 @@ export function getWeekNumber(currentDate: Date) {
   return week;
 }
 
-export function getWeekStartingAndEndingDates(currentDate: Date) {
+/**
+ * Compute the Monday–Sunday range that contains `currentDate` and return the
+ * two endpoints formatted (day + long month) in the user's configured order.
+ *
+ * @param currentDate - Any date within the target week
+ * @param prefs - Resolved user format prefs (drives endpoint formatting)
+ * @returns `[startLabel, endLabel]`
+ */
+export function getWeekStartingAndEndingDates(
+  currentDate: Date,
+  prefs: ResolvedFormatPrefs
+) {
   // Get the day of the week as a number (0 for Sunday, 1 for Monday, etc.)
   const day = currentDate.getDay();
   const diffToMonday = day === 0 ? 6 : day - 1; // if day is Sunday(0), set diffToMonday as 6, else day - 1
@@ -88,10 +100,10 @@ export function getWeekStartingAndEndingDates(currentDate: Date) {
   const end = new Date(currentDate);
   end.setDate(start.getDate() + 6);
 
-  // Format the dates as strings
-  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
-  const startStr = start.toLocaleDateString(undefined, options);
-  const endStr = end.toLocaleDateString(undefined, options);
+  // Format the endpoints per the user's prefs (absolute, no tz conversion)
+  const options = { day: "numeric", month: "long" } as const;
+  const startStr = formatDate(start, prefs, { ...options, localeOnly: true });
+  const endStr = formatDate(end, prefs, { ...options, localeOnly: true });
 
   return [startStr, endStr];
 }

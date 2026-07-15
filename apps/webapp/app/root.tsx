@@ -24,13 +24,17 @@ import { CloudflareWebAnalytics } from "./components/marketing/cloudflare-web-an
 import { AnimationProvider } from "./components/shared/animation-provider";
 import { TooltipProvider } from "./components/shared/tooltip";
 import { config } from "./config/shelf.config";
+import { db } from "./database/db.server";
 import { useNprogress } from "./hooks/use-nprogress";
+import { detectAndPersistFormatPrefs } from "./modules/user/format-prefs.server";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
+import { resolveFormatPrefs } from "./utils/date-format";
+import type { ResolvedFormatPrefs } from "./utils/date-format";
 import { getBrowserEnv, MAINTENANCE_MODE } from "./utils/env";
 import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
@@ -74,11 +78,51 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const admin = MAINTENANCE_MODE
     ? await isAdmin(context).catch(() => null)
     : null;
+
+  const hints = getClientHint(request);
+
+  // Resolve the acting user's formatting prefs ONCE per request and expose them
+  // via requestInfo.formatPrefs — the single seam every date surface reads.
+  // Session is optional: context.getSession() throws on auth/onboarding pages
+  // (no user), so we tolerate that exactly like the admin lookup above and let
+  // browser hints govern (today's behavior). shouldRevalidate=false means this
+  // is snapshotted once per full navigation.
+  let formatPrefs: ResolvedFormatPrefs;
+  try {
+    const { userId } = context.getSession();
+    const userPrefs = await db.user.findFirst({
+      where: { id: userId },
+      select: {
+        dateFormat: true,
+        timeFormat: true,
+        weekStart: true,
+        timeZone: true,
+      },
+    });
+    formatPrefs = resolveFormatPrefs(userPrefs, hints);
+
+    // Lazy backfill: pre-existing users have null pref columns. Snapshot the
+    // hint-detected values once, fire-and-forget (mirrors recordMobileActivity).
+    if (
+      userPrefs &&
+      (userPrefs.dateFormat === null ||
+        userPrefs.timeFormat === null ||
+        userPrefs.weekStart === null ||
+        userPrefs.timeZone === null)
+    ) {
+      detectAndPersistFormatPrefs(userId, userPrefs, hints);
+    }
+  } catch {
+    // No session / getSession unavailable / transient DB error → hints govern.
+    formatPrefs = resolveFormatPrefs(null, hints);
+  }
+
   return payload({
     env: getBrowserEnv(),
     maintenanceMode: MAINTENANCE_MODE && !admin,
     requestInfo: {
-      hints: getClientHint(request),
+      hints,
+      formatPrefs,
     },
   });
 };

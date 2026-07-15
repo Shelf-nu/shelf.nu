@@ -772,6 +772,9 @@ async function computeComplianceTrend(
  * Format day as "Mon 21" style label.
  */
 function formatDayLabel(date: Date): string {
+  // why: kept ISO/English on purpose — chart-axis labels stay in English so
+  // the report visuals read consistently regardless of the viewer's locale
+  // or date-format preference; not user-facing prose.
   const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
   const dayNum = date.getDate();
   return `${dayName} ${dayNum}`;
@@ -781,6 +784,9 @@ function formatDayLabel(date: Date): string {
  * Format week range as "Mar 3-9" style label.
  */
 function formatWeekLabel(start: Date, end: Date): string {
+  // why: kept ISO/English on purpose — chart-axis month labels stay in
+  // English for consistent report visuals; not affected by the user's
+  // display date-format preference.
   const startMonth = start.toLocaleDateString("en-US", { month: "short" });
   const startDay = start.getDate();
   const endDay = end.getDate();
@@ -3327,6 +3333,9 @@ export async function monthlyBookingTrendsReport(
 
         return {
           id: key,
+          // why: kept ISO/English on purpose — chart-axis month label stays
+          // in English for consistent report visuals; not driven by the
+          // user's display date-format preference.
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",

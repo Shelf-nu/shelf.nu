@@ -13,6 +13,7 @@ import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
   getCalendarTitleAndSubtitle,
@@ -44,7 +45,11 @@ export default function AvailabilityCalendar({
     useLoaderData<AssetIndexLoaderData>();
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
-  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+  const { prefs } = useDateFormatter();
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+    new Date(),
+    prefs
+  );
 
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -59,7 +64,9 @@ export default function AvailabilityCalendar({
   const updateTitle = (viewType = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
+      setCalendarHeader(
+        getCalendarTitleAndSubtitle({ viewType, calendarApi, prefs })
+      );
     }
   };
 

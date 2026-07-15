@@ -53,6 +53,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       !isBackupRequest && mode === AssetIndexMode.ADVANCED && assetIds
         ? await exportAssetsFromIndexToCsv({
             request,
+            userId,
             assetIds,
             settings,
             currentOrganization,

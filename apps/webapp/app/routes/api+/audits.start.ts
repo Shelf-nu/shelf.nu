@@ -256,11 +256,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
             assigneeUser.user.lastName || "User"
           }`;
 
-          // Send async email (don't await to avoid blocking response)
+          // Send async email (don't await to avoid blocking response).
+          // `assignee` is the recipient user id — plumbed so the email helper
+          // can resolve the assignee's own date/time format preferences.
           void sendAuditAssignedEmail({
             audit: auditForEmail,
             assigneeEmail: assigneeUser.user.email,
             assigneeName,
+            assigneeUserId: assignee,
             hints,
           });
         }

@@ -16,6 +16,8 @@ import {
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 
+import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
 vi.mock("@remix-run/form-data-parser", async () => {
@@ -35,13 +37,6 @@ vi.mock("lottie-react", () => ({
 }));
 
 const parseFormDataMock = vi.mocked(parseFormData);
-
-const baseRequest = new Request("http://localhost", {
-  headers: {
-    "accept-language": "en-US",
-    Cookie: "CH-time-zone=UTC",
-  },
-});
 
 describe("parseCsv", () => {
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
@@ -369,7 +364,7 @@ describe("buildCsvExportDataFromAssets", () => {
         barcodesEnabled: false,
         currency: "USD",
       },
-      request: baseRequest,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(headers).toEqual([
@@ -439,7 +434,7 @@ describe("buildCsvExportDataFromAssets", () => {
         barcodesEnabled: false,
         currency: "USD",
       },
-      request: baseRequest,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
@@ -473,7 +468,7 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
-      baseRequest
+      HARDCODED_DEFAULT_PREFS
     );
 
     expect(headers).toEqual([
@@ -554,7 +549,7 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [, mainRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
-      baseRequest,
+      HARDCODED_DEFAULT_PREFS,
       checkinsByBooking
     );
 

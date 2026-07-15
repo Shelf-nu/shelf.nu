@@ -68,6 +68,15 @@ model User {
   // recently-active member (join via UserOrganization). Null until first use.
   lastMobileActiveAt DateTime?
 
+  // User datetime-formatting preferences. Nullable: null = not yet detected, so
+  // the resolver falls back to live browser hints (today's behavior) until the
+  // user's next authenticated load lazily backfills concrete values. See
+  // ~/utils/date-format (resolveFormatPrefs / detectFormatPrefsFromHints).
+  dateFormat DateFormatPreference? // null → not yet detected
+  timeFormat TimeFormatPreference? // null → not yet detected
+  weekStart  WeekStartPreference?  // null → not yet detected
+  timeZone   String?               // IANA name; null → not yet detected
+
   // Relationships
   assets             Asset[]
   categories         Category[]
@@ -970,11 +979,6 @@ model Organization {
   // QR code display preference - which ID to show on QR code labels
   qrIdDisplayPreference QrIdDisplayPreference @default(QR_ID)
 
-  // Workspace date-format preference. AUTO keeps the legacy behavior (format
-  // derived from the browser Accept-Language header). Any explicit value forces
-  // the ordering of dates rendered across the app (see ~/utils/date-format).
-  dateFormat DateFormat @default(AUTO)
-
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
 
@@ -1026,14 +1030,25 @@ enum QrIdDisplayPreference {
   EAN13
 }
 
-// Workspace date-format preference. Controls how dates are rendered across the
-// app. AUTO preserves the legacy behavior (locale derived from the browser
-// Accept-Language header); the explicit values force the day/month/year order.
-enum DateFormat {
-  AUTO // Browser locale (legacy default)
+// User date-format preference — controls day/month/year ordering in rendered
+// dates. Stored per-User (nullable); null resolves from live browser hints.
+enum DateFormatPreference {
   DD_MM_YYYY // e.g. 03/04/2026
   MM_DD_YYYY // e.g. 04/03/2026
   YYYY_MM_DD // e.g. 2026-04-03
+}
+
+// User time-format preference — 12-hour (AM/PM) vs 24-hour clock.
+enum TimeFormatPreference {
+  H12 // 1:30 PM
+  H24 // 13:30
+}
+
+// User "start of week" preference for calendar/date-picker rendering.
+enum WeekStartPreference {
+  MONDAY
+  SUNDAY
+  SATURDAY
 }
 
 enum OrganizationRoles {

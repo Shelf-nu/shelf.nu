@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
 
 // why: Stripe SDK makes external API calls that should not run in tests
 // Using vi.hoisted to ensure the mock function is available when vi.mock runs
@@ -206,6 +207,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.amountDue).toBe("$29.99");
@@ -229,6 +231,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: euroInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     // EUR formatting varies by locale, just verify it contains the amount
@@ -247,6 +250,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.dueDate).toBe("January 1, 2024");
@@ -269,6 +273,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithoutDueDate,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.dueDate).toBeNull();
@@ -291,6 +296,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithoutDescription,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.subscriptionName).toBe("Shelf Subscription");
@@ -313,6 +319,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithEmptyLines,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.subscriptionName).toBe("Shelf Subscription");
@@ -330,6 +337,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     // Verify it includes the customer notification data

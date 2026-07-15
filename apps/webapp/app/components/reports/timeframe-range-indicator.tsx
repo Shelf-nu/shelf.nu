@@ -17,6 +17,7 @@
 
 import { DateS } from "~/components/shared/date";
 import type { ResolvedTimeframe } from "~/modules/reports/types";
+import type { DateFormatOptions } from "~/utils/date-format";
 
 /** Props for {@link TimeframeRangeIndicator}. */
 type Props = {
@@ -55,12 +56,12 @@ export function TimeframeRangeIndicator({ timeframe }: Props) {
   const fromYear = from.getFullYear();
   const toYear = to.getFullYear();
   const showYear = fromYear !== toYear || toYear !== new Date().getFullYear();
-  const fromOptions: Intl.DateTimeFormatOptions = {
+  const fromOptions: DateFormatOptions = {
     month: "short",
     day: "numeric",
     ...(showYear && fromYear !== toYear ? { year: "numeric" } : {}),
   };
-  const toOptions: Intl.DateTimeFormatOptions = {
+  const toOptions: DateFormatOptions = {
     month: "short",
     day: "numeric",
     ...(showYear ? { year: "numeric" } : {}),

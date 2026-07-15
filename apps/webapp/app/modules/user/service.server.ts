@@ -32,6 +32,7 @@ import {
 } from "~/modules/auth/service.server";
 
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import type { DetectedFormatPrefs } from "~/utils/date-format";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -228,12 +229,15 @@ export async function createUserOrAttachOrg({
   firstName,
   lastName,
   createdWithInvite = false,
+  formatPrefs,
 }: Pick<User, "email" | "firstName"> &
   Partial<Pick<User, "lastName">> & {
     organizationId: Organization["id"];
     roles: OrganizationRoles[];
     password: string;
     createdWithInvite: boolean;
+    /** Browser-detected prefs threaded down from the invite-accept action. */
+    formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
     const shelfUser = await db.user.findFirst({
@@ -276,6 +280,7 @@ export async function createUserOrAttachOrg({
         firstName,
         lastName,
         createdWithInvite,
+        formatPrefs,
       });
 
       await ensureAssetIndexModeForRole({
@@ -347,7 +352,9 @@ export async function createUserFromSSO(
       zipPostalCode?: string;
       countryRegion?: string;
     };
-  }
+  },
+  /** Browser-detected prefs from the SSO callback action; stamped on the new row. */
+  formatPrefs?: DetectedFormatPrefs
 ) {
   try {
     const { email, userId } = authSession;
@@ -362,6 +369,7 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
+      formatPrefs,
     });
 
     // Update contact information if provided
@@ -657,6 +665,8 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    /** Browser-detected prefs to stamp on the new row; undefined → resolved at read time. */
+    formatPrefs?: DetectedFormatPrefs;
   }
 ) {
   const {
@@ -669,6 +679,7 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    formatPrefs,
   } = payload;
 
   /**
@@ -687,6 +698,9 @@ export async function createUser(
             firstName,
             lastName,
             createdWithInvite,
+            // Stamp browser-detected date/time/week/timezone prefs when supplied.
+            // `{...undefined}` is a no-op, so unset prefs leave the columns null.
+            ...formatPrefs,
             roles: {
               connect: {
                 name: Roles["USER"],

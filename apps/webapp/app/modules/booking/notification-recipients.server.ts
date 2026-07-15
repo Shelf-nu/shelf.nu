@@ -16,6 +16,11 @@
  * After resolution, the editor (user performing the action) is excluded
  * from non-scheduled notifications so they don't email themselves.
  */
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@prisma/client";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
@@ -53,6 +58,12 @@ export type BookingEventType =
  * @property firstName - Recipient's first name (nullable for team-member-only users)
  * @property lastName - Recipient's last name (nullable for team-member-only users)
  * @property userId - The user's database ID, used for editor exclusion matching
+ * @property dateFormat - Raw (nullable) date-format preference, carried so the
+ *   send loop resolves this recipient's prefs from the already-loaded row via
+ *   `resolveFormatPrefs` — avoids a per-recipient DB fetch (N+1)
+ * @property timeFormat - Raw (nullable) time-format preference (see `dateFormat`)
+ * @property weekStart - Raw (nullable) week-start preference (see `dateFormat`)
+ * @property timeZone - Raw (nullable) IANA time zone (see `dateFormat`)
  * @property reason - Why this person receives the notification; drives the
  *   personalized footer in the email template (see `NotificationReasonFooter`)
  */
@@ -61,6 +72,12 @@ export type NotificationRecipient = {
   firstName: string | null;
   lastName: string | null;
   userId: string;
+  // Raw (nullable) format prefs, carried so the send loop can resolve prefs
+  // from this already-loaded row via resolveFormatPrefs — avoids an N+1.
+  dateFormat: DateFormatPreference | null;
+  timeFormat: TimeFormatPreference | null;
+  weekStart: WeekStartPreference | null;
+  timeZone: string | null;
   reason:
     | "custodian"
     | "creator"
@@ -126,6 +143,10 @@ export async function getBookingNotificationRecipients({
         firstName: booking.custodianUser.firstName ?? null,
         lastName: booking.custodianUser.lastName ?? null,
         userId: booking.custodianUser.id,
+        dateFormat: booking.custodianUser.dateFormat,
+        timeFormat: booking.custodianUser.timeFormat,
+        weekStart: booking.custodianUser.weekStart,
+        timeZone: booking.custodianUser.timeZone,
         reason: "custodian",
       });
     }
@@ -141,6 +162,10 @@ export async function getBookingNotificationRecipients({
           firstName: booking.creator.firstName ?? null,
           lastName: booking.creator.lastName ?? null,
           userId: booking.creator.id,
+          dateFormat: booking.creator.dateFormat,
+          timeFormat: booking.creator.timeFormat,
+          weekStart: booking.creator.weekStart,
+          timeZone: booking.creator.timeZone,
           reason: "creator",
         });
       }
@@ -166,6 +191,10 @@ export async function getBookingNotificationRecipients({
             firstName: admin.firstName ?? null,
             lastName: admin.lastName ?? null,
             userId: admin.id,
+            dateFormat: admin.dateFormat,
+            timeFormat: admin.timeFormat,
+            weekStart: admin.weekStart,
+            timeZone: admin.timeZone,
             reason: "admin",
           });
         }
@@ -180,6 +209,10 @@ export async function getBookingNotificationRecipients({
           firstName: tm.user.firstName ?? null,
           lastName: tm.user.lastName ?? null,
           userId: tm.user.id,
+          dateFormat: tm.user.dateFormat,
+          timeFormat: tm.user.timeFormat,
+          weekStart: tm.user.weekStart,
+          timeZone: tm.user.timeZone,
           reason: "always_notify",
         });
       }
@@ -194,6 +227,10 @@ export async function getBookingNotificationRecipients({
             firstName: tm.user.firstName ?? null,
             lastName: tm.user.lastName ?? null,
             userId: tm.user.id,
+            dateFormat: tm.user.dateFormat,
+            timeFormat: tm.user.timeFormat,
+            weekStart: tm.user.weekStart,
+            timeZone: tm.user.timeZone,
             reason: "booking_recipient",
           });
         }

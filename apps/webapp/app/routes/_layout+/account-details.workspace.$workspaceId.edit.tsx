@@ -271,13 +271,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, organizationId: id },
         });
 
-        const {
-          name,
-          currency,
-          qrIdDisplayPreference,
-          dateFormat,
-          showShelfBranding,
-        } = parsedData;
+        const { name, currency, qrIdDisplayPreference, showShelfBranding } =
+          parsedData;
 
         let nextShowShelfBranding = resolveShowShelfBranding(
           showShelfBranding,
@@ -324,7 +319,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: authSession.userId,
           currency,
           qrIdDisplayPreference,
-          dateFormat,
           showShelfBranding: nextShowShelfBranding,
         });
 
@@ -467,7 +461,6 @@ export default function WorkspaceEditPage() {
           name={organization.name || name}
           currency={organization.currency}
           qrIdDisplayPreference={organization.qrIdDisplayPreference}
-          dateFormat={organization.dateFormat}
           className="mt-4"
         />
       </div>

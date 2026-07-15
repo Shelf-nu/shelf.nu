@@ -67,6 +67,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const csv = await exportAuditNotesToCsv({
       request,
+      userId,
       auditId,
       organizationId,
     });

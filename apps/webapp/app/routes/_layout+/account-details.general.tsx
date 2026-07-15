@@ -17,6 +17,10 @@ import {
   DisplayNameForm,
   DisplayNameFormSchema,
 } from "~/components/user/display-name-form";
+import {
+  LanguageRegionForm,
+  FormatPrefsFormSchema,
+} from "~/components/user/language-region/language-region-form";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
 import {
@@ -65,6 +69,7 @@ const IntentSchema = z.object({
     "initiateEmailChange",
     "verifyEmailChange",
     "updateUserContact",
+    "updateFormatPrefs",
   ]),
 });
 
@@ -80,6 +85,10 @@ const ActionSchemas = {
 
   updateDisplayName: DisplayNameFormSchema.extend({
     type: z.literal("updateDisplayName"),
+  }),
+
+  updateFormatPrefs: FormatPrefsFormSchema.extend({
+    type: z.literal("updateFormatPrefs"),
   }),
 
   updateUserContact: UserContactDetailsFormSchema.extend({
@@ -212,6 +221,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Display name updated",
           message: "Your display name has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+      case "updateFormatPrefs": {
+        if (parsedData.type !== "updateFormatPrefs")
+          throw new Error("Invalid payload type");
+
+        await updateUser({
+          id: userId,
+          dateFormat: parsedData.dateFormat,
+          timeFormat: parsedData.timeFormat,
+          weekStart: parsedData.weekStart,
+          timeZone: parsedData.timeZone,
+        });
+
+        sendNotification({
+          title: "Preferences updated",
+          message:
+            "Your language & region settings have been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -454,6 +485,7 @@ export default function UserPage() {
       <UserDetailsForm user={user} />
       {user.sso ? <DisplayNameForm user={user} /> : null}
       <UserContactDetailsForm user={user} />
+      <LanguageRegionForm user={user} />
       {!user.sso && (
         <>
           <Card className="my-0">

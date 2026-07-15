@@ -56,6 +56,8 @@ import type {
   TopBookedKitRow,
 } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -126,10 +128,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const customFrom = url.searchParams.get("from");
   const customTo = url.searchParams.get("to");
 
+  // Resolve the acting user's date/time formatting preferences so timeframe
+  // labels (e.g. custom ranges) render in their configured format.
+  const formatPrefs = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   const timeframe = resolveTimeframe(
     timeframePreset,
     customFrom ? new Date(customFrom) : undefined,
-    customTo ? new Date(customTo) : undefined
+    customTo ? new Date(customTo) : undefined,
+    formatPrefs
   );
 
   // Load report data based on report ID

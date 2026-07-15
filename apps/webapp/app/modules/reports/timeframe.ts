@@ -7,6 +7,11 @@
  * @see {@link file://./types.ts}
  */
 
+import {
+  formatDate,
+  HARDCODED_DEFAULT_PREFS,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
 import type { TimeframePreset, ResolvedTimeframe } from "./types";
 
 /**
@@ -15,12 +20,16 @@ import type { TimeframePreset, ResolvedTimeframe } from "./types";
  * @param preset - The timeframe preset
  * @param customFrom - Custom start date (required if preset is "custom")
  * @param customTo - Custom end date (required if preset is "custom")
+ * @param prefs - Resolved user format prefs driving label ordering. Optional;
+ *   defaults to {@link HARDCODED_DEFAULT_PREFS} so server callers keep
+ *   compiling until Phase 7 threads acting-user prefs into them.
  * @returns Resolved timeframe with actual dates and label
  */
 export function resolveTimeframe(
   preset: TimeframePreset,
   customFrom?: Date,
-  customTo?: Date
+  customTo?: Date,
+  prefs: ResolvedFormatPrefs = HARDCODED_DEFAULT_PREFS
 ): ResolvedTimeframe {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -76,7 +85,7 @@ export function resolveTimeframe(
         preset,
         from,
         to: now,
-        label: formatMonthLabel(from),
+        label: formatMonthLabel(from, prefs),
       };
     }
 
@@ -87,7 +96,7 @@ export function resolveTimeframe(
         preset,
         from,
         to,
-        label: formatMonthLabel(from),
+        label: formatMonthLabel(from, prefs),
       };
     }
 
@@ -133,7 +142,10 @@ export function resolveTimeframe(
         preset,
         from: customFrom,
         to: customTo,
-        label: `${formatDateShort(customFrom)} – ${formatDateShort(customTo)}`,
+        label: `${formatDateShort(customFrom, prefs)} – ${formatDateShort(
+          customTo,
+          prefs
+        )}`,
       };
     }
 
@@ -143,15 +155,38 @@ export function resolveTimeframe(
   }
 }
 
-function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+/**
+ * Format a full month + year label (e.g. "April 2026") in the caller's
+ * configured date-part order. Month/year names stay English by design; only
+ * ORDER is prefs-driven.
+ *
+ * @param date - The month to label (first-of-month date)
+ * @param prefs - Resolved user format prefs
+ * @returns the assembled month label
+ */
+function formatMonthLabel(date: Date, prefs: ResolvedFormatPrefs): string {
+  return formatDate(date, prefs, {
+    month: "long",
+    year: "numeric",
+    localeOnly: true,
+  });
 }
 
-function formatDateShort(date: Date): string {
-  return date.toLocaleDateString("en-US", {
+/**
+ * Format a short day/month/year label (e.g. "3 Apr 2026") in the caller's
+ * configured date-part order. Month names stay English; only ORDER is
+ * prefs-driven.
+ *
+ * @param date - The date to label
+ * @param prefs - Resolved user format prefs
+ * @returns the assembled short date label
+ */
+function formatDateShort(date: Date, prefs: ResolvedFormatPrefs): string {
+  return formatDate(date, prefs, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    localeOnly: true,
   });
 }
 

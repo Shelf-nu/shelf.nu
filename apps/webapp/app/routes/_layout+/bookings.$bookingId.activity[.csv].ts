@@ -40,6 +40,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const csv = await exportBookingNotesToCsv({
       request,
+      userId,
       bookingId,
       organizationId,
     });

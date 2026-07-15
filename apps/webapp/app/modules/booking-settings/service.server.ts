@@ -228,6 +228,15 @@ export async function getBookingNotificationSettingsForOrg(
                 firstName: true,
                 lastName: true,
                 profilePicture: true,
+                // Format-preference columns so the booking notification
+                // resolver can carry them onto each recipient and resolve
+                // recipient-specific email date/time formatting from the
+                // loaded row (no per-recipient DB fetch). See
+                // `NotificationRecipient`.
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },

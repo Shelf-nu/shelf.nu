@@ -9,6 +9,7 @@ import AuditTeamMemberSelector from "~/components/audit/audit-team-member-select
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -140,10 +141,10 @@ export function EditAuditDialog({
                 className="mb-4"
               />
 
-              <Input
+              <DateTimePicker
+                mode="datetime"
                 name={dueDateField}
                 label="Due date"
-                type="datetime-local"
                 defaultValue={defaultDueDate}
                 error={dueDateError}
                 disabled={disabled}

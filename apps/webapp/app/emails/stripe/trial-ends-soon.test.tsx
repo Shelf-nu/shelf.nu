@@ -30,6 +30,8 @@ vi.mock("~/utils/env", () => ({
   GEOCODING_USER_AGENT: "",
 }));
 
+import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
+
 import {
   trialEndsSoonEmailText,
   sendTrialEndsSoonEmail,
@@ -44,6 +46,7 @@ describe("trialEndsSoonEmailText", () => {
       hasPaymentMethod: true,
       planName: "Team",
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("ACTION REQUIRED");
     expect(text).toContain(
@@ -58,6 +61,7 @@ describe("trialEndsSoonEmailText", () => {
       hasPaymentMethod: false,
       planName: "Team",
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).not.toContain("ACTION REQUIRED");
     expect(text).toContain("Shelf Team trial");
@@ -70,6 +74,7 @@ describe("trialEndsSoonEmailText", () => {
       hasPaymentMethod: false,
       planName: "Plus",
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("Shelf Plus trial");
   });
@@ -80,6 +85,7 @@ describe("trialEndsSoonEmailText", () => {
       hasPaymentMethod: true,
       planName: "Team",
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("March 24, 2026");
   });
@@ -90,6 +96,7 @@ describe("trialEndsSoonEmailText", () => {
       hasPaymentMethod: false,
       planName: "Team",
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toMatch(/^Hey Bob,/);
   });
@@ -107,6 +114,7 @@ describe("sendTrialEndsSoonEmail", () => {
       hasPaymentMethod: true,
       planName: "Team",
       trialEndDate: new Date("2026-03-24T00:00:00Z"),
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(mockSendEmail).toHaveBeenCalledOnce();
@@ -125,6 +133,7 @@ describe("sendTrialEndsSoonEmail", () => {
       hasPaymentMethod: false,
       planName: "Plus",
       trialEndDate: new Date("2026-03-24T00:00:00Z"),
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(mockSendEmail).toHaveBeenCalledOnce();
@@ -147,6 +156,7 @@ describe("sendTrialEndsSoonEmail", () => {
         hasPaymentMethod: true,
         planName: "Team",
         trialEndDate: new Date("2026-03-24T00:00:00Z"),
+        prefs: HARDCODED_DEFAULT_PREFS,
       })
     ).resolves.toBeUndefined();
   });

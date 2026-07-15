@@ -77,6 +77,9 @@ export function buildMonthlyGrowthData(
     cumulative += assetsCreated;
 
     months.push({
+      // why: kept ISO/English on purpose — dashboard chart-axis month label
+      // stays in English for consistent visuals; not driven by the user's
+      // display date-format preference.
       month: MONTH_NAMES[d.getMonth()],
       year: d.getFullYear(),
       assetsCreated,

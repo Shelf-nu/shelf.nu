@@ -3,7 +3,9 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
+import { formatDate } from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError } from "~/utils/error";
 import {
   payload,
@@ -59,10 +61,17 @@ export const loader = async ({
       { orderBy, orderDirection, search: paramsValues.search }
     );
 
-    const dateTimeFormat = getDateTimeFormat(request, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+    // Resolve the acting user's format preferences so booking PDF dates render
+    // per their settings rather than the request locale.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
+    // Preserve the existing `.format(date)` call shape used below.
+    const dateTimeFormat = {
+      format: (date: Date) => formatDate(date, prefs, { includeTime: true }),
+    };
 
     const { from, to, originalFrom, originalTo } = pdfMeta.booking;
     if (from && to) {
