@@ -38,29 +38,13 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import type { getUserWithContact } from "~/modules/user/service.server";
 import type { UserPageActionData } from "~/routes/_layout+/account-details.general";
-import { formatDate } from "~/utils/date-format";
+import { formatDate, isValidTimeZone } from "~/utils/date-format";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { getValidationErrors } from "~/utils/http";
 import { DateFormatSelect } from "./date-format-select";
 import { TimeFormatSelect } from "./time-format-select";
 import { TimezoneSelect } from "./timezone-select";
 import { WeekStartSelect } from "./week-start-select";
-
-/**
- * Validates whether a string is a resolvable IANA time-zone name.
- * `Intl.DateTimeFormat` throws a RangeError for unknown zones.
- *
- * @param tz - Candidate IANA name
- * @returns true if the runtime accepts it as a time zone
- */
-function isValidTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Server-and-client schema for the format-preference form. All four fields

@@ -162,8 +162,12 @@ describe("resolveFormatPrefs", () => {
   });
 });
 
-import { formatDate } from "./date-format";
-import type { DateFormatOptions, ResolvedFormatPrefs } from "./date-format";
+import { formatDate, isValidTimeZone } from "./date-format";
+import type {
+  DateFormatOptions,
+  RawFormatPrefs,
+  ResolvedFormatPrefs,
+} from "./date-format";
 
 // Reference prefs across three orderings / time formats / timezones.
 const US: ResolvedFormatPrefs = {
@@ -406,4 +410,56 @@ describe("detectors — representative locale sweep", () => {
       expect(detectWeekStart(locale)).toBe(weekStart);
     }
   );
+});
+
+describe("formatDate — date-only strings never shift a day (bug: PR review)", () => {
+  // A bare YYYY-MM-DD is a calendar date with no instant. It must render as the
+  // exact same day in every timezone — previously `new Date("2026-06-22")` was
+  // parsed as UTC midnight and rendered "06/21/2026" under America/New_York (US).
+  it("renders the given calendar date regardless of prefs.timeZone", () => {
+    expect(formatDate("2026-06-22", US)).toBe("06/22/2026"); // NY, not 06/21
+    expect(formatDate("2026-06-22", GB)).toBe("22/06/2026");
+    expect(formatDate("2026-06-22", CA)).toBe("2026-06-22");
+  });
+
+  it("is stable under localeOnly and with a name-month option", () => {
+    expect(formatDate("2026-06-22", US, { localeOnly: true })).toBe(
+      "06/22/2026"
+    );
+    expect(
+      formatDate("2026-01-01", US, { month: "short", day: "numeric" })
+    ).toMatch(/Jan\s+1/);
+  });
+});
+
+describe("timezone validation — corrupted/forged zones never throw", () => {
+  const badRaw: RawFormatPrefs = {
+    dateFormat: null,
+    timeFormat: null,
+    weekStart: null,
+    timeZone: "Not/ARealZone",
+  };
+
+  it("isValidTimeZone accepts real zones and rejects junk", () => {
+    expect(isValidTimeZone("America/New_York")).toBe(true);
+    expect(isValidTimeZone("Not/ARealZone")).toBe(false);
+  });
+
+  it("detectFormatPrefsFromHints falls back to UTC on an invalid zone", () => {
+    expect(
+      detectFormatPrefsFromHints({ locale: "en-US", timeZone: "Not/ARealZone" })
+        .timeZone
+    ).toBe("UTC");
+  });
+
+  it("resolveFormatPrefs never resolves to an invalid stored zone", () => {
+    expect(resolveFormatPrefs(badRaw, null).timeZone).toBe("UTC");
+  });
+
+  it("formatDate never throws on an invalid prefs.timeZone (guards the email loop)", () => {
+    const corrupted: ResolvedFormatPrefs = { ...US, timeZone: "Not/ARealZone" };
+    expect(() => formatDate(V, corrupted)).not.toThrow();
+    // Falls back to UTC: V = 2026-06-22T21:05Z → 06/22/2026 in UTC.
+    expect(formatDate(V, corrupted)).toBe("06/22/2026");
+  });
 });

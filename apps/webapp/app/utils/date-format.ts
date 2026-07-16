@@ -59,6 +59,23 @@ export const HARDCODED_DEFAULT_PREFS: ResolvedFormatPrefs = {
   timeZone: "UTC",
 };
 
+/**
+ * True when `tz` is an IANA zone `Intl` accepts. Used to reject unvalidated
+ * client-hint timezones before they are stored on a User row, and to guard the
+ * read path so a corrupted stored value can never throw a `RangeError`.
+ *
+ * @param tz - a candidate IANA timezone name
+ * @returns whether `Intl.DateTimeFormat` accepts it
+ */
+export function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Superset of the option shapes DateS callers pass today (facts-02 §C). */
 export type DateFormatOptions = {
   weekday?: "long" | "short" | "narrow";
@@ -197,7 +214,12 @@ export function detectFormatPrefsFromHints(
     dateFormat: detectDateFormat(hints.locale),
     timeFormat: detectTimeFormat(hints.locale),
     weekStart: detectWeekStart(hints.locale),
-    timeZone: hints.timeZone,
+    // The CH-time-zone cookie is user-controlled and can be forged; never store
+    // an invalid IANA zone (a bad value throws RangeError at every format call,
+    // and would silently break email fan-outs). Fall back to UTC.
+    timeZone: isValidTimeZone(hints.timeZone)
+      ? hints.timeZone
+      : HARDCODED_DEFAULT_PREFS.timeZone,
   };
 }
 
@@ -232,6 +254,14 @@ export function resolveFormatPrefs(
 
   const weekStartEnum = userPrefs?.weekStart ?? detected?.weekStart ?? null;
 
+  // Rows written before timezone validation existed (or via any other path)
+  // may hold an invalid zone; never resolve to one — it would throw at format
+  // time. `detected` is already validated in detectFormatPrefsFromHints.
+  const candidateTimeZone =
+    userPrefs?.timeZone ??
+    detected?.timeZone ??
+    HARDCODED_DEFAULT_PREFS.timeZone;
+
   return {
     dateFormat:
       userPrefs?.dateFormat ??
@@ -244,10 +274,9 @@ export function resolveFormatPrefs(
     weekStartsOn: weekStartEnum
       ? weekStartEnumToIndex(weekStartEnum)
       : HARDCODED_DEFAULT_PREFS.weekStartsOn,
-    timeZone:
-      userPrefs?.timeZone ??
-      detected?.timeZone ??
-      HARDCODED_DEFAULT_PREFS.timeZone,
+    timeZone: isValidTimeZone(candidateTimeZone)
+      ? candidateTimeZone
+      : HARDCODED_DEFAULT_PREFS.timeZone,
   };
 }
 
@@ -308,10 +337,21 @@ function partsFor(
 ): Record<string, string> {
   const options: Intl.DateTimeFormatOptions = { ...intlOptions };
   if (timeZone) options.timeZone = timeZone;
+  // Defense-in-depth: an invalid timeZone makes the constructor throw a
+  // RangeError. resolveFormatPrefs already rejects bad zones, but this is on the
+  // hot path for every recipient in email fan-outs — one corrupted row must
+  // never throw mid-loop and drop everyone else's notifications. Fall back to UTC.
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", options);
+  } catch {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      ...intlOptions,
+      timeZone: "UTC",
+    });
+  }
   const map: Record<string, string> = {};
-  for (const part of new Intl.DateTimeFormat("en-US", options).formatToParts(
-    date
-  )) {
+  for (const part of formatter.formatToParts(date)) {
     if (part.type !== "literal") map[part.type] = part.value;
   }
   return map;
@@ -453,8 +493,22 @@ export function formatDate(
   prefs: ResolvedFormatPrefs,
   opts: DateFormatOptions = {}
 ): string {
-  const date = value instanceof Date ? value : new Date(value);
-  const timeZone = opts.localeOnly ? undefined : prefs.timeZone;
+  // A bare `YYYY-MM-DD` string is a calendar date with no instant. `new Date()`
+  // parses it as UTC midnight, which shifts a day when rendered in a non-UTC
+  // zone (e.g. "2026-06-22" → "06/21/2026" in America/New_York). Parse it as a
+  // LOCAL date and never apply timezone conversion, so the calendar date renders
+  // exactly as given — for custom-field DATE values, filter chips, etc.
+  const dateOnlyMatch =
+    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? value.split("-").map(Number)
+      : null;
+  const date = dateOnlyMatch
+    ? new Date(dateOnlyMatch[0], dateOnlyMatch[1] - 1, dateOnlyMatch[2])
+    : value instanceof Date
+    ? value
+    : new Date(value);
+  const timeZone =
+    opts.localeOnly || dateOnlyMatch ? undefined : prefs.timeZone;
   const n = normalizeOptions(opts);
 
   // One conversion for all numeric parts (year/month/day/hour/minute) in tz.

@@ -14,6 +14,7 @@ import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { CreateOverrideFormSchema } from "~/modules/working-hours/zod-utils";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
+import { parseDateOnlyString } from "~/utils/client-hints";
 
 export function NewOverrideDialog() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -149,7 +150,7 @@ export const WorkingHoursOverrideForm = ({
             name={zo.fields.date()}
             disabled={disabled}
             required
-            min={new Date(todayAbsolute)}
+            min={parseDateOnlyString(todayAbsolute)}
             error={zo.errors.date()?.message}
             className="w-full"
           />
