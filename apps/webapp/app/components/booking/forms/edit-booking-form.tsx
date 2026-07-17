@@ -6,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
@@ -13,6 +14,7 @@ import type {
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -75,17 +77,8 @@ type BookingFormData = {
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export function EditBookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
-  const {
-    id,
-    name,
-    startDate: incomingStartDate,
-    endDate: incomingEndDate,
-    custodianRef,
-    bookingFlags,
-    description,
-    status,
-    tags,
-  } = booking;
+  const { id, name, custodianRef, bookingFlags, description, status, tags } =
+    booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
   const {
@@ -113,13 +106,29 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   // haven't been checked out yet (the Booked bucket). Once everything has been
   // checked out, hide the "Scan to check out" entry point.
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
+
+  const isProcessing = isFormProcessing(navigation.state);
+  const hints = useHints();
+  // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
+  // user's RESOLVED timezone preference (the same one date DISPLAY uses), so
+  // the edit form shows the same wall-clock the display shows. Seeding from
+  // the raw stored UTC instant via `dateForDateTimeInputValue` (browser/runtime
+  // zone) produced a different wall-clock whenever the browser zone differed
+  // from the pref zone. Locale still comes from `hints`.
+  const prefs = useFormatPrefs();
+  const incomingStartDate = toIsoDateTimeToUserTimezone(
+    loaderBooking.from,
+    prefs.timeZone
+  ).slice(0, 16);
+  const incomingEndDate = toIsoDateTimeToUserTimezone(
+    loaderBooking.to,
+    prefs.timeZone
+  ).slice(0, 16);
+
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
-
-  const isProcessing = isFormProcessing(navigation.state);
-  const hints = useHints();
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours();
@@ -151,7 +160,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints,
+      // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+      // (matches display + the server parse), not the browser hint.
+      hints: { ...hints, timeZone: prefs.timeZone },
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,

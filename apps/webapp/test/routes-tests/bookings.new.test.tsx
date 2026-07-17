@@ -24,6 +24,12 @@ vi.mock("~/database/db.server", () => ({
     booking: {
       create: dbMocks.booking.create,
     },
+    // why: the action now resolves the acting user's timezone preference via
+    // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS
+    // / hint-derived zone, matching the pre-existing hint-based parse behavior.
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 

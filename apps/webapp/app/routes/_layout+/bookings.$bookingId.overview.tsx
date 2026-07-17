@@ -91,6 +91,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
@@ -1439,15 +1440,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         getBookingSettingsForOrganization(organizationId),
       ]
     );
+
+    // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+    // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+    // browser hint. When the two differ the browser hint interprets the typed
+    // wall-clock in the wrong zone and stores the wrong UTC instant. Shared by
+    // the save / reserve / extend branches below; locale still comes from hints.
+    const prefTimeZone = (
+      await resolveUserFormatPrefsById(userId, getClientHint(request))
+    ).timeZone;
+
     switch (intent) {
       case "save": {
         const hints = getHints(request);
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
         const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints,
+            hints: hintsWithPrefTz,
             workingHours,
             bookingSettings,
             isAdminOrOwner,
@@ -1462,13 +1474,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1501,11 +1513,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "reserve": {
         const hints = getHints(request);
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
 
         const parsedData = parseData(
           formData,
           BookingFormSchema({
-            hints,
+            hints: hintsWithPrefTz,
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
@@ -1523,13 +1536,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1909,7 +1922,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           formData,
           ExtendBookingSchema({
             workingHours,
-            timeZone: hints.timeZone,
+            // TIMEZONE FIX: parse the submitted wall-clock end date in the
+            // acting user's RESOLVED pref timezone (matches display), not the
+            // browser hint.
+            timeZone: prefTimeZone,
             bookingSettings,
             isAdminOrOwner,
           }),

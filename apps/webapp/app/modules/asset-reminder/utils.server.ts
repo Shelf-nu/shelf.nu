@@ -4,8 +4,9 @@ import { redirect } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { payload, parseData, safeRedirect } from "~/utils/http.server";
 import { deleteAssetReminder, editAssetReminder } from "./service.server";
@@ -41,12 +42,20 @@ export async function resolveRemindersActions({
         { shouldBeCaptured: false }
       );
 
-      const hints = getHints(request);
+      // Parse the submitted wall-clock time in the acting user's RESOLVED
+      // timezone preference — the SAME zone the UI displays dates in — not the
+      // browser hint. When the two differ (e.g. pref Europe/London, browser
+      // UTC+3), using the browser zone would offset the stored UTC instant
+      // wrong. Locale still comes from hints; only the timezone source changes.
+      const { timeZone } = await resolveUserFormatPrefsById(
+        userId,
+        getClientHint(request)
+      );
 
       const alertDateTime = DateTime.fromFormat(
         formData.get("alertDateTime")!.toString()!,
         DATE_TIME_FORMAT,
-        { zone: hints.timeZone }
+        { zone: timeZone }
       ).toJSDate();
 
       await editAssetReminder({

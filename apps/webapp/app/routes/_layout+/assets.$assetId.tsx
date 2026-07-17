@@ -39,8 +39,9 @@ import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -353,13 +354,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           setReminderSchema,
           { shouldBeCaptured: false }
         );
-        const hints = getHints(request);
+        // Parse the submitted wall-clock time in the acting user's RESOLVED
+        // timezone preference — the SAME zone the UI displays dates in — not
+        // the browser hint. When the two differ the browser zone would offset
+        // the stored UTC instant wrong. Only the timezone source changes here.
+        const { timeZone } = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
 
         const alertDateTime = DateTime.fromFormat(
           formData.get("alertDateTime")!.toString()!,
           DATE_TIME_FORMAT,
           {
-            zone: hints.timeZone,
+            zone: timeZone,
           }
         ).toJSDate();
 

@@ -20,6 +20,7 @@ import {
 } from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { badRequest, makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -179,12 +180,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const sanitizedDescription = description?.trim() || undefined;
 
-    // Convert dueDate from user's local timezone to UTC
-    // Get raw value from formData (not parsed Zod value) to ensure proper timezone handling
+    // Convert dueDate from the acting user's stored timezone preference to UTC.
+    // Get raw value from formData (not parsed Zod value) to ensure proper
+    // timezone handling. Parse against the SAME resolved timezone that date
+    // DISPLAY uses (the user's `timeZone` preference), NOT the browser hint —
+    // otherwise a browser/preference zone mismatch offsets the stored instant
+    // (e.g. pref Europe/London, browser UTC+3: typed 15:48 stored as 12:48Z
+    // instead of 14:48Z).
     const dueDateString = formData.get("dueDate")?.toString();
+    const { timeZone: prefTimeZone } = await resolveUserFormatPrefsById(
+      userId,
+      hints
+    );
     const dueDateUTC = dueDateString
       ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-          zone: hints.timeZone,
+          zone: prefTimeZone,
         }).toJSDate()
       : undefined;
     if (dueDateUTC && dueDateUTC <= new Date()) {

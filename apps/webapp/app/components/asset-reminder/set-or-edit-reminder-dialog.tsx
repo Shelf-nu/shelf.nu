@@ -8,7 +8,8 @@ import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -42,6 +43,14 @@ export default function SetOrEditReminderDialog({
 }: SetOrEditReminderDialogProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+
+  /**
+   * The acting user's resolved timezone preference — the SAME zone the server
+   * parses submitted wall-clock times in and the UI displays dates in. Seeding
+   * the datetime input from this (not the browser/runtime zone) keeps the
+   * round-trip consistent when the two differ.
+   */
+  const { timeZone } = useFormatPrefs();
 
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -163,9 +172,10 @@ export default function SetOrEditReminderDialog({
                 mode="datetime"
                 defaultValue={
                   reminder?.alertDateTime
-                    ? dateForDateTimeInputValue(
-                        new Date(reminder.alertDateTime)
-                      ).substring(0, 16)
+                    ? toIsoDateTimeToUserTimezone(
+                        reminder.alertDateTime,
+                        timeZone
+                      ).slice(0, 16)
                     : undefined
                 }
                 name={zo.fields.alertDateTime()}
