@@ -44,6 +44,7 @@ import {
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
@@ -52,6 +53,10 @@ import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
+import {
+  buildImportReadyCsvFromAssets,
+  type ColumnScope,
+} from "./import-ready-export.server";
 import { ALL_SELECTED_KEY } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
@@ -299,7 +304,20 @@ export async function exportAssetsBackupToCsv({
   }
 }
 
-export async function exportAssetsFromIndexToCsv({
+/**
+ * Resolves the assets to export, honoring the select-all sentinel and the
+ * index's current filters. Shared by the standard and import-ready exports.
+ *
+ * @param args.request - The incoming request (carries cookie-based filters).
+ * @param args.assetIds - Comma-separated asset ids, or containing
+ *   {@link ALL_SELECTED_KEY} when the "select all" sentinel is active.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - The index's current URL search
+ *   params, used instead of cookie filters when select-all is active.
+ * @returns The full filtered asset set (no pagination when selecting all).
+ */
+async function resolveExportAssets({
   request,
   assetIds,
   settings,
@@ -314,7 +332,7 @@ export async function exportAssetsFromIndexToCsv({
     "id" | "barcodesEnabled" | "currency"
   >;
   assetIndexCurrentSearchParams: string | null;
-}) {
+}): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
   const takeAll = ids.includes(ALL_SELECTED_KEY);
@@ -343,11 +361,64 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
+
+  return { assets };
+}
+
+/**
+ * Builds the human/analytics asset export CSV (display labels,
+ * currency-formatted values, a synthetic `total_value` column).
+ *
+ * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - Current URL search params for
+ *   the select-all-with-filters path.
+ * @param args.columnScope - `"visible"` (default) exports only the columns
+ *   the user currently has shown; `"all"` exports every configured column
+ *   regardless of visibility.
+ * @returns The CSV file contents (CRLF-joined rows).
+ */
+export async function exportAssetsFromIndexToCsv({
+  request,
+  assetIds,
+  settings,
+  currentOrganization,
+  assetIndexCurrentSearchParams,
+  columnScope = "visible",
+}: {
+  request: Request;
+  assetIds: string;
+  settings: AssetIndexSettings;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
+  assetIndexCurrentSearchParams: string | null;
+  columnScope?: ColumnScope;
+}) {
+  const { assets } = await resolveExportAssets({
+    request,
+    assetIds,
+    settings,
+    currentOrganization,
+    assetIndexCurrentSearchParams,
+  });
+
+  const baseColumns = settings.columns as Column[];
+  // "All columns" for the human export = every configured column, visible or
+  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
+  const scopedColumns =
+    columnScope === "all"
+      ? baseColumns.map((c) => ({ ...c, visible: true }))
+      : baseColumns;
+
   const csvData = buildCsvExportDataFromAssets({
     assets,
     columns: [
       { name: "name", visible: true, position: 0 },
-      ...(settings.columns as Column[]),
+      ...scopedColumns,
       // Synthetic export-only column: emits `valuation × quantity` so QT
       // inventories report total worth without overwriting the per-unit
       // `valuation` column (kept lossless for CSV → re-import round-trip).
@@ -362,6 +433,68 @@ export async function exportAssetsFromIndexToCsv({
 
   // Join rows with CRLF as per CSV spec
   return csvData.join("\r\n");
+}
+
+/**
+ * Builds an import-ready CSV (headers = content-importer keys, values
+ * importer-native) so the file re-imports into another workspace. Works in
+ * both index modes; SIMPLE mode has no per-user column config, so scope is
+ * forced to "all".
+ *
+ * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - Current URL search params for
+ *   the select-all-with-filters path.
+ * @param args.columnScope - `"visible"` exports only the columns the user
+ *   currently has shown; `"all"` exports every importable column. Ignored
+ *   (forced to `"all"`) when `settings.mode` is `SIMPLE`, which has no
+ *   per-user column visibility to key off of.
+ * @returns The CSV file contents.
+ */
+export async function exportAssetsForImportToCsv({
+  request,
+  assetIds,
+  settings,
+  currentOrganization,
+  assetIndexCurrentSearchParams,
+  columnScope,
+}: {
+  request: Request;
+  assetIds: string;
+  settings: AssetIndexSettings;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
+  assetIndexCurrentSearchParams: string | null;
+  columnScope: ColumnScope;
+}): Promise<string> {
+  const [{ assets }, activeCustomFields] = await Promise.all([
+    resolveExportAssets({
+      request,
+      assetIds,
+      settings,
+      currentOrganization,
+      assetIndexCurrentSearchParams,
+    }),
+    getActiveCustomFields({
+      organizationId: currentOrganization.id,
+      includeAllCategories: true,
+    }),
+  ]);
+
+  const effectiveScope: ColumnScope =
+    settings.mode === "ADVANCED" ? columnScope : "all";
+
+  return buildImportReadyCsvFromAssets({
+    assets,
+    settingsColumns: settings.columns as Column[],
+    activeCustomFields,
+    barcodesEnabled: currentOrganization.barcodesEnabled ?? false,
+    columnScope: effectiveScope,
+  });
 }
 
 /**

@@ -193,6 +193,8 @@ export type AdvancedIndexAsset = Pick<
   | "valuation"
   | "quantity"
   | "unitOfMeasure"
+  | "minQuantity"
+  | "consumptionType"
   | "availableToBook"
 > & {
   qrId: string; // QR code will always be available
