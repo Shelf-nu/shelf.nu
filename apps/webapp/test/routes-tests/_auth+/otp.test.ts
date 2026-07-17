@@ -9,7 +9,7 @@ import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { detectFormatPrefsFromHints } from "~/utils/date-format";
 
-import { action } from "./otp";
+import { action } from "~/routes/_auth+/otp";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files

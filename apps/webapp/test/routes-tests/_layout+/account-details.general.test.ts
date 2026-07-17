@@ -12,7 +12,7 @@ import { createActionArgs } from "@mocks/remix";
 import * as userService from "~/modules/user/service.server";
 import * as rolesServer from "~/utils/roles.server";
 
-import { action } from "./account-details.general";
+import { action } from "~/routes/_layout+/account-details.general";
 
 // @vitest-environment node
 
