@@ -85,7 +85,7 @@ const DAY_TO_WEEK_START: Record<0 | 1 | 6, WeekStartPreference> = {
 export function LanguageRegionForm({
   user,
 }: {
-  user: ReturnType<typeof getUserWithContact>;
+  user: Awaited<ReturnType<typeof getUserWithContact>>;
 }) {
   const zo = useZorm("LanguageRegionForm", FormatPrefsFormSchema);
   const data = useActionData<UserPageActionData>();

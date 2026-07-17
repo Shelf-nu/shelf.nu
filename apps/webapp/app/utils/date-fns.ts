@@ -77,11 +77,13 @@ export function getWeekNumber(currentDate: Date) {
 }
 
 /**
- * Compute the Monday–Sunday range that contains `currentDate` and return the
- * two endpoints formatted (day + long month) in the user's configured order.
+ * Compute the 7-day range that contains `currentDate` and return the two
+ * endpoints formatted (day + long month) in the user's configured order. The
+ * week's first day is driven by `prefs.weekStartsOn` (0 = Sunday, 1 = Monday,
+ * 6 = Saturday) so the range matches the calendar's configured week start.
  *
  * @param currentDate - Any date within the target week
- * @param prefs - Resolved user format prefs (drives endpoint formatting)
+ * @param prefs - Resolved user format prefs (drives week start + endpoint formatting)
  * @returns `[startLabel, endLabel]`
  */
 export function getWeekStartingAndEndingDates(
@@ -90,11 +92,12 @@ export function getWeekStartingAndEndingDates(
 ) {
   // Get the day of the week as a number (0 for Sunday, 1 for Monday, etc.)
   const day = currentDate.getDay();
-  const diffToMonday = day === 0 ? 6 : day - 1; // if day is Sunday(0), set diffToMonday as 6, else day - 1
+  // Days elapsed since the configured week start (weekStartsOn: 0|1|6).
+  const diffToStart = (day - prefs.weekStartsOn + 7) % 7;
 
   // Calculate the start of the week
   const start = new Date(currentDate);
-  start.setDate(currentDate.getDate() - diffToMonday);
+  start.setDate(currentDate.getDate() - diffToStart);
 
   // Calculate the end of the week
   const end = new Date(currentDate);

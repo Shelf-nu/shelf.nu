@@ -49,11 +49,19 @@ type DateSProps = {
 export const DateS = ({
   date,
   options,
-  includeTime = false,
-  onlyTime = false,
-  localeOnly = false,
+  includeTime,
+  onlyTime,
+  localeOnly,
 }: DateSProps) => {
   const { formatDate } = useDateFormatter();
+
+  // Resolve each formatting flag so an explicit prop wins, then a matching key
+  // inside `options`, then the `false` default. Without this, a `false` default
+  // spread after `...options` would silently overwrite a flag the caller passed
+  // via `options` (e.g. `options={{ onlyTime: true }}`).
+  const resolvedIncludeTime = includeTime ?? options?.includeTime ?? false;
+  const resolvedOnlyTime = onlyTime ?? options?.onlyTime ?? false;
+  const resolvedLocaleOnly = localeOnly ?? options?.localeOnly ?? false;
 
   if (!date) {
     // eslint-disable-next-line no-console
@@ -61,16 +69,16 @@ export const DateS = ({
     return null;
   }
 
-  if (localeOnly && includeTime) {
+  if (resolvedLocaleOnly && resolvedIncludeTime) {
     // eslint-disable-next-line no-console
     console.warn("includeTime is not supported with localeOnly formatting");
   }
 
   const formattedDate = formatDate(date, {
     ...options,
-    includeTime,
-    onlyTime,
-    localeOnly,
+    includeTime: resolvedIncludeTime,
+    onlyTime: resolvedOnlyTime,
+    localeOnly: resolvedLocaleOnly,
   });
 
   return <span>{formattedDate}</span>;

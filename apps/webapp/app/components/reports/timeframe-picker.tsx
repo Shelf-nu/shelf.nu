@@ -244,7 +244,7 @@ export function TimeframePicker({
                   }}
                   numberOfMonths={2}
                   showOutsideDays
-                  weekStartsOn={0}
+                  weekStartsOn={prefs.weekStartsOn}
                   style={dayPickerStyles}
                 />
               </div>

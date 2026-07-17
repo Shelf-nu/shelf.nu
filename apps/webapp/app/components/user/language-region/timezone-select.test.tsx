@@ -22,6 +22,7 @@ describe("TimezoneSelect", () => {
       <TimezoneSelect
         name="timeZone"
         value="Europe/London"
+        // why: these tests verify render + hidden-input submission only; onChange is stubbed, not exercised
         onChange={vi.fn()}
       />
     );
@@ -33,6 +34,7 @@ describe("TimezoneSelect", () => {
       <TimezoneSelect
         name="timeZone"
         value="America/New_York"
+        // why: these tests verify render + hidden-input submission only; onChange is stubbed, not exercised
         onChange={vi.fn()}
       />
     );

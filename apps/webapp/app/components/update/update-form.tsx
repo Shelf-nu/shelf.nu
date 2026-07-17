@@ -5,6 +5,7 @@ import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { useDisabled } from "~/hooks/use-disabled";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 
 /** Stable module-scoped default to avoid new array identity on each render */
 const EMPTY_TARGET_ROLES: OrganizationRoles[] = [];
@@ -30,10 +31,13 @@ export function UpdateForm({
   status = UpdateStatus.DRAFT,
   targetRoles = EMPTY_TARGET_ROLES,
 }: UpdateFormProps) {
-  // Default publish date to now if not provided
-  const defaultPublishDate = publishDate
-    ? new Date(publishDate).toISOString().slice(0, 16)
-    : new Date().toISOString().slice(0, 16);
+  // Default publish date to now if not provided.
+  // DateTimePicker treats defaultValue as a naive LOCAL wire string, so build
+  // it from local clock fields via dateForDateTimeInputValue (not toISOString,
+  // which would shift the displayed time by the UTC offset outside UTC).
+  const defaultPublishDate = dateForDateTimeInputValue(
+    publishDate ? new Date(publishDate) : new Date()
+  ).slice(0, 16);
 
   const isEdit = !!id;
   const disabled = useDisabled();

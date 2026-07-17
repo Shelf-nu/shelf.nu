@@ -12,7 +12,7 @@
  * @see {@link file://../../assets/assets-index/advanced-filters/field-selector.tsx}
  */
 import type { ChangeEvent, KeyboardEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -21,7 +21,6 @@ import {
 } from "@radix-ui/react-popover";
 import { ChevronDownIcon, Search } from "lucide-react";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 
 /**
@@ -99,6 +98,14 @@ export function TimezoneSelect({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // Stable id roots for combobox wiring. The listbox id backs `aria-controls`
+  // and each option's id (derived from its filtered-list index) backs
+  // `aria-activedescendant`, so assistive tech can announce the highlighted
+  // option while DOM focus stays on the search input.
+  const baseId = useId();
+  const listboxId = `${baseId}-listbox`;
+  const getOptionId = (index: number) => `${baseId}-option-${index}`;
+
   // Focus the search box when the popover opens (re-focuses on each open).
   // Radix portals mount on the next tick, so the hook's rAF defer is required.
   const searchInputRef = useAutoFocus<HTMLInputElement>({ when: isOpen });
@@ -165,13 +172,21 @@ export function TimezoneSelect({
           align="start"
           className="z-[999999] max-h-[400px] overflow-scroll rounded-md border border-gray-200 bg-white"
           style={{ width: triggerRef?.current?.clientWidth }}
-          role="listbox"
-          aria-label="Time zone options"
         >
           <div className="flex items-center border-b">
             <Search className="ml-4 size-4 text-gray-500" />
             <input
               ref={searchInputRef}
+              // Combobox semantics: DOM focus stays here while the arrow keys
+              // move the highlight, announced via aria-activedescendant.
+              role="combobox"
+              aria-label="Search time zone"
+              aria-expanded={isOpen}
+              aria-controls={listboxId}
+              aria-activedescendant={
+                filtered[selectedIndex] ? getOptionId(selectedIndex) : undefined
+              }
+              aria-autocomplete="list"
               placeholder="Search time zone..."
               className="border-0 px-4 py-2 pl-2 text-sm focus:border-0 focus:ring-0"
               value={searchQuery}
@@ -179,28 +194,32 @@ export function TimezoneSelect({
               onKeyDown={handleKeyDown}
             />
           </div>
-          {filtered.map((tz, index) => (
-            <div
-              key={tz}
-              className={tw(
-                "px-4 py-2 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                selectedIndex === index && "bg-gray-50",
-                tz === value && "font-medium text-gray-900"
-              )}
-              role="option"
-              aria-selected={tz === value}
-              tabIndex={0}
-              onClick={() => handleSelect(tz)}
-              onKeyDown={handleActivationKeyPress(() => handleSelect(tz))}
-            >
-              {tz}
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="px-4 py-2 text-sm text-gray-500">
-              No time zones found
-            </div>
-          )}
+          <div id={listboxId} role="listbox" aria-label="Time zone options">
+            {filtered.map((tz, index) => (
+              <div
+                key={tz}
+                id={getOptionId(index)}
+                className={tw(
+                  "px-4 py-2 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && "bg-gray-50",
+                  tz === value && "font-medium text-gray-900"
+                )}
+                role="option"
+                aria-selected={tz === value}
+                // Options are not tab stops; keyboard nav lives on the input
+                // (arrow keys + Enter). Kept clickable/tappable for pointers.
+                tabIndex={-1}
+                onClick={() => handleSelect(tz)}
+              >
+                {tz}
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-4 py-2 text-sm text-gray-500">
+                No time zones found
+              </div>
+            )}
+          </div>
         </PopoverContent>
       </PopoverPortal>
     </Popover>

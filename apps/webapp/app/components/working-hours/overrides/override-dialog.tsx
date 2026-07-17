@@ -11,6 +11,7 @@ import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Spinner } from "~/components/shared/spinner";
 import When from "~/components/when/when";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import { CreateOverrideFormSchema } from "~/modules/working-hours/zod-utils";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
@@ -82,6 +83,7 @@ export const WorkingHoursOverrideForm = ({
     key: "workingHoursOverride",
   });
   const disabled = useDisabled(fetcher);
+  const { prefs } = useDateFormatter();
   const zo = useZorm("WorkingHoursOverrideForm", CreateOverrideFormSchema);
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
@@ -173,6 +175,7 @@ export const WorkingHoursOverrideForm = ({
                   aria-label="Override opening time"
                   required={isOpen}
                   defaultValue="09:00"
+                  timeFormat={prefs.timeFormat}
                 />
                 <div className="text-gray-500">-</div>
                 <TimeSelect
@@ -182,6 +185,7 @@ export const WorkingHoursOverrideForm = ({
                   aria-label="Override closing time"
                   required={isOpen}
                   defaultValue="17:00"
+                  timeFormat={prefs.timeFormat}
                 />
               </div>
               {(zo.errors.openTime()?.message ||

@@ -46,6 +46,8 @@ export default function AvailabilityCalendar({
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
   const { prefs } = useDateFormatter();
+  // Drive FullCalendar's clock (12h vs 24h) from the workspace time-format pref.
+  const hour12 = prefs.timeFormat === "H12";
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(
     new Date(),
     prefs
@@ -135,12 +137,14 @@ export default function AvailabilityCalendar({
               ref={calendarRef}
               height="auto"
               timeZone={timeZone}
+              firstDay={prefs.weekStartsOn}
               nowIndicator
               slotEventOverlap
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
                 meridiem: "short",
+                hour12,
               }}
               eventMouseEnter={handleEventMouseEnter("resourceTimelineMonth")}
               eventMouseLeave={handleEventMouseLeave("resourceTimelineMonth")}
@@ -190,13 +194,18 @@ export default function AvailabilityCalendar({
                 resourceTimelineWeek: {
                   slotLabelFormat: [
                     { weekday: "long", month: "short", day: "numeric" },
-                    { hour: "numeric", meridiem: "short" },
+                    { hour: "numeric", meridiem: "short", hour12 },
                   ],
                 },
                 resourceTimelineDay: {
                   slotLabelFormat: [
                     { weekday: "short", month: "short", day: "numeric" },
-                    { hour: "numeric", minute: "2-digit", meridiem: "short" },
+                    {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      meridiem: "short",
+                      hour12,
+                    },
                   ],
                 },
               }}
