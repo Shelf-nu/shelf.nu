@@ -17,6 +17,7 @@ describe("DateFormatSelect", () => {
       <DateFormatSelect
         name="dateFormat"
         value="YYYY_MM_DD"
+        // why: these tests verify render + hidden-input submission only; onChange is stubbed, not exercised
         onChange={vi.fn()}
       />
     );
@@ -28,6 +29,7 @@ describe("DateFormatSelect", () => {
       <DateFormatSelect
         name="dateFormat"
         value="DD_MM_YYYY"
+        // why: these tests verify render + hidden-input submission only; onChange is stubbed, not exercised
         onChange={vi.fn()}
       />
     );
