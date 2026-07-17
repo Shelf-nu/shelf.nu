@@ -291,6 +291,13 @@ describe("custom-field value encoding", () => {
     expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: "no" })).toBe("No");
   });
 
+  it("BOOLEAN treats a blank raw with no valueBoolean as unset (not false)", () => {
+    // why: emitting "No" for an unset boolean would flip it on re-import;
+    // buildCustomFieldValue rejects blank boolean input rather than coercing it.
+    expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: "" })).toBe("");
+    expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: "   " })).toBe("");
+  });
+
   it("AMOUNT -> plain number (NOT currency formatted)", () => {
     expect(
       cfCell(CustomFieldType.AMOUNT, "Warranty cost", { raw: 299.99 })

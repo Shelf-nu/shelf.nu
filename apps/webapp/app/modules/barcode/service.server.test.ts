@@ -1072,6 +1072,14 @@ describe("importDataHasBarcodes", () => {
       ])
     ).toBe(false);
   });
+
+  it("ignores whitespace-only barcode cells (matches the parser)", () => {
+    // why: the parser trims and skips " ", so the guard must too — otherwise an
+    // accidental space would 403 a workspace that has barcodes disabled.
+    expect(
+      importDataHasBarcodes([{ key: "a", title: "A", barcode_Code128: "   " }])
+    ).toBe(false);
+  });
 });
 
 describe("parseBarcodesFromImportData", () => {

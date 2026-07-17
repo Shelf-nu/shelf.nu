@@ -177,8 +177,13 @@ function encodeCustomFieldForImport(
 
   switch (cfType) {
     case CustomFieldType.BOOLEAN: {
-      // Nothing stored at all → emit blank so re-import leaves it unset.
-      if (value.valueBoolean === undefined && value.raw == null) return "";
+      // Nothing meaningful stored → emit blank so re-import leaves it unset
+      // (mirrors buildCustomFieldValue, which rejects null/blank boolean input
+      // rather than coercing it to false).
+      const rawBlank =
+        value.raw == null ||
+        (typeof value.raw === "string" && value.raw.trim() === "");
+      if (value.valueBoolean === undefined && rawBlank) return "";
       // Prefer the parsed boolean; fall back to interpreting `raw` for older or
       // partial records that only kept the raw value (e.g. `true` / "yes").
       const bool =

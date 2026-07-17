@@ -740,7 +740,12 @@ export function importDataHasBarcodes(
   data: CreateAssetFromContentImportPayload[]
 ): boolean {
   return data.some((asset) =>
-    BARCODE_IMPORT_COLUMNS.some(({ column }) => asset[column])
+    BARCODE_IMPORT_COLUMNS.some(({ column }) => {
+      // Match the parser: a whitespace-only cell is not barcode data, so it
+      // mustn't trip the "barcodes disabled" 403 for those workspaces.
+      const value = asset[column];
+      return typeof value === "string" && value.trim() !== "";
+    })
   );
 }
 
