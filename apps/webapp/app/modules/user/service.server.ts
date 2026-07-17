@@ -1181,6 +1181,7 @@ export async function softDeleteUser(id: User["id"]) {
             id,
             newOwnerId,
             organizationId: userOrg.organizationId,
+            reason: "removal",
           });
         }
         /**
@@ -1498,24 +1499,41 @@ export async function changeUserRole({
   }
 }
 
+/**
+ * Why a user's entities are being moved. The two callers have opposite
+ * requirements, so this is required with no default — every call site must
+ * declare intent and the compiler enforces it.
+ *
+ * - `"removal"` — the user is losing workspace access entirely. `Booking.creator`
+ *   and `Booking.custodianUser` are `onDelete: Cascade` FKs, so they must be
+ *   cleared off the departing user. `creatorId` is non-nullable → transferred
+ *   rather than nulled.
+ * - `"demotion"` — the user KEEPS membership; only their role rank drops. The
+ *   `User` row is untouched, so no cascade applies. Only OWNERSHIP columns move.
+ */
+export type EntityTransferReason = "removal" | "demotion";
+
 /** Move entries inside an organization from 1 owner to another.
- * Affects the following models:
- *   - [x] Asset
- *   - [x] Category
- *   - [x] Tag
- *   - [x] Location
- *   - [x] CustomField
- *   - [x] Invite (skippable via `skipInvites`)
- *   - [x] Booking
- *   - [x] Image
- *   - [x] Kit
- *   - [x] AssetReminder
+ *
+ * OWNERSHIP — moved for EVERY `reason`: `Asset`/`Category`/`Tag`/`Location`/
+ * `CustomField`/`Image.userId`, `Kit`/`AssetReminder.createdById`.
+ *
+ * AUTHORSHIP + ASSIGNMENT — moved ONLY when `reason === "removal"`:
+ * `Invite.inviterId`, `Booking.creatorId`, `Booking.custodianUserId → null`.
  *
  * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
  * transferred — their userId represents authorship, not ownership.
  *
- * Invites can be skipped via `skipInvites` (used during demotion) because
- * inviterId represents "who sent this" (authorship), not ownership.
+ * Known, accepted consequence of `reason: "demotion"`: a demoted admin keeps
+ * `creatorId` on bookings they created for OTHER custodians, and
+ * `validateBookingOwnership` grants SELF_SERVICE/BASE access on
+ * `creatorId === userId || custodianUserId === userId`, so they retain write
+ * access to those bookings. They cannot VIEW them (the detail route gates on
+ * `custodianUserId` only). This is the pre-2026-02-17 behaviour and is a
+ * property of `validateBookingOwnership`, not of this function. The
+ * alternative (transferring `creatorId`) is strictly worse: it hides the
+ * demoted user's own drafts from them and permanently leaks those drafts to
+ * the recipient.
  *
  * Required to be used inside a transaction
  */
@@ -1524,13 +1542,13 @@ export async function transferEntitiesToNewOwner({
   id,
   newOwnerId,
   organizationId,
-  skipInvites = false,
+  reason,
 }: {
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
-  skipInvites?: boolean;
+  reason: EntityTransferReason;
 }) {
   /** Update assets */
   await tx.asset.updateMany({
@@ -1587,8 +1605,14 @@ export async function transferEntitiesToNewOwner({
     },
   });
 
-  /** Update invites (skipped during demotion — inviterId is authorship) */
-  if (!skipInvites) {
+  /**
+   * AUTHORSHIP + ASSIGNMENT rewrites — removal only. On demotion the user
+   * keeps membership, so inviterId (authorship) stays theirs, and the
+   * Booking.creator/custodianUser cascade-defusing rewrites below don't
+   * apply (see the accepted-consequence note in the JSDoc above).
+   */
+  if (reason === "removal") {
+    /** Update invites */
     await tx.invite.updateMany({
       where: {
         inviterId: id,
@@ -1598,29 +1622,29 @@ export async function transferEntitiesToNewOwner({
         inviterId: newOwnerId,
       },
     });
+
+    /** Update bookings */
+    await tx.booking.updateMany({
+      where: {
+        creatorId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        creatorId: newOwnerId,
+      },
+    });
+
+    /** Update bookings where the person deleted is the custodian */
+    await tx.booking.updateMany({
+      where: {
+        custodianUserId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        custodianUserId: null,
+      },
+    });
   }
-
-  /** Update bookings */
-  await tx.booking.updateMany({
-    where: {
-      creatorId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      creatorId: newOwnerId,
-    },
-  });
-
-  /** Update bookings where the person deleted is the custodian */
-  await tx.booking.updateMany({
-    where: {
-      custodianUserId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      custodianUserId: null,
-    },
-  });
 
   /** Update images */
   await tx.image.updateMany({

@@ -36,7 +36,6 @@ interface EntityCounts {
   tags: number;
   locations: number;
   customFields: number;
-  bookings: number;
   kits: number;
   assetReminders: number;
   images: number;
@@ -328,9 +327,6 @@ export function ChangeRoleDialog({
                           )}
                           {entityCounts.customFields > 0 && (
                             <li>{entityCounts.customFields} custom fields</li>
-                          )}
-                          {entityCounts.bookings > 0 && (
-                            <li>{entityCounts.bookings} bookings</li>
                           )}
                           {entityCounts.kits > 0 && (
                             <li>{entityCounts.kits} kits</li>

@@ -35,7 +35,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       tags,
       locations,
       customFields,
-      bookings,
       kits,
       assetReminders,
       images,
@@ -55,9 +54,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       db.customField.count({
         where: { userId: targetUserId, organizationId, deletedAt: null },
       }),
-      db.booking.count({
-        where: { creatorId: targetUserId, organizationId },
-      }),
       db.kit.count({
         where: { createdById: targetUserId, organizationId },
       }),
@@ -75,7 +71,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       tags +
       locations +
       customFields +
-      bookings +
       kits +
       assetReminders +
       images;
@@ -87,7 +82,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         tags,
         locations,
         customFields,
-        bookings,
         kits,
         assetReminders,
         images,
