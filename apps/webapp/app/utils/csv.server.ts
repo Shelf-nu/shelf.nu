@@ -38,6 +38,7 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
+  bookingDraftVisibilityClause,
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
@@ -669,6 +670,50 @@ const formatCustomFieldForCsv = (
 };
 
 /**
+ * Builds the custody restriction for a caller who may only export their own
+ * bookings, matching custody recorded on EITHER link.
+ *
+ * The team-member half exists because legacy rows carry custody on
+ * `custodianTeamMemberId` with a null `custodianUserId` — for example a booking
+ * assigned while no user was attached to the team member, the two being linked
+ * only later when the invite was accepted. The bookings index matches those
+ * rows (see `getBookingsFilterData`, which resolves the same team-member ids
+ * into `getBookings`' `custodianScope`), so restricting the export to the user
+ * link alone would silently drop rows the user can see on screen and selected
+ * for export.
+ *
+ * This never widens access: `teamMemberIds` are resolved server-side from the
+ * authenticated `userId`, never from request input, so both halves describe the
+ * same person. A caller with no team-member row in this org simply falls back
+ * to the user link, which is fail-closed.
+ *
+ * @param params.userId - The authenticated caller
+ * @param params.organizationId - The active workspace
+ * @returns An OR-clause to push into `where.AND` as a single member
+ */
+async function buildExportCustodyScopeClause({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<Prisma.BookingWhereInput> {
+  const teamMember = await db.teamMember.findFirst({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  return {
+    OR: [
+      { custodianUserId: userId },
+      ...(teamMember
+        ? [{ custodianTeamMemberId: { in: [teamMember.id] } }]
+        : []),
+    ],
+  };
+}
+
+/**
  * Builds the bookings CSV string for the export route.
  *
  * Resolves which bookings to export — either the explicit `bookingsIds`, or,
@@ -677,7 +722,9 @@ const formatCustomFieldForCsv = (
  * delegates row construction to {@link buildCsvExportDataFromBookings}.
  *
  * @param request - The incoming request (carries filters, locale, timezone)
- * @param userId - The acting user, for filter scoping in the select-all path
+ * @param userId - The acting user; scopes custody and DRAFT visibility on both
+ *   paths. `bookingsIds` is unvalidated request input, so this is a security
+ *   boundary rather than a convenience filter.
  * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
  * @param canSeeAllBookings - Whether the user may export bookings they don't own
  * @param organizationId - The active workspace; scopes every booking read
@@ -738,7 +785,32 @@ export async function exportBookingsFromIndexToCsv({
       bookings = bookingsData.bookings;
     } else {
       bookings = await db.booking.findMany({
-        where: { id: { in: bookingsIds }, organizationId },
+        where: {
+          id: { in: bookingsIds },
+          organizationId,
+          /**
+           * `bookingsIds` comes straight from the `?bookingsIds=` query param
+           * and is unvalidated, so the org scope alone is not a boundary:
+           * without these clauses a self-service / base user (both hold
+           * `booking.export`) can export any booking in the organization by
+           * supplying its id.
+           *
+           * Mirrors the restriction the index applies via
+           * {@link getBookingsFilterData} + {@link getBookings}, so a user can
+           * export exactly the rows they can see — no more, and no fewer.
+           */
+          AND: [
+            bookingDraftVisibilityClause(userId),
+            ...(canSeeAllBookings
+              ? []
+              : [
+                  await buildExportCustodyScopeClause({
+                    userId,
+                    organizationId,
+                  }),
+                ]),
+          ],
+        },
         include: {
           ...BOOKING_COMMON_INCLUDE,
           bookingAssets: {

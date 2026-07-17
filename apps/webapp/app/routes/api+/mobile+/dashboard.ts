@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -30,10 +31,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    const { canUseAudits } = await getMobileUserContext(
+    // The same call yields the caller's `role`, which gates booking
+    // visibility below.
+    const { canUseAudits, role } = await getMobileUserContext(
       user.id,
       organizationId
     );
+
+    // Scope the booking sections to the caller's own bookings for
+    // self-service / base users, who may only see bookings they are the
+    // custodian of. `requireOrganizationAccess` above proves membership but
+    // performs NO role check, so without this restriction any member could
+    // read every booking in the workspace — with custodian names attached —
+    // straight off the dashboard.
+    //
+    // Mirrors the mobile bookings list (`bookings.ts`), which draws the same
+    // line for the same roles. Passed as `custodianScope` — a restriction
+    // `getBookings` ANDs into the query, so it can only ever narrow. Left
+    // `null` for owners/admins, who see all bookings.
+    //
+    // NOTE: this deliberately does not mirror the web dashboard, which denies
+    // self-service/base the page outright (`PermissionEntity.dashboard` is
+    // empty for both). The companion's Home tab is the app's landing screen
+    // for every role, not an admin analytics surface — denying it would leave
+    // those users on a permanent error state rather than a scoped dashboard.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
+    const custodianScope = isSelfServiceOrBase ? { userId: user.id } : null;
 
     // Run all queries in parallel for speed
     const [
@@ -108,6 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["RESERVED"],
         userId: user.id,
+        custodianScope,
         bookingFrom: new Date(),
         extraInclude: {
           custodianUser: {
@@ -128,6 +154,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["ONGOING"],
         userId: user.id,
+        custodianScope,
         extraInclude: {
           custodianUser: {
             select: {
@@ -147,6 +174,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["OVERDUE"],
         userId: user.id,
+        custodianScope,
         extraInclude: {
           custodianUser: {
             select: {

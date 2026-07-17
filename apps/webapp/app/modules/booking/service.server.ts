@@ -8575,13 +8575,20 @@ export async function getBookingsFilterData({
     "asc") as SortingDirection;
 
   /**
-   * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-   * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
-   * This is to ensure that the booking is still visible to the user that was assigned to it.
-   * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
-   * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
-   * Ideally in the future we should remove this as it adds another query to the db
-   * @TODO this can safely be remove 3-6 months after this commit
+   * For self service and base users, we look up their team member so the
+   * restriction can match custody recorded on EITHER link.
+   *
+   * This handles the case where a booking was assigned while no user was
+   * attached to the team member, and the two were linked only later — the
+   * booking must stay visible to the user it was assigned to. It shouldn't
+   * normally happen (accepting an invite now links them), but it is kept as a
+   * safety net for rows that pre-date that fix.
+   *
+   * This fallback is live: `custodianScope.teamMemberIds` is read by
+   * {@link getBookings}, which ORs it with the user link inside a single AND-ed
+   * clause. It previously returned a singular `custodianTeamMemberId` that
+   * `getBookings` never declared, so callers spreading this object had the key
+   * silently dropped and the fallback never actually fired.
    */
   let selfServiceData = null;
 
@@ -8608,8 +8615,10 @@ export async function getBookingsFilterData({
 
     selfServiceData = {
       // If the user is self service/base without override, we only show bookings that belong to that user
-      custodianUserId: userId,
-      custodianTeamMemberId: teamMember.id,
+      custodianScope: {
+        userId,
+        teamMemberIds: [teamMember.id],
+      },
     };
   }
 
@@ -8666,6 +8675,16 @@ export function bookingDraftVisibilityClause(
  * @param params.statuses - Explicit status filter; defaults to excluding
  *   ARCHIVED + CANCELLED (mirrors {@link getBookings}).
  * @param params.custodianUserId - Restrict to a custodian (self-service views).
+ *
+ *   HAZARD — this is a *restriction*, not a user-supplied filter. It is safe
+ *   today only because every call site passes the session user and no
+ *   request-controlled value reaches it, so it stays AND-ed as a plain scalar.
+ *   {@link getBookings} deliberately separates the two concepts (`custodianScope`
+ *   = restriction, `custodianTeamMemberIds` = filter) because conflating them
+ *   let a self-service caller widen their own restriction by supplying a
+ *   custodian filter. If you add a custodian *filter* here, do not extend this
+ *   param — add a separate one and AND it, exactly as `getBookings` does.
+ *
  * @returns `{ bookings }` — id, name, status, from, to, ordered by `from`
  *   with a stable `id` tiebreaker.
  * @throws {ShelfError} If the query fails.
@@ -8731,8 +8750,43 @@ export async function getBookings(params: {
   search?: string | null;
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
-  custodianUserId?: Booking["custodianUserId"] | null;
-  /** Accepts an array of team member IDs instead of a single ID so it can be used for filtering of bookings on index */
+  /**
+   * A RESTRICTION scoping results to the bookings of ONE person, matched via
+   * either custody link. Set ONLY by callers that have established the viewer
+   * is allowed to see no more than that person's bookings.
+   *
+   * Both halves identify the SAME person: a booking is theirs if custody sits on
+   * their user link OR on their team-member link (legacy rows where
+   * `custodianUserId` was never backfilled). Those halves are OR-ed with each
+   * other, then the whole thing is AND-ed into the query as ONE clause — so this
+   * ALWAYS narrows and can never be widened away by a user-supplied filter.
+   * That AND-ing is the security contract; do not move it into a top-level `OR`.
+   *
+   * Usually the caller themselves (self-service/base users restricted to their
+   * own bookings). NOT always: the team-member profile route scopes to the
+   * profile BEING VIEWED, having already gated access with a
+   * `teamMemberProfile.read` permission check. Hence the neutral name — pass
+   * whichever person the caller has proven the viewer may see.
+   *
+   * Distinct from `custodianTeamMemberIds`, which is a user-facing FILTER built
+   * from unvalidated search params. Conflating the two was a privilege
+   * escalation: `?teamMember=<victim-id>` OR-ed the restriction away.
+   */
+  custodianScope?: {
+    /** The person whose bookings the results are scoped to. */
+    userId: string;
+    /** That person's team-member ids in this org. Optional; omit to match on the user link only. */
+    teamMemberIds?: string[];
+  } | null;
+  /**
+   * User-facing FILTER — "show me this person's bookings" — built from
+   * unvalidated `?teamMember=` search params, so the values are
+   * attacker-controlled. It is NEVER a restriction: it is always AND-ed, so it
+   * can only narrow what the caller is already allowed to see. To restrict a
+   * user to their own bookings use `custodianScope` instead.
+   *
+   * Accepts an array so the bookings index can filter by several team members.
+   */
   custodianTeamMemberIds?: string[] | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
@@ -8759,7 +8813,7 @@ export async function getBookings(params: {
     perPage = 8,
     search,
     statuses,
-    custodianUserId,
+    custodianScope,
     custodianTeamMemberIds,
     assetIds,
     bookingTo,
@@ -8782,10 +8836,16 @@ export async function getBookings(params: {
     /** Default value of where. Takes the assetss belonging to current org */
     const where: Prisma.BookingWhereInput = { organizationId };
 
-    /** The idea is that only the creator of a draft booking can see it
+    /**
+     * Clauses that must NARROW the result set. Everything AND-ed here composes:
+     * no clause can widen another away.
+     *
+     * The idea is that only the creator of a draft booking can see it
      * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
      */
-    where.AND = [bookingDraftVisibilityClause(userId)];
+    const andClauses: Prisma.BookingWhereInput[] = [
+      bookingDraftVisibilityClause(userId),
+    ];
 
     /** If the search string exists, add it to the where object */
     if (search?.trim()?.length) {
@@ -8846,34 +8906,36 @@ export async function getBookings(params: {
       }));
     }
 
-    /** Handle combination of custodianTeamMemberIds and custodianUserId */
-    if (
-      custodianTeamMemberIds &&
-      custodianTeamMemberIds?.length &&
-      custodianUserId
-    ) {
-      where.OR = [
-        {
-          custodianTeamMemberId: {
-            in: custodianTeamMemberIds,
-          },
-        },
-        {
-          custodianUserId,
-        },
+    /**
+     * The restriction: AND-ed as ONE clause whose internal OR matches either
+     * custody link. Nesting the OR inside a single AND member is what keeps it
+     * un-widenable — a top-level `where.OR` is a single slot that the search
+     * block also writes, so whichever ran last silently dropped the other.
+     */
+    if (custodianScope) {
+      const selfBranches: Prisma.BookingWhereInput[] = [
+        { custodianUserId: custodianScope.userId },
       ];
-    } else {
-      /** Handle custodianTeamMemberIds if present */
-      if (custodianTeamMemberIds?.length) {
-        where.custodianTeamMemberId = {
-          in: custodianTeamMemberIds,
-        };
+
+      if (custodianScope.teamMemberIds?.length) {
+        selfBranches.push({
+          custodianTeamMemberId: { in: custodianScope.teamMemberIds },
+        });
       }
-      /** Handle custodianUserId if present */
-      if (custodianUserId) {
-        where.custodianUserId = custodianUserId;
-      }
+
+      andClauses.push(
+        selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches }
+      );
     }
+
+    /** The filter: independent, always AND-ed, never a restriction. */
+    if (custodianTeamMemberIds?.length) {
+      andClauses.push({
+        custodianTeamMemberId: { in: custodianTeamMemberIds },
+      });
+    }
+
+    where.AND = andClauses;
 
     if (statuses?.length) {
       where.status = {
@@ -10078,10 +10140,13 @@ export async function getBookingsForICalFeed(params: {
   // Members without the "see all bookings" override only get their own bookings,
   // matched by custodian user OR their linked team member (the documented legacy
   // case in getBookingsFilterData where a booking is assigned to the team member
-  // but custodianUserId is null). getBookings ORs the two, so this can only ever
-  // narrow visibility to this member's own bookings — never widen it.
-  let custodianUserId: string | null = null;
-  let custodianTeamMemberIds: string[] | null = null;
+  // but custodianUserId is null). Both halves describe this one member, so they
+  // travel together as a single restriction that getBookings ANDs into the
+  // query — it can only ever narrow visibility to this member, never widen it.
+  let custodianScope: {
+    userId: string;
+    teamMemberIds?: string[];
+  } | null = null;
   if (!canSeeAllBookings) {
     const teamMember = await db.teamMember.findFirst({
       where: { userId, organizationId },
@@ -10097,8 +10162,7 @@ export async function getBookingsForICalFeed(params: {
         shouldBeCaptured: false,
       });
     }
-    custodianUserId = userId;
-    custodianTeamMemberIds = [teamMember.id];
+    custodianScope = { userId, teamMemberIds: [teamMember.id] };
   }
 
   try {
@@ -10116,8 +10180,7 @@ export async function getBookingsForICalFeed(params: {
       takeAll: true,
       // The feed renders rows only; skip the wasted COUNT companion query.
       skipCount: true,
-      custodianUserId,
-      custodianTeamMemberIds,
+      custodianScope,
       statuses: [
         BookingStatus.RESERVED,
         BookingStatus.ONGOING,
@@ -11951,7 +12014,7 @@ export async function loadBookingsData({
     statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
     // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
     ...(isSelfServiceOrBase && {
-      custodianUserId: userId,
+      custodianScope: { userId },
     }),
   });
 

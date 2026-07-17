@@ -75,7 +75,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
           ...(!canSeeAllBookings && {
             // If the user is self service, we only show bookings that belong to that user)
-            custodianUserId: userId,
+            custodianScope: { userId },
           }),
           custodianTeamMemberIds: teamMemberIds,
           kitId,

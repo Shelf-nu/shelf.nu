@@ -49,12 +49,30 @@ describe("getBookingsForICalFeed scoping", () => {
 
     const where = lastFindManyWhere();
     expect(where.organizationId).toBe(ORG_ID);
-    // Security property: a restricted member only ever sees their own bookings,
-    // matched by custodian user OR their linked team member — never others'.
-    expect(where.OR).toEqual([
-      { custodianTeamMemberId: { in: ["tm-1"] } },
-      { custodianUserId: USER_ID },
-    ]);
+    // Security property (unchanged): a restricted member only ever sees their
+    // own bookings, matched by custodian user OR their linked team member —
+    // never others'.
+    //
+    // This OR used to sit at the top level of `where`. It now lives INSIDE a
+    // single `AND` member: the two halves are OR-ed with each other, and the
+    // whole clause is AND-ed into the query. That nesting is what stops a
+    // user-supplied `?teamMember=` filter from OR-ing the restriction away, and
+    // keeps the restriction out of the single top-level `OR` slot that the
+    // search block also writes. Only the assertion's location moved — a
+    // restricted member matching on the team-member link alone (legacy rows with
+    // a null `custodianUserId`) is still covered, and this assertion still fails
+    // if the two halves are ever AND-ed instead of OR-ed.
+    expect(where.AND).toEqual(
+      expect.arrayContaining([
+        {
+          OR: [
+            { custodianUserId: USER_ID },
+            { custodianTeamMemberId: { in: ["tm-1"] } },
+          ],
+        },
+      ])
+    );
+    expect(where.OR).toBeUndefined();
     expect(where.custodianUserId).toBeUndefined();
   });
 

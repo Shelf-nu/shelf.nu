@@ -72,7 +72,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         search,
         userId: authSession?.userId,
-        custodianUserId: selectedUserId, // Here we just hardcode the userId because user profiles cannot be seen by other selfService or Base users
+        // Scopes to the profile being viewed, NOT the viewer — this route
+        // renders one user's bookings and is gated above by a
+        // `teamMemberProfile.read` check (self-service/base users cannot reach
+        // other profiles). Do not substitute the caller's id here.
+        custodianScope: { userId: selectedUserId },
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],

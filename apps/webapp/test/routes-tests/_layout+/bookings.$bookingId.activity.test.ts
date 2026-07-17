@@ -14,10 +14,11 @@
  * server-only imports.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createActionArgs } from "@mocks/remix";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
-import { action } from "~/routes/_layout+/bookings.$bookingId.activity";
+import { action, loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { db } from "~/database/db.server";
+import * as bookingService from "~/modules/booking/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import type * as HttpServerModule from "~/utils/http.server";
 import * as httpServer from "~/utils/http.server";
@@ -49,7 +50,13 @@ vi.mock("~/utils/roles.server", () => ({
 vi.mock("~/modules/booking-note/service.server", () => ({
   createBookingNote: vi.fn().mockResolvedValue({}),
   deleteBookingNote: vi.fn().mockResolvedValue({ count: 1 }),
-  getBookingNotes: vi.fn(),
+  getBookingNotes: vi.fn().mockResolvedValue([]),
+}));
+
+// why: the loader's gate reads the booking `getBooking` returns; stub the
+// service so the custody links under test are the only thing driving the gate.
+vi.mock("~/modules/booking/service.server", () => ({
+  getBooking: vi.fn(),
 }));
 
 // why: avoid notification side-effects inside the test harness.
@@ -131,10 +138,17 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // Cross-org bookingId must not reach the service
     expect(bookingNoteService.createBookingNote).not.toHaveBeenCalled();
 
-    // And the booking lookup must have been scoped to the attacker's org
+    // And the booking lookup must have been scoped to the attacker's org.
+    // Both custody links are selected so the route can also gate self-service /
+    // base callers to their own bookings — custody recorded on the team-member
+    // link alone still belongs to the user behind it.
     expect(db.booking.findFirst).toHaveBeenCalledWith({
       where: { id: "victim-booking", organizationId: "org-attacker" },
-      select: { id: true },
+      select: {
+        id: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
+      },
     });
   });
 
@@ -156,8 +170,11 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
 
   it("creates a note and forwards organizationId to the service on the happy path", async () => {
     // Booking IS in the requester's org
+    // The requester is this booking's custodian — the happy path for a caller
+    // who may only touch their own bookings.
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -181,8 +198,11 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   });
 
   it("requests `bookingNote.create` permission on POST", async () => {
+    // The requester is this booking's custodian — the happy path for a caller
+    // who may only touch their own bookings.
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -209,8 +229,11 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // Guards against a regression where the DELETE branch inherited the
     // POST permission check, letting roles with only `bookingNote.create`
     // delete notes they shouldn't be able to touch.
+    // The requester is this booking's custodian — the happy path for a caller
+    // who may only touch their own bookings.
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -234,8 +257,11 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   });
 
   it("deletes a note and forwards organizationId to the service on the happy path", async () => {
+    // The requester is this booking's custodian — the happy path for a caller
+    // who may only touch their own bookings.
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
+      custodianUserId: "user-attacker",
     } as any);
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "own-booking",
@@ -256,5 +282,238 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
       userId: "user-attacker",
       organizationId: "org-attacker",
     });
+  });
+
+  /**
+   * Custody scoping is orthogonal to the organization scoping above: a booking
+   * can be in the requester's own org and still not be theirs. `bookingNote`
+   * `create`/`delete` reaching this far only proves the role holds the
+   * permission, and BASE / SELF_SERVICE both do.
+   */
+  it("rejects a POST on a same-org booking the requester is not the custodian of", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "someone-elses-booking",
+      custodianUserId: "user-victim",
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "someone-elses-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ content: "hi" });
+
+    const response = await action(
+      createActionArgs({
+        request: makeRequest("POST"),
+        params: { bookingId: "someone-elses-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect((response as any).init?.status).toBe(403);
+    expect(bookingNoteService.createBookingNote).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A booking assigned to the requester's team member before a user was
+   * attached to it keeps `custodianUserId = NULL` forever — the index lists it
+   * (its restriction matches either link) so the write gate must recognise it
+   * too, or the note form on a row the user can see rejects them.
+   */
+  it("allows a POST on a legacy booking held via the requester's team-member link alone", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "legacy-booking",
+      custodianUserId: null,
+      custodianTeamMember: { userId: "user-attacker" },
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "legacy-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ content: "hi" });
+
+    await action(
+      createActionArgs({
+        request: makeRequest("POST"),
+        params: { bookingId: "legacy-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect(bookingNoteService.createBookingNote).toHaveBeenCalled();
+  });
+
+  it("refuses a POST on a booking whose team-member link belongs to another user", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "someone-elses-booking",
+      custodianUserId: null,
+      custodianTeamMember: { userId: "user-victim" },
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "someone-elses-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ content: "hi" });
+
+    const response = await action(
+      createActionArgs({
+        request: makeRequest("POST"),
+        params: { bookingId: "someone-elses-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect((response as any).init?.status).toBe(403);
+    expect(bookingNoteService.createBookingNote).not.toHaveBeenCalled();
+  });
+
+  it("allows a POST on another user's booking when the requester can see all bookings", async () => {
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org-attacker",
+      isSelfServiceOrBase: false,
+      organizations: [],
+      currentOrganization: {} as any,
+      role: {} as any,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: false,
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "someone-elses-booking",
+      custodianUserId: "user-victim",
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "someone-elses-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ content: "hi" });
+
+    await action(
+      createActionArgs({
+        request: makeRequest("POST"),
+        params: { bookingId: "someone-elses-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect(bookingNoteService.createBookingNote).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The loader is the read half of the same gate the action enforces on writes:
+ * `bookingNote.read` is granted to BASE and SELF_SERVICE and `getBooking` is
+ * org-scoped only, so without this gate any booking's activity feed — every
+ * note on it — is readable by id within the workspace.
+ */
+describe("bookings.$bookingId.activity loader — custody scoping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org-attacker",
+      canSeeAllBookings: false,
+    } as any);
+
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "victim-booking",
+    });
+  });
+
+  function makeLoaderRequest() {
+    return new Request("http://localhost/bookings/victim-booking/activity");
+  }
+
+  it("refuses to read another user's booking activity", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "victim-booking",
+      name: "Victim booking",
+      custodianUserId: "user-victim",
+      custodianTeamMember: { userId: "user-victim" },
+    } as any);
+
+    // The loader `throw`s `data(error(...), { status })` on failure rather than
+    // returning it, so the rejected value carries the status. The gate is what
+    // keeps the notes from reaching the caller: the loader fetches them
+    // concurrently with the booking, so they are read from the DB either way
+    // and simply discarded on this path — no note content is ever returned.
+    await expect(
+      loader(
+        createLoaderArgs({
+          request: makeLoaderRequest(),
+          params: { bookingId: "victim-booking" },
+          context: mockContext,
+        })
+      )
+    ).rejects.toMatchObject({ init: { status: 403 } });
+  });
+
+  it("reads the caller's own booking activity", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "own-booking",
+      name: "My booking",
+      custodianUserId: "user-attacker",
+      custodianTeamMember: null,
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "own-booking",
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        request: makeLoaderRequest(),
+        params: { bookingId: "own-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect((response as any).booking?.id).toBe("own-booking");
+  });
+
+  /**
+   * The legacy class: custody recorded on the team-member link only. The index
+   * lists these rows, so refusing them here is what made a visible booking 403
+   * on click.
+   */
+  it("reads a legacy booking held via the caller's team-member link alone", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "legacy-booking",
+      name: "Legacy booking",
+      custodianUserId: null,
+      custodianTeamMember: { userId: "user-attacker" },
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "legacy-booking",
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        request: makeLoaderRequest(),
+        params: { bookingId: "legacy-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect((response as any).booking?.id).toBe("legacy-booking");
+  });
+
+  it("reads another user's booking when the caller can see all bookings", async () => {
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org-attacker",
+      canSeeAllBookings: true,
+    } as any);
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "victim-booking",
+      name: "Victim booking",
+      custodianUserId: "user-victim",
+      custodianTeamMember: { userId: "user-victim" },
+    } as any);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: makeLoaderRequest(),
+        params: { bookingId: "victim-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect((response as any).booking?.id).toBe("victim-booking");
   });
 });
