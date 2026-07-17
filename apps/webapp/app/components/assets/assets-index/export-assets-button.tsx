@@ -8,7 +8,7 @@
  * @see {@link file://./../../../utils/import-ready-export.server.ts} import-ready builder
  * @see {@link file://./../../../routes/_layout+/assets.export.$fileName[.csv].tsx} export route
  */
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -79,6 +79,9 @@ function RadioRow({
   label: string;
   hint?: string;
 }) {
+  // Stable id so the hint can be linked to the input via aria-describedby,
+  // exposing it to assistive tech as descriptive text rather than the label.
+  const hintId = useId();
   return (
     <label className="mb-1 flex cursor-pointer items-start gap-2">
       <input
@@ -87,10 +90,15 @@ function RadioRow({
         checked={checked}
         onChange={onChange}
         className="mt-1"
+        aria-describedby={hint ? hintId : undefined}
       />
       <span className="flex flex-col">
         <span className="text-sm text-gray-900">{label}</span>
-        {hint ? <span className="text-xs text-gray-500">{hint}</span> : null}
+        {hint ? (
+          <span id={hintId} className="text-xs text-gray-500">
+            {hint}
+          </span>
+        ) : null}
       </span>
     </label>
   );
@@ -111,6 +119,7 @@ export function ExportAssetsButton() {
   const [open, setOpen] = useState(false);
   const [format, setFormat] = useState<ExportFormat>("standard");
   const [columnScope, setColumnScope] = useState<ExportColumnScope>("visible");
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const disabled = selectedAssets.length === 0;
   const allSelected = isSelectingAllItems(selectedAssets);
@@ -126,6 +135,7 @@ export function ExportAssetsButton() {
 
   const handleExport = async () => {
     setIsDownloading(true);
+    setExportError(null);
     try {
       const assetIds = selectedAssets.map((asset) => asset.id);
       const fileName = `assets${
@@ -140,6 +150,11 @@ export function ExportAssetsButton() {
       });
 
       const response = await fetch(`/assets/export/${fileName}?${qs}`);
+      // Don't save an error/auth payload under a .csv filename — surface it.
+      if (!response.ok) {
+        setExportError("Export failed. Please try again.");
+        return;
+      }
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -148,7 +163,11 @@ export function ExportAssetsButton() {
       document.body.appendChild(link);
       link.click();
       link.remove();
+      // Release the object URL so the blob can be garbage-collected.
+      window.URL.revokeObjectURL(downloadUrl);
       setOpen(false);
+    } catch {
+      setExportError("Export failed. Please try again.");
     } finally {
       setIsDownloading(false);
     }
@@ -176,7 +195,13 @@ export function ExportAssetsButton() {
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setExportError(null);
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -247,6 +272,12 @@ export function ExportAssetsButton() {
             <p className="mb-4 text-xs text-gray-500">
               Import-ready always includes the fields required to recreate
               assets.
+            </p>
+          ) : null}
+
+          {exportError ? (
+            <p className="mb-4 text-xs text-error-500" role="alert">
+              {exportError}
             </p>
           ) : null}
 

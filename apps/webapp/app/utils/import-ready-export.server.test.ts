@@ -279,6 +279,18 @@ describe("custom-field value encoding", () => {
     ).toBe("No");
   });
 
+  it("BOOLEAN falls back to raw when valueBoolean is absent (partial records)", () => {
+    // why: older/partial records may store only `raw` without `valueBoolean`;
+    // emitting "No" there would silently flip a true value on re-import.
+    expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: true })).toBe(
+      "Yes"
+    );
+    expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: "yes" })).toBe(
+      "Yes"
+    );
+    expect(cfCell(CustomFieldType.BOOLEAN, "Active", { raw: "no" })).toBe("No");
+  });
+
   it("AMOUNT -> plain number (NOT currency formatted)", () => {
     expect(
       cfCell(CustomFieldType.AMOUNT, "Warranty cost", { raw: 299.99 })

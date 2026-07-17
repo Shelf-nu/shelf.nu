@@ -171,28 +171,34 @@ function encodeCustomFieldForImport(
   value: ShelfAssetCustomFieldValueType["value"] | undefined,
   cfType: CustomFieldType
 ): string {
+  // `value` is guaranteed present past this guard, so the per-case checks below
+  // read its fields directly (no redundant `value &&`).
   if (!value) return "";
 
   switch (cfType) {
-    case CustomFieldType.BOOLEAN:
-      if (
-        !value ||
-        (value.raw === undefined && value.valueBoolean === undefined)
-      ) {
-        return "";
-      }
-      return value.valueBoolean ? "Yes" : "No";
+    case CustomFieldType.BOOLEAN: {
+      // Nothing stored at all → emit blank so re-import leaves it unset.
+      if (value.valueBoolean === undefined && value.raw == null) return "";
+      // Prefer the parsed boolean; fall back to interpreting `raw` for older or
+      // partial records that only kept the raw value (e.g. `true` / "yes").
+      const bool =
+        value.valueBoolean ??
+        (typeof value.raw === "boolean"
+          ? value.raw
+          : ["yes", "true"].includes(String(value.raw).trim().toLowerCase()));
+      return bool ? "Yes" : "No";
+    }
     case CustomFieldType.DATE:
       // buildCustomFieldValue stores `raw` as the YYYY-MM-DD string.
-      return value && typeof value.raw === "string" ? value.raw : "";
+      return typeof value.raw === "string" ? value.raw : "";
     case CustomFieldType.MULTILINE_TEXT:
-      return value ? cleanMarkdownFormatting(String(value.raw ?? "")) : "";
+      return cleanMarkdownFormatting(String(value.raw ?? ""));
     case CustomFieldType.AMOUNT:
     case CustomFieldType.NUMBER:
-      return value && value.raw != null ? String(value.raw) : "";
+      return value.raw != null ? String(value.raw) : "";
     case CustomFieldType.OPTION:
     default:
-      return value && value.raw != null ? String(value.raw) : "";
+      return value.raw != null ? String(value.raw) : "";
   }
 }
 

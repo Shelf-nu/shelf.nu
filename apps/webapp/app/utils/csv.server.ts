@@ -338,11 +338,14 @@ async function resolveExportAssets({
   const takeAll = ids.includes(ALL_SELECTED_KEY);
 
   /**
-   * When taking all with filters (select all button), use the current page's search params
-   * Otherwise, use cookie-based filters from the request
+   * When taking all (select all button), use the current page's search params —
+   * even an empty string, which means "no filters". Only fall back to the
+   * cookie-based filters when the param was not sent at all (`null`); a
+   * truthiness check would treat an unfiltered index (`""`) as "not sent" and
+   * wrongly reapply stale cookie filters.
    */
   const filtersToUse =
-    takeAll && assetIndexCurrentSearchParams
+    takeAll && assetIndexCurrentSearchParams !== null
       ? assetIndexCurrentSearchParams
       : (
           await getAdvancedFiltersFromRequest(
