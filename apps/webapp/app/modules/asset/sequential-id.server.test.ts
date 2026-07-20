@@ -1,9 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+import { db } from "~/database/db.server";
 
 import {
   formatSequentialId,
   isValidSequentialIdFormat,
   extractSequenceNumber,
+  estimateNextSequentialId,
 } from "./sequential-id.server";
 
 // why: testing pure sequential ID formatting functions without database connection errors
@@ -161,6 +164,104 @@ describe("Sequential ID Service - Pure Functions", () => {
   });
 });
 
-// Note: Database-dependent functions like getNextSequentialId, createOrganizationSequence,
-// generateBulkSequentialIdsEfficient, etc. require integration tests with a real database
-// and are covered by the E2E tests and integration test suite.
+/**
+ * Reconstructs the static SQL text from a Prisma tagged-template call
+ * (`db.$queryRaw`...``) so a test can assert *which* query ran without depending on
+ * the interpolated bind values (which arrive as separate arguments).
+ */
+function sqlFromCall(strings: unknown): string {
+  return Array.isArray(strings) ? strings.join(" ") : String(strings);
+}
+
+describe("estimateNextSequentialId (pooler-safe sequence peek)", () => {
+  beforeEach(() => {
+    vi.mocked(db.$executeRaw).mockReset();
+    vi.mocked(db.$queryRaw).mockReset();
+    // createOrganizationSequence() runs SELECT create_asset_sequence_for_org(...)
+    // via $executeRaw; it just needs to resolve for these tests.
+    vi.mocked(db.$executeRaw).mockResolvedValue(1 as never);
+  });
+
+  it("never issues a session-local currval() query (must work behind the Supavisor pooler)", async () => {
+    // why: currval() is session-local and throws SQLSTATE 55000 behind Supabase's
+    // transaction pooler because nextval() was never run on the pooled backend. The
+    // estimate must instead read the session-independent pg_sequences catalog. This is
+    // the regression guard for the flood of "currval ... is not yet defined" log errors.
+    vi.mocked(db.$queryRaw).mockImplementation((strings: unknown) => {
+      const sql = sqlFromCall(strings);
+      if (sql.includes("pg_sequences")) {
+        return Promise.resolve([{ last_value: 41n }]) as never;
+      }
+      return Promise.resolve([{ max_num: 0 }]) as never;
+    });
+
+    const result = await estimateNextSequentialId("org_123");
+
+    expect(result).toBe("SAM-0042");
+    const issuedCurrval = vi
+      .mocked(db.$queryRaw)
+      .mock.calls.some(([strings]) => sqlFromCall(strings).includes("currval"));
+    expect(issuedCurrval).toBe(false);
+  });
+
+  it("returns last_value + 1 from the sequence catalog when the sequence has been advanced", async () => {
+    vi.mocked(db.$queryRaw).mockImplementation((strings: unknown) => {
+      const sql = sqlFromCall(strings);
+      if (sql.includes("pg_sequences")) {
+        return Promise.resolve([{ last_value: 100n }]) as never;
+      }
+      return Promise.resolve([{ max_num: 0 }]) as never;
+    });
+
+    expect(await estimateNextSequentialId("org_123")).toBe("SAM-0101");
+  });
+
+  it("falls back to the max existing sequentialId when the sequence has never been advanced", async () => {
+    vi.mocked(db.$queryRaw).mockImplementation((strings: unknown) => {
+      const sql = sqlFromCall(strings);
+      if (sql.includes("pg_sequences")) {
+        // Row exists but the sequence was never advanced -> last_value is NULL.
+        return Promise.resolve([{ last_value: null }]) as never;
+      }
+      if (sql.includes("MAX")) {
+        return Promise.resolve([{ max_num: 7 }]) as never;
+      }
+      return Promise.resolve([]) as never;
+    });
+
+    expect(await estimateNextSequentialId("org_123")).toBe("SAM-0008");
+  });
+
+  it("falls back to the max scan when the catalog read itself fails", async () => {
+    // why: silence the expected fallback console.error so the test output stays pristine.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(db.$queryRaw).mockImplementation((strings: unknown) => {
+      const sql = sqlFromCall(strings);
+      if (sql.includes("pg_sequences")) {
+        return Promise.reject(new Error("boom")) as never;
+      }
+      return Promise.resolve([{ max_num: 3 }]) as never;
+    });
+
+    expect(await estimateNextSequentialId("org_123")).toBe("SAM-0004");
+    errorSpy.mockRestore();
+  });
+
+  it("honours a custom prefix", async () => {
+    vi.mocked(db.$queryRaw).mockImplementation((strings: unknown) => {
+      const sql = sqlFromCall(strings);
+      if (sql.includes("pg_sequences")) {
+        return Promise.resolve([{ last_value: 5n }]) as never;
+      }
+      return Promise.resolve([{ max_num: 0 }]) as never;
+    });
+
+    expect(await estimateNextSequentialId("org_123", "EQUIP")).toBe(
+      "EQUIP-0006"
+    );
+  });
+});
+
+// Note: The remaining database-dependent functions (getNextSequentialId,
+// createOrganizationSequence, generateBulkSequentialIdsEfficient, etc.) mutate sequence
+// state and are covered by the E2E tests and integration test suite.

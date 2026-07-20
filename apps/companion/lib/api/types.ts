@@ -452,6 +452,13 @@ export type BookingListItem = {
   custodianName: string | null;
   custodianImage: string | null;
   assetCount: number;
+  /**
+   * Outstanding book-by-model reservations still to assign (units reserved at
+   * the model level with no concrete asset behind them yet). > 0 means the
+   * booking can't be checked out until matching assets are assigned. Optional
+   * for back-compat with an older server response.
+   */
+  outstandingModelCount?: number;
 };
 
 export type BookingsResponse = {
@@ -470,6 +477,59 @@ export type BookingAsset = {
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
   kit: { id: string; name: string } | null;
+  // Quantity-tracked fields. The server sends `quantity` for every asset;
+  // `type`/`unitOfMeasure`/`consumptionType` + the `remaining*` counts are what
+  // the check-in / check-out pickers use. Optional for back-compat with older
+  // server responses (the app falls back to bare-scan behaviour when absent).
+  type?: AssetType;
+  quantity?: number;
+  unitOfMeasure?: string | null;
+  consumptionType?: ConsumptionType | null;
+  assetKitId?: string | null;
+  /** Units currently checked out on this booking that can still be checked in. */
+  remainingToCheckIn?: number;
+  /** Units still reserved on this booking that can still be checked out. */
+  remainingToCheckOut?: number;
+};
+
+/**
+ * Per-asset check-in disposition for a QUANTITY_TRACKED asset: how many of the
+ * checked-out units were returned / consumed / lost / damaged. Sum must be
+ * <= the asset's `remainingToCheckIn`. Mirrors the web check-in drawer.
+ */
+export type CheckinDisposition = {
+  assetId: string;
+  bookingAssetId?: string | null;
+  returned?: number;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+};
+
+/**
+ * Per-asset check-out disposition for a QUANTITY_TRACKED asset: how many units
+ * to take now. `quantity` must be <= the asset's `remainingToCheckOut`.
+ */
+export type CheckoutDisposition = {
+  assetId: string;
+  bookingAssetId?: string | null;
+  quantity: number;
+};
+
+/**
+ * A book-by-model reservation on a booking: intent to reserve `quantity` units
+ * of an `AssetModel` without picking specific assets upfront. `outstanding` is
+ * how many are still waiting to be assigned via scan-to-assign;
+ * `fulfilledAt` non-null means every unit has been assigned (read-only history).
+ */
+export type BookingModelRequest = {
+  id: string;
+  assetModelId: string;
+  assetModelName: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  outstandingQuantity: number;
+  fulfilledAt: string | null;
 };
 
 export type BookingDetail = {
@@ -500,6 +560,32 @@ export type BookingDetail = {
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
+  /** Book-by-model reservations (outstanding + fulfilled), matching the web. */
+  modelRequests: BookingModelRequest[];
+  /** Number of distinct models reserved (rows in `modelRequests`). */
+  modelRequestCount: number;
+  /** Total units still to assign across all model requests. */
+  outstandingModelUnitCount: number;
+  /**
+   * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
+   * computed server-side by the SAME shared helper the web booking overview
+   * uses, so the mobile progress bar shows identical numbers to web. `null` /
+   * absent from an older server (rolling deploy) — the card is then omitted.
+   */
+  lifecycleProgress?: {
+    totalUnits: number;
+    bookedCount: number;
+    partialCount: number;
+    checkedOutCount: number;
+    returnedCount: number;
+    checkoutProgressCount: number;
+    checkoutProgressPercentage: number;
+    checkinProgressCount: number;
+    checkinProgressPercentage: number;
+    hasPartialCheckouts: boolean;
+    hasPartialCheckins: boolean;
+    countMode: "assets" | "units";
+  } | null;
 };
 
 export type BookingDetailResponse = {
@@ -618,6 +704,13 @@ export type AvailableAsset = {
   mainImageExpiration: string | null;
   thumbnailImage: string | null;
   kitId: string | null;
+  /**
+   * The workspace's display code for this asset (QR Code ID by default, or a
+   * SAM ID / barcode per the org preference), resolved server-side. Shown on
+   * the picker row so the operator can match a physical label by eye and toggle
+   * the exact unit. Null when the asset has no resolvable code.
+   */
+  displayCode?: { value: string; label: string } | null;
 };
 
 export type AvailableAssetsResponse = {
@@ -641,6 +734,51 @@ export type AvailableKitsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+/**
+ * A bookable asset model in the book-by-model picker, with how many units are
+ * free to reserve in the booking's window. `available` = total − in-custody −
+ * reserved (concrete + via other model requests). Server-computed; the app
+ * caps the reserve input at `available` + the amount already fulfilled.
+ */
+export type AvailableModel = {
+  id: string;
+  name: string;
+  total: number;
+  available: number;
+  inCustody: number;
+  reservedConcrete: number;
+  reservedViaRequest: number;
+};
+
+/**
+ * The booking's existing model-level reservations as returned by the picker
+ * (leaner than {@link BookingModelRequest} — no id/outstanding, since the
+ * picker only needs current amounts to pre-fill inputs).
+ */
+export type AvailableModelExistingRequest = {
+  assetModelId: string;
+  assetModelName: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: string | null;
+};
+
+export type AvailableModelsResponse = {
+  /** False when the workspace has no AssetModel at all — hide the picker. */
+  showModelsTab: boolean;
+  /** Per-model availability for this booking's window (first 50 by name). */
+  assetModels: AvailableModel[];
+  /** Full workspace model count (the list above is capped at 50). */
+  totalAssetModels: number;
+  /** This booking's existing model reservations, to pre-fill the inputs. */
+  modelRequests: AvailableModelExistingRequest[];
+};
+
+/** Response from the model-request upsert/remove endpoint. */
+export type ModelRequestMutationResponse = {
+  success: boolean;
 };
 
 export type BookingTag = { id: string; name: string };

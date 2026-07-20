@@ -3396,13 +3396,13 @@ describe("archiveBooking", () => {
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
+      where: { id: "booking-1", status: BookingStatus.COMPLETE },
       data: { status: BookingStatus.ARCHIVED },
     });
     expect(result).toEqual(archivedBooking);
   });
 
-  it("should throw error when booking is not COMPLETE", async () => {
+  it("rejects ONGOING bookings (their assets are still checked out)", async () => {
     expect.assertions(1);
 
     const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
@@ -3448,6 +3448,53 @@ describe("archiveBooking", () => {
     await archiveBooking({ id: "booking-1", organizationId: "org-1" });
 
     expect(scheduler.cancel).not.toHaveBeenCalled();
+  });
+
+  it("archives a past-due RESERVED booking and flags it archivedWithoutCheckin", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      to: new Date("2020-01-01T00:00:00Z"),
+    };
+    const archivedBooking = { ...mockBooking, status: BookingStatus.ARCHIVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(archivedBooking);
+
+    await archiveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1", status: BookingStatus.RESERVED },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("rejects a RESERVED booking whose end date has not passed", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      to: new Date("2999-01-01T00:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      archiveBooking({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
   });
 });
 
@@ -6019,6 +6066,208 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("bare scan (no disposition) of a TWO_WAY QT asset in a partial batch defaults to RETURN of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    // Two-asset booking: the QT "Pens" (booked 10) + an INDIVIDUAL asset that
+    // is NOT scanned this batch. Because the batch does not cover every
+    // outstanding asset, the flow stays on the partial path (it does not
+    // delegate to the full checkinBooking), so the in-tx default resolution is
+    // what we're exercising here.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    // No prior check-ins → both assets outstanding (keeps us off the early-exit).
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    // The scanned QT asset is checked out (passes the progressive-checkout guard).
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    // Bare scan — no `checkins` disposition, exactly what the native app sends.
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Resolved to "all remaining" (10) → one RETURN log for the full amount
+    // (default lock stub has no consumptionType → treated as returnable).
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
+  it("bare scan (no disposition) of a ONE_WAY (consumable) QT asset defaults to CONSUME of ALL remaining units", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    // Mark the locked asset consumable so the default resolves to CONSUME.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: mockQtyAssetId,
+      title: "Pens",
+      quantity: 100,
+      consumptionType: ConsumptionType.ONE_WAY,
+    });
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "CONSUME",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+  });
+
+  it("rejects a BARE re-scan of a QT asset that is already fully checked in (no units remain)", async () => {
+    expect.assertions(1);
+
+    // Asset booked 10, all 10 already logged back → remaining 0. A bare scan
+    // must reject rather than write a no-op PartialBookingCheckin + event.
+    setupQtyMocks({ logged: 10 });
+
+    // Two-asset booking (QT fully reconciled + an INDIVIDUAL still out) so the
+    // batch does not cover all outstanding and stays on the partial path.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          assetId: "asset-individual-2",
+          quantity: 1,
+          asset: {
+            id: "asset-individual-2",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        assetIds: [mockQtyAssetId],
+      })
+    ).rejects.toThrow(/no units remain to check in/);
+  });
+
+  it("bare full-coverage scan of a single QT asset is accepted (not rejected by the guard) and completes via the delegate path", async () => {
+    expect.assertions(1);
+
+    // Single-QT-asset booking (default makeQtyBooking): a bare scan covers ALL
+    // outstanding units, so `hasQuantityDispositions` is false and the batch
+    // takes the "all remaining scanned → complete check-in" early-exit that
+    // delegates to the full checkinBooking. This is the common native case, and
+    // pre-fix it would have thrown at the non-zero-disposition guard. We assert
+    // the batch is accepted and completes (isComplete) — proof the bare id
+    // reaches the delegate. checkinBooking's own all-remaining default is
+    // exercised by its dedicated tests; asserting its internal ConsumptionLog
+    // here would just re-test that function under partialCheckinBooking's mocks.
+    setupQtyMocks();
+    (
+      db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: mockQtyAssetId, title: "Pens", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    const result = await partialCheckinBooking({
+      ...baseParams,
+      assetIds: [mockQtyAssetId],
+    });
+
+    // Full-coverage batch delegates and completes the booking (it did not throw
+    // the "must include a non-zero disposition" guard the bare id used to hit).
+    expect(result.isComplete).toBe(true);
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 
@@ -6681,10 +6930,15 @@ describe("bulkArchiveBookings", () => {
     await bulkArchiveBookings({
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
+      userId: "user-1",
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["b1", "b2"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["b1", "b2"] },
+        organizationId: "org-1",
+        status: BookingStatus.COMPLETE,
+      },
       data: { status: BookingStatus.ARCHIVED },
     });
     // The fix removed the interactive transaction entirely for this path.
@@ -6702,21 +6956,252 @@ describe("bulkArchiveBookings", () => {
     );
   });
 
-  it("throws if any selected booking is not COMPLETE", async () => {
+  it("throws if any selected booking is not archivable (e.g. ONGOING)", async () => {
     expect.assertions(1);
     //@ts-expect-error mock setup
     db.booking.findMany.mockResolvedValue([
       {
         id: "b1",
         status: BookingStatus.ONGOING,
+        to: new Date("2020-01-01T00:00:00Z"),
         custodianUserId: null,
         activeSchedulerReference: null,
       },
     ]);
 
     await expect(
-      bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
+      bulkArchiveBookings({
+        bookingIds: ["b1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
     ).rejects.toThrow(ShelfError);
+  });
+
+  it("archives a past-due RESERVED booking and flags it archivedWithoutCheckin", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["r1"] },
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+      },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("rejects a RESERVED booking whose end date has not passed", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2999-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["r1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects OVERDUE bookings even when past their end date (assets still checked out)", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "o1",
+        status: BookingStatus.OVERDUE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["o1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("flags only the never-returned RESERVED rows when archiving a mixed selection", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "c1",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2999-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["c1", "r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // COMPLETE rows archive without the flag…
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["c1"] },
+        organizationId: "org-1",
+        status: BookingStatus.COMPLETE,
+      },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    // …RESERVED rows archive WITH the never-returned flag.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["r1"] },
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+      },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("emits a BOOKING_ARCHIVED event per booking (parity with single archive)", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b2",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "b2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "b1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "b2",
+        }),
+      ])
+    );
+  });
+
+  // Regression for the phantom-archive race: the status-guarded updateMany can
+  // skip a row whose status changed between the findMany and the write (e.g. a
+  // RESERVED booking checked out mid-batch). The follow-up events + notes must
+  // reflect only the rows actually flipped — never the originally-fetched set —
+  // or we'd log a booking as archived while it is still ONGOING.
+  it("emits events + notes only for bookings the status guard actually archived", async () => {
+    expect.assertions(3);
+
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany
+      // main fetch: b1 (COMPLETE) + r1 (past-due RESERVED) both look eligible
+      .mockResolvedValueOnce([
+        {
+          id: "b1",
+          status: BookingStatus.COMPLETE,
+          to: new Date("2020-01-01T00:00:00Z"),
+          custodianUserId: null,
+          activeSchedulerReference: null,
+        },
+        {
+          id: "r1",
+          status: BookingStatus.RESERVED,
+          to: new Date("2020-01-01T00:00:00Z"),
+          custodianUserId: null,
+          activeSchedulerReference: null,
+        },
+      ])
+      // reconcile read: only b1 ended up ARCHIVED — r1 was checked out and its
+      // RESERVED-guarded updateMany matched no row.
+      .mockResolvedValueOnce([{ id: "b1" }]);
+
+    const updateMany = db.booking.updateMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    updateMany
+      .mockResolvedValueOnce({ count: 1 }) // completeIds → b1 archived
+      .mockResolvedValueOnce({ count: 0 }); // reservedIds → r1 skipped
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith([
+      expect.objectContaining({ action: "BOOKING_ARCHIVED", bookingId: "b1" }),
+    ]);
+    // Status note for the archived booking …
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b1" })
+    );
+    // … but never for the concurrently-skipped one.
+    expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "r1" })
+    );
   });
 });
 

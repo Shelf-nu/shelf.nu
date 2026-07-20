@@ -3,6 +3,8 @@ import type {
   BookingsResponse,
   BookingDetailResponse,
   BookingActionResponse,
+  CheckinDisposition,
+  CheckoutDisposition,
   PartialCheckinResponse,
   PartialCheckoutResponse,
   BookingMutationResponse,
@@ -11,6 +13,8 @@ import type {
   RemoveBookingAssetsResponse,
   AvailableAssetsResponse,
   AvailableKitsResponse,
+  AvailableModelsResponse,
+  ModelRequestMutationResponse,
   BookingTagsResponse,
 } from "./types";
 
@@ -72,6 +76,28 @@ export const bookingsApi = {
       }
     ),
 
+  /**
+   * Fulfil outstanding book-by-model reservations by scanning concrete units,
+   * then check the booking out (RESERVED -> ONGOING) in one atomic step.
+   * Mirrors the web `fulfil-and-checkout` scanner: each scanned asset is
+   * matched against an outstanding `BookingModelRequest` (materialising it);
+   * the server rejects the submit if any reservation is still unassigned.
+   */
+  fulfilAndCheckoutBooking: (
+    orgId: string,
+    bookingId: string,
+    assetIds: string[],
+    kitIds: string[] = [],
+    timeZone?: string
+  ) =>
+    apiFetch<BookingActionResponse>(
+      `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, assetIds, kitIds, timeZone }),
+      }
+    ),
+
   /** Full check-in (ONGOING -> COMPLETE) */
   checkinBooking: (orgId: string, bookingId: string, timeZone?: string) =>
     apiFetch<BookingActionResponse>(
@@ -87,13 +113,14 @@ export const bookingsApi = {
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    timeZone?: string
+    timeZone?: string,
+    checkins?: CheckinDisposition[]
   ) =>
     apiFetch<PartialCheckinResponse>(
       `/api/mobile/bookings/partial-checkin?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, timeZone }),
+        body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
       }
     ),
 
@@ -107,13 +134,14 @@ export const bookingsApi = {
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    timeZone?: string
+    timeZone?: string,
+    checkouts?: CheckoutDisposition[]
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, timeZone }),
+        body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
       }
     ),
 
@@ -270,4 +298,56 @@ export const bookingsApi = {
   /** Tags assignable to bookings (for the booking-form tag picker). */
   bookingTags: (orgId: string) =>
     apiFetch<BookingTagsResponse>(`/api/mobile/bookings/tags?orgId=${orgId}`),
+
+  /**
+   * Book-by-model picker: the workspace's asset models with how many units are
+   * free to reserve in this booking's window, plus the booking's existing
+   * model reservations (to pre-fill inputs). Read-only. `search` filters by
+   * model name server-side so orgs with more than ~50 models can reach any
+   * of them (the list is capped, so a client-only filter can't).
+   */
+  availableModels: (orgId: string, bookingId: string, search?: string) => {
+    const sp = new URLSearchParams({ orgId, bookingId });
+    if (search) sp.set("s", search);
+    return apiFetch<AvailableModelsResponse>(
+      `/api/mobile/bookings/available-models?${sp}`
+    );
+  },
+
+  /**
+   * Reserve (or edit) `quantity` units of an asset model on a booking.
+   * `quantity` is the ABSOLUTE reserved total, not a delta — the server upserts
+   * to it. DRAFT/RESERVED only; availability + ownership enforced server-side.
+   */
+  upsertModelRequest: (
+    orgId: string,
+    bookingId: string,
+    assetModelId: string,
+    quantity: number
+  ) =>
+    apiFetch<ModelRequestMutationResponse>(
+      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetModelId, quantity }),
+      }
+    ),
+
+  /**
+   * Cancel a model-level reservation on a booking. Idempotent; blocked
+   * server-side if units have already been assigned (edit the quantity down
+   * instead). DRAFT/RESERVED only.
+   */
+  removeModelRequest: (
+    orgId: string,
+    bookingId: string,
+    assetModelId: string
+  ) =>
+    apiFetch<ModelRequestMutationResponse>(
+      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ assetModelId }),
+      }
+    ),
 };

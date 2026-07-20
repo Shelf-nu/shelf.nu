@@ -1,0 +1,11 @@
+# You can create custom attribute mapping rules using
+
+# simple property files stored in this directory tree.
+
+# Spring property replacement is NOT supported.
+
+# As an example, a default SAML 2 rule for eduPersonPrincipalName would be:
+
+#id=eduPersonPrincipalName
+#transcoder=SAML2ScopedStringTranscoder
+#saml2.name=urn:oid:1.3.6.1.4.1.5923.1.1.1.6
