@@ -104,7 +104,7 @@ describe("transferEntitiesToNewOwner", () => {
       }
     });
 
-    it("never transfers creatorId on any booking.updateMany call", async () => {
+    it("transfers creatorId ONLY for bookings whose custodian is a different registered user", async () => {
       const tx = createMockTx();
 
       await transferEntitiesToNewOwner({
@@ -115,11 +115,49 @@ describe("transferEntitiesToNewOwner", () => {
         reason: "demotion",
       });
 
-      // Per-call assertion (not `not.toHaveBeenCalled()`): a half-fix that
-      // still moves creatorId while merely skipping the custodian rewrite
-      // must fail this case.
+      const creatorCalls = tx.booking.updateMany.mock.calls.filter((call) =>
+        Object.prototype.hasOwnProperty.call(call[0].data, "creatorId")
+      );
+
+      // Exactly one creatorId transfer, and it is scoped to created-for-others.
+      expect(creatorCalls).toHaveLength(1);
+      expect(creatorCalls[0][0]).toEqual({
+        where: {
+          creatorId: TARGET,
+          organizationId: ORG,
+          AND: [
+            { custodianUserId: { not: null } },
+            { custodianUserId: { not: TARGET } },
+          ],
+        },
+        data: { creatorId: RECIPIENT },
+      });
+    });
+
+    it("never issues a blanket creatorId transfer that would sweep the user's own bookings", async () => {
+      const tx = createMockTx();
+
+      await transferEntitiesToNewOwner({
+        tx: asTx(tx),
+        id: TARGET,
+        newOwnerId: RECIPIENT,
+        organizationId: ORG,
+        reason: "demotion",
+      });
+
+      // The `not: null` guard is load-bearing: without it, a null custodian
+      // (the user's own unassigned draft, or a legacy team-member-link row)
+      // would be transferred away, hiding it from them and leaking it to the
+      // recipient — the exact failure a blanket `{ creatorId: id }` where, or a
+      // null-inclusive `{ not: id }`, would cause. No creatorId transfer may
+      // omit that guard.
       for (const call of tx.booking.updateMany.mock.calls) {
-        expect(call[0].data).not.toHaveProperty("creatorId");
+        if (!Object.prototype.hasOwnProperty.call(call[0].data, "creatorId")) {
+          continue;
+        }
+        expect(call[0].where.AND).toContainEqual({
+          custodianUserId: { not: null },
+        });
       }
     });
 

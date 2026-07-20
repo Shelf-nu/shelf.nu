@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { bookingsReassignedOnDemotionWhere } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -38,6 +39,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       kits,
       assetReminders,
       images,
+      bookings,
     ] = await Promise.all([
       db.asset.count({
         where: { userId: targetUserId, organizationId },
@@ -63,6 +65,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       db.image.count({
         where: { userId: targetUserId, ownerOrgId: organizationId },
       }),
+      // Bookings the user created for a DIFFERENT registered custodian — the
+      // only bookings a demotion reassigns. Uses the exact predicate the
+      // transfer runs, so this count and the rows actually moved cannot drift.
+      db.booking.count({
+        where: bookingsReassignedOnDemotionWhere({
+          userId: targetUserId,
+          organizationId,
+        }),
+      }),
     ]);
 
     const total =
@@ -73,7 +84,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       customFields +
       kits +
       assetReminders +
-      images;
+      images +
+      bookings;
 
     return data(
       payload({
@@ -85,6 +97,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         kits,
         assetReminders,
         images,
+        bookings,
         total,
       })
     );

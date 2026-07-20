@@ -39,6 +39,8 @@ interface EntityCounts {
   kits: number;
   assetReminders: number;
   images: number;
+  /** Bookings the user created for a different custodian — reassigned on demotion. */
+  bookings: number;
   total: number;
 }
 
@@ -338,6 +340,12 @@ export function ChangeRoleDialog({
                           )}
                           {entityCounts.images > 0 && (
                             <li>{entityCounts.images} images</li>
+                          )}
+                          {entityCounts.bookings > 0 && (
+                            <li>
+                              {entityCounts.bookings} bookings created for
+                              others
+                            </li>
                           )}
                         </ul>
 

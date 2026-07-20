@@ -33,21 +33,50 @@ interface FakeBookingRow {
 }
 
 /**
+ * Evaluates a booking `where` against one in-memory row, modelling the subset
+ * of Prisma operators `transferEntitiesToNewOwner` actually emits: scalar
+ * equality, an `AND` array of sub-clauses, and `{ not: value }` (including
+ * `{ not: null }`).
+ *
+ * The combined `AND: [{ not: null }, { not: id }]` reproduces SQL's
+ * `IS NOT NULL AND <> id`: a null value fails the `not: null` branch, so
+ * null-custodian rows never match — which is the property that keeps a demoted
+ * user's own drafts with them.
+ */
+function whereMatches(
+  row: FakeBookingRow,
+  where: Record<string, unknown>
+): boolean {
+  return Object.entries(where).every(([key, value]) => {
+    if (key === "AND") {
+      const clauses = (Array.isArray(value) ? value : [value]) as Record<
+        string,
+        unknown
+      >[];
+      return clauses.every((clause) => whereMatches(row, clause));
+    }
+    if (value !== null && typeof value === "object" && "not" in value) {
+      return (
+        (row as unknown as Record<string, unknown>)[key] !==
+        (value as { not: unknown }).not
+      );
+    }
+    return (row as unknown as Record<string, unknown>)[key] === value;
+  });
+}
+
+/**
  * Applies a Prisma-style `updateMany({ where, data })` call to an in-memory
  * row array — the minimal stand-in for what Postgres would do. A row only
- * gets `data` merged in when every key in `where` matches; calls issued for
- * other models (e.g. `Asset.userId`) simply never match a booking row shape.
+ * gets `data` merged in when {@link whereMatches}; calls issued for other
+ * models (e.g. `Asset.userId`) simply never match a booking row shape.
  */
 function applyUpdateMany(
   rows: FakeBookingRow[],
   call: { where: Record<string, unknown>; data: Record<string, unknown> }
 ) {
   for (const row of rows) {
-    const matches = Object.entries(call.where).every(
-      ([key, value]) =>
-        (row as unknown as Record<string, unknown>)[key] === value
-    );
-    if (matches) {
+    if (whereMatches(row, call.where)) {
       Object.assign(row, call.data);
     }
   }
@@ -106,7 +135,10 @@ function asTx(tx: MockTx) {
  * `updateMany` call it made across every model onto a fresh pair of rows
  * from {@link makeRows}, mirroring what those writes would do in Postgres.
  */
-async function transferAndApply(reason: "demotion" | "removal") {
+async function transferAndApply(
+  reason: "demotion" | "removal",
+  rows: FakeBookingRow[] = makeRows()
+) {
   const tx = createMockTx();
 
   await transferEntitiesToNewOwner({
@@ -117,7 +149,6 @@ async function transferAndApply(reason: "demotion" | "removal") {
     reason,
   });
 
-  const rows = makeRows();
   for (const model of Object.values(tx)) {
     for (const call of model.updateMany.mock.calls) {
       applyUpdateMany(rows, call[0]);
@@ -211,5 +242,46 @@ describe("demotion preserves booking visibility (observable outcome)", () => {
     expect(reserved.creatorId).toBe(RECIPIENT_ID);
     expect(draft.custodianUserId).toBeNull();
     expect(draft.creatorId).toBe(RECIPIENT_ID);
+  });
+
+  it("hands over a booking Paul created for a DIFFERENT custodian so he loses write access to it", async () => {
+    const [createdForOther] = await transferAndApply("demotion", [
+      {
+        id: "booking-for-someone-else",
+        status: "RESERVED",
+        organizationId: ORG,
+        creatorId: PAUL_ID,
+        custodianUserId: "someone-else",
+        custodianTeamMemberId: "someone-else-tm",
+      },
+    ]);
+
+    expect(createdForOther.creatorId).toBe(RECIPIENT_ID);
+  });
+
+  it("keeps creatorId on Paul's unassigned draft (null custodian) — the null-safety case a blanket or null-inclusive transfer would break", async () => {
+    const [ownDraft] = await transferAndApply("demotion", [
+      {
+        id: "booking-own-unassigned-draft",
+        status: "DRAFT",
+        organizationId: ORG,
+        creatorId: PAUL_ID,
+        custodianUserId: null,
+        custodianTeamMemberId: null,
+      },
+    ]);
+
+    // Still Paul's: creatorId is what keeps this draft visible to him and out
+    // of the recipient's view.
+    expect(ownDraft.creatorId).toBe(PAUL_ID);
+    expect(
+      matchesDraftVisibility(ownDraft, bookingDraftVisibilityClause(PAUL_ID))
+    ).toBe(true);
+    expect(
+      matchesDraftVisibility(
+        ownDraft,
+        bookingDraftVisibilityClause(RECIPIENT_ID)
+      )
+    ).toBe(false);
   });
 });
