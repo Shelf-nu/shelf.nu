@@ -3,6 +3,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   exportAssetsBackupToCsv,
+  exportAssetsForImportToCsv,
   exportAssetsFromIndexToCsv,
 } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
@@ -46,20 +47,44 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const assetIndexCurrentSearchParams = searchParams.get(
       "assetIndexCurrentSearchParams"
     );
+    // `exportType=import` requests the importer-native CSV (re-importable
+    // into another workspace) instead of the human/analytics export.
+    const exportType =
+      searchParams.get("exportType") === "import" ? "import" : "standard";
+    // `columnScope=all` exports every configured column regardless of the
+    // user's current visibility settings; defaults to "visible" (existing
+    // behavior) when absent.
+    const columnScope =
+      searchParams.get("columnScope") === "all" ? "all" : "visible";
     const isBackupRequest = assetIds === null;
 
     /** Join the rows with a new line */
-    const csvString =
-      !isBackupRequest && mode === AssetIndexMode.ADVANCED && assetIds
-        ? await exportAssetsFromIndexToCsv({
-            request,
-            userId,
-            assetIds,
-            settings,
-            currentOrganization,
-            assetIndexCurrentSearchParams,
-          })
-        : await exportAssetsBackupToCsv({ organizationId });
+    let csvString: string;
+    if (isBackupRequest) {
+      csvString = await exportAssetsBackupToCsv({ organizationId });
+    } else if (exportType === "import") {
+      // Import-ready works in both index modes (scope forced to "all" in SIMPLE).
+      csvString = await exportAssetsForImportToCsv({
+        request,
+        assetIds,
+        settings,
+        currentOrganization,
+        assetIndexCurrentSearchParams,
+        columnScope,
+      });
+    } else if (mode === AssetIndexMode.ADVANCED) {
+      csvString = await exportAssetsFromIndexToCsv({
+        request,
+        userId,
+        assetIds,
+        settings,
+        currentOrganization,
+        assetIndexCurrentSearchParams,
+        columnScope,
+      });
+    } else {
+      csvString = await exportAssetsBackupToCsv({ organizationId });
+    }
 
     return new Response(csvString, {
       status: 200,

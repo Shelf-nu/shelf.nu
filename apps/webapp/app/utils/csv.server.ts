@@ -38,12 +38,15 @@ import {
 } from "~/modules/asset-index-settings/helpers";
 import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
+  bookingDraftVisibilityClause,
   getBookings,
   getBookingsFilterData,
+  resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
@@ -54,6 +57,10 @@ import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
+import {
+  buildImportReadyCsvFromAssets,
+  type ColumnScope,
+} from "./import-ready-export.server";
 import { ALL_SELECTED_KEY } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
@@ -301,16 +308,27 @@ export async function exportAssetsBackupToCsv({
   }
 }
 
-export async function exportAssetsFromIndexToCsv({
+/**
+ * Resolves the assets to export, honoring the select-all sentinel and the
+ * index's current filters. Shared by the standard and import-ready exports.
+ *
+ * @param args.request - The incoming request (carries cookie-based filters).
+ * @param args.assetIds - Comma-separated asset ids, or containing
+ *   {@link ALL_SELECTED_KEY} when the "select all" sentinel is active.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - The index's current URL search
+ *   params, used instead of cookie filters when select-all is active.
+ * @returns The full filtered asset set (no pagination when selecting all).
+ */
+async function resolveExportAssets({
   request,
-  userId,
   assetIds,
   settings,
   currentOrganization,
   assetIndexCurrentSearchParams,
 }: {
   request: Request;
-  userId: string;
   assetIds: string;
   settings: AssetIndexSettings;
   currentOrganization: Pick<
@@ -318,17 +336,20 @@ export async function exportAssetsFromIndexToCsv({
     "id" | "barcodesEnabled" | "currency"
   >;
   assetIndexCurrentSearchParams: string | null;
-}) {
+}): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
   const takeAll = ids.includes(ALL_SELECTED_KEY);
 
   /**
-   * When taking all with filters (select all button), use the current page's search params
-   * Otherwise, use cookie-based filters from the request
+   * When taking all (select all button), use the current page's search params —
+   * even an empty string, which means "no filters". Only fall back to the
+   * cookie-based filters when the param was not sent at all (`null`); a
+   * truthiness check would treat an unfiltered index (`""`) as "not sent" and
+   * wrongly reapply stale cookie filters.
    */
   const filtersToUse =
-    takeAll && assetIndexCurrentSearchParams
+    takeAll && assetIndexCurrentSearchParams !== null
       ? assetIndexCurrentSearchParams
       : (
           await getAdvancedFiltersFromRequest(
@@ -347,6 +368,54 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
+
+  return { assets };
+}
+
+/**
+ * Builds the human/analytics asset export CSV (display labels,
+ * currency-formatted values, a synthetic `total_value` column).
+ *
+ * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.userId - The acting user; their date/time prefs humanize columns.
+ * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - Current URL search params for
+ *   the select-all-with-filters path.
+ * @param args.columnScope - `"visible"` (default) exports only the columns
+ *   the user currently has shown; `"all"` exports every configured column
+ *   regardless of visibility.
+ * @returns The CSV file contents (CRLF-joined rows).
+ */
+export async function exportAssetsFromIndexToCsv({
+  request,
+  userId,
+  assetIds,
+  settings,
+  currentOrganization,
+  assetIndexCurrentSearchParams,
+  columnScope = "visible",
+}: {
+  request: Request;
+  userId: string;
+  assetIds: string;
+  settings: AssetIndexSettings;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
+  assetIndexCurrentSearchParams: string | null;
+  columnScope?: ColumnScope;
+}) {
+  const { assets } = await resolveExportAssets({
+    request,
+    assetIds,
+    settings,
+    currentOrganization,
+    assetIndexCurrentSearchParams,
+  });
+
   // Acting user's prefs: this export was triggered by userId, so their
   // date/time preferences drive every humanized column.
   const prefs = await resolveUserFormatPrefsById(
@@ -354,11 +423,19 @@ export async function exportAssetsFromIndexToCsv({
     getClientHint(request)
   );
 
+  const baseColumns = settings.columns as Column[];
+  // "All columns" for the human export = every configured column, visible or
+  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
+  const scopedColumns =
+    columnScope === "all"
+      ? baseColumns.map((c) => ({ ...c, visible: true }))
+      : baseColumns;
+
   const csvData = buildCsvExportDataFromAssets({
     assets,
     columns: [
       { name: "name", visible: true, position: 0 },
-      ...(settings.columns as Column[]),
+      ...scopedColumns,
       // Synthetic export-only column: emits `valuation × quantity` so QT
       // inventories report total worth without overwriting the per-unit
       // `valuation` column (kept lossless for CSV → re-import round-trip).
@@ -373,6 +450,68 @@ export async function exportAssetsFromIndexToCsv({
 
   // Join rows with CRLF as per CSV spec
   return csvData.join("\r\n");
+}
+
+/**
+ * Builds an import-ready CSV (headers = content-importer keys, values
+ * importer-native) so the file re-imports into another workspace. Works in
+ * both index modes; SIMPLE mode has no per-user column config, so scope is
+ * forced to "all".
+ *
+ * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
+ * @param args.settings - The asset index settings (mode + column config).
+ * @param args.currentOrganization - The active workspace; scopes the fetch.
+ * @param args.assetIndexCurrentSearchParams - Current URL search params for
+ *   the select-all-with-filters path.
+ * @param args.columnScope - `"visible"` exports only the columns the user
+ *   currently has shown; `"all"` exports every importable column. Ignored
+ *   (forced to `"all"`) when `settings.mode` is `SIMPLE`, which has no
+ *   per-user column visibility to key off of.
+ * @returns The CSV file contents.
+ */
+export async function exportAssetsForImportToCsv({
+  request,
+  assetIds,
+  settings,
+  currentOrganization,
+  assetIndexCurrentSearchParams,
+  columnScope,
+}: {
+  request: Request;
+  assetIds: string;
+  settings: AssetIndexSettings;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
+  assetIndexCurrentSearchParams: string | null;
+  columnScope: ColumnScope;
+}): Promise<string> {
+  const [{ assets }, activeCustomFields] = await Promise.all([
+    resolveExportAssets({
+      request,
+      assetIds,
+      settings,
+      currentOrganization,
+      assetIndexCurrentSearchParams,
+    }),
+    getActiveCustomFields({
+      organizationId: currentOrganization.id,
+      includeAllCategories: true,
+    }),
+  ]);
+
+  const effectiveScope: ColumnScope =
+    settings.mode === "ADVANCED" ? columnScope : "all";
+
+  return buildImportReadyCsvFromAssets({
+    assets,
+    settingsColumns: settings.columns as Column[],
+    activeCustomFields,
+    barcodesEnabled: currentOrganization.barcodesEnabled ?? false,
+    columnScope: effectiveScope,
+  });
 }
 
 /**
@@ -689,6 +828,53 @@ const formatCustomFieldForCsv = (
 };
 
 /**
+ * Builds the custody restriction for a caller who may only export their own
+ * bookings, matching custody recorded on EITHER link.
+ *
+ * The team-member half exists because legacy rows carry custody on
+ * `custodianTeamMemberId` with a null `custodianUserId` — for example a booking
+ * assigned while no user was attached to the team member, the two being linked
+ * only later when the invite was accepted. The bookings index matches those
+ * rows (see `getBookingsFilterData`, which resolves the same team-member ids
+ * into `getBookings`' `custodianScope`), so restricting the export to the user
+ * link alone would silently drop rows the user can see on screen and selected
+ * for export.
+ *
+ * This never widens access: `teamMemberIds` are resolved server-side from the
+ * authenticated `userId`, never from request input, so both halves describe the
+ * same person. A caller with no team-member row in this org simply falls back
+ * to the user link, which is fail-closed.
+ *
+ * @param params.userId - The authenticated caller
+ * @param params.organizationId - The active workspace
+ * @returns An OR-clause to push into `where.AND` as a single member
+ */
+async function buildExportCustodyScopeClause({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<Prisma.BookingWhereInput> {
+  // Resolve ALL of the user's team-member links (a user can hold more than one
+  // per org — the schema has no unique constraint), so the export matches the
+  // index's custody scope instead of an arbitrary single row.
+  const { teamMemberIds } = await resolveCustodianScope({
+    userId,
+    organizationId,
+  });
+
+  return {
+    OR: [
+      { custodianUserId: userId },
+      ...(teamMemberIds.length
+        ? [{ custodianTeamMemberId: { in: teamMemberIds } }]
+        : []),
+    ],
+  };
+}
+
+/**
  * Builds the bookings CSV string for the export route.
  *
  * Resolves which bookings to export — either the explicit `bookingsIds`, or,
@@ -697,7 +883,9 @@ const formatCustomFieldForCsv = (
  * delegates row construction to {@link buildCsvExportDataFromBookings}.
  *
  * @param request - The incoming request (carries filters, locale, timezone)
- * @param userId - The acting user, for filter scoping in the select-all path
+ * @param userId - The acting user; scopes custody and DRAFT visibility on both
+ *   paths. `bookingsIds` is unvalidated request input, so this is a security
+ *   boundary rather than a convenience filter.
  * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
  * @param canSeeAllBookings - Whether the user may export bookings they don't own
  * @param organizationId - The active workspace; scopes every booking read
@@ -758,7 +946,32 @@ export async function exportBookingsFromIndexToCsv({
       bookings = bookingsData.bookings;
     } else {
       bookings = await db.booking.findMany({
-        where: { id: { in: bookingsIds }, organizationId },
+        where: {
+          id: { in: bookingsIds },
+          organizationId,
+          /**
+           * `bookingsIds` comes straight from the `?bookingsIds=` query param
+           * and is unvalidated, so the org scope alone is not a boundary:
+           * without these clauses a self-service / base user (both hold
+           * `booking.export`) can export any booking in the organization by
+           * supplying its id.
+           *
+           * Mirrors the restriction the index applies via
+           * {@link getBookingsFilterData} + {@link getBookings}, so a user can
+           * export exactly the rows they can see — no more, and no fewer.
+           */
+          AND: [
+            bookingDraftVisibilityClause(userId),
+            ...(canSeeAllBookings
+              ? []
+              : [
+                  await buildExportCustodyScopeClause({
+                    userId,
+                    organizationId,
+                  }),
+                ]),
+          ],
+        },
         include: {
           ...BOOKING_COMMON_INCLUDE,
           bookingAssets: {

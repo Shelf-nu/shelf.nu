@@ -75,12 +75,17 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // `canSeeAllBookings: true` models the admin/owner case these formatting
+    // assertions are about. The route also gates self-service/base callers to
+    // their own bookings; that gate has its own test below.
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
+      canSeeAllBookings: true,
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
       name: "Field Shoot",
+      custodianUserId: "someone-else",
     });
     dbMock.bookingNote.findMany.mockResolvedValue([
       {
@@ -150,5 +155,122 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
       '"02/10/2024, 8:15 AM","Alex Stone","COMMENT","Packed ""Lens"" set Verify inventory"'
     );
     expect(rows[2]).toBe('"02/09/2024, 12:00 PM","","UPDATE","System update"');
+  });
+
+  /**
+   * Both permission checks the loader makes (`booking.read` and
+   * `bookingNote.read`) are granted to BASE and SELF_SERVICE, so the
+   * organization scope alone left this export readable for any booking in the
+   * workspace by id.
+   */
+  it("refuses to export another user's booking for a caller who cannot see all bookings", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-9",
+      canSeeAllBookings: false,
+    } as any);
+    dbMock.booking.findFirstOrThrow.mockResolvedValue({
+      id: "booking-789",
+      name: "Field Shoot",
+      custodianUserId: "someone-else",
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/bookings/booking-789/activity.csv"
+        ),
+        params: { bookingId: "booking-789" },
+      })
+    );
+
+    // The route catches and returns `data(error(...), { status })` rather than
+    // a CSV Response.
+    expect(response instanceof Response).toBe(false);
+    expect((response as any).init?.status).toBe(403);
+  });
+
+  it("exports the caller's own booking when they cannot see all bookings", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-9",
+      canSeeAllBookings: false,
+    } as any);
+    dbMock.booking.findFirstOrThrow.mockResolvedValue({
+      id: "booking-789",
+      name: "Field Shoot",
+      custodianUserId: "user-456",
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/bookings/booking-789/activity.csv"
+        ),
+        params: { bookingId: "booking-789" },
+      })
+    );
+
+    expect(response instanceof Response).toBe(true);
+    expect((response as unknown as Response).status).toBe(200);
+  });
+
+  /**
+   * Custody can live on the team-member link alone (assigned before a user was
+   * attached to the team member, linked only when the invite was accepted).
+   * The bookings index and its CSV export both match either link, so refusing
+   * the row here would export a booking list containing rows whose own
+   * activity export 403s.
+   */
+  it("exports a legacy booking held via the caller's team-member link alone", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-9",
+      canSeeAllBookings: false,
+    } as any);
+    dbMock.booking.findFirstOrThrow.mockResolvedValue({
+      id: "booking-789",
+      name: "Field Shoot",
+      custodianUserId: null,
+      custodianTeamMember: { userId: "user-456" },
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/bookings/booking-789/activity.csv"
+        ),
+        params: { bookingId: "booking-789" },
+      })
+    );
+
+    expect(response instanceof Response).toBe(true);
+    expect((response as unknown as Response).status).toBe(200);
+  });
+
+  it("refuses to export a booking whose team-member link belongs to another user", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-9",
+      canSeeAllBookings: false,
+    } as any);
+    dbMock.booking.findFirstOrThrow.mockResolvedValue({
+      id: "booking-789",
+      name: "Field Shoot",
+      custodianUserId: null,
+      custodianTeamMember: { userId: "someone-else" },
+    });
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/bookings/booking-789/activity.csv"
+        ),
+        params: { bookingId: "booking-789" },
+      })
+    );
+
+    expect(response instanceof Response).toBe(false);
+    expect((response as any).init?.status).toBe(403);
   });
 });

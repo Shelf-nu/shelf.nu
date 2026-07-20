@@ -39,6 +39,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  importDataHasBarcodes,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import {
@@ -4333,13 +4334,12 @@ export async function createAssetsFromContentImport({
       userId,
     });
 
-    // Check if any assets have barcode data and if barcodes are enabled
-    const hasBarcodesData = data.some(
-      (asset) =>
-        asset.barcode_Code128 ||
-        asset.barcode_Code39 ||
-        asset.barcode_DataMatrix
-    );
+    // Check if any assets have barcode data (any of the five barcode columns)
+    // and if barcodes are enabled. Uses the shared column list so every type
+    // the parser handles is also counted here — otherwise a file carrying only
+    // ExternalQR/EAN13 would pass this guard and have those barcodes silently
+    // dropped below when barcodes are disabled.
+    const hasBarcodesData = importDataHasBarcodes(data);
 
     if (hasBarcodesData && !canUseBarcodes) {
       throw new ShelfError({
