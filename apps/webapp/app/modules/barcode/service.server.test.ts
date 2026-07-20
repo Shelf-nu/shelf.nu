@@ -14,6 +14,7 @@ import {
   replaceBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  importDataHasBarcodes,
 } from "./service.server";
 
 // @vitest-environment node
@@ -1037,6 +1038,47 @@ describe("validateBarcodeUniqueness", () => {
         message: 'This barcode value is already used by "Existing Kit"',
       },
     });
+  });
+});
+
+describe("importDataHasBarcodes", () => {
+  it("detects every barcode type, including ExternalQR and EAN13", () => {
+    // why: the import entitlement guard previously only checked
+    // Code128/Code39/DataMatrix, so files carrying only ExternalQR/EAN13
+    // slipped past and had those barcodes silently dropped when the
+    // destination workspace lacked the barcodes add-on.
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_EAN13: "5901234123457" },
+      ])
+    ).toBe(true);
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_ExternalQR: "abc123" },
+      ])
+    ).toBe(true);
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_Code128: "ABCD1234" },
+      ])
+    ).toBe(true);
+  });
+
+  it("returns false when no row carries any barcode column", () => {
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A" },
+        { key: "b", title: "B", barcode_Code128: "" },
+      ])
+    ).toBe(false);
+  });
+
+  it("ignores whitespace-only barcode cells (matches the parser)", () => {
+    // why: the parser trims and skips " ", so the guard must too — otherwise an
+    // accidental space would 403 a workspace that has barcodes disabled.
+    expect(
+      importDataHasBarcodes([{ key: "a", title: "A", barcode_Code128: "   " }])
+    ).toBe(false);
   });
 });
 
