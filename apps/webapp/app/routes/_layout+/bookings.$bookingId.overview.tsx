@@ -81,7 +81,10 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -236,8 +239,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     //   return statusRedirect;
     // }
 
-    /** For self service & base users, we only allow them to read their own bookings */
-    if (!canSeeAllBookings && booking.custodianUserId !== authSession.userId) {
+    /**
+     * For self service & base users, we only allow them to read their own
+     * bookings. Custody matches on EITHER link so a booking held via the
+     * team-member link alone stays readable by the user it belongs to —
+     * the same rule the index and the CSV export apply.
+     */
+    if (
+      !canSeeBooking({
+        canSeeAllBookings,
+        booking,
+        userId: authSession.userId,
+      })
+    ) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",
