@@ -4,7 +4,10 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -64,6 +67,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
+    // Self-service / base users see only their own bookings here. Resolve the
+    // full scope (user link + every team-member link) so legacy team-member-
+    // linked bookings aren't hidden while showing on the index.
+    const custodianScope = !canSeeAllBookings
+      ? await resolveCustodianScope({ userId, organizationId })
+      : undefined;
+
     const [{ bookings, bookingCount }, teamMembersData, tagsData, kit] =
       await Promise.all([
         getBookings({
@@ -73,10 +83,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           search,
           userId,
           statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-          ...(!canSeeAllBookings && {
-            // If the user is self service, we only show bookings that belong to that user)
-            custodianScope: { userId },
-          }),
+          ...(custodianScope && { custodianScope }),
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,

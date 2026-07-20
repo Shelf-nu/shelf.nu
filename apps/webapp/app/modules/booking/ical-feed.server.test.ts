@@ -14,7 +14,7 @@ vi.mock("~/database/db.server", () => ({
       count: vi.fn().mockResolvedValue(0),
     },
     teamMember: {
-      findFirst: vi.fn(),
+      findMany: vi.fn(),
     },
   },
 }));
@@ -37,9 +37,9 @@ beforeEach(() => {
 
 describe("getBookingsForICalFeed scoping", () => {
   it("restricts a member who can't see all bookings to their own (custodian user OR team member)", async () => {
-    vi.mocked(db.teamMember.findFirst).mockResolvedValue({
-      id: "tm-1",
-    } as never);
+    vi.mocked(db.teamMember.findMany).mockResolvedValue([
+      { id: "tm-1" },
+    ] as never);
 
     await getBookingsForICalFeed({
       organizationId: ORG_ID,
@@ -87,7 +87,7 @@ describe("getBookingsForICalFeed scoping", () => {
     expect(where.organizationId).toBe(ORG_ID);
     expect(where.custodianUserId).toBeUndefined();
     // privileged roles never need a team-member lookup
-    expect(db.teamMember.findFirst).not.toHaveBeenCalled();
+    expect(db.teamMember.findMany).not.toHaveBeenCalled();
     // the feed renders rows only — it must not run the wasted COUNT companion
     expect(db.booking.count).not.toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe("getBookingsForICalFeed scoping", () => {
   });
 
   it("throws if a restricted member has no team-member record", async () => {
-    vi.mocked(db.teamMember.findFirst).mockResolvedValue(null);
+    vi.mocked(db.teamMember.findMany).mockResolvedValue([] as never);
 
     await expect(
       getBookingsForICalFeed({
@@ -119,5 +119,32 @@ describe("getBookingsForICalFeed scoping", () => {
         canSeeAllBookings: false,
       })
     ).rejects.toThrow();
+  });
+
+  it("includes ALL of a member's team-member links in the restriction, not just one", async () => {
+    // A user can hold more than one TeamMember row per org (no unique
+    // constraint), and a legacy booking's custody may point at any of them.
+    // Resolving only the first would silently hide those bookings.
+    vi.mocked(db.teamMember.findMany).mockResolvedValue([
+      { id: "tm-1" },
+      { id: "tm-2" },
+    ] as never);
+
+    await getBookingsForICalFeed({
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      canSeeAllBookings: false,
+    });
+
+    expect(lastFindManyWhere().AND).toEqual(
+      expect.arrayContaining([
+        {
+          OR: [
+            { custodianUserId: USER_ID },
+            { custodianTeamMemberId: { in: ["tm-1", "tm-2"] } },
+          ],
+        },
+      ])
+    );
   });
 });

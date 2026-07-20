@@ -41,6 +41,7 @@ import {
   bookingDraftVisibilityClause,
   getBookings,
   getBookingsFilterData,
+  resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
@@ -834,16 +835,19 @@ async function buildExportCustodyScopeClause({
   userId: string;
   organizationId: string;
 }): Promise<Prisma.BookingWhereInput> {
-  const teamMember = await db.teamMember.findFirst({
-    where: { userId, organizationId },
-    select: { id: true },
+  // Resolve ALL of the user's team-member links (a user can hold more than one
+  // per org — the schema has no unique constraint), so the export matches the
+  // index's custody scope instead of an arbitrary single row.
+  const { teamMemberIds } = await resolveCustodianScope({
+    userId,
+    organizationId,
   });
 
   return {
     OR: [
       { custodianUserId: userId },
-      ...(teamMember
-        ? [{ custodianTeamMemberId: { in: [teamMember.id] } }]
+      ...(teamMemberIds.length
+        ? [{ custodianTeamMemberId: { in: teamMemberIds } }]
         : []),
     ],
   };

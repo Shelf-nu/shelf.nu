@@ -1,7 +1,10 @@
 import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -44,6 +47,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    // Always scoped to the current user — /me/bookings only ever shows their
+    // own. Resolve the full scope (user link + every team-member link) so
+    // legacy team-member-linked bookings aren't hidden here.
+    const custodianScope = await resolveCustodianScope({
+      userId,
+      organizationId,
+    });
+
     const [{ bookings, bookingCount }, tagsData] = await Promise.all([
       getBookings({
         organizationId,
@@ -51,8 +62,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         search,
         userId,
-        // Hardcoded to the current user because only they can see their own bookings
-        custodianScope: { userId },
+        custodianScope,
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],

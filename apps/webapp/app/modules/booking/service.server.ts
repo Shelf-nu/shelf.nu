@@ -8543,6 +8543,40 @@ export async function extendBooking({
   }
 }
 
+/**
+ * Resolves the `custodianScope` restriction for one user in one organization —
+ * the "these bookings are mine" clause that {@link getBookings} ANDs in so a
+ * restricted (SELF_SERVICE / BASE) user only ever sees their own bookings.
+ *
+ * Resolves **every** `TeamMember` row the user has in the org, not just one:
+ * the schema has no unique constraint on `(userId, organizationId)` (the
+ * demotion backfill migration depends on that), so a user can hold more than
+ * one team-member row, and a legacy booking's custody link may point at any of
+ * them. A `findFirst` would silently hide bookings linked via the other rows.
+ *
+ * Returns `teamMemberIds: []` when the user has no team member — callers that
+ * require one (the index, the iCal feed) throw on that; list surfaces simply
+ * fall back to matching on the user link alone.
+ *
+ * @param params.userId - The user whose bookings the scope restricts to
+ * @param params.organizationId - The active workspace
+ * @returns A `custodianScope` with all of the user's team-member ids in the org
+ */
+export async function resolveCustodianScope({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<{ userId: string; teamMemberIds: string[] }> {
+  const teamMembers = await db.teamMember.findMany({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  return { userId, teamMemberIds: teamMembers.map((tm) => tm.id) };
+}
+
 export async function getBookingsFilterData({
   request,
   userId,
@@ -8594,15 +8628,12 @@ export async function getBookingsFilterData({
 
   // Only fetch team member data if the user doesn't have permission to see all bookings
   if (!canSeeAllBookings) {
-    // Get the team member for the current user
-    const teamMember = await db.teamMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-      },
+    const custodianScope = await resolveCustodianScope({
+      userId,
+      organizationId,
     });
 
-    if (!teamMember) {
+    if (!custodianScope.teamMemberIds.length) {
       throw new ShelfError({
         cause: null,
         title: "Team member not found",
@@ -8613,13 +8644,10 @@ export async function getBookingsFilterData({
       });
     }
 
-    selfServiceData = {
-      // If the user is self service/base without override, we only show bookings that belong to that user
-      custodianScope: {
-        userId,
-        teamMemberIds: [teamMember.id],
-      },
-    };
+    // If the user is self service/base without override, we only show bookings
+    // that belong to that user — matched via their user link OR any of their
+    // team-member links.
+    selfServiceData = { custodianScope };
   }
 
   return {
@@ -10145,14 +10173,11 @@ export async function getBookingsForICalFeed(params: {
   // query — it can only ever narrow visibility to this member, never widen it.
   let custodianScope: {
     userId: string;
-    teamMemberIds?: string[];
+    teamMemberIds: string[];
   } | null = null;
   if (!canSeeAllBookings) {
-    const teamMember = await db.teamMember.findFirst({
-      where: { userId, organizationId },
-      select: { id: true },
-    });
-    if (!teamMember) {
+    custodianScope = await resolveCustodianScope({ userId, organizationId });
+    if (!custodianScope.teamMemberIds.length) {
       throw new ShelfError({
         cause: null,
         title: "Team member not found",
@@ -10162,7 +10187,6 @@ export async function getBookingsForICalFeed(params: {
         shouldBeCaptured: false,
       });
     }
-    custodianScope = { userId, teamMemberIds: [teamMember.id] };
   }
 
   try {
@@ -12005,6 +12029,13 @@ export async function loadBookingsData({
   // Fetch bookings with filters. Includes ONGOING/OVERDUE so assets/kits can be
   // added to active bookings (they stay AVAILABLE — progressive checkout), not
   // just to not-yet-started DRAFT/RESERVED ones.
+  // Self-service / base users may only work with their own bookings — resolve
+  // the full scope (user link + every team-member link) so legacy rows aren't
+  // hidden here while showing on the index.
+  const custodianScope = isSelfServiceOrBase
+    ? await resolveCustodianScope({ userId, organizationId })
+    : undefined;
+
   const { bookings, bookingCount } = await getBookings({
     organizationId,
     page,
@@ -12012,10 +12043,7 @@ export async function loadBookingsData({
     search,
     userId,
     statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
-    // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
-    ...(isSelfServiceOrBase && {
-      custodianScope: { userId },
-    }),
+    ...(custodianScope && { custodianScope }),
   });
 
   // Set up header and model name

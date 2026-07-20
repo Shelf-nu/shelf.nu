@@ -2,7 +2,10 @@ import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -65,6 +68,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    // Scopes to the profile being viewed, NOT the viewer — this route renders
+    // one user's bookings and is gated above by a `teamMemberProfile.read` check
+    // (self-service/base users cannot reach other profiles). Do not substitute
+    // the caller's id here. Resolves all of the viewed user's team-member links
+    // so legacy team-member-linked bookings show, matching their own index.
+    const custodianScope = await resolveCustodianScope({
+      userId: selectedUserId,
+      organizationId,
+    });
+
     const [{ bookings, bookingCount }, tagsData] = await Promise.all([
       getBookings({
         organizationId,
@@ -72,11 +85,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         search,
         userId: authSession?.userId,
-        // Scopes to the profile being viewed, NOT the viewer — this route
-        // renders one user's bookings and is gated above by a
-        // `teamMemberProfile.read` check (self-service/base users cannot reach
-        // other profiles). Do not substitute the caller's id here.
-        custodianScope: { userId: selectedUserId },
+        custodianScope,
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],

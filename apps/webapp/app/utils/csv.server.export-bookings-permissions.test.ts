@@ -26,7 +26,7 @@ import { exportBookingsFromIndexToCsv } from "./csv.server";
 
 // why: the subject under test is the `where` the export builds, not what a
 // database returns. Mocking the client lets us capture that argument.
-// `teamMember.findFirst` is mocked because the restriction resolves the
+// `teamMember.findMany` is mocked because the restriction resolves ALL of the
 // caller's own team-member ids to match custody recorded on either link, and
 // `partialBookingCheckin.findMany` because the export batches check-in state
 // for the rows it fetched.
@@ -36,7 +36,7 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
     },
     teamMember: {
-      findFirst: vitest.fn().mockResolvedValue({ id: "own-team-member-1" }),
+      findMany: vitest.fn().mockResolvedValue([{ id: "own-team-member-1" }]),
     },
     partialBookingCheckin: {
       findMany: vitest.fn().mockResolvedValue([]),
@@ -125,6 +125,6 @@ describe("exportBookingsFromIndexToCsv — explicit bookingsIds branch", () => {
   it("does not look up team members for a caller who can see all bookings", async () => {
     await captureWhere(true);
 
-    expect(db.teamMember.findFirst).not.toHaveBeenCalled();
+    expect(db.teamMember.findMany).not.toHaveBeenCalled();
   });
 });

@@ -102,7 +102,11 @@ WHERE b."custodianTeamMemberId" = tm."id"
 -- means the transfer ran.
 --
 -- The same two EXISTS guards as statement 1 apply, here to the recovered
--- creator, so no intentional removal transfer is reverted.
+-- creator, so no intentional removal transfer is reverted. It also restores the
+-- creator ONLY for bookings the actor still owns (custodian is the actor, or
+-- none), matching the runtime scoped transfer — so it does not undo the
+-- created-for-others transfer. That custody check reads `custodianUserId`,
+-- which statement 1 restores, so THESE TWO STATEMENTS MUST RUN IN THIS ORDER.
 --
 -- ACCEPTED, UNRECOVERABLE RESIDUE: `ActivityEvent` was introduced by migration
 -- `20260421123609`, while the bug landed with `20260217120638`. Bookings created
@@ -127,6 +131,14 @@ FROM (
 WHERE src."bookingId" = b."id"
   AND src."organizationId" = b."organizationId"
   AND src."actorUserId" <> b."creatorId"
+  -- Only restore the creator on bookings the actor still owns: where they are
+  -- the custodian (custody is restored by statement 1 above, which runs first
+  -- in this transaction) or the booking has no registered custodian. Bookings
+  -- the actor created FOR a different custodian are deliberately left with the
+  -- transfer recipient, matching the runtime scoped transfer
+  -- (`bookingsReassignedOnDemotionWhere`). Restoring those would re-grant the
+  -- demoted user creator-based write access to someone else's booking.
+  AND (b."custodianUserId" IS NULL OR b."custodianUserId" = src."actorUserId")
   AND EXISTS (
     SELECT 1
     FROM "UserOrganization" uo
