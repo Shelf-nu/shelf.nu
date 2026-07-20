@@ -352,8 +352,9 @@ export function DateTimePicker({
     if (min && compareDay(parsed, min) < 0) return;
     if (max && compareDay(parsed, max) > 0) return;
 
-    // Preserve the current time in datetime mode (default 09:00 for a fresh pick).
-    const nextTime = mode === "datetime" ? time || "09:00" : "";
+    // Preserve the current time in datetime mode; a fresh pick falls back to the
+    // partsToWire default ("00:00") for consistency across the picker.
+    const nextTime = mode === "datetime" ? time : "";
     commit(partsToWire(parsed, nextTime, mode));
   };
 
@@ -363,18 +364,20 @@ export function DateTimePicker({
   };
 
   const handleDaySelect = (day: Date | undefined) => {
-    // Datetime keeps the current time, or defaults to 09:00 for a fresh pick.
-    const nextTime = mode === "datetime" ? time || "09:00" : "";
+    // Datetime keeps the current time; a fresh pick falls back to the
+    // partsToWire default ("00:00") for consistency across the picker.
+    const nextTime = mode === "datetime" ? time : "";
     setTypedText(dateToText(day));
     commit(partsToWire(day, nextTime, mode));
     setOpen(false);
   };
 
   const handleNativeTimeChange = (nextTime: string) => {
-    // No date yet → anchor the time to today so the field carries a value.
-    const baseDate = selectedDate ?? new Date();
-    setTypedText(dateToText(baseDate));
-    commit(partsToWire(baseDate, nextTime, "datetime"));
+    // No date selected yet → ignore the time change rather than silently
+    // committing today as the base date (which would set the field to today).
+    if (!selectedDate) return;
+    setTypedText(dateToText(selectedDate));
+    commit(partsToWire(selectedDate, nextTime, "datetime"));
   };
 
   const handleClear = () => {

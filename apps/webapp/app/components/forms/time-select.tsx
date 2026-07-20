@@ -126,9 +126,11 @@ function getDisplayLabel(
   value24: string,
   timeFormat: TimeFormatPreference = "H12"
 ): string {
-  // 24h display: the stored value already IS the display string.
+  // 24h display: the stored value already IS the display string, but validate
+  // the HH:mm shape first so an unparseable value returns "" per this function's
+  // contract (mirrors the H12 path's try/catch) instead of surfacing raw text.
   if (timeFormat === "H24") {
-    return value24;
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(value24) ? value24 : "";
   }
 
   // First check if it's the special 23:59 end-of-day case

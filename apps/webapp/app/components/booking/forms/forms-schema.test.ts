@@ -1058,7 +1058,7 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
 
   function parseStart(timeZone: string): Date {
     const schema = BookingFormSchema({
-      hints: { timeZone } as any,
+      hints: { timeZone },
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
@@ -1111,7 +1111,7 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
 
     // 2. Submit that wall-clock and parse it back with the pref zone.
     const schema = BookingFormSchema({
-      hints: { timeZone: PREF_ZONE } as any,
+      hints: { timeZone: PREF_ZONE },
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
