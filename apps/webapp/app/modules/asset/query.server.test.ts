@@ -917,6 +917,18 @@ describe("assetQueryFragment", () => {
       expect(sql).not.toContain("'kitName', bk_kit.name");
     });
   });
+
+  describe("quantity-tracking fields projection (import-ready export)", () => {
+    it("projects minQuantity and consumptionType by their mapped column names", () => {
+      // why: Prisma.sql is an opaque string to TS, so a wrong/missing column
+      // name only surfaces as a runtime 500. Guard the projection statically.
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      expect(sql).toContain('a."minQuantity" AS "assetMinQuantity"');
+      expect(sql).toContain('a."consumptionType" AS "assetConsumptionType"');
+    });
+  });
 });
 
 describe("generateWhereClause - barcode value case normalization", () => {
