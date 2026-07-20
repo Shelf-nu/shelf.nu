@@ -5,7 +5,8 @@ import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { useDisabled } from "~/hooks/use-disabled";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 
 /** Stable module-scoped default to avoid new array identity on each render */
 const EMPTY_TARGET_ROLES: OrganizationRoles[] = [];
@@ -31,12 +32,15 @@ export function UpdateForm({
   status = UpdateStatus.DRAFT,
   targetRoles = EMPTY_TARGET_ROLES,
 }: UpdateFormProps) {
-  // Default publish date to now if not provided.
-  // DateTimePicker treats defaultValue as a naive LOCAL wire string, so build
-  // it from local clock fields via dateForDateTimeInputValue (not toISOString,
-  // which would shift the displayed time by the UTC offset outside UTC).
-  const defaultPublishDate = dateForDateTimeInputValue(
-    publishDate ? new Date(publishDate) : new Date()
+  // Default publish date to now if not provided. Seed the datetime-local input
+  // with the wall-clock in the user's RESOLVED timezone preference — the same
+  // zone the action parses the submitted value in — so an existing publishDate
+  // shows the correct wall-clock and round-trips back to the same instant even
+  // when the admin's browser zone differs from their preference.
+  const { timeZone } = useFormatPrefs();
+  const defaultPublishDate = toIsoDateTimeToUserTimezone(
+    publishDate ?? new Date(),
+    timeZone
   ).slice(0, 16);
 
   const isEdit = !!id;

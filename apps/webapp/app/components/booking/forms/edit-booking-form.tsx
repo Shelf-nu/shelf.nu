@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
 import { useAtom } from "jotai";
+import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -14,6 +15,7 @@ import type {
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -127,6 +129,19 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
+
+  // TIMEZONE FIX: `startDate` / `endDate` are naive wall-clock strings in the
+  // user's RESOLVED pref zone (see the seed above). Parse them back to absolute
+  // instants using that SAME zone (not the browser zone) before handing Date
+  // objects to the check-in/out dialogs — `new Date(str)` would parse the
+  // wall-clock in the browser zone and yield the wrong instant when the two
+  // differ. `DATE_TIME_FORMAT` matches the `.slice(0, 16)` wall-clock shape.
+  const startDateAsDate = DateTime.fromFormat(startDate, DATE_TIME_FORMAT, {
+    zone: prefs.timeZone,
+  }).toJSDate();
+  const endDateAsDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
+    zone: prefs.timeZone,
+  }).toJSDate();
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
@@ -402,7 +417,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
-                    booking={{ id, name: name!, from: new Date(startDate!) }}
+                    booking={{ id, name: name!, from: startDateAsDate }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={
@@ -438,8 +453,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 booking={{
                   id,
                   name: name!,
-                  to: new Date(endDate),
-                  from: new Date(startDate),
+                  to: endDateAsDate,
+                  from: startDateAsDate,
                 }}
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={

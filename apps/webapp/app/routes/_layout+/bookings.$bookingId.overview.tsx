@@ -1441,18 +1441,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ]
     );
 
-    // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
-    // RESOLVED timezone preference (the same one date DISPLAY uses), not the
-    // browser hint. When the two differ the browser hint interprets the typed
-    // wall-clock in the wrong zone and stores the wrong UTC instant. Shared by
-    // the save / reserve / extend branches below; locale still comes from hints.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-
     switch (intent) {
       case "save": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
         const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
         const parsedData = parseData(
           formData,
@@ -1513,6 +1510,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "reserve": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
         const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
 
         const parsedData = parseData(
@@ -1916,15 +1919,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "extend-booking": {
         const hints = getClientHint(request);
 
-        // Debug: Check what's actually in the form data
+        // TIMEZONE FIX: parse the submitted wall-clock end date in the acting
+        // user's RESOLVED pref timezone (matches display), not the browser
+        // hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (await resolveUserFormatPrefsById(userId, hints))
+          .timeZone;
 
         const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
-            // TIMEZONE FIX: parse the submitted wall-clock end date in the
-            // acting user's RESOLVED pref timezone (matches display), not the
-            // browser hint.
             timeZone: prefTimeZone,
             bookingSettings,
             isAdminOrOwner,

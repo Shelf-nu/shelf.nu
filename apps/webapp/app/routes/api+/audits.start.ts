@@ -188,13 +188,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
     // (e.g. pref Europe/London, browser UTC+3: typed 15:48 stored as 12:48Z
     // instead of 14:48Z).
     const dueDateString = formData.get("dueDate")?.toString();
-    const { timeZone: prefTimeZone } = await resolveUserFormatPrefsById(
-      userId,
-      hints
-    );
+    // Resolve the acting user's timezone preference lazily — only when a due
+    // date was actually submitted (no date → no parse → no DB lookup needed).
     const dueDateUTC = dueDateString
       ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-          zone: prefTimeZone,
+          zone: (await resolveUserFormatPrefsById(userId, hints)).timeZone,
         }).toJSDate()
       : undefined;
     if (dueDateUTC && dueDateUTC <= new Date()) {
