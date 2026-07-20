@@ -59,13 +59,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const [booking, bookingNotes] = await Promise.all([
-      getBooking({ id, organizationId, request }),
-      getBookingNotes({
-        bookingId: id,
-        organizationId,
-      }),
-    ]);
+    const booking = await getBooking({ id, organizationId, request });
 
     /**
      * For self service & base users, we only allow them to read their own
@@ -74,6 +68,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * SELF_SERVICE, and `getBooking` is org-scoped only. Without this check any
      * booking's activity feed is readable by id. Mirrors the gate the overview
      * route applies.
+     *
+     * Gate BEFORE fetching notes so an unauthorized request never reads another
+     * user's activity rows — the custody check is a precondition, not a filter
+     * applied after the data is already in memory.
      */
     if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
       throw new ShelfError({
@@ -84,6 +82,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    const bookingNotes = await getBookingNotes({
+      bookingId: id,
+      organizationId,
+    });
 
     const header: HeaderData = {
       title: `${booking.name}'s activity`,

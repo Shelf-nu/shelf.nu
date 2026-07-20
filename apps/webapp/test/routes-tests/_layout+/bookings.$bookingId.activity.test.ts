@@ -430,10 +430,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
     } as any);
 
     // The loader `throw`s `data(error(...), { status })` on failure rather than
-    // returning it, so the rejected value carries the status. The gate is what
-    // keeps the notes from reaching the caller: the loader fetches them
-    // concurrently with the booking, so they are read from the DB either way
-    // and simply discarded on this path — no note content is ever returned.
+    // returning it, so the rejected value carries the status.
     await expect(
       loader(
         createLoaderArgs({
@@ -443,6 +440,11 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
         })
       )
     ).rejects.toMatchObject({ init: { status: 403 } });
+
+    // The gate is a precondition: an unauthorized request must never read the
+    // notes table at all, not fetch-then-discard. Notes are queried only after
+    // the custody check passes.
+    expect(bookingNoteService.getBookingNotes).not.toHaveBeenCalled();
   });
 
   it("reads the caller's own booking activity", async () => {
