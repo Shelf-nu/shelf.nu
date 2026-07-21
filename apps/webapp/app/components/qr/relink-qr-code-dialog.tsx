@@ -129,12 +129,19 @@ export function RelinkQrCodeDialog({
              * `scannerModeClassName="h-[450px]"` were only there to match the
              * fixed 450px: InfoOverlay is already `absolute inset-0` and
              * ScannerMode is already `h-full`, so both now track the flexed
-             * height on their own. `overlayClassName` keeps its preferred
-             * height because the base overlay already caps itself at
-             * `max-h-[90%] md:max-h-[95%]` of the scanner.
+             * height on their own.
+             *
+             * overlayPosition="centered" is REQUIRED once the scanner can
+             * shrink. The default is "fullscreen", which pins the paused
+             * "Code detected" overlay at `top-[75px]` with a fixed height; at a
+             * ~200px scanner that overflowed the `overflow-hidden` container by
+             * ~190px and cropped 60% of the confirmation card. The centered
+             * variant caps itself at `max-h-[90%] md:max-h-[95%]` of the
+             * scanner and scrolls, so it fits at any height.
              */}
             <CodeScanner
               className="!h-auto min-h-[200px] shrink basis-[450px]"
+              overlayPosition="centered"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}
               onCodeDetectionSuccess={handleQrDetectionSuccess}
