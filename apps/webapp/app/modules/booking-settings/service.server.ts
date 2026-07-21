@@ -12,7 +12,7 @@ const label = "Booking Settings";
  * return the exact same shape — a single source of truth prevents the two
  * code paths from drifting apart over time.
  */
-const BOOKING_SETTINGS_SELECT = {
+export const BOOKING_SETTINGS_SELECT = {
   id: true,
   bufferStartTime: true,
   maxBookingLength: true,

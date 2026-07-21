@@ -2,6 +2,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
 import {
+  BOOKING_SETTINGS_SELECT,
   getBookingSettingsForOrganization,
   updateBookingSettings,
 } from "./service.server";
@@ -52,36 +53,9 @@ describe("getBookingSettingsForOrganization", () => {
 
     expect(db.bookingSettings.findUnique).toHaveBeenCalledWith({
       where: { organizationId: mockOrganizationId },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        tagsRequired: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        autoArchiveExpiredReservations: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      // Reuse the production projection so this assertion can't silently
+      // drift from what `getBookingSettingsForOrganization` actually selects.
+      select: BOOKING_SETTINGS_SELECT,
     });
     // why: the whole point of the read-first change is that an existing row
     // never triggers a write — this is the regression guard for the
@@ -127,36 +101,9 @@ describe("getBookingSettingsForOrganization", () => {
         notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        autoArchiveExpiredReservations: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      // Reuse the production projection so this assertion can't silently
+      // drift from what `getBookingSettingsForOrganization` actually selects.
+      select: BOOKING_SETTINGS_SELECT,
     });
     expect(result).toEqual(defaultSettings);
   });

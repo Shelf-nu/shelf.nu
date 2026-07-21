@@ -64,6 +64,10 @@ describe("useSearchParams", () => {
     routerMocks.pathname = "/assets";
     routerMocks.loaderData = { filters: "", settings: { mode: "SIMPLE" } };
     routerMocks.routeLoaderData = { currentOrganization: { id: "org-1" } };
+    // why: the last test in this suite sets this cookie directly (bypassing
+    // the mocked setter) to exercise real `js-cookie` read/remove behavior —
+    // clear it so a later run (or a failed assertion) can't leak it forward.
+    Cookies.remove("org-1_assetFilter_v2", { path: "/" });
   });
 
   it("keeps a stable customSetSearchParams identity across re-renders on a cookie-filtered page", () => {

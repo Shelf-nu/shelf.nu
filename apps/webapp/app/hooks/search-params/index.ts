@@ -163,7 +163,9 @@ export const useSearchParams = (): [
           let newParams = nextInit(prev);
           // Ensure newParams is an instance of URLSearchParams
           if (!(newParams instanceof URLSearchParams)) {
-            newParams = new URLSearchParams(newParams as any);
+            newParams = new URLSearchParams(
+              newParams as ConstructorParameters<typeof URLSearchParams>[0]
+            );
           }
           checkAndDestroyCookies(newParams);
           return newParams;
@@ -172,7 +174,9 @@ export const useSearchParams = (): [
         let newParams = nextInit;
         // Ensure newParams is an instance of URLSearchParams
         if (!(newParams instanceof URLSearchParams)) {
-          newParams = new URLSearchParams(newParams as any);
+          newParams = new URLSearchParams(
+            newParams as ConstructorParameters<typeof URLSearchParams>[0]
+          );
         }
         checkAndDestroyCookies(newParams);
         setSearchParams(newParams, navigateOptions);
@@ -181,7 +185,7 @@ export const useSearchParams = (): [
     [searchParams, setSearchParams, destroyCookieValues]
   );
 
-  /** In those cases, we return the default searchParams and setSearchParams as we dont need to handle cookies */
+  /** In those cases, we return the default searchParams and setSearchParams as we don't need to handle cookies */
   return isPageWithCookieFilters && currentOrganization
     ? [searchParams, customSetSearchParams]
     : [searchParams, setSearchParams];

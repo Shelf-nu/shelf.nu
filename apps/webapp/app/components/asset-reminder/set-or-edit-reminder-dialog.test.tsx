@@ -5,6 +5,12 @@
  * dialog + strip the param) exactly once — not on every re-render while the
  * strip navigation is still committing.
  *
+ * Also covers the follow-up "21x mini-storm" fix: the reminders table mounts
+ * one create dialog plus one closed edit dialog per row, and every mounted
+ * instance observes the same `?success=true` param. Only the dialog that is
+ * actually `open` may act on it — a closed instance must not call `onClose`
+ * or `setSearchParams`.
+ *
  * @see {@link file://./set-or-edit-reminder-dialog.tsx}
  */
 import type { ComponentProps, ReactNode } from "react";
@@ -93,10 +99,16 @@ vi.mock("react-router", async () => {
   };
 });
 
-function renderDialog(onClose: () => void) {
+/**
+ * Renders the dialog inside a `MemoryRouter`. Defaults to `open={true}` since
+ * most tests below exercise the "originating" dialog whose submit produced
+ * the success param; pass `open: false` to simulate a sibling row's closed
+ * edit dialog observing the same param.
+ */
+function renderDialog(onClose: () => void, { open = true } = {}) {
   return render(
     <MemoryRouter>
-      <SetOrEditReminderDialog open onClose={onClose} />
+      <SetOrEditReminderDialog open={open} onClose={onClose} />
     </MemoryRouter>
   );
 }
@@ -145,6 +157,20 @@ describe("SetOrEditReminderDialog success-handling effect", () => {
     currentSearchParams = new URLSearchParams();
 
     renderDialog(makeOnClose());
+
+    expect(onCloseCallCount).toBe(0);
+    expect(setSearchParamsCallCount).toBe(0);
+  });
+
+  it("does not call onClose or setSearchParams when the dialog is not open, even if success=true", () => {
+    // Simulates a sibling row's closed edit dialog: every mounted instance
+    // of SetOrEditReminderDialog observes the same `?success=true` param
+    // after ANY row's create/edit submits, but only the dialog that is
+    // actually `open` should react — otherwise an N-row page produces N
+    // competing navigations/revalidations (the "21x mini-storm" bug).
+    currentSearchParams = new URLSearchParams("success=true");
+
+    renderDialog(makeOnClose(), { open: false });
 
     expect(onCloseCallCount).toBe(0);
     expect(setSearchParamsCallCount).toBe(0);

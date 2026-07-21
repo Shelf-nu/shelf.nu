@@ -87,15 +87,25 @@ export default function SetOrEditReminderDialog({
 
   useEffect(
     function handleOnSuccess() {
-      const success = searchParams.get("success");
+      const isSuccess = searchParams.get("success") === "true";
 
-      if (success !== "true") {
+      if (!isSuccess) {
         // Re-arm the latch once the param is gone (or was never set) so a
         // *subsequent* success (e.g. creating another reminder) still closes
         // the dialog and strips the param.
         successHandledRef.current = false;
         return;
       }
+
+      // Gate on `open`: the reminders table mounts ONE create dialog plus,
+      // inside every row's `ActionsDropdown`, one (closed) edit dialog. All
+      // of those instances observe the same `?success=true` param, so
+      // without this gate every mounted instance — each with its own
+      // independently-false latch — would call `setSearchParams` once,
+      // producing N competing navigations/`.data` revalidations on an
+      // N-row page. Only the dialog that is actually `open` (the one whose
+      // submit produced this success) should react.
+      if (!open) return;
 
       if (successHandledRef.current) {
         // Already handled this success signal — the strip navigation may
@@ -119,7 +129,7 @@ export default function SetOrEditReminderDialog({
         { replace: true, preventScrollReset: true }
       );
     },
-    [onClose, searchParams, setSearchParams]
+    [open, onClose, searchParams, setSearchParams]
   );
 
   return (
