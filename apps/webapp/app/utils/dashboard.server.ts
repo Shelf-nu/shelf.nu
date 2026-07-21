@@ -31,20 +31,10 @@ interface MonthlyGrowthRow {
   assets_created: number;
 }
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+// Fixed-en-US short-month formatter — the SAME mechanism the shared date
+// formatter (formatDate) uses for name-months. Constructed once at module
+// scope because Intl formatter construction is costly to repeat in a loop.
+const SHORT_MONTH_FMT = new Intl.DateTimeFormat("en-US", { month: "short" });
 
 export function buildMonthlyGrowthData(
   monthlyRows: MonthlyGrowthRow[],
@@ -77,10 +67,12 @@ export function buildMonthlyGrowthData(
     cumulative += assetsCreated;
 
     months.push({
-      // why: kept ISO/English on purpose — dashboard chart-axis month label
-      // stays in English for consistent visuals; not driven by the user's
-      // display date-format preference.
-      month: MONTH_NAMES[d.getMonth()],
+      // why: a monthly chart-axis BUCKET label, not a full date — it uses the
+      // same fixed-en-US Intl month rendering as the shared date formatter
+      // (short English month, e.g. "Jul"), and deliberately does NOT follow the
+      // user's numeric date-format preference (a "07/2026" axis would be worse
+      // UX). Kept a short name so a month-name preference stays visually aligned.
+      month: SHORT_MONTH_FMT.format(d),
       year: d.getFullYear(),
       assetsCreated,
       "Total assets": cumulative,

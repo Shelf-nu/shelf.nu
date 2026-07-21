@@ -87,11 +87,7 @@ export default function OverdueBookings() {
                             </>
                           )}
                           <span className="font-medium text-error-600">
-                            Due{" "}
-                            <DateS
-                              date={booking.to}
-                              options={{ month: "short", day: "numeric" }}
-                            />
+                            Due <DateS date={booking.to} />
                           </span>
                         </span>
                       </div>
