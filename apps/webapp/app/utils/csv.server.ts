@@ -15,7 +15,6 @@ import {
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
-import { format } from "date-fns";
 import iconv from "iconv-lite";
 import { db } from "~/database/db.server";
 import {
@@ -604,19 +603,15 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.status;
             break;
           case "createdAt":
-            // why: kept ISO/English on purpose — CSV timestamps stay
-            // machine-readable ISO 8601 so export → re-import round-trips
-            // losslessly regardless of the user's display date format.
-            value = asset.createdAt
-              ? new Date(asset.createdAt).toISOString()
-              : "";
+            // Human/analytics export → format in the acting user's date/time
+            // prefs. The Import-ready export handles machine round-trips and
+            // doesn't even include createdAt/updatedAt (they aren't import
+            // fields), so there is no lossless-ISO contract to preserve here.
+            value = asset.createdAt ? formatDateForCsv(asset.createdAt) : "";
             break;
           case "updatedAt":
-            // why: kept ISO/English on purpose — see createdAt above; ISO
-            // preserves the import round-trip contract.
-            value = asset.updatedAt
-              ? new Date(asset.updatedAt).toISOString()
-              : "";
+            // Human/analytics export → format in the user's prefs (see createdAt).
+            value = asset.updatedAt ? formatDateForCsv(asset.updatedAt) : "";
             break;
           case "valuation":
             // Per-unit price — matches `Asset.valuation` in the DB so CSV
@@ -725,7 +720,8 @@ export const buildCsvExportDataFromAssets = ({
           value = formatCustomFieldForCsv(
             fieldValue,
             column.cfType,
-            currentOrganization
+            currentOrganization,
+            prefs
           );
         }
       }
@@ -786,7 +782,11 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
 const formatCustomFieldForCsv = (
   fieldValue: ShelfAssetCustomFieldValueType["value"],
   cfType: CustomFieldType | undefined,
-  currentOrganization: Pick<Organization, "id" | "barcodesEnabled" | "currency">
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >,
+  prefs: ResolvedFormatPrefs
 ): string => {
   if (!fieldValue || fieldValue.raw === undefined || fieldValue.raw === null) {
     return "";
@@ -807,10 +807,10 @@ const formatCustomFieldForCsv = (
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
       try {
-        // why: kept ISO/English on purpose — custom-field dates export as
-        // ISO (yyyy-MM-dd) so the CSV import round-trip stays lossless,
-        // independent of the user's display date format.
-        return format(new Date(fieldValue.valueDate), "yyyy-MM-dd");
+        // Standard export is display-only (re-import uses the Import-ready
+        // export), so custom-field dates render in the user's date format.
+        // localeOnly: a calendar date with no instant — no tz conversion.
+        return formatDate(fieldValue.valueDate, prefs, { localeOnly: true });
       } catch {
         return String(fieldValue.raw);
       }
