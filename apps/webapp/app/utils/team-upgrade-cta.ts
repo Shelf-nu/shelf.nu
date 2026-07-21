@@ -7,6 +7,14 @@
  * Getting this wrong is user-visible: offering a "trial" to someone who already
  * spent theirs dead-ends, because the subscription action rejects a second one.
  *
+ * Deliberately NOT considered here: the paid add-ons (`Organization.auditsEnabled`,
+ * `Organization.barcodesEnabled`). Those live on the organization and can be active
+ * on a Personal workspace while the user is still on the free tier, so they make
+ * someone a paying customer without changing what this resolves. They do not affect
+ * entitlement to a Team workspace, which is driven purely by the tier's
+ * `TierLimit.maxOrganizations`. This is also why nothing outside this function
+ * should try to render "the plan" as a single label: there isn't one.
+ *
  * @see {@link file://./../routes/_layout+/settings.team.tsx}
  * @see {@link file://./../routes/_layout+/account-details.subscription.tsx}
  */
