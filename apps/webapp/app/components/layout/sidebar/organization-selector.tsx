@@ -24,13 +24,33 @@ import {
   useSidebar,
 } from "./sidebar";
 
+/**
+ * Plan marker shown beside a Personal workspace name.
+ *
+ * Personal workspaces cannot invite anyone regardless of plan, so the marker
+ * states the plan the user actually pays for rather than assuming "free" from
+ * the workspace type. Team-tier users get no marker: they already pay for Team,
+ * and badging their Personal workspace would misrepresent what it is.
+ *
+ * @param tierId - The user's subscription tier
+ * @returns The label to render, or null when no marker should be shown
+ */
+function getPersonalPlanLabel(tierId: string | null | undefined) {
+  if (tierId === "free") return "Free";
+  if (tierId === "tier_1") return "Plus";
+  return null;
+}
+
 export default function OrganizationSelector() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const { open, openMobile, isMobile } = useSidebar();
 
-  const { organizations, currentOrganizationId } =
+  const { organizations, currentOrganizationId, user } =
     useLoaderData<typeof loader>();
+
+  /** Plan marker for a Personal workspace; null when none should show. */
+  const personalPlanLabel = getPersonalPlanLabel(user?.tierId);
 
   const fetcher = useFetcher();
   const isSwitchingOrg = isFormProcessing(fetcher.state);
@@ -89,6 +109,12 @@ export default function OrganizationSelector() {
                       {currentOrganization.name}
                     </span>
                   </div>
+                  {currentOrganization.type === "PERSONAL" &&
+                  personalPlanLabel ? (
+                    <span className="ml-1 shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                      {personalPlanLabel}
+                    </span>
+                  ) : null}
                   <ChevronDownIcon className="ml-auto" />
                 </>
               </When>
@@ -144,6 +170,16 @@ export default function OrganizationSelector() {
             >
               Manage workspaces
             </Button>
+            {currentOrganization.type === "PERSONAL" ? (
+              <Button
+                to="/settings/team"
+                variant="link"
+                className="w-full select-none justify-start rounded p-2 text-left font-medium text-primary-700 outline-none hover:bg-gray-50"
+                onClick={closeDropdown}
+              >
+                Upgrade to invite your team
+              </Button>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
