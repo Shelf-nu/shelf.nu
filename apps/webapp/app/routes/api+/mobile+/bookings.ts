@@ -6,6 +6,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -83,6 +84,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       organizationId,
       status: { in: statusFilter },
       ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+      /**
+       * Draft privacy (web parity). A DRAFT booking is private to whoever
+       * created it — web enforces this in `getBookings`, the slim picker list
+       * and the CSV export via this same shared clause. Mobile applied it
+       * nowhere, so every user saw every colleague's unfinished drafts.
+       *
+       * AND-ed rather than merged into the search `OR` below: an OR at this
+       * level would widen the search clause instead of restricting it.
+       */
+      AND: [bookingDraftVisibilityClause(user.id)],
       // Keyword search over booking name + description (the field-tech "find my
       // booking" case). Web also searches tags/custodian/asset names; name +
       // description covers the common case without a heavier query.
