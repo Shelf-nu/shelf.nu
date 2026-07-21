@@ -159,11 +159,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           });
         }
 
-        await updateAccountPassword(
-          otpData.user.id,
-          password,
-          otpData.session.access_token
-        );
+        /**
+         * Revokes every session for the user (GoTrue deletes all sessions on an
+         * admin password update), so other logged-in browsers are signed out on
+         * their next request.
+         */
+        await updateAccountPassword(otpData.user.id, password);
 
         context.destroySession();
         return redirect("/login?password_reset=true");

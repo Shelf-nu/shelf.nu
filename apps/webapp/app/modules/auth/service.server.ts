@@ -367,11 +367,25 @@ export async function sendResetPasswordLink(email: string) {
   }
 }
 
-export async function updateAccountPassword(
-  id: string,
-  password: string,
-  accessToken?: string | undefined
-) {
+/**
+ * Updates a user's password via the Supabase admin API.
+ *
+ * Session handling is delegated entirely to GoTrue: the admin
+ * `updateUserById` endpoint calls `UpdatePassword(tx, nil)` internally, which
+ * runs `Logout(tx, userId)` — deleting **every** session for the user, with
+ * refresh tokens cascade-deleted via `refresh_tokens_session_id_fkey`.
+ *
+ * That means all sessions are revoked, including the caller's own. Shelf's
+ * `protect()` middleware calls {@link validateSession} on every non-public
+ * request, so any other logged-in browser is signed out on its next request.
+ * Callers that must keep the user logged in have to mint a fresh session
+ * afterwards (see the `signInWithEmail` call in the onboarding route).
+ *
+ * @param id - The Supabase auth user id whose password is being changed
+ * @param password - The new plaintext password
+ * @throws {ShelfError} If the user is SSO-backed, or the update fails
+ */
+export async function updateAccountPassword(id: string, password: string) {
   try {
     const user = await db.user.findFirst({
       where: { id },
@@ -386,11 +400,7 @@ export async function updateAccountPassword(
         label,
       });
     }
-    //logout all the others session expect the current sesssion.
-    if (accessToken) {
-      await getSupabaseAdmin().auth.admin.signOut(accessToken, "others");
-    }
-    //on password update, it is remvoing the session in th supbase.
+
     const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
       password,
     });
