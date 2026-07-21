@@ -464,6 +464,13 @@ export async function updateAccountPassword(
       throw error;
     }
   } catch (cause) {
+    // Preserve already-specific ShelfErrors (e.g. the SSO guard above).
+    // Wrapping them would replace their actionable message with the generic
+    // one below, so the user would never learn why the update was refused.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
@@ -560,7 +567,7 @@ export async function validateSession(token: string) {
     Logger.error(
       new ShelfError({
         cause: null,
-        message: "Something went wrong while valdiating the session",
+        message: "Something went wrong while validating the session",
         label,
         shouldBeCaptured: false,
       })
