@@ -281,7 +281,11 @@ export default function AddBookingAssetsScreen() {
           onPress={() => toggleAsset(item.id)}
           accessibilityRole="button"
           accessibilityState={{ selected }}
-          accessibilityLabel={`${item.title}${selected ? ", selected" : ""}`}
+          accessibilityLabel={`${item.title}${
+            item.displayCode
+              ? `, ${item.displayCode.label} ${item.displayCode.value}`
+              : ""
+          }${selected ? ", selected" : ""}`}
         >
           <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
             {selected && (
@@ -303,9 +307,25 @@ export default function AddBookingAssetsScreen() {
               <Ionicons name="cube-outline" size={18} color={colors.gray300} />
             </View>
           )}
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
+          <View style={styles.assetInfo}>
+            <Text style={styles.rowAssetTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            {/* The code the operator reads off the physical tag — scan it, or
+                just eyeball this id and toggle the row (web-parity code badge). */}
+            {item.displayCode ? (
+              <View style={styles.rowCodeLine}>
+                <Ionicons
+                  name="qr-code-outline"
+                  size={12}
+                  color={colors.muted}
+                />
+                <Text style={styles.rowCode} numberOfLines={1}>
+                  {item.displayCode.value}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </TouchableOpacity>
       );
     },
@@ -690,6 +710,27 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     fontWeight: "600",
     color: colors.foreground,
+  },
+  // Asset row text column: title + code line stacked.
+  assetInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  rowAssetTitle: {
+    fontSize: fontSize.base,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  rowCodeLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  rowCode: {
+    flex: 1,
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    fontVariant: ["tabular-nums"],
   },
   // Book-by-model rows
   modelInfo: {

@@ -32,12 +32,18 @@ Shelf decides which role a user gets by matching the groups they belong to in yo
 > [!NOTE]
 > You only need to map the **roles you actually use** — a single group mapping is enough for SSO to work. You do not need to create a group for every role. See your provider guide below for whether to use group **names** or group **IDs**.
 
+**Mapping more than one group to a role.** Each role field accepts **one or more group identifiers, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several groups you already have in your identity provider should all grant the same Shelf role, so you don't have to create a new dedicated group just for Shelf. For example, mapping the Self service role to `staff@your-idp, faculty@your-idp` gives both groups self-service access.
+
+> [!NOTE]
+> A user still only ever holds **one** Shelf role per workspace. If their groups match more than one role, the **highest** one applies (Administrator > Self service > Base) — so listing several groups for a role is a convenience for grouping people into one role, never a way to grant multiple roles. Matching ignores letter case and surrounding spaces, but paste each value exactly as your identity provider sends it to be safe.
+
 ## Setup and limitations [#](#setup-and-limitations)
 
 Shelf supports most identity providers that support the SAML 2.0 SSO protocol. We've prepared these guides for commonly used identity providers to help you get started. If you use a different provider, our support stands ready to help you out.
 
 - [Google Workspaces (formerly GSuite)](./providers/google-workspace.md)
 - [Microsoft Entra (formerly Azure Active Directory)](./providers/microsoft-entra.md)
+- [Shibboleth](./providers/shibboleth.md)
 - Okta
 
 Accounts signing in with SSO have certain limitations. The following sections outline the limitations when SSO is enabled or disabled for your team.

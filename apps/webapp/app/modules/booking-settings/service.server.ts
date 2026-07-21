@@ -21,6 +21,7 @@ export async function getBookingSettingsForOrganization(
         tagsRequired: false,
         autoArchiveBookings: false,
         autoArchiveDays: 2,
+        autoArchiveExpiredReservations: false,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
         countKitsAsSingleUnit: false,
@@ -36,6 +37,7 @@ export async function getBookingSettingsForOrganization(
         tagsRequired: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -78,6 +80,7 @@ export async function updateBookingSettings({
   maxBookingLengthSkipClosedDays,
   autoArchiveBookings,
   autoArchiveDays,
+  autoArchiveExpiredReservations,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
   countKitsAsSingleUnit,
@@ -91,6 +94,7 @@ export async function updateBookingSettings({
   maxBookingLengthSkipClosedDays?: boolean;
   autoArchiveBookings?: boolean;
   autoArchiveDays?: number;
+  autoArchiveExpiredReservations?: boolean;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
   countKitsAsSingleUnit?: boolean;
@@ -111,6 +115,9 @@ export async function updateBookingSettings({
       updateData.autoArchiveBookings = autoArchiveBookings;
     if (autoArchiveDays !== undefined)
       updateData.autoArchiveDays = autoArchiveDays;
+    if (autoArchiveExpiredReservations !== undefined)
+      updateData.autoArchiveExpiredReservations =
+        autoArchiveExpiredReservations;
     if (requireExplicitCheckinForAdmin !== undefined)
       updateData.requireExplicitCheckinForAdmin =
         requireExplicitCheckinForAdmin;
@@ -135,6 +142,7 @@ export async function updateBookingSettings({
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,

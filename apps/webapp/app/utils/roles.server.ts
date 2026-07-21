@@ -141,23 +141,80 @@ export async function requirePermission({
   };
 }
 
-/** Gets the role needed for SSO login from the groupID returned by the SSO claims */
+/**
+ * Splits a comma-separated `SsoDetails` group-id field into a normalized list of
+ * lower-cased, trimmed, non-empty ids. Mirrors the comma-separated convention
+ * already used by `SsoDetails.domain`, so one role can map to several IdP groups
+ * without a schema change.
+ *
+ * @param field - Raw group-id field (`adminGroupId` | `selfServiceGroupId` | `baseUserGroupId`)
+ * @returns Normalized group ids (possibly empty)
+ */
+function parseGroupIds(field: string | null | undefined): string[] {
+  return (field ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Returns true if the group id(s) configured on a role field are present in the
+ * SAML `groups` claim. Matching is trimmed + case-insensitive.
+ *
+ * Two match modes, checked in order, so both real-world value shapes work:
+ *  1. Whole-field match — the entire trimmed field equals a claim value. Supports
+ *     values that themselves contain commas, e.g. LDAP DNs like
+ *     `cn=shelf-base,ou=groups,dc=example,dc=edu`.
+ *  2. Comma-separated list — the field is split on commas and any token matches.
+ *     Supports mapping several comma-free groups (names, Grouper paths, entitlement
+ *     URIs, scoped affiliations) to one role.
+ *
+ * A field containing `=` is treated as a single DN-style value (whole-field only),
+ * NOT split on commas — otherwise a DN's components (`dc=edu`, `ou=groups`) would
+ * each become match candidates and could falsely grant a role. Consequence: you
+ * cannot comma-list multiple DN values in one field (map them to separate roles,
+ * or use comma-free identifiers).
+ *
+ * @param field - The role's configured group-id field on `SsoDetails`
+ * @param claimGroups - The `groups` claim values from the SAML assertion
+ */
+function groupClaimMatches(
+  field: string | null | undefined,
+  claimGroups: string[]
+): boolean {
+  const whole = (field ?? "").trim().toLowerCase();
+  if (!whole) return false;
+  const claims = claimGroups.map((value) => value.trim().toLowerCase());
+  // 1. Whole-field exact match (handles comma-bearing values like LDAP DNs).
+  if (claims.includes(whole)) return true;
+  // 2. A DN-style value (contains "=") is a single value only — never split it,
+  //    so its components can't become false matches.
+  if (whole.includes("=")) return false;
+  // 3. Otherwise treat the field as a comma-separated list of individual group ids.
+  return parseGroupIds(field).some((id) => claims.includes(id));
+}
+
+/**
+ * Resolves the Shelf organization role for an SSO user from the SAML `groups`
+ * claim, using the group ids mapped on `SsoDetails`. Precedence is
+ * ADMIN > SELF_SERVICE > BASE: if the user is in groups for multiple roles, the
+ * highest wins. Returns `null` when no configured group matches (the caller then
+ * grants no org access → the user lands on `/sso-pending-assignment`).
+ *
+ * @param ssoDetails - The org's SSO config (holds the per-role group ids)
+ * @param groupIds - The `groups` claim values from the SAML assertion
+ * @returns The resolved role, or `null` if none matched
+ */
 export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles | null {
-  // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
-  if (ssoDetails.adminGroupId && groupIds.includes(ssoDetails.adminGroupId)) {
+  // We prioritize the admin group. If the user is in several, the highest role wins.
+  if (groupClaimMatches(ssoDetails.adminGroupId, groupIds)) {
     return OrganizationRoles.ADMIN;
-  } else if (
-    ssoDetails.selfServiceGroupId &&
-    groupIds.includes(ssoDetails.selfServiceGroupId)
-  ) {
+  } else if (groupClaimMatches(ssoDetails.selfServiceGroupId, groupIds)) {
     return OrganizationRoles.SELF_SERVICE;
-  } else if (
-    ssoDetails.baseUserGroupId &&
-    groupIds.includes(ssoDetails.baseUserGroupId)
-  ) {
+  } else if (groupClaimMatches(ssoDetails.baseUserGroupId, groupIds)) {
     return OrganizationRoles.BASE;
   } else {
     return null;

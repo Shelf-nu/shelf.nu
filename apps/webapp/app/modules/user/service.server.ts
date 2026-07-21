@@ -1181,6 +1181,7 @@ export async function softDeleteUser(id: User["id"]) {
             id,
             newOwnerId,
             organizationId: userOrg.organizationId,
+            reason: "removal",
           });
         }
         /**
@@ -1498,24 +1499,85 @@ export async function changeUserRole({
   }
 }
 
+/**
+ * Why a user's entities are being moved. The two callers have opposite
+ * requirements, so this is required with no default — every call site must
+ * declare intent and the compiler enforces it.
+ *
+ * - `"removal"` — the user is losing workspace access entirely. `Booking.creator`
+ *   and `Booking.custodianUser` are `onDelete: Cascade` FKs, so they must be
+ *   cleared off the departing user. `creatorId` is non-nullable → transferred
+ *   rather than nulled.
+ * - `"demotion"` — the user KEEPS membership; only their role rank drops. The
+ *   `User` row is untouched, so no cascade applies. Only OWNERSHIP columns move.
+ */
+export type EntityTransferReason = "removal" | "demotion";
+
+/**
+ * Prisma `where` selecting the bookings a DEMOTION reassigns to the new owner:
+ * those the user created for a DIFFERENT registered custodian. Shared by
+ * {@link transferEntitiesToNewOwner} (which moves them) and the change-role
+ * dialog's entity-count endpoint (which tells the admin how many will move), so
+ * the number the admin consents to and the rows actually reassigned cannot drift.
+ *
+ * The custodian filter is `IS NOT NULL AND <> userId`, written explicitly rather
+ * than as the terser `{ not: userId }`: a null `custodianUserId` marks the
+ * booking as the user's own — an unassigned draft, or a legacy row held via the
+ * team-member link — which must stay theirs. `{ not: userId }` alone excludes
+ * nulls only because this Prisma version compiles `not` to a bare `<>`; the
+ * explicit `not: null` keeps those rows out regardless of that behaviour. See
+ * the JSDoc on {@link transferEntitiesToNewOwner} for the full rationale.
+ */
+export function bookingsReassignedOnDemotionWhere({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Prisma.BookingWhereInput {
+  return {
+    creatorId: userId,
+    organizationId,
+    AND: [
+      { custodianUserId: { not: null } },
+      { custodianUserId: { not: userId } },
+    ],
+  };
+}
+
 /** Move entries inside an organization from 1 owner to another.
- * Affects the following models:
- *   - [x] Asset
- *   - [x] Category
- *   - [x] Tag
- *   - [x] Location
- *   - [x] CustomField
- *   - [x] Invite (skippable via `skipInvites`)
- *   - [x] Booking
- *   - [x] Image
- *   - [x] Kit
- *   - [x] AssetReminder
+ *
+ * OWNERSHIP — moved for EVERY `reason`: `Asset`/`Category`/`Tag`/`Location`/
+ * `CustomField`/`Image.userId`, `Kit`/`AssetReminder.createdById`.
+ *
+ * AUTHORSHIP + ASSIGNMENT:
+ * - `removal`: `Invite.inviterId` and `Booking.creatorId` transfer to the new
+ *   owner, and `Booking.custodianUserId` is nulled — a departing user must come
+ *   off every FK before their row is anonymized (`Booking.creator`/`custodianUser`
+ *   are `onDelete: Cascade`; `creatorId` is non-nullable, so it transfers rather
+ *   than nulls).
+ * - `demotion`: the user keeps membership, so `Invite.inviterId` stays theirs
+ *   and `Booking.custodianUserId` is left untouched. `Booking.creatorId`
+ *   transfers ONLY for bookings whose custodian is a DIFFERENT registered user
+ *   — bookings the user created on someone else's behalf. Their own bookings
+ *   keep `creatorId`: either they are the custodian, or there is no registered
+ *   custodian (an unassigned draft, or a legacy row held via the team-member
+ *   link with a null `custodianUserId`).
+ *
+ * Why scope demotion that way: `validateBookingOwnership` grants
+ * SELF_SERVICE/BASE access on `creatorId === userId || custodianUserId === userId`.
+ * Transferring ALL of a demoted user's `creatorId` would hide their own drafts
+ * from them (DRAFT visibility keys solely on `creatorId`) and leak those drafts
+ * to the recipient; keeping ALL of it would let them retain write access to
+ * bookings they created for other people. Moving only the created-for-others
+ * slice avoids both.
+ *
+ * Narrow, accepted residue on `demotion`: a booking created for a NON-registered
+ * member (null `custodianUserId`, custody on the team-member link only) keeps
+ * the demoted user as creator — there is no registered custodian to hand it to.
  *
  * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
  * transferred — their userId represents authorship, not ownership.
- *
- * Invites can be skipped via `skipInvites` (used during demotion) because
- * inviterId represents "who sent this" (authorship), not ownership.
  *
  * Required to be used inside a transaction
  */
@@ -1524,13 +1586,13 @@ export async function transferEntitiesToNewOwner({
   id,
   newOwnerId,
   organizationId,
-  skipInvites = false,
+  reason,
 }: {
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
-  skipInvites?: boolean;
+  reason: EntityTransferReason;
 }) {
   /** Update assets */
   await tx.asset.updateMany({
@@ -1587,8 +1649,14 @@ export async function transferEntitiesToNewOwner({
     },
   });
 
-  /** Update invites (skipped during demotion — inviterId is authorship) */
-  if (!skipInvites) {
+  /**
+   * AUTHORSHIP + ASSIGNMENT rewrites — removal only. On demotion the user
+   * keeps membership, so inviterId (authorship) stays theirs, and the
+   * Booking.creator/custodianUser cascade-defusing rewrites below don't
+   * apply (see the accepted-consequence note in the JSDoc above).
+   */
+  if (reason === "removal") {
+    /** Update invites */
     await tx.invite.updateMany({
       where: {
         inviterId: id,
@@ -1598,29 +1666,48 @@ export async function transferEntitiesToNewOwner({
         inviterId: newOwnerId,
       },
     });
+
+    /** Update bookings */
+    await tx.booking.updateMany({
+      where: {
+        creatorId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        creatorId: newOwnerId,
+      },
+    });
+
+    /** Update bookings where the person deleted is the custodian */
+    await tx.booking.updateMany({
+      where: {
+        custodianUserId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        custodianUserId: null,
+      },
+    });
   }
 
-  /** Update bookings */
-  await tx.booking.updateMany({
-    where: {
-      creatorId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      creatorId: newOwnerId,
-    },
-  });
-
-  /** Update bookings where the person deleted is the custodian */
-  await tx.booking.updateMany({
-    where: {
-      custodianUserId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      custodianUserId: null,
-    },
-  });
+  if (reason === "demotion") {
+    /**
+     * Hand over ONLY the bookings the demoted user created for a different
+     * registered custodian; their own bookings keep `creatorId`. The predicate
+     * (and the reason it is null-safe) lives in
+     * {@link bookingsReassignedOnDemotionWhere}, shared with the count the
+     * change-role dialog shows the admin.
+     */
+    await tx.booking.updateMany({
+      where: bookingsReassignedOnDemotionWhere({
+        userId: id,
+        organizationId,
+      }),
+      data: {
+        creatorId: newOwnerId,
+      },
+    });
+  }
 
   /** Update images */
   await tx.image.updateMany({

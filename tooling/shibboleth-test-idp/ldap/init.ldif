@@ -1,0 +1,68 @@
+# Seed data for the local Shibboleth test IdP's OpenLDAP backend.
+#
+# Base DN: dc=idptestbed (must match idp-home/conf/ldap.properties and
+# idp-home/conf/attribute-resolver.xml).
+#
+# eduPerson-schema workaround: stock OpenLDAP (osixia/openldap) does not
+# ship the eduPerson/eduMember schemas, so group/affiliation/entitlement
+# data is stashed in standard inetOrgPerson/organizationalPerson attributes
+# and renamed to the canonical eduPerson attribute IDs in
+# idp-home/conf/attribute-resolver.xml:
+#   title            -> eduPersonScopedAffiliation (scoped to @example.edu)
+#   description      -> isMemberOf
+#   businessCategory -> eduPersonEntitlement
+
+dn: ou=groups,dc=idptestbed
+objectClass: organizationalUnit
+ou: groups
+
+dn: ou=People,dc=idptestbed
+objectClass: organizationalUnit
+ou: People
+
+dn: uid=carol,ou=People,dc=idptestbed
+objectClass: inetOrgPerson
+uid: carol
+cn: Carol Admin
+sn: Admin
+givenName: Carol
+mail: carol@example.edu
+userPassword: carolpass
+title: staff
+description: cn=admins,ou=groups,dc=idptestbed
+description: cn=engineering,ou=groups,dc=idptestbed
+businessCategory: urn:mace:example.edu:shelf:admin
+
+dn: uid=alice,ou=People,dc=idptestbed
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Staff
+sn: Staff
+givenName: Alice
+mail: alice@example.edu
+userPassword: alicepass
+title: staff
+description: cn=engineering,ou=groups,dc=idptestbed
+businessCategory: urn:mace:example.edu:shelf:selfservice
+
+dn: uid=bob,ou=People,dc=idptestbed
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Student
+sn: Student
+givenName: Bob
+mail: bob@example.edu
+userPassword: bobpass
+title: student
+description: cn=library-users,ou=groups,dc=idptestbed
+businessCategory: urn:mace:example.edu:shelf:base
+
+dn: uid=dan,ou=People,dc=idptestbed
+objectClass: inetOrgPerson
+uid: dan
+cn: Dan Nogroup
+sn: Nogroup
+givenName: Dan
+mail: dan@example.edu
+userPassword: danpass
+title: guest

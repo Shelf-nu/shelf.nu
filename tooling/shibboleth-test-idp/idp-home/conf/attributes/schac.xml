@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    Note that all built-in rules rely on URI-naming and thus include the implied settings:
+    
+    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:2.0:attrname-format:uri</prop>
+    <prop key="saml1.namespace">urn:mace:shibboleth:1.0:attributeNamespace:uri</prop>
+    -->
+
+    <bean parent="shibboleth.TranscodingRuleLoader">
+    <constructor-arg>
+    <list>
+	<bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacMotherTongue</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.1</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.1</prop>
+                    <prop key="displayName.en">Mother Tongue</prop>
+                    <prop key="displayName.de">Muttersprache</prop>
+                    <prop key="displayName.fr">Langue maternelle</prop>
+                    <prop key="displayName.it">Lingua Madre</prop>
+                    <prop key="displayName.sk">Materinský jazyk</prop>
+                    <prop key="description.en">Mother tongue of the subject</prop>
+                    <prop key="description.de">Muttersprache der Person</prop>
+                    <prop key="description.fr">Langue maternelle (la langue apprise en premier par une personne : fr</prop>
+                    <prop key="description.it">Lingua Madre dell'utente</prop>
+                    <prop key="description.sk">Materinský jazyk osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacGender</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.2</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.2</prop>
+                    <prop key="displayName.en">Gender</prop>
+                    <prop key="displayName.de">Geschlecht</prop>
+                    <prop key="displayName.fr">Genre</prop>
+                    <prop key="displayName.it">Genere</prop>
+                    <prop key="displayName.sk">Pohlavie</prop>
+                    <prop key="description.en">Gender of the subject</prop>
+                    <prop key="description.de">Geschlecht der Person</prop>
+                    <prop key="description.fr">Genre de la personne : un chiffre (0 "Not known, 1 "Male", 2 "Female", 9 "Not specified")</prop>
+                    <prop key="description.it">Genere dell'utente</prop>
+                    <prop key="description.sk">Pohlavie osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacDateOfBirth</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.3</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.3</prop>
+                    <prop key="displayName.en">Date of Birth</prop>
+                    <prop key="displayName.de">Geburtsdatum</prop>
+                    <prop key="displayName.fr">Date de naissance</prop>
+                    <prop key="displayName.it">Giorno di nascita</prop>
+                    <prop key="displayName.sk">Dátum narodenia</prop>
+                    <prop key="description.en">The date of birth of the subject</prop>
+                    <prop key="description.de">Geburtsdatum der Person</prop>
+                    <prop key="description.fr">Date de naissance au format "YYYYMMJJ"</prop>
+                    <prop key="description.it">Giorno di nascita del soggetto</prop>
+                    <prop key="description.sk">Dátum narodenia osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacYearOfBirth</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.0.2.3</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.0.2.3</prop>
+                    <prop key="displayName.en">Year of birth</prop>
+                    <prop key="displayName.de">Geburtsjahr</prop>
+                    <prop key="displayName.fr">Année de naissance</prop>
+                    <prop key="displayName.it">Anno di nascita</prop>
+                    <prop key="displayName.sk">Rok narodenia</prop>
+                    <prop key="description.en">The year of birth for the subject</prop>
+                    <prop key="description.de">Geburtsjahr der Person</prop>
+                    <prop key="description.fr">Année de naissance au format "YYYY"</prop>
+                    <prop key="description.it">Anno di nascita del soggetto</prop>
+                    <prop key="description.sk">Rok narodenia osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacPlaceOfBirth</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.4</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.4</prop>
+                    <prop key="displayName.en">Place of Birth</prop>
+                    <prop key="displayName.de">Geburtsort</prop>
+                    <prop key="displayName.fr">Lieu de naissance</prop>
+                    <prop key="displayName.it">Luogo di nascita</prop>
+                    <prop key="displayName.sk">Miesto narodenia</prop>
+                    <prop key="description.en">The place of birth of the subject</prop>
+                    <prop key="description.de">Geburtsort der Person</prop>
+                    <prop key="description.fr">Lieu de naissance</prop>
+                    <prop key="description.it">Luogo di nascita del soggetto</prop>
+                    <prop key="description.sk">Miesto narodenia osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacCountryOfCitizenship</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.5</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.5</prop>
+                    <prop key="displayName.en">Country of Citizenship</prop>
+                    <prop key="displayName.de">Nationalität</prop>
+                    <prop key="displayName.fr">Nationalité</prop>
+                    <prop key="displayName.sk">Občianstvo</prop>
+                    <prop key="description.en">The countries of citizenship of the subject</prop>
+                    <prop key="description.de">Nationalitäten der Person</prop>
+                    <prop key="description.fr">Pays où une personne est un citoyen : 2 lettres au format ISO 3166 (fr, es...)</prop>
+                    <prop key="description.it">Cittadinanza</prop>
+                    <prop key="description.sk">Krajiny občianstva osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacSn1</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.6</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.6</prop>
+                    <prop key="displayName.en">First Surname</prop>
+                    <prop key="displayName.de">Erster Nachname</prop>
+                    <prop key="displayName.fr">Premier nom</prop>
+                    <prop key="displayName.it">Primo Cognome</prop>
+                    <prop key="displayName.sk">Priezvisko</prop>
+                    <prop key="description.en">First surname of the subject ("the surname" in international terms)</prop>
+                    <prop key="description.de">Erster Nachname einer Person</prop>
+                    <prop key="description.fr">Premier nom d'une personne</prop>
+                    <prop key="description.it">Il cognome di una persona</prop>
+                    <prop key="description.sk">Priezvisko osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacSn2</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.7</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.7</prop>
+                    <prop key="displayName.en">Second Surname</prop>
+                    <prop key="displayName.de">Zweiter Nachname</prop>
+                    <prop key="displayName.fr">Second nom</prop>
+                    <prop key="displayName.it">Secondo Cognome</prop>
+                    <prop key="displayName.sk">Druhé priezvisko</prop>
+                    <prop key="description.en">Second surname of the subject</prop>
+                    <prop key="description.de">Zweiter Nachname der Person</prop>
+                    <prop key="description.fr">Second nom d'une personne</prop>
+                    <prop key="description.it">Secondo cognome di una persona</prop>
+                    <prop key="description.sk">Druhé priezvisko osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacPersonalTitle</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.8</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.8</prop>
+                    <prop key="displayName.en">Personal Title</prop>
+                    <prop key="displayName.de">Persönlicher Titel</prop>
+                    <prop key="displayName.fr">Titre</prop>
+                    <prop key="displayName.it">Soprannome</prop>
+                    <prop key="displayName.sk">Osobný titul</prop>
+                    <prop key="description.en">Personal title of the subject</prop>
+                    <prop key="description.de">Persönlicher Titel in der Anrede</prop>
+                    <prop key="description.fr">Titre de la personne</prop>
+                    <prop key="description.it">Titolo usato per salutare l'utente</prop>
+                    <prop key="description.sk">Osobný titul osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacHomeOrganization</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.9</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.9</prop>
+                    <prop key="displayName.en">Home Organization</prop>
+                    <prop key="displayName.de">Heimatorganisation</prop>
+                    <prop key="displayName.de-ch">Heimorganisation</prop>
+                    <prop key="displayName.fi">Kotiorganisaatio</prop>
+                    <prop key="displayName.fr">Organisme</prop>
+                    <prop key="displayName.it">Dominio dell'istituzione</prop>
+                    <prop key="displayName.sk">Domovská organizácia</prop>
+                    <prop key="description.en">The domain name of the subject's home organisation</prop>
+                    <prop key="description.de">Domänenname der Heimatorganisation der Person</prop>
+                    <prop key="description.de-ch">Domainname der Heimorganisation der Person</prop>
+                    <prop key="description.fi">Henkilön kotiorganisaation domain-nimi</prop>
+                    <prop key="description.fr">Nom de domaine DNS de l'organisme d'origine d'une personne</prop>
+                    <prop key="description.it">Dominio dell'istituzione</prop>
+                    <prop key="description.sk">Názov domény domovskej organizácie osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacHomeOrganizationType</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.10</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.10</prop>
+                    <prop key="displayName.en">Home organization type</prop>
+                    <prop key="displayName.de">Art der Heimatorganisation</prop>
+                    <prop key="displayName.de-ch">Art der Heimorganisation</prop>
+                    <prop key="displayName.fi">Kotiorganisaation tyyppi</prop>
+                    <prop key="displayName.fr">Type d'organisme</prop>
+                    <prop key="displayName.it">Tipo di organizzazione di appartenenza (internazionale)</prop>
+                    <prop key="displayName.sk">Druh domovskej organizácie</prop>
+                    <prop key="description.en">Home organisation type: university, polytechnic, etc</prop>
+                    <prop key="description.de">Art der Heimatorganisation: Universität, Fachhochschule, etc.</prop>
+                    <prop key="description.de-ch">Art der Heimorganisation: Universität, Fachhochschule, etc.</prop>
+                    <prop key="description.fi">Kotiorganisaation tyyppi: yliopisto, ammattikorkeakoulu jne</prop>
+                    <prop key="description.fr">Type d'organisme d'origine d'une personne</prop>
+                    <prop key="description.it">Tipo di organizzazione di appartenenza</prop>
+                    <prop key="description.sk">Druh domovskej organizácie: univerzita, polytechnika atď.</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacCountryOfResidence</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.11</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.11</prop>
+                    <prop key="displayName.en">Country of Residence</prop>
+                    <prop key="displayName.de">Land des Wohnsitzes</prop>
+                    <prop key="displayName.fr">Pays de résidence</prop>
+                    <prop key="displayName.it">Residenza</prop>
+                    <prop key="displayName.sk">Krajina pobytu</prop>
+                    <prop key="description.en">The country of residence of the subject</prop>
+                    <prop key="description.de">Land des Wohnsitzes der Person</prop>
+                    <prop key="description.fr">Pays de résidence : fr, es...</prop>
+                    <prop key="description.it">Paese di residenza dell'utente</prop>
+                    <prop key="description.sk">Krajina bydliska osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacUserPresenceID</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.12</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.12</prop>
+                    <prop key="displayName.en">User Presence ID</prop>
+                    <prop key="displayName.de">Benutzer-Präsenz-ID</prop>
+                    <prop key="displayName.fr">Identifiant de présence</prop>
+                    <prop key="displayName.it">ID utente sulla rete</prop>
+                    <prop key="displayName.sk">ID prítomnosti používateľa</prop>
+                    <prop key="description.en">User presence identifiers of the subject</prop>
+                    <prop key="description.de">Benutzer-Präsenz-Identifikatoren des Subjekts</prop>
+                    <prop key="description.fr">Ensemble de valeurs liées aux protocoles de présence réseau (sip, xmpp, h323...)</prop>
+                    <prop key="description.it">Identificativi usati dall'utente sulla rete</prop>
+                    <prop key="description.sk">Identifikátory prítomnosti používateľa daného subjektu</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacPersonalPosition</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.13</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.13</prop>
+                    <prop key="displayName.en">Personal Position</prop>
+                    <prop key="displayName.de">Persönliche Position</prop>
+                    <prop key="displayName.fr">Position/Rôle</prop>
+                    <prop key="displayName.it">Ruolo ricoperto</prop>
+                    <prop key="displayName.sk">Osobné postavenie</prop>
+                    <prop key="description.en">Personal position of the subject within the institution</prop>
+                    <prop key="description.de">Persönliche Stellung der betreffenden Person innerhalb der Institution</prop>
+                    <prop key="description.fr">Position/Rôle de la personne au sein d'une institution</prop>
+                    <prop key="description.it">Ruolo dell'utente nell'istituzione</prop>
+                    <prop key="description.sk">Osobné postavenie osoby v rámci inštitúcie</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacPersonalUniqueCode</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.14</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.14</prop>
+                    <prop key="displayName.en">Personal Unique Code</prop>
+                    <prop key="displayName.de">Persönlicher eindeutiger Code</prop>
+                    <prop key="displayName.fr">Code personnel unique</prop>
+                    <prop key="displayName.it">Codice Univoco</prop>
+                    <prop key="displayName.sk">Osobný jedinečný kód</prop>
+                    <prop key="description.en">Unique code for the subject</prop>
+                    <prop key="description.de">Eindeutiger Code der Person</prop>
+                    <prop key="description.fr">"Code unique" pour le sujet auquel il est associé (peut être le numéro d'étudiant, le numéro d'employé, ...)</prop>
+                    <prop key="description.it">Codice Univoco legato al soggetto</prop>
+                    <prop key="description.sk">Osobný jedinečný kód osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacPersonalUniqueID</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.15</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.15</prop>
+                    <prop key="displayName.en">Personal Unique ID</prop>
+                    <prop key="displayName.de">Eindeutiger persönlicher Identifikator</prop>
+                    <prop key="displayName.fr">Identifiant personnel unique</prop>
+                    <prop key="displayName.it">ID Legale Univoco</prop>
+                    <prop key="displayName.sk">Osobné jedinečné identifikačné číslo</prop>
+                    <prop key="description.en">Personal unique identifier of the subject</prop>
+                    <prop key="description.de">Eindeutiger rechtlicher Identifikator der Person</prop>
+                    <prop key="description.fr">identifiant unique légal (DNI en espagne)</prop>
+                    <prop key="description.it">Identificativo Univoco Legale associato alla persona</prop>
+                    <prop key="description.sk">Osobné jedinečné identifikačné číslo osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacExpiryDate</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.17</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.17</prop>
+                    <prop key="displayName.en">Expiry Date</prop>
+                    <prop key="displayName.de">Ablaufdatum</prop>
+                    <prop key="displayName.fr">Date d'expiration</prop>
+                    <prop key="displayName.sk">Dátum expirácie</prop>
+                    <prop key="description.en">The date from which the set of data is to be considered invalid (specifically, in what refers to rights and entitlements)</prop>
+                    <prop key="description.de">Das Datum, ab dem der Datensatz als ungültig zu betrachten ist (insbesondere in Bezug auf Rechte und Ansprüche)</prop>
+                    <prop key="description.fr">Date à partir de laquelle l'ensemble de données de la personne doit être considéré comme invalide, au format "YYYYMMDDhhmmssZ"</prop>
+                    <prop key="description.it">Data di scadenza dei dati utente (diritti e titoli)</prop>
+                    <prop key="description.sk">Dátum, od ktorého sa súbor údajov považuje za neplatný (najmä v súvislosti s právami a nárokmi)</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacUserPrivateAttribute</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.18</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.18</prop>
+                    <prop key="displayName.en">User Private Attribute</prop>
+                    <prop key="displayName.de">Privates Benutzerattribut</prop>
+                    <prop key="displayName.fr">Exigences de confidentialité</prop>
+                    <prop key="displayName.sk">Súkromný atribút používateľa</prop>
+                    <prop key="description.en">Data that the subject and/or organization policies want to keep private</prop>
+                    <prop key="description.de">Daten, die der Benutzer und/oder die Organisation für sich behalten wollen</prop>
+                    <prop key="description.fr">Exigences de confidentialité, telles qu'exprimées par l'utilisateur et / ou les stratégies de l'entreprise</prop>
+                    <prop key="description.it">Dati che l'utente o le policy organizzative vogliono tenere private</prop>
+                    <prop key="description.sk">Údaje, ktoré subjekt a/alebo organizácia chcú zachovať ako súkromné</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacUserStatus</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.19</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.19</prop>
+                    <prop key="displayName.en">User Status</prop>
+                    <prop key="displayName.de">Benutzerstatus</prop>
+                    <prop key="displayName.fr">Status utilisateur</prop>
+                    <prop key="displayName.sk">Stav používateľa</prop>
+                    <prop key="description.en">Status of the subject as a consumer of services</prop>
+                    <prop key="description.de">Satz von Statuswerten einer Person als Nutzer von Dienstleistungen</prop>
+                    <prop key="description.fr">Ensemble de status d'une personne en tant qu'utilisateur de services</prop>
+                    <prop key="description.it">Stato di attivita' per l'utente sui diversi servizi</prop>
+                    <prop key="description.sk">Stav subjektu ako spotrebiteľa služieb</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacProjectMembership</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.20</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.20</prop>
+                    <prop key="displayName.en">Project Membership</prop>
+                    <prop key="displayName.de">Projekt-Mitgliedschaft</prop>
+                    <prop key="displayName.fr">Appartenance au projet</prop>
+                    <prop key="displayName.sk">Členstvo v projekte</prop>
+                    <prop key="description.en">Name of the project the subject belongs to</prop>
+                    <prop key="description.de">Name des Projekts, zu dem der Benutzer gehört</prop>
+                    <prop key="description.fr">Nom du projet auquel l'utilisateur appartient</prop>
+                    <prop key="description.it">Nome del progetto a cui l'utente appartiene</prop>
+                    <prop key="description.sk">Názov projektu, do ktorého subjekt patrí</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">schacProjectSpecificRole</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.25178.1.2.21</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.25178.1.2.21</prop>
+                    <prop key="displayName.en">Project Specific Role</prop>
+                    <prop key="displayName.de">Projektspezifische Rolle</prop>
+                    <prop key="displayName.fr">Roles spécifiques au projet</prop>
+                    <prop key="displayName.sk">Projektovo špecifická úloha</prop>
+                    <prop key="description.en">Set of roles for specific projects of the subject</prop>
+                    <prop key="description.de">Satz von Rollen des Benutzers in bestimmten Projekten</prop>
+                    <prop key="description.fr">Ensemble de rôles dans des projets spécifiques</prop>
+                    <prop key="description.it">Insieme dei ruoli svolti dall'utente su specifici progetti</prop>
+                    <prop key="description.sk">Súbor rolí pre konkrétne projekty danej osoby</prop>
+                </props>
+            </property>
+        </bean>
+    </list>
+    </constructor-arg>
+    </bean>
+</beans>
