@@ -146,7 +146,7 @@ describe("getBookingSettingsForOrganization", () => {
     });
   });
 
-  it("should handle missing organization id", async () => {
+  it("wraps a findUnique failure in a ShelfError", async () => {
     expect.assertions(1);
     const dbError = new Error("Database connection failed");
     //@ts-expect-error missing vitest type

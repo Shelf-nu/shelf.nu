@@ -5,12 +5,13 @@ import { ShelfError } from "~/utils/error";
 const label = "Booking Settings";
 
 /**
- * Shared `select` clause for `BookingSettings` reads/writes in this module.
+ * Shared `select` clause for the full `BookingSettings` shape.
  *
  * Hoisted to module scope so the read-first `findUnique` in
- * {@link getBookingSettingsForOrganization} and its upsert fallback always
- * return the exact same shape — a single source of truth prevents the two
- * code paths from drifting apart over time.
+ * {@link getBookingSettingsForOrganization}, its `upsert` fallback, and the
+ * `update` in {@link updateBookingSettings} all return the exact same shape —
+ * a single source of truth keeps those paths from drifting apart over time.
+ * (The notification-only helpers below deliberately select a leaner subset.)
  */
 export const BOOKING_SETTINGS_SELECT = {
   id: true,
@@ -175,36 +176,7 @@ export async function updateBookingSettings({
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
       data: updateData,
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        autoArchiveExpiredReservations: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      select: BOOKING_SETTINGS_SELECT,
     });
 
     return bookingSettings;
