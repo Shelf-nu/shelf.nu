@@ -160,11 +160,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
         }
 
         /**
-         * Revokes every session for the user (GoTrue deletes all sessions on an
-         * admin password update), so other logged-in browsers are signed out on
-         * their next request.
+         * Revokes every session for the user so other logged-in browsers are
+         * signed out on their next request. We pass the freshly-minted OTP
+         * access token so the explicit `signOut(…, "others")` defense-in-depth
+         * layer can run before the update (see `updateAccountPassword`).
          */
-        await updateAccountPassword(otpData.user.id, password);
+        await updateAccountPassword(
+          otpData.user.id,
+          password,
+          otpData.session.access_token
+        );
 
         context.destroySession();
         return redirect("/login?password_reset=true");
