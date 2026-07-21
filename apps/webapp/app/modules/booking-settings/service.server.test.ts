@@ -13,6 +13,7 @@ import {
 vitest.mock("~/database/db.server", () => ({
   db: {
     bookingSettings: {
+      findUnique: vitest.fn(),
       upsert: vitest.fn(),
       update: vitest.fn(),
     },
@@ -34,41 +35,29 @@ const mockOrganizationId = "org-1";
 describe("getBookingSettingsForOrganization", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: keep each test self-contained — default the read-first lookup to
+    // "not found" so tests that only care about the upsert fallback don't
+    // have to know about the new findUnique call. Tests exercising the
+    // existing-row path override this explicitly.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
   });
 
-  it("should get existing booking settings successfully", async () => {
-    expect.assertions(2);
+  it("should return the existing row without writing when one is found", async () => {
+    expect.assertions(3);
     //@ts-expect-error missing vitest type
-    db.bookingSettings.upsert.mockResolvedValue(mockBookingSettingsData);
+    db.bookingSettings.findUnique.mockResolvedValue(mockBookingSettingsData);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
-    expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
-      where: {
-        organizationId: mockOrganizationId,
-      },
-      update: {},
-      create: {
-        bufferStartTime: 0,
-        tagsRequired: false,
-        maxBookingLength: null,
-        maxBookingLengthSkipClosedDays: false,
-        autoArchiveBookings: false,
-        autoArchiveDays: 2,
-        autoArchiveExpiredReservations: false,
-        requireExplicitCheckinForAdmin: false,
-        requireExplicitCheckinForSelfService: false,
-        countKitsAsSingleUnit: false,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        organizationId: mockOrganizationId,
-      },
+    expect(db.bookingSettings.findUnique).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
       select: {
         id: true,
         bufferStartTime: true,
-        tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        tagsRequired: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
         autoArchiveExpiredReservations: true,
@@ -94,11 +83,15 @@ describe("getBookingSettingsForOrganization", () => {
         },
       },
     });
+    // why: the whole point of the read-first change is that an existing row
+    // never triggers a write — this is the regression guard for the
+    // connection-pool-exhaustion incident this task fixes.
+    expect(db.bookingSettings.upsert).not.toHaveBeenCalled();
     expect(result).toEqual(mockBookingSettingsData);
   });
 
   it("should create new booking settings with default values when none exist", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     const defaultSettings = {
       id: "booking-settings-new",
       bufferStartTime: 0,
@@ -107,10 +100,13 @@ describe("getBookingSettingsForOrganization", () => {
       organizationId: mockOrganizationId,
     };
     //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
     db.bookingSettings.upsert.mockResolvedValue(defaultSettings);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
+    expect(db.bookingSettings.upsert).toHaveBeenCalledTimes(1);
     expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
       where: {
         organizationId: mockOrganizationId,
@@ -165,9 +161,29 @@ describe("getBookingSettingsForOrganization", () => {
     expect(result).toEqual(defaultSettings);
   });
 
-  it("should throw ShelfError when database operation fails", async () => {
+  it("should throw ShelfError when the read-first lookup fails", async () => {
     expect.assertions(2);
     const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockRejectedValue(dbError);
+
+    await expect(
+      getBookingSettingsForOrganization(mockOrganizationId)
+    ).rejects.toThrow(ShelfError);
+
+    await expect(
+      getBookingSettingsForOrganization(mockOrganizationId)
+    ).rejects.toMatchObject({
+      message: "Failed to retrieve booking settings configuration",
+      additionalData: { organizationId: mockOrganizationId },
+    });
+  });
+
+  it("should throw ShelfError when the upsert fallback fails", async () => {
+    expect.assertions(2);
+    const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
     db.bookingSettings.upsert.mockRejectedValue(dbError);
 
@@ -185,6 +201,9 @@ describe("getBookingSettingsForOrganization", () => {
 
   it("should handle missing organization id", async () => {
     expect.assertions(1);
+    const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockRejectedValue(dbError);
 
     await expect(getBookingSettingsForOrganization("")).rejects.toThrow(
       ShelfError
