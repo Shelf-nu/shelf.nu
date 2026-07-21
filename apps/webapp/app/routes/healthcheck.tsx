@@ -79,6 +79,19 @@ export async function loader() {
     const result = await Promise.race([probe, timeout]);
 
     if (result === HEALTHCHECK_TIMEOUT) {
+      // Accepted tradeoff: elapsed time alone can't tell a busy pool apart from
+      // a genuinely-broken-but-slow DB path (a wedged socket / stalled TLS
+      // handshake that hangs instead of erroring). Both land here and return
+      // 200, so a truly-wedged machine could keep receiving traffic. We accept
+      // this because the alternative -- rebooting on slowness -- reintroduces
+      // the fleet-wide crashloop this route exists to prevent, and because
+      // failures that error *quickly* (connection refused, P1001) already fall
+      // through to the 503 path below. Distinguishing a *persistently* unhealthy
+      // machine from a transient blip needs a consecutive-failure signal (a Fly
+      // unhealthy-threshold), not time-based escalation here -- escalating to
+      // 503 after N slow checks would re-trigger the cascade under a sustained
+      // fleet-wide saturation.
+
       // why: the probe lost the race but is still in flight. Attach a no-op
       // handler so its eventual rejection can't surface as an unhandled
       // promise rejection after this request has already responded.
