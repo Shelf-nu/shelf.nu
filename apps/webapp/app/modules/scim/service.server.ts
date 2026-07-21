@@ -169,10 +169,15 @@ async function findScimResourceOrThrow(organizationId: string, scimId: string) {
 
 /**
  * Grants (or re-grants) org membership to a SCIM user: creates the
- * `UserOrganization` at the SCIM default role and a team member. Used when
- * attaching a user at provision time and when reactivating a previously
- * deactivated user (`active: true`). Roles are otherwise reconciled from the
- * IdP's group mappings on the user's next SSO login.
+ * `UserOrganization` at the SCIM default role and ensures a team member exists.
+ * Used when attaching a user at provision time and when reactivating a
+ * previously deactivated user (`active: true`). Roles are otherwise reconciled
+ * from the IdP's group mappings on the user's next SSO login.
+ *
+ * The team member is reused when one is already linked (see
+ * {@link revokeScimMembership}, which keeps the link across a soft deactivate).
+ * Creating a second one would duplicate the person in the org's team list and
+ * strand their custody/booking history on the old row.
  */
 async function grantScimMembership(
   userId: string,
@@ -186,7 +191,97 @@ async function grantScimMembership(
       roles: [OrganizationRoles.SELF_SERVICE],
     },
   });
+
+  const existingTeamMember = await db.teamMember.findFirst({
+    where: { userId, organizationId, deletedAt: null },
+    select: { id: true },
+  });
+
+  if (existingTeamMember) {
+    // The id is server-derived from the org-scoped findFirst above, but keep
+    // `organizationId` in the where clause per the org-scope IDOR convention
+    // for org-scoped tables — it costs nothing and survives refactors.
+    await db.teamMember.update({
+      where: { id: existingTeamMember.id, organizationId },
+      data: { name: displayName },
+    });
+    return;
+  }
+
   await createTeamMember({ name: displayName, organizationId, userId });
+}
+
+/**
+ * Soft-deactivates a SCIM user in one org: deletes their `UserOrganization` so
+ * they lose all access, while deliberately KEEPING their `TeamMember` linked.
+ *
+ * This is what separates SCIM `active: false` from a full deprovision.
+ * `revokeAccessToOrganization` — used by SCIM DELETE and by admin-initiated
+ * revokes — also disconnects the team member. The row survives (so booking and
+ * custody history isn't lost) but nothing can ever reconnect it, because the
+ * `userId` that identified it is gone. For a soft deactivate that is the wrong
+ * trade: the IdP re-enabling the user would create a SECOND team member,
+ * showing the person twice in the org and leaving their history on the orphan.
+ *
+ * Keeping the link makes deactivate → reactivate a pure membership toggle.
+ *
+ * @param userId - The Shelf user losing access
+ * @param organizationId - The org the SCIM token is scoped to
+ */
+async function revokeScimMembership(
+  userId: string,
+  organizationId: string
+): Promise<void> {
+  await db.userOrganization.delete({
+    where: { userId_organizationId: { userId, organizationId } },
+  });
+
+  // Don't leave the user pointing at a workspace they can no longer open.
+  // Raw SQL so the write doesn't bump `User.updatedAt`; best-effort, mirroring
+  // the same cleanup in `revokeAccessToOrganization`.
+  try {
+    await db.$executeRaw`
+      UPDATE "User"
+      SET "lastSelectedOrganizationId" = NULL
+      WHERE "id" = ${userId}
+        AND "lastSelectedOrganizationId" = ${organizationId}
+    `;
+  } catch (cause) {
+    Logger.warn(
+      "Failed to clear lastSelectedOrganizationId during SCIM deactivation",
+      userId,
+      organizationId,
+      cause
+    );
+  }
+}
+
+/**
+ * Interprets a SCIM `active` value from a PATCH operation.
+ *
+ * IdPs are inconsistent about the type: Okta sends real booleans, Entra ID
+ * sends the strings `"True"`/`"False"`, and others send lowercase
+ * `"true"`/`"false"`. Comparing against a single spelling resolves every other
+ * form to "not active" — so an *activation* request would silently deactivate
+ * the user, which is the dangerous direction to get wrong.
+ *
+ * @param value - The raw `value` from the SCIM operation
+ * @returns `true`/`false` for a recognised value, or `undefined` when it is
+ *   absent or unrecognised, so the caller leaves the active state untouched
+ *   rather than guessing.
+ */
+function parseScimActiveValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+
+  return undefined;
 }
 
 /**
@@ -533,12 +628,13 @@ export async function replaceScimUser(
     [firstName, lastName].filter(Boolean).join(" ") || effectiveEmail;
 
   // Reconcile membership with the desired active state (state, not deletion):
-  // deactivate → revoke access (mapping persists); reactivate → re-grant.
+  // deactivate → drop membership, keeping the mapping AND the team member link;
+  // reactivate → re-grant.
   const isCurrentlyActive = user.userOrganizations.length > 0;
   const shouldBeActive = input.active !== false;
 
   if (isCurrentlyActive && !shouldBeActive) {
-    await revokeAccessToOrganization({ userId: user.id, organizationId });
+    await revokeScimMembership(user.id, organizationId);
   } else if (!isCurrentlyActive && shouldBeActive) {
     await grantScimMembership(user.id, organizationId, displayName);
   } else if (isCurrentlyActive) {
@@ -586,7 +682,9 @@ export async function patchScimUser(
     }
 
     if (op.path === "active") {
-      activeIntent = op.value === true || op.value === "True";
+      // Leave the intent untouched on an unrecognised value rather than
+      // defaulting to "deactivate" (see parseScimActiveValue).
+      activeIntent = parseScimActiveValue(op.value) ?? activeIntent;
     } else if (op.path === "userName") {
       newEmail = String(op.value ?? "").toLowerCase();
     } else if (op.path === "name.givenName") {
@@ -600,7 +698,7 @@ export async function patchScimUser(
       const val = op.value as Record<string, unknown>;
 
       if ("active" in val) {
-        activeIntent = val.active === true || val.active === "True";
+        activeIntent = parseScimActiveValue(val.active) ?? activeIntent;
       }
       // Nested name object: { name: { givenName, familyName } }
       if ("name" in val && typeof val.name === "object" && val.name !== null) {
@@ -649,10 +747,11 @@ export async function patchScimUser(
     effectiveEmail;
 
   // Reconcile membership with the desired active state (state, not deletion):
-  // deactivate → revoke access (mapping persists); reactivate → re-grant.
+  // deactivate → drop membership, keeping the mapping AND the team member link;
+  // reactivate → re-grant.
   const isCurrentlyActive = user.userOrganizations.length > 0;
   if (activeIntent === false && isCurrentlyActive) {
-    await revokeAccessToOrganization({ userId: user.id, organizationId });
+    await revokeScimMembership(user.id, organizationId);
   } else if (activeIntent === true && !isCurrentlyActive) {
     await grantScimMembership(user.id, organizationId, displayName);
   } else if (
@@ -682,12 +781,17 @@ export async function deactivateScimUser(
   organizationId: string,
   scimId: string
 ): Promise<void> {
-  // Unlike PATCH `active: false` (soft — keeps the mapping so the resource can
-  // be reactivated), DELETE is a full per-org deprovision: revoke access AND
-  // remove the SCIM mapping so the id no longer resolves (later GET → 404).
+  // Unlike PATCH `active: false` (soft — keeps the mapping and the team member
+  // link so the resource can be reactivated), DELETE is a full per-org
+  // deprovision: revoke access AND remove the SCIM mapping so the id no longer
+  // resolves (later GET → 404).
   const user = await findScimResourceOrThrow(organizationId, scimId);
 
-  // Revoke actual access if the user is still a member.
+  // Revoke actual access if the user is still a member. This uses the full
+  // `revokeAccessToOrganization` (not the soft `revokeScimMembership`) on
+  // purpose: a full deprovision should behave exactly like an admin revoking
+  // access from the Team settings, which orphans the team member so the org
+  // keeps their booking/custody history without the person staying linked.
   if (user.userOrganizations.length > 0) {
     await revokeAccessToOrganization({ userId: user.id, organizationId });
   }

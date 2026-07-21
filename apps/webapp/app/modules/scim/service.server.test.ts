@@ -23,6 +23,7 @@ vi.mock("~/database/db.server", () => ({
     },
     userOrganization: {
       create: vi.fn(),
+      delete: vi.fn(),
     },
     // The SCIM resource identity/mapping table. Post-#2 the SCIM id is the
     // per-org external id, so GET/PUT/PATCH/DELETE resolve through here.
@@ -33,11 +34,17 @@ vi.mock("~/database/db.server", () => ({
     },
     teamMember: {
       updateMany: vi.fn(),
+      // Reactivation reuses an already-linked team member instead of creating
+      // a duplicate, so the grant path reads and renames through these.
+      findFirst: vi.fn(),
+      update: vi.fn(),
     },
     // Used by the SSO-domain gate on every provisioning path
     organization: {
       findUnique: vi.fn(),
     },
+    // Soft deactivation clears `lastSelectedOrganizationId` via raw SQL
+    $executeRaw: vi.fn(),
   },
 }));
 
@@ -494,17 +501,22 @@ describe("replaceScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+    mockDb.db.userOrganization.delete.mockResolvedValue({});
 
     const result = await replaceScimUser(ORG_ID, SCIM_ID, {
       userName: "jane@example.com",
       active: false,
     });
 
-    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
-      userId: "user-abc",
-      organizationId: ORG_ID,
+    // Soft deactivate drops membership only — it must NOT go through the full
+    // `revokeAccessToOrganization`, which would disconnect (orphan) the team
+    // member and make reactivation create a duplicate.
+    expect(mockDb.db.userOrganization.delete).toHaveBeenCalledWith({
+      where: {
+        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
+      },
     });
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(false);
   });
 
@@ -519,6 +531,9 @@ describe("replaceScimUser", () => {
     );
     // @ts-expect-error - vitest mock type
     mockDb.db.userOrganization.create.mockResolvedValue({});
+    // No team member is linked yet, so the grant provisions a fresh one.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
     mockTeamMemberService.createTeamMember.mockResolvedValue({});
 
@@ -637,17 +652,20 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+    mockDb.db.userOrganization.delete.mockResolvedValue({});
 
     const result = await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "replace", path: "active", value: false }],
     });
 
-    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
-      userId: "user-abc",
-      organizationId: ORG_ID,
+    // Soft deactivate drops membership only, keeping the team member linked.
+    expect(mockDb.db.userOrganization.delete).toHaveBeenCalledWith({
+      where: {
+        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
+      },
     });
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(false);
   });
 
@@ -662,14 +680,14 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+    mockDb.db.userOrganization.delete.mockResolvedValue({});
 
     await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "Replace", path: "active", value: false }],
     });
 
-    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalled();
+    expect(mockDb.db.userOrganization.delete).toHaveBeenCalled();
   });
 
   it("should deactivate via Entra value-object form", async () => {
@@ -682,14 +700,14 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+    mockDb.db.userOrganization.delete.mockResolvedValue({});
 
     await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "replace", value: { active: false } }],
     });
 
-    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalled();
+    expect(mockDb.db.userOrganization.delete).toHaveBeenCalled();
   });
 
   it("should reactivate a deactivated user via active=true", async () => {
@@ -703,6 +721,8 @@ describe("patchScimUser", () => {
     );
     // @ts-expect-error - vitest mock type
     mockDb.db.userOrganization.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
     mockTeamMemberService.createTeamMember.mockResolvedValue({});
 
@@ -718,6 +738,82 @@ describe("patchScimUser", () => {
         roles: [OrganizationRoles.SELF_SERVICE],
       },
     });
+    expect(result.active).toBe(true);
+  });
+
+  it("should reuse the linked team member on reactivation instead of duplicating it", async () => {
+    // Regression: a soft deactivate keeps the team member linked, so the
+    // re-grant must rename that row rather than create a second one — a
+    // duplicate would show the person twice in the org and strand their
+    // custody/booking history on the old row.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping({ userOrganizations: [] })
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping()
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userOrganization.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue({ id: "tm-1" });
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.update.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "replace", path: "active", value: true }],
+    });
+
+    expect(mockDb.db.teamMember.update).toHaveBeenCalledWith({
+      where: { id: "tm-1", organizationId: ORG_ID },
+      data: { name: "Jane Doe" },
+    });
+    expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
+  });
+
+  it("should activate on a lowercase 'true' string rather than deactivating", async () => {
+    // Regression: `active` arrives as a boolean (Okta), "True" (Entra) or
+    // "true" (others). Matching only one spelling resolved the rest to false,
+    // so an ACTIVATION request silently deactivated the user.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping({ userOrganizations: [] })
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping()
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userOrganization.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockTeamMemberService.createTeamMember.mockResolvedValue({});
+
+    const result = await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "Replace", path: "active", value: "true" }],
+    });
+
+    expect(mockDb.db.userOrganization.create).toHaveBeenCalled();
+    expect(mockDb.db.userOrganization.delete).not.toHaveBeenCalled();
+    expect(result.active).toBe(true);
+  });
+
+  it("should leave the active state untouched when the value is unrecognised", async () => {
+    // An absent or junk `value` must not be read as "deactivate".
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+
+    const result = await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "replace", path: "active" }],
+    });
+
+    expect(mockDb.db.userOrganization.delete).not.toHaveBeenCalled();
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(true);
   });
 
