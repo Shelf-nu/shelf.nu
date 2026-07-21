@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import Cookies from "js-cookie";
 import {
   useLoaderData,
@@ -124,52 +124,67 @@ export const useSearchParams = (): [
   const isPageWithCookieFilters = useIsPageWithCookieFilters();
   const currentOrganization = useCurrentOrganization();
 
-  /** In those cases, we return the default searchParams and setSearchParams as we dont need to handle cookies */
-  if (!isPageWithCookieFilters || !currentOrganization) {
-    return [searchParams, setSearchParams];
-  }
+  /**
+   * Cookie-aware setter used on pages that persist filters in a cookie (assets,
+   * bookings, kits). Memoized with `useCallback` so consumers that put the returned
+   * setter in an effect/callback dependency array (e.g. `set-or-edit-reminder-dialog.tsx`)
+   * get a stable identity across renders instead of a new function every render — an
+   * unstable identity there re-fires those effects on every render and can sustain a
+   * revalidation loop.
+   *
+   * NOTE: this hook is called unconditionally on every render (rules of hooks). The
+   * conditional choice of *which* setter to return happens after, at the `return`
+   * statement below.
+   */
+  const customSetSearchParams = useCallback<
+    (
+      nextInit: Parameters<SetSearchParamsType>[0],
+      navigateOptions?: Parameters<SetSearchParamsType>[1]
+    ) => void
+  >(
+    (nextInit, navigateOptions) => {
+      const prevParams = new URLSearchParams(searchParams.toString());
 
-  const customSetSearchParams: (
-    nextInit: Parameters<SetSearchParamsType>[0],
-    navigateOptions?: Parameters<SetSearchParamsType>[1]
-  ) => void = (nextInit, navigateOptions) => {
-    const prevParams = new URLSearchParams(searchParams.toString());
+      const checkAndDestroyCookies = (newParams: URLSearchParams) => {
+        const removedKeys: string[] = [];
+        prevParams.forEach((_value, key) => {
+          if (!newParams.has(key)) {
+            removedKeys.push(key);
+          }
+        });
 
-    const checkAndDestroyCookies = (newParams: URLSearchParams) => {
-      const removedKeys: string[] = [];
-      prevParams.forEach((_value, key) => {
-        if (!newParams.has(key)) {
-          removedKeys.push(key);
+        if (removedKeys.length > 0) {
+          destroyCookieValues(removedKeys);
         }
-      });
+      };
 
-      if (removedKeys.length > 0) {
-        destroyCookieValues(removedKeys);
-      }
-    };
-
-    if (typeof nextInit === "function") {
-      setSearchParams((prev) => {
-        let newParams = nextInit(prev);
+      if (typeof nextInit === "function") {
+        setSearchParams((prev) => {
+          let newParams = nextInit(prev);
+          // Ensure newParams is an instance of URLSearchParams
+          if (!(newParams instanceof URLSearchParams)) {
+            newParams = new URLSearchParams(newParams as any);
+          }
+          checkAndDestroyCookies(newParams);
+          return newParams;
+        }, navigateOptions);
+      } else {
+        let newParams = nextInit;
         // Ensure newParams is an instance of URLSearchParams
         if (!(newParams instanceof URLSearchParams)) {
           newParams = new URLSearchParams(newParams as any);
         }
         checkAndDestroyCookies(newParams);
-        return newParams;
-      }, navigateOptions);
-    } else {
-      let newParams = nextInit;
-      // Ensure newParams is an instance of URLSearchParams
-      if (!(newParams instanceof URLSearchParams)) {
-        newParams = new URLSearchParams(newParams as any);
+        setSearchParams(newParams, navigateOptions);
       }
-      checkAndDestroyCookies(newParams);
-      setSearchParams(newParams, navigateOptions);
-    }
-  };
+    },
+    [searchParams, setSearchParams, destroyCookieValues]
+  );
 
-  return [searchParams, customSetSearchParams];
+  /** In those cases, we return the default searchParams and setSearchParams as we dont need to handle cookies */
+  return isPageWithCookieFilters && currentOrganization
+    ? [searchParams, customSetSearchParams]
+    : [searchParams, setSearchParams];
 };
 
 type SetSearchParams = (
@@ -363,11 +378,59 @@ export function useCookieDestroy() {
   const location = useLocation();
 
   /**
+   * Latch holding this render's closed-over values. `_destroyCookieValues` (below)
+   * reads from this ref at *call time* instead of closing over these values
+   * directly, so its identity can stay stable across renders (empty-deps
+   * `useCallback` below) while still always acting on the freshest state when
+   * it's actually invoked — the standard "latest ref" pattern for giving an
+   * event-handler-like callback a stable identity without going stale.
+   *
+   * This keeps `destroyCookieValues`'s reference stable for consumers that put
+   * it in an effect/callback dependency array (e.g. `useSearchParams`'s
+   * `customSetSearchParams`, which closes over it) — see
+   * `.claude/rules/react-render-stability.md`.
+   *
+   * IMPORTANT: `cookieSearchParams` itself must stay a *fresh* URLSearchParams
+   * instance every render (not memoized) — `destroyCookieValues()` mutates it
+   * via `.delete()`, and caching it across renders would leak those mutations
+   * into a later render that reuses the same instance before its inputs
+   * change. The ref only stabilizes the *function identity*, never the
+   * search-params object itself.
+   */
+  const latestRef = useRef({
+    cookieSearchParams,
+    currentOrganization,
+    isAssetIndexPage,
+    modeIsAdvanced,
+    isPageWithCookieFilters,
+    pathname: location.pathname,
+  });
+  latestRef.current = {
+    cookieSearchParams,
+    currentOrganization,
+    isAssetIndexPage,
+    modeIsAdvanced,
+    isPageWithCookieFilters,
+    pathname: location.pathname,
+  };
+
+  /**
    * Function to destroy specific keys from cookies if on the asset index page.
+   * Referentially stable across renders (see `latestRef` above), so it is
+   * safe for consumers to place in a `useEffect`/`useCallback` dependency array.
    *
    * @param {string[]} keys - Array of keys (strings) to be removed from the cookies.
    */
-  function _destroyCookieValues(keys: string[]) {
+  const _destroyCookieValues = useCallback((keys: string[]) => {
+    const {
+      isPageWithCookieFilters,
+      currentOrganization,
+      isAssetIndexPage,
+      modeIsAdvanced,
+      pathname,
+      cookieSearchParams,
+    } = latestRef.current;
+
     // Check if the current page supports cookie filters
     if (
       isPageWithCookieFilters &&
@@ -383,7 +446,7 @@ export function useCookieDestroy() {
       const cookieName = getCookieName(
         currentOrganization.id,
         effectiveModeIsAdvanced,
-        location.pathname
+        pathname
       );
 
       // Always use root path to match server-side cookie path
@@ -393,7 +456,7 @@ export function useCookieDestroy() {
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
       destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
     }
-  }
+  }, []);
 
   return { destroyCookieValues: _destroyCookieValues };
 }
