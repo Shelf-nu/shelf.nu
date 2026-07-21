@@ -40,6 +40,16 @@ const OPTIONS: Option[] = [
     label: "Year / Month / Day",
     description: "e.g. 2026-04-03",
   },
+  {
+    value: "MMM_DD_YYYY",
+    label: "Month name / Day / Year",
+    description: "e.g. Jul 20, 2026",
+  },
+  {
+    value: "DD_MMM_YYYY",
+    label: "Day / Month name / Year",
+    description: "e.g. 20 Jul 2026",
+  },
 ];
 
 /** Props for the controlled date-format selector. */

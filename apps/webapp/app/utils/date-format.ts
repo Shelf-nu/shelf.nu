@@ -295,6 +295,11 @@ const DATE_ORDER: Record<
   DD_MM_YYYY: { order: ["day", "month", "year"], separator: "/" },
   MM_DD_YYYY: { order: ["month", "day", "year"], separator: "/" },
   YYYY_MM_DD: { order: ["year", "month", "day"], separator: "-" },
+  // Month-name formats. `separator` is only reached if a caller forces numeric
+  // months (e.g. dateStyle:short) on a name-month preference; the default
+  // name-month path uses renderNameMonth and ignores `separator`.
+  MMM_DD_YYYY: { order: ["month", "day", "year"], separator: "/" },
+  DD_MMM_YYYY: { order: ["day", "month", "year"], separator: "/" },
 };
 
 /** dateStyle preset → explicit fields. `short` is zero-padded, 4-digit year. */
@@ -466,7 +471,7 @@ function renderNameMonth(
   rendered: { day: string; month: string; year: string },
   dateFormat: DateFormatPreference
 ): string {
-  if (dateFormat === "MM_DD_YYYY") {
+  if (dateFormat === "MM_DD_YYYY" || dateFormat === "MMM_DD_YYYY") {
     const hasYear = activeOrder.includes("year");
     const monthDay = activeOrder
       .filter((f) => f !== "year")
@@ -511,6 +516,21 @@ export function formatDate(
     opts.localeOnly || dateOnlyMatch ? undefined : prefs.timeZone;
   const n = normalizeOptions(opts);
 
+  // A month-NAME date-format preference (e.g. "Jul 20, 2026" / "20 Jul 2026")
+  // renders the month as a short NAME by default. Explicit caller options
+  // (`month` or a `dateStyle` preset) still win, so numeric prefs and callers
+  // that pass e.g. `dateStyle: "short"` stay numeric.
+  const prefWantsNameMonth =
+    prefs.dateFormat === "MMM_DD_YYYY" || prefs.dateFormat === "DD_MMM_YYYY";
+  const callerSpecifiedMonth = opts.month != null || opts.dateStyle != null;
+  const callerSpecifiedDay = opts.day != null || opts.dateStyle != null;
+  const effectiveMonthStyle =
+    prefWantsNameMonth && !callerSpecifiedMonth ? "short" : n.monthStyle;
+  // Name-month formats read more naturally with a non-padded day
+  // ("Jul 3, 2026", not "Jul 03, 2026"); an explicit day/dateStyle still wins.
+  const effectiveDayStyle =
+    prefWantsNameMonth && !callerSpecifiedDay ? "numeric" : n.dayStyle;
+
   // One conversion for all numeric parts (year/month/day/hour/minute) in tz.
   const numeric = partsFor(date, timeZone, {
     year: "numeric",
@@ -525,16 +545,17 @@ export function formatDate(
 
   if (n.wantDate) {
     const { order, separator } = DATE_ORDER[prefs.dateFormat];
-    const isNameMonth = n.monthStyle === "short" || n.monthStyle === "long";
+    const isNameMonth =
+      effectiveMonthStyle === "short" || effectiveMonthStyle === "long";
 
     const rendered = {
       year: n.yearStyle === "2-digit" ? numeric.year.slice(-2) : numeric.year,
       month: isNameMonth
-        ? partsFor(date, timeZone, { month: n.monthStyle }).month // English name
-        : n.monthStyle === "2-digit"
+        ? partsFor(date, timeZone, { month: effectiveMonthStyle }).month // name
+        : effectiveMonthStyle === "2-digit"
         ? pad2(numeric.month)
         : numeric.month,
-      day: n.dayStyle === "2-digit" ? pad2(numeric.day) : numeric.day,
+      day: effectiveDayStyle === "2-digit" ? pad2(numeric.day) : numeric.day,
     };
 
     const include = {

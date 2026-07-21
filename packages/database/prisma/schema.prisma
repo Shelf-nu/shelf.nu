@@ -1036,6 +1036,8 @@ enum DateFormatPreference {
   DD_MM_YYYY // e.g. 03/04/2026
   MM_DD_YYYY // e.g. 04/03/2026
   YYYY_MM_DD // e.g. 2026-04-03
+  MMM_DD_YYYY // e.g. Jul 20, 2026
+  DD_MMM_YYYY // e.g. 20 Jul 2026
 }
 
 // User time-format preference — 12-hour (AM/PM) vs 24-hour clock.

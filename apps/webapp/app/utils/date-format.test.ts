@@ -191,6 +191,47 @@ const CA: ResolvedFormatPrefs = {
 // UTC 2026-06-22T21:05 → NY 17:05 (same day), Tokyo 06:05 (next day), Sofia 00:05 (next day).
 const V = "2026-06-22T21:05:00Z";
 
+// Month-name preferences (UTC so the rendered calendar day is unambiguous).
+const US_NAME: ResolvedFormatPrefs = {
+  dateFormat: "MMM_DD_YYYY",
+  timeFormat: "H12",
+  weekStartsOn: 0,
+  timeZone: "UTC",
+};
+const EU_NAME: ResolvedFormatPrefs = {
+  dateFormat: "DD_MMM_YYYY",
+  timeFormat: "H24",
+  weekStartsOn: 1,
+  timeZone: "UTC",
+};
+const JUL = "2026-07-20T14:30:00Z";
+
+describe("formatDate — month-name preferences", () => {
+  it("renders the month as a short name by default (US comma, EU spaces)", () => {
+    expect(formatDate(JUL, US_NAME)).toBe("Jul 20, 2026");
+    expect(formatDate(JUL, EU_NAME)).toBe("20 Jul 2026");
+    // Non-padded day (Intl convention): "Jul 3", not "Jul 03".
+    expect(formatDate("2026-07-03T12:00:00Z", US_NAME)).toBe("Jul 3, 2026");
+    expect(formatDate("2026-07-03T12:00:00Z", EU_NAME)).toBe("3 Jul 2026");
+  });
+
+  it("composes with includeTime per the time-format preference", () => {
+    expect(formatDate(JUL, US_NAME, { includeTime: true })).toBe(
+      "Jul 20, 2026, 2:30 PM"
+    );
+    expect(formatDate(JUL, EU_NAME, { includeTime: true })).toBe(
+      "20 Jul 2026, 14:30"
+    );
+  });
+
+  it("lets an explicit caller dateStyle win (stays numeric)", () => {
+    // A caller that forces a numeric preset must stay numeric even when the
+    // user's preference is a month-name format.
+    expect(formatDate(JUL, US_NAME, { dateStyle: "short" })).toBe("07/20/2026");
+    expect(formatDate(JUL, EU_NAME, { dateStyle: "short" })).toBe("20/07/2026");
+  });
+});
+
 describe("formatDate — reassembly + timezone conversion", () => {
   it("plain numeric is zero-padded 4-digit-year in the pref order", () => {
     expect(formatDate(V, US)).toBe("06/22/2026");
