@@ -22,6 +22,9 @@ type Props = {
   onClose: () => void;
 };
 
+/** Rows per page; the list pages through all members, so this is not a cap. */
+const MEMBER_PAGE_SIZE = 50;
+
 const memberKeyExtractor = (item: TeamMember) => item.id;
 
 const useStyles = createStyles((colors, shadows) => ({
@@ -69,6 +72,10 @@ const useStyles = createStyles((colors, shadows) => ({
   list: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
+  },
+  footerLoading: {
+    paddingVertical: spacing.lg,
+    alignItems: "center",
   },
   memberRow: {
     flexDirection: "row",
@@ -139,6 +146,8 @@ const useStyles = createStyles((colors, shadows) => ({
 export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -151,23 +160,58 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
     return () => clearTimeout(timer);
   }, [search]);
 
+  /** Highest page held, so `loadMore` knows what to request next. */
+  const pageRef = useRef(1);
+
+  /**
+   * Fetch one page of team members.
+   *
+   * Paginated because custody must be assignable to ANY colleague. The
+   * endpoint used to hard-cap at 50 with no way to reach past it, so an org
+   * larger than that simply could not hand an asset to the people who sorted
+   * after the cut.
+   */
+  const fetchMembersPage = useCallback(
+    async (targetPage: number, append: boolean) => {
+      if (!orgId) return;
+      if (append) setIsLoadingMore(true);
+      else {
+        setIsLoading(true);
+        setError(null);
+      }
+
+      const { data, error: fetchErr } = await api.teamMembers(
+        orgId,
+        debouncedSearch || undefined,
+        { page: targetPage, perPage: MEMBER_PAGE_SIZE }
+      );
+
+      if (fetchErr || !data) {
+        setError(fetchErr || "Failed to load team members");
+      } else {
+        setMembers((prev) =>
+          append ? [...prev, ...data.teamMembers] : data.teamMembers
+        );
+        setHasMore(targetPage < (data.totalPages ?? 1));
+        pageRef.current = targetPage;
+      }
+      setIsLoading(false);
+      setIsLoadingMore(false);
+    },
+    [orgId, debouncedSearch]
+  );
+
   const fetchMembers = useCallback(async () => {
-    if (!orgId) return;
-    setIsLoading(true);
-    setError(null);
+    pageRef.current = 1;
+    setHasMore(false);
+    await fetchMembersPage(1, false);
+  }, [fetchMembersPage]);
 
-    const { data, error: fetchErr } = await api.teamMembers(
-      orgId,
-      debouncedSearch || undefined
-    );
-
-    if (fetchErr || !data) {
-      setError(fetchErr || "Failed to load team members");
-    } else {
-      setMembers(data.teamMembers);
-    }
-    setIsLoading(false);
-  }, [orgId, debouncedSearch]);
+  /** Pull the next page in when the list nears its end. */
+  const loadMore = useCallback(() => {
+    if (isLoading || isLoadingMore || !hasMore) return;
+    void fetchMembersPage(pageRef.current + 1, true);
+  }, [isLoading, isLoadingMore, hasMore, fetchMembersPage]);
 
   // Track when the initial (non-search) data was last fetched
   const lastFetchedAt = useRef(0);
@@ -329,6 +373,15 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
             initialNumToRender={15}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
+            onEndReached={loadMore}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+              isLoadingMore ? (
+                <View style={styles.footerLoading}>
+                  <ActivityIndicator size="small" color={colors.muted} />
+                </View>
+              ) : null
+            }
           />
         )}
       </SafeAreaView>

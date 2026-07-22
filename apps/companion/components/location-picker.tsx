@@ -23,6 +23,11 @@ type Props = {
   onClose: () => void;
 };
 
+/** Rows per request while walking to a complete location set. */
+const LOCATION_PAGE_SIZE = 100;
+/** Safety bound so a pathological workspace can't loop indefinitely. */
+const LOCATION_PAGE_HARD_STOP = 50;
+
 const locationKeyExtractor = (item: LocationNode) => item.id;
 
 /** Location with depth info for hierarchical rendering */
@@ -253,21 +258,50 @@ export function LocationPicker({
     return () => clearTimeout(timer);
   }, [search]);
 
+  /**
+   * Load EVERY location, walking the server's pages until the list is whole.
+   *
+   * Unlike the flat pickers this one cannot lazily page as you scroll:
+   * `buildLocationTree` nests rows by `parentId`, and rows are ordered by
+   * name, so a child routinely lands on a different page from its parent.
+   * Rendering a half-loaded set would show orphaned children at the root —
+   * a wrong hierarchy is worse than a slow one.
+   *
+   * The endpoint used to hard-cap at 50 with no way past it, so a workspace
+   * with more locations than that could not place an asset in the ones that
+   * sorted after the cut. Locations are a small, bounded entity (rooms,
+   * shelves, sites), so completing the set costs one extra request per 100.
+   * `LOCATION_PAGE_HARD_STOP` bounds pathological workspaces rather than
+   * looping forever.
+   */
   const fetchLocations = useCallback(async () => {
     if (!orgId) return;
     setIsLoading(true);
     setError(null);
 
-    const { data, error: fetchErr } = await api.locations(
-      orgId,
-      debouncedSearch || undefined
-    );
+    const collected: Location[] = [];
+    let page = 1;
+    let totalPages = 1;
 
-    if (fetchErr || !data) {
-      setError(fetchErr || "Failed to load locations");
-    } else {
-      setLocations(data.locations);
-    }
+    do {
+      const { data, error: fetchErr } = await api.locations(
+        orgId,
+        debouncedSearch || undefined,
+        { page, perPage: LOCATION_PAGE_SIZE }
+      );
+
+      if (fetchErr || !data) {
+        setError(fetchErr || "Failed to load locations");
+        setIsLoading(false);
+        return;
+      }
+
+      collected.push(...data.locations);
+      totalPages = data.totalPages ?? 1;
+      page += 1;
+    } while (page <= totalPages && page <= LOCATION_PAGE_HARD_STOP);
+
+    setLocations(collected);
     setIsLoading(false);
   }, [orgId, debouncedSearch]);
 
