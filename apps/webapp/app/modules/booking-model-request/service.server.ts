@@ -361,7 +361,13 @@ export async function getBookingModelTabData({
       const rawModels = await db.assetModel.findMany({
         where: { organizationId, ...searchWhere },
         select: { id: true, name: true },
-        orderBy: { name: "asc" },
+        /**
+         * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
+         * tied rows can repeat on one page and vanish from the next, leaving
+         * models unreachable — exactly what this pagination exists to prevent.
+         * `id` breaks the tie deterministically.
+         */
+        orderBy: [{ name: "asc" }, { id: "asc" }],
         skip: (effectivePage - 1) * effectivePerPage,
         take: effectivePerPage,
       });

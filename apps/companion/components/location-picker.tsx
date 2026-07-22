@@ -274,21 +274,33 @@ export function LocationPicker({
    * `LOCATION_PAGE_HARD_STOP` bounds pathological workspaces rather than
    * looping forever.
    */
+  /**
+   * Generation counter so a slow earlier run (older search or org) can't
+   * overwrite fresher state when it finally resolves. The booking picker
+   * already does this; these pickers were missing it.
+   */
+  const requestGenerationRef = useRef(0);
+
   const fetchLocations = useCallback(async () => {
     if (!orgId) return;
+    const generation = ++requestGenerationRef.current;
     setIsLoading(true);
     setError(null);
 
     const collected: Location[] = [];
     let page = 1;
-    let totalPages = 1;
 
-    do {
+    // Loop rather than do/while so `totalPages` is only ever read from the
+    // response that defined it, with no dead initial value.
+    for (;;) {
       const { data, error: fetchErr } = await api.locations(
         orgId,
         debouncedSearch || undefined,
         { page, perPage: LOCATION_PAGE_SIZE }
       );
+
+      // Superseded by a newer fetch — drop this result entirely.
+      if (generation !== requestGenerationRef.current) return;
 
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load locations");
@@ -297,9 +309,11 @@ export function LocationPicker({
       }
 
       collected.push(...data.locations);
-      totalPages = data.totalPages ?? 1;
+
+      const totalPages = data.totalPages ?? 1;
+      if (page >= totalPages || page >= LOCATION_PAGE_HARD_STOP) break;
       page += 1;
-    } while (page <= totalPages && page <= LOCATION_PAGE_HARD_STOP);
+    }
 
     setLocations(collected);
     setIsLoading(false);

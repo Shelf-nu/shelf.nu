@@ -77,6 +77,10 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: spacing.lg,
     alignItems: "center",
   },
+  footerRetryText: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
   memberRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -148,6 +152,13 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  /**
+   * Failures while appending a page are tracked separately from `error`. The
+   * render path shows a FULL-SCREEN error whenever `error` is set, so reusing
+   * it for a load-more failure would throw away the members already on screen
+   * and force a full reload — a transient blip should only fail the footer.
+   */
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -162,6 +173,11 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
 
   /** Highest page held, so `loadMore` knows what to request next. */
   const pageRef = useRef(1);
+  /**
+   * Generation counter so a slow earlier run (older search) can't overwrite
+   * fresher state when it resolves late.
+   */
+  const requestGenerationRef = useRef(0);
 
   /**
    * Fetch one page of team members.
@@ -174,10 +190,14 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
   const fetchMembersPage = useCallback(
     async (targetPage: number, append: boolean) => {
       if (!orgId) return;
-      if (append) setIsLoadingMore(true);
-      else {
+      const generation = ++requestGenerationRef.current;
+      if (append) {
+        setIsLoadingMore(true);
+        setLoadMoreError(null);
+      } else {
         setIsLoading(true);
         setError(null);
+        setLoadMoreError(null);
       }
 
       const { data, error: fetchErr } = await api.teamMembers(
@@ -186,8 +206,13 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
         { page: targetPage, perPage: MEMBER_PAGE_SIZE }
       );
 
+      // Superseded by a newer fetch — drop this result entirely.
+      if (generation !== requestGenerationRef.current) return;
+
       if (fetchErr || !data) {
-        setError(fetchErr || "Failed to load team members");
+        // Keep the loaded list on an append failure; only the footer fails.
+        if (append) setLoadMoreError(fetchErr || "Couldn't load more");
+        else setError(fetchErr || "Failed to load team members");
       } else {
         setMembers((prev) =>
           append ? [...prev, ...data.teamMembers] : data.teamMembers
@@ -380,6 +405,17 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
                 <View style={styles.footerLoading}>
                   <ActivityIndicator size="small" color={colors.muted} />
                 </View>
+              ) : loadMoreError ? (
+                <TouchableOpacity
+                  style={styles.footerLoading}
+                  onPress={loadMore}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading more team members"
+                >
+                  <Text style={styles.footerRetryText}>
+                    {loadMoreError}. Tap to retry.
+                  </Text>
+                </TouchableOpacity>
               ) : null
             }
           />
