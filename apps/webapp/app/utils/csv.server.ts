@@ -318,6 +318,9 @@ export async function exportAssetsBackupToCsv({
  * @param args.currentOrganization - The active workspace; scopes the fetch.
  * @param args.assetIndexCurrentSearchParams - The index's current URL search
  *   params, used instead of cookie filters when select-all is active.
+ * @param args.timeZone - Acting user's IANA timezone; forwarded to the fetch so
+ *   built-in date-column filters truncate the day in the user's tz (avoids an
+ *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
  * @returns The full filtered asset set (no pagination when selecting all).
  */
 async function resolveExportAssets({
@@ -326,6 +329,7 @@ async function resolveExportAssets({
   settings,
   currentOrganization,
   assetIndexCurrentSearchParams,
+  timeZone = "UTC",
 }: {
   request: Request;
   assetIds: string;
@@ -335,6 +339,7 @@ async function resolveExportAssets({
     "id" | "barcodesEnabled" | "currency"
   >;
   assetIndexCurrentSearchParams: string | null;
+  timeZone?: string;
 }): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
@@ -366,6 +371,7 @@ async function resolveExportAssets({
     takeAll,
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+    timeZone,
   });
 
   return { assets };
@@ -407,20 +413,23 @@ export async function exportAssetsFromIndexToCsv({
   assetIndexCurrentSearchParams: string | null;
   columnScope?: ColumnScope;
 }) {
+  // Acting user's prefs: this export was triggered by userId, so their
+  // date/time preferences drive every humanized column AND the timezone the
+  // built-in date-column filters resolve the day in. Resolved before the fetch
+  // so `timeZone` can flow into the filter query.
+  const prefs = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   const { assets } = await resolveExportAssets({
     request,
     assetIds,
     settings,
     currentOrganization,
     assetIndexCurrentSearchParams,
+    timeZone: prefs.timeZone,
   });
-
-  // Acting user's prefs: this export was triggered by userId, so their
-  // date/time preferences drive every humanized column.
-  const prefs = await resolveUserFormatPrefsById(
-    userId,
-    getClientHint(request)
-  );
 
   const baseColumns = settings.columns as Column[];
   // "All columns" for the human export = every configured column, visible or

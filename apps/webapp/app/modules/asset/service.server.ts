@@ -1139,6 +1139,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   canUseBarcodes = false,
   availableToBookOnly = false,
   preParsedFilters,
+  timeZone = "UTC",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1151,6 +1152,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly?: boolean;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
+  /**
+   * IANA timezone the acting user displays dates in. Threaded into
+   * `generateWhereClause` so built-in date-column filters truncate the day in
+   * the user's tz (avoids an off-by-one for non-UTC users). Defaults to "UTC"
+   * for callers that don't resolve the acting user's prefs.
+   */
+  timeZone?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1185,7 +1193,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -5504,12 +5513,19 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5518,6 +5534,7 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**

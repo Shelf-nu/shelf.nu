@@ -35,6 +35,11 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
+ * @param availableToBookOnly - Restrict to bookable assets (self-service)
+ * @param timeZone - IANA timezone name the acting user displays dates in.
+ *   Used only by built-in `timestamptz` date-column filters so their day
+ *   truncation matches what the user sees (see {@link addDateFilter}).
+ *   Defaults to `"UTC"` to preserve behavior for callers that don't supply it.
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -42,7 +47,8 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false
+  availableToBookOnly = false,
+  timeZone: string = "UTC"
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
@@ -153,7 +159,7 @@ export function generateWhereClause(
         whereClause = addBooleanFilter(whereClause, filter);
         break;
       case "date":
-        whereClause = addDateFilter(whereClause, filter);
+        whereClause = addDateFilter(whereClause, filter, timeZone);
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
@@ -434,29 +440,51 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   }`;
 }
 
-function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+/**
+ * Adds a built-in date-column filter to the WHERE clause.
+ *
+ * Built-in date columns (`createdAt`, `updatedAt`, …) are `timestamptz`. A bare
+ * `::date` cast resolves the calendar day in the DB session timezone (UTC),
+ * which disagrees with the day the row is *displayed* in for a non-UTC user —
+ * an off-by-one when they filter "on the day a row shows". We normalize the
+ * column into the acting user's preferred timezone before truncating to a date
+ * (`(a."col" AT TIME ZONE ${timeZone})::date`) so the compared day matches the
+ * UI. The right-hand side stays a date-only string (`value::date`), unchanged.
+ *
+ * NOTE: this is intentionally NOT applied to custom-field DATE filters
+ * ({@link addCustomFieldDateFilter}) — those values are stored date-only, so
+ * there is no timezone to reconcile.
+ *
+ * @param whereClause - The existing WHERE clause to extend.
+ * @param filter - The date filter (operator + value).
+ * @param timeZone - IANA timezone name the day should be resolved in (the
+ *   acting user's resolved pref tz). Bound as a SQL parameter, never
+ *   string-interpolated, so it stays injection-safe.
+ * @returns The extended WHERE clause.
+ */
+function addDateFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  timeZone: string
+): Prisma.Sql {
+  // The timestamptz column truncated to a calendar date in the user's tz.
+  // `timeZone` is passed as a bound parameter (`AT TIME ZONE $n`), not raw SQL.
+  const localDate = Prisma.sql`(a."${Prisma.raw(
+    filter.name
+  )}" AT TIME ZONE ${timeZone})::date`;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ${filter.value}::date`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date != ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} != ${filter.value}::date`;
     case "before":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} < ${filter.value}::date`;
     case "after":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} > ${filter.value}::date`;
     case "between": {
       const [start, end] = filter.value as [string, string];
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" BETWEEN ${start}::date AND ${end}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} BETWEEN ${start}::date AND ${end}::date`;
     }
     case "inDates": {
       // Split comma-separated dates and remove whitespace
@@ -466,9 +494,7 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         dates.map((d) => Prisma.sql`${d}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ANY(ARRAY[${datesArray}]::date[])`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ANY(ARRAY[${datesArray}]::date[])`;
     }
     default:
       return whereClause;
