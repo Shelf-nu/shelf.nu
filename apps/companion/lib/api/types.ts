@@ -243,6 +243,12 @@ export type QrResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+       * matches it against the booking's outstanding reservations so it can
+       * count only units that actually fulfil one. Absent on older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -268,6 +274,12 @@ export type BarcodeResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+       * unit that fulfils a reservation from one that does not. Absent on
+       * older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -362,6 +374,10 @@ export type TeamMember = {
 
 export type TeamMembersResponse = {
   teamMembers: TeamMember[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type Location = {
@@ -374,6 +390,10 @@ export type Location = {
 
 export type LocationsResponse = {
   locations: Location[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type CustodyResponse = {
@@ -768,12 +788,21 @@ export type AvailableModelExistingRequest = {
 export type AvailableModelsResponse = {
   /** False when the workspace has no AssetModel at all — hide the picker. */
   showModelsTab: boolean;
-  /** Per-model availability for this booking's window (first 50 by name). */
+  /** Per-model availability for this booking's window, for THIS page. */
   assetModels: AvailableModel[];
-  /** Full workspace model count (the list above is capped at 50). */
+  /** Full workspace model count, ignoring any search. */
   totalAssetModels: number;
   /** This booking's existing model reservations, to pre-fill the inputs. */
   modelRequests: AvailableModelExistingRequest[];
+  /** 1-based page this response represents. */
+  page?: number;
+  perPage?: number;
+  /**
+   * Models matching the current search — the pagination denominator. The
+   * picker stops requesting pages once it holds this many rows.
+   */
+  matchedAssetModels?: number;
+  totalPages?: number;
 };
 
 /** Response from the model-request upsert/remove endpoint. */

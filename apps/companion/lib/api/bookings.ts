@@ -253,6 +253,7 @@ export const bookingsApi = {
       unhideBookingId?: string;
       search?: string;
       page?: number;
+      perPage?: number;
     }
   ) => {
     const sp = new URLSearchParams({ orgId });
@@ -263,6 +264,7 @@ export const bookingsApi = {
       sp.set("unhideAssetsBookigIds", params.unhideBookingId);
     if (params.search) sp.set("s", params.search);
     if (params.page) sp.set("page", String(params.page));
+    if (params.perPage) sp.set("per_page", String(params.perPage));
     return apiFetch<AvailableAssetsResponse>(
       `/api/mobile/bookings/available-assets?${sp}`
     );
@@ -280,6 +282,7 @@ export const bookingsApi = {
       currentBookingId?: string;
       search?: string;
       page?: number;
+      perPage?: number;
     }
   ) => {
     const sp = new URLSearchParams({ orgId });
@@ -290,6 +293,7 @@ export const bookingsApi = {
       sp.set("currentBookingId", params.currentBookingId);
     if (params.search) sp.set("s", params.search);
     if (params.page) sp.set("page", String(params.page));
+    if (params.perPage) sp.set("per_page", String(params.perPage));
     return apiFetch<AvailableKitsResponse>(
       `/api/mobile/bookings/available-kits?${sp}`
     );
@@ -306,9 +310,16 @@ export const bookingsApi = {
    * model name server-side so orgs with more than ~50 models can reach any
    * of them (the list is capped, so a client-only filter can't).
    */
-  availableModels: (orgId: string, bookingId: string, search?: string) => {
+  availableModels: (
+    orgId: string,
+    bookingId: string,
+    search?: string,
+    params?: { page?: number; perPage?: number }
+  ) => {
     const sp = new URLSearchParams({ orgId, bookingId });
     if (search) sp.set("s", search);
+    if (params?.page) sp.set("page", String(params.page));
+    if (params?.perPage) sp.set("perPage", String(params.perPage));
     return apiFetch<AvailableModelsResponse>(
       `/api/mobile/bookings/available-models?${sp}`
     );
