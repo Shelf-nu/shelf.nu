@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Form, useNavigation, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -64,18 +64,72 @@ export default function SetOrEditReminderDialog({
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
+  /**
+   * One-shot latch guarding {@link handleOnSuccess} against re-firing while
+   * the `success=true` param is still present but not yet stripped from the
+   * committed URL.
+   *
+   * Root cause of the production incident this guards against: the reminder
+   * form action redirects to `?...&success=true`. Handling that (closing the
+   * dialog + stripping the param) is *itself* a second navigation, and until
+   * that navigation commits, `searchParams` keeps reading `success=true` on
+   * every intermediate re-render. Both `onClose` (an inline arrow in some
+   * callers) and `setSearchParams` can also get a fresh identity every
+   * render. Without a latch, any one of those re-renders re-runs this effect,
+   * which calls `setSearchParams` again — aborting the in-flight strip
+   * navigation before it commits — so `success` never clears and the effect
+   * fires again on the next render: an infinite `reminders.data`
+   * revalidation loop. This latch makes the effect body idempotent
+   * regardless of dependency-identity churn (defense in depth on top of
+   * stabilizing `onClose`/`setSearchParams` at the call sites).
+   */
+  const successHandledRef = useRef(false);
+
   useEffect(
     function handleOnSuccess() {
-      if (searchParams.get("success") === "true") {
-        onClose && onClose();
+      const isSuccess = searchParams.get("success") === "true";
 
-        setSearchParams((prev) => {
+      if (!isSuccess) {
+        // Re-arm the latch once the param is gone (or was never set) so a
+        // *subsequent* success (e.g. creating another reminder) still closes
+        // the dialog and strips the param.
+        successHandledRef.current = false;
+        return;
+      }
+
+      // Gate on `open`: the reminders table mounts ONE create dialog plus,
+      // inside every row's `ActionsDropdown`, one (closed) edit dialog. All
+      // of those instances observe the same `?success=true` param, so
+      // without this gate every mounted instance — each with its own
+      // independently-false latch — would call `setSearchParams` once,
+      // producing N competing navigations/`.data` revalidations on an
+      // N-row page. Only the dialog that is actually `open` (the one whose
+      // submit produced this success) should react.
+      if (!open) return;
+
+      if (successHandledRef.current) {
+        // Already handled this success signal — the strip navigation may
+        // still be in flight; do not act again until `success` clears.
+        return;
+      }
+      successHandledRef.current = true;
+
+      onClose && onClose();
+
+      // TODO(follow-up): migrate this form to `useFetcher` so success is
+      // signalled via fetcher state instead of a `?success=true` redirect +
+      // param-strip navigation. That would remove this whole class of loop,
+      // but changing the form's action/redirect contract is out of scope for
+      // this hotfix — it's shared with the global reminders page.
+      setSearchParams(
+        (prev) => {
           prev.delete("success");
           return prev;
-        });
-      }
+        },
+        { replace: true, preventScrollReset: true }
+      );
     },
-    [onClose, searchParams, setSearchParams]
+    [open, onClose, searchParams, setSearchParams]
   );
 
   return (
