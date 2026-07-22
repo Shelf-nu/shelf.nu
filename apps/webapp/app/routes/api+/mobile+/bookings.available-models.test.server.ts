@@ -99,6 +99,7 @@ beforeEach(() => {
     assetModels: [],
     initialAssetModels: [],
     totalAssetModels: 0,
+    matchedAssetModels: 0,
     modelRequests: [],
   });
 });
@@ -174,6 +175,7 @@ describe("GET /api/mobile/bookings/available-models", () => {
         { id: "m-1", name: "Dell XPS", metadata: {} as never },
       ],
       totalAssetModels: 1,
+      matchedAssetModels: 1,
       modelRequests: [
         {
           assetModelId: "m-1",
