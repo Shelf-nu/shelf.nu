@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
+  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -245,6 +246,13 @@ function ScannerContent() {
     setScannedItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
   }, [blockers]);
 
+  /**
+   * Measured height of the open drawer. The overlay itself never resizes (see
+   * the bottom-section comment), so this is used only to lift the floating
+   * manual-entry pill clear of the drawer.
+   */
+  const [drawerHeight, setDrawerHeight] = useState(0);
+
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
@@ -254,6 +262,47 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  /**
+   * Clear the measured height once no drawer can be showing. The drawer host
+   * unmounts on close, so its `onLayout` never fires again — without this the
+   * manual-entry pill stays floating at the old offset over empty space.
+   *
+   * Mirrors the `show*Drawer` predicates further down (which sit past an early
+   * return, so a hook can't read them) rather than only checking the item
+   * lists: the drawer also disappears when `action` or booking mode changes.
+   */
+  const anyDrawerVisible =
+    (!isBookingMode && isBatchAction(action) && scannedItems.length > 0) ||
+    (isBookingMode && bookingCheckinItems.length > 0);
+  useEffect(() => {
+    if (!anyDrawerVisible) setDrawerHeight(0);
+  }, [anyDrawerVisible]);
+
+  /**
+   * Where the floating manual-entry control sits, or `null` when it cannot be
+   * placed without overlapping something.
+   *
+   * It is anchored inside the bottom strip, which is roughly half the space
+   * left over after the 240px frame. Lifting it by the full drawer height
+   * clears the drawer but can push it up INTO the frame and over the
+   * instruction text — the drawer grows to 280px (400px with blockers), so on
+   * a short viewport no offset clears both. In that case we render nothing
+   * rather than recreate the overlap this fix exists to remove: the camera and
+   * the drawer's own actions still work, and clearing an item restores the gap.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const manualEntryBottom = useMemo(() => {
+    const DEFAULT_BOTTOM = 90;
+    const CONTROL_HEIGHT = 48;
+    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
+
+    // Space between the frame's bottom edge and the screen bottom.
+    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
+    const desired = drawerHeight + spacing.md;
+    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
+    return desired > maxBottom ? null : desired;
+  }, [drawerHeight, windowHeight]);
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -1917,14 +1966,22 @@ function ScannerContent() {
 
         {/* Bottom */}
         <View
-          style={[
-            styles.overlaySection,
-            styles.bottomSection,
-            (showBatchDrawer || showBookingDrawer) && {
-              flex: 0,
-              paddingTop: spacing.md,
-            },
-          ]}
+          /**
+           * The overlay must NOT reflow when a drawer opens.
+           *
+           * This used to collapse to `flex: 0`, but only the BOTTOM section
+           * did — the top kept `flex: 1`, so it absorbed the freed space and
+           * pushed the header and the 240px scan frame downward. The camera is
+           * a static `absoluteFill` layer underneath, so what actually moved
+           * was the cutout sliding down over a still picture: it reads as "the
+           * camera jumped". It also dragged the absolutely-positioned
+           * manual-entry pill (anchored to this section's bottom) up onto the
+           * drawer.
+           *
+           * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
+           * it never needed the overlay to make room in the first place.
+           */
+          style={[styles.overlaySection, styles.bottomSection]}
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -2010,59 +2067,68 @@ function ScannerContent() {
             (apps/webapp/app/components/scanner/code-scanner.tsx).
             NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
             control's origin so the existing e2e flows stay stable. */}
-        <View style={styles.devScanContainer}>
-          {devScanVisible ? (
-            <View style={styles.devScanRow}>
-              <TextInput
-                testID="dev-scan-input"
-                style={styles.devScanInput}
-                value={devScanInput}
-                onChangeText={setDevScanInput}
-                placeholder="Enter QR, barcode, or SAM ID"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="go"
-                onSubmitEditing={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-              />
+        {manualEntryBottom !== null && (
+          <View
+            style={[
+              styles.devScanContainer,
+              // Clamped so the lift never pushes the control into the scan
+              // frame; see `manualEntryBottom`.
+              { bottom: manualEntryBottom },
+            ]}
+          >
+            {devScanVisible ? (
+              <View style={styles.devScanRow}>
+                <TextInput
+                  testID="dev-scan-input"
+                  style={styles.devScanInput}
+                  value={devScanInput}
+                  onChangeText={setDevScanInput}
+                  placeholder="Enter QR, barcode, or SAM ID"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                />
+                <TouchableOpacity
+                  testID="dev-scan-submit"
+                  style={styles.devScanButton}
+                  onPress={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                  accessibilityLabel="Look up code"
+                >
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.devScanClose}
+                  onPress={() => setDevScanVisible(false)}
+                  accessibilityLabel="Close manual entry"
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
               <TouchableOpacity
-                testID="dev-scan-submit"
-                style={styles.devScanButton}
-                onPress={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-                accessibilityLabel="Look up code"
+                testID="dev-scan-toggle"
+                style={styles.devScanToggle}
+                onPress={() => setDevScanVisible(true)}
+                accessibilityLabel="Enter a code manually"
               >
-                <Ionicons name="arrow-forward" size={16} color="#fff" />
+                <Ionicons name="keypad-outline" size={14} color="#fff" />
+                <Text style={styles.devScanToggleText}>Enter code</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.devScanClose}
-                onPress={() => setDevScanVisible(false)}
-                accessibilityLabel="Close manual entry"
-              >
-                <Ionicons name="close" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              testID="dev-scan-toggle"
-              style={styles.devScanToggle}
-              onPress={() => setDevScanVisible(true)}
-              accessibilityLabel="Enter a code manually"
-            >
-              <Ionicons name="keypad-outline" size={14} color="#fff" />
-              <Text style={styles.devScanToggleText}>Enter code</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* ── Drawers ─────────────────────────────────────
@@ -2071,7 +2137,16 @@ function ScannerContent() {
           drawer inside the overlay left its buttons dead whenever the
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
-        <View style={styles.drawerHost} pointerEvents="box-none">
+        <View
+          style={styles.drawerHost}
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = Math.round(e.nativeEvent.layout.height);
+            // Guard the setState: onLayout re-fires on every relayout, and an
+            // unconditional set would loop.
+            setDrawerHeight((prev) => (prev === h ? prev : h));
+          }}
+        >
           {/* ── Batch Drawer ──────────────────────────── */}
           {showBatchDrawer && (
             <BatchDrawer
