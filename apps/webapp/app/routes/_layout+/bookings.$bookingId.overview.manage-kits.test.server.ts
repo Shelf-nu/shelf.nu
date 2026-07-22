@@ -921,6 +921,7 @@ describe("manage-kits loader — Models tab payload", () => {
       assetModels: [],
       initialAssetModels: [],
       totalAssetModels: 0,
+      matchedAssetModels: 0,
       modelRequests: [],
     });
 
@@ -933,6 +934,7 @@ describe("manage-kits loader — Models tab payload", () => {
       assetModels: [],
       initialAssetModels: [],
       totalAssetModels: 0,
+      matchedAssetModels: 0,
       modelRequests: [],
     });
   });
@@ -970,6 +972,7 @@ describe("manage-kits loader — Models tab payload", () => {
         },
       ],
       totalAssetModels: 1,
+      matchedAssetModels: 1,
       modelRequests: [
         {
           assetModelId: "model1",
@@ -996,6 +999,7 @@ describe("manage-kits loader — Models tab payload", () => {
       assetModels: mockModelTabData.assetModels,
       initialAssetModels: mockModelTabData.initialAssetModels,
       totalAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.totalAssetModels,
       modelRequests: mockModelTabData.modelRequests,
     });
   });
@@ -1011,6 +1015,7 @@ describe("manage-kits loader — Models tab payload", () => {
       assetModels: [],
       initialAssetModels: [],
       totalAssetModels: 1,
+      matchedAssetModels: 1,
       modelRequests: [],
     });
 
