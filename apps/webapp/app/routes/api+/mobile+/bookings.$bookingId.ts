@@ -9,6 +9,7 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import {
+  bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
   computeBookingAssetRemainingToCheckOut,
   getPartiallyCheckedInAssetIds,
@@ -56,6 +57,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         id: bookingId,
         organizationId,
         ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+        /**
+         * Draft privacy (web parity). A DRAFT booking is private to its
+         * creator — web gates the detail route on the same shared clause, so
+         * without it a direct GET here returns a colleague's unfinished draft
+         * even though the list would (now) hide it. The list fix alone is not
+         * enough: booking ids are guessable-adjacent and the detail endpoint
+         * is reachable directly.
+         */
+        AND: [bookingDraftVisibilityClause(user.id)],
       },
       select: {
         id: true,
