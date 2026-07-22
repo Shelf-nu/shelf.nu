@@ -12,7 +12,7 @@
  * @see {@link file://./date-time-picker.tsx}
  */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   DateTimePicker,
   parseWireToParts,
@@ -21,21 +21,32 @@ import {
 
 // why: useDateFormatter reads useRequestInfo(), which needs the root loader's
 // RequestInfo context (unavailable in a unit test). We stub the hook with a
-// fixed Monday-start / H24 prefs object to exercise the picker deterministically.
+// mutable prefs object (default Monday-start / H24 / DD_MM_YYYY) so individual
+// tests can flip `dateFormat` to exercise the token mapping deterministically.
+const mockPrefs = vi.hoisted(() => ({
+  current: {
+    dateFormat: "DD_MM_YYYY" as string,
+    timeFormat: "H24",
+    weekStartsOn: 1,
+    timeZone: "Europe/London",
+  },
+}));
+
 vi.mock("~/hooks/use-date-formatter", () => ({
   useDateFormatter: () => ({
-    prefs: {
-      dateFormat: "DD_MM_YYYY",
-      timeFormat: "H24",
-      weekStartsOn: 1,
-      timeZone: "Europe/London",
-    },
+    prefs: mockPrefs.current,
     formatDate: (value: string | Date) =>
       value instanceof Date ? value.toDateString() : value,
     formatTime: (v: string | Date) => String(v),
     formatDateTime: (v: string | Date) => String(v),
   }),
 }));
+
+// Reset to the default DD_MM_YYYY pref between tests so a token override in one
+// test can't leak into the next.
+afterEach(() => {
+  mockPrefs.current.dateFormat = "DD_MM_YYYY";
+});
 
 describe("wire helpers", () => {
   it("round-trips a date-only wire without tz shift", () => {
@@ -123,6 +134,22 @@ describe("DateTimePicker", () => {
     expect(screen.getByText("Override Date")).toBeTruthy();
   });
 
+  it("shows an example date (not the format token) as the empty placeholder", () => {
+    // why: an empty typeable input must teach the format by EXAMPLE
+    // ("e.g. 24/07/2026"), not leak the raw token ("dd/mm/yyyy" / "mmm d, yyyy")
+    // which reads as gibberish to normal users. Mock prefs are DD_MM_YYYY.
+    render(<DateTimePicker name="date" mode="date" label="Date" />);
+    const text = document.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(text?.placeholder).toBe("e.g. 24/07/2026");
+  });
+
+  it("renders the month-name example placeholder for a month-name pref", () => {
+    mockPrefs.current.dateFormat = "MMM_DD_YYYY";
+    render(<DateTimePicker name="date" mode="date" label="Date" />);
+    const text = document.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(text?.placeholder).toBe("e.g. Jul 24, 2026");
+  });
+
   it("shows the selected date in the typeable input using the workspace format", () => {
     // Mock prefs are DD_MM_YYYY → dd/MM/yyyy tokens.
     render(<DateTimePicker name="date" value="2026-06-22" label="Date" />);
@@ -166,5 +193,37 @@ describe("DateTimePicker", () => {
     const timeInput =
       document.querySelector<HTMLInputElement>('input[type="time"]');
     expect(timeInput?.value).toBe("18:30");
+  });
+
+  // Month-name display prefs render AND parse the typeable input in their
+  // natural format (e.g. "20 Jul 2026" / "Jul 20, 2026") — option B.
+  describe("month-name prefs render + parse the natural format", () => {
+    it("renders 'd MMM yyyy' for a DD_MMM_YYYY pref", () => {
+      mockPrefs.current.dateFormat = "DD_MMM_YYYY";
+      render(<DateTimePicker name="date" value="2026-07-20" label="Date" />);
+      const text =
+        document.querySelector<HTMLInputElement>('input[type="text"]');
+      expect(text?.value).toBe("20 Jul 2026");
+    });
+
+    it("renders 'MMM d, yyyy' for a MMM_DD_YYYY pref", () => {
+      mockPrefs.current.dateFormat = "MMM_DD_YYYY";
+      render(<DateTimePicker name="date" value="2026-07-20" label="Date" />);
+      const text =
+        document.querySelector<HTMLInputElement>('input[type="text"]');
+      expect(text?.value).toBe("Jul 20, 2026");
+    });
+
+    it("parses a typed month-name back to the YYYY-MM-DD wire (DD_MMM_YYYY)", () => {
+      mockPrefs.current.dateFormat = "DD_MMM_YYYY";
+      render(<DateTimePicker name="typed" mode="date" />);
+      const text =
+        document.querySelector<HTMLInputElement>('input[type="text"]');
+      fireEvent.change(text!, { target: { value: "20 Jul 2026" } });
+      const hidden = document.querySelector<HTMLInputElement>(
+        'input[type="hidden"][name="typed"]'
+      );
+      expect(hidden?.value).toBe("2026-07-20");
+    });
   });
 });

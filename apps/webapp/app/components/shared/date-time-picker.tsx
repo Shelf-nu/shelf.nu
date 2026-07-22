@@ -25,11 +25,11 @@
  * @see {@link file://../../hooks/use-date-formatter.ts} prefs source
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DateFormatPreference } from "@prisma/client";
 import * as Popover from "@radix-ui/react-popover";
 import { format, isValid, parse } from "date-fns";
-import { CalendarIcon, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { CalendarIcon, X } from "lucide-react";
 import type { Matcher } from "react-day-picker";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
@@ -37,94 +37,24 @@ import "react-day-picker/style.css";
 import { InnerLabel } from "~/components/forms/inner-label";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { tw } from "~/utils/tw";
+import {
+  calendarBounds,
+  CalendarChevron,
+  RDP_CLASS_NAMES,
+  RDP_STYLE,
+} from "./calendar-styles";
 
 /**
- * Neutral, shadcn-style day-button appearance for react-day-picker v9. v9's
- * default "selected" is an accent-colored ring; we override it to a filled dark
- * pill with white text and give "today" a subtle gray fill — the clean default
- * shadcn look. Structural layout (nav, caption, weekday header, sizing) is set
- * via RDP_CLASS_NAMES; only the day pill lives in this static <style>.
+ * A fixed, unambiguous example date used to render the input placeholder in the
+ * user's own format (e.g. "e.g. Jul 24, 2026" / "e.g. 24/07/2026"). The day (24)
+ * is > 12 so day/month position can never be confused when teaching the format.
  */
-const RDP_STYLE = `
-  .rdp-day_button {
-    width: 34px;
-    height: 34px;
-    margin: 0 auto;
-    border: none;
-    border-radius: 9999px;
-    box-shadow: none;
-    outline: none;
-    font-size: 13px;
-    font-weight: 400;
-    color: #101828;
-    transition: background-color 0.15s ease;
-  }
-  .rdp-day_button:hover:not([disabled]) { background-color: #F2F4F7; }
-  .rdp-day_button:focus-visible {
-    background-color: #F2F4F7;
-  }
-  .rdp-today:not(.rdp-selected) .rdp-day_button {
-    background-color: #F2F4F7;
-    font-weight: 500;
-  }
-  /* Filled dark pill IS the selected indicator — strip v9's default accent
-     (blue) border/outline/shadow so there's no ring around it. */
-  .rdp-selected .rdp-day_button {
-    background-color: #101828 !important;
-    color: #ffffff !important;
-    font-weight: 500 !important;
-    border: none !important;
-    box-shadow: none !important;
-    outline: none !important;
-  }
-  .rdp-outside .rdp-day_button { color: #98A2B3; }
-  .rdp-disabled .rdp-day_button { color: #D0D5DD; opacity: 0.5; }
-`;
-
-/**
- * shadcn-style structural classes for react-day-picker v9 parts: centered month
- * caption with the nav arrows pinned left/right, muted weekday header, compact
- * 36px grid.
- */
-const RDP_CLASS_NAMES = {
-  months: "relative",
-  month: "flex flex-col gap-3",
-  month_caption: "flex h-8 items-center justify-center",
-  caption_label: "text-sm font-semibold text-gray-900",
-  nav: "absolute inset-x-0 top-0 flex h-8 items-center justify-between",
-  button_previous:
-    "inline-flex size-7 items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40",
-  button_next:
-    "inline-flex size-7 items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40",
-  weekdays: "flex",
-  weekday: "w-9 pb-1 text-[0.8rem] font-normal text-gray-500",
-  week: "flex w-full",
-  day: "size-9 p-0 text-center",
-  hidden: "invisible",
-};
-
-/**
- * Neutral nav chevrons for react-day-picker v9's `Chevron` slot — replaces the
- * default themed (blue) chevron with plain lucide icons.
- *
- * @param props.orientation - which arrow to render
- */
-function CalendarChevron({
-  orientation,
-}: {
-  orientation?: "up" | "down" | "left" | "right";
-}) {
-  return orientation === "left" ? (
-    <ChevronLeft className="size-4" />
-  ) : (
-    <ChevronRight className="size-4" />
-  );
-}
+const PLACEHOLDER_EXAMPLE_DATE = new Date(2026, 6, 24); // Jul 24, 2026
 
 /**
  * Map a workspace `dateFormat` preference to the date-fns token string used both
  * to RENDER the selected date in the typeable text input and to PARSE the user's
- * typed value back into a Date. Also drives the field placeholder (lowercased).
+ * typed value back into a Date. Also drives the example placeholder.
  *
  * @param dateFormat - the workspace date-format preference
  * @returns a date-fns format token string, e.g. `"dd/MM/yyyy"`
@@ -135,6 +65,14 @@ function dateFormatTokens(dateFormat: DateFormatPreference): string {
       return "dd/MM/yyyy";
     case "YYYY_MM_DD":
       return "yyyy-MM-dd";
+    // Month-name prefs render AND parse in their natural format
+    // (e.g. "20 Jul 2026" / "Jul 20, 2026"). date-fns parses a complete month
+    // name and treats partial input as invalid, so typing works with the
+    // existing parse-on-change (the text is kept until it parses cleanly).
+    case "DD_MMM_YYYY":
+      return "d MMM yyyy";
+    case "MMM_DD_YYYY":
+      return "MMM d, yyyy";
     case "MM_DD_YYYY":
     default:
       return "MM/dd/yyyy";
@@ -188,8 +126,9 @@ export type DateTimePickerProps = {
   required?: boolean;
   className?: string;
   /**
-   * Placeholder for the date text input. When left at the default, the
-   * lowercased format tokens are used (e.g. "dd/mm/yyyy").
+   * Placeholder for the date text input. When left at the default, an example
+   * date in the user's own format is shown (e.g. "e.g. Jul 24, 2026") so users
+   * learn the format they can type.
    */
   placeholder?: string;
   /** Show a Clear affordance that empties the field. */
@@ -288,6 +227,12 @@ export function DateTimePicker({
     day ? format(day, tokens) : "";
 
   const [open, setOpen] = useState(false);
+  // The whole field wrapper (text input + calendar icon). The calendar opens on
+  // focus of the input, but the input is the Popover *Anchor*, not its Trigger —
+  // Radix only auto-excludes the Trigger from dismiss detection, so without this
+  // ref a pointer-down / focus on the input reads as "interact outside" and
+  // dismisses the popover the same tick it opened. We use it to veto that.
+  const fieldRef = useRef<HTMLDivElement>(null);
   const [internalWire, setInternalWire] = useState<string>(
     () => value ?? defaultValue ?? ""
   );
@@ -389,11 +334,15 @@ export function DateTimePicker({
   // Stable id linking the field to its error message via aria-describedby.
   const errorId = `${name}-error`;
 
-  // Placeholder: caller-supplied wins; otherwise the lowercased format tokens.
+  // Placeholder: a caller-supplied override wins. Otherwise — because this is a
+  // TYPEABLE input — show a concrete EXAMPLE date in the user's own format
+  // ("e.g. Jul 24, 2026"), which teaches what to type. This is clearer than the
+  // raw format token ("mmm d, yyyy"), which reads as gibberish to normal users.
+  // (The non-typeable DateRangePicker button uses a plain "Select …" label.)
   const placeholderText =
     placeholder && placeholder !== "Select date"
       ? placeholder
-      : tokens.toLowerCase();
+      : `e.g. ${format(PLACEHOLDER_EXAMPLE_DATE, tokens)}`;
 
   // Build react-day-picker disabled matchers from min/max bounds.
   const disabledMatchers: Matcher[] = [];
@@ -423,6 +372,7 @@ export function DateTimePicker({
               button) so it aligns with the field's left edge. */}
           <Popover.Anchor asChild>
             <div
+              ref={fieldRef}
               className={tw(
                 "flex min-w-0 flex-1 items-center rounded-[4px] border shadow transition-colors",
                 "focus-within:border-primary-300",
@@ -437,6 +387,11 @@ export function DateTimePicker({
                 value={typedText}
                 onChange={(e) => handleTypedChange(e.target.value)}
                 onBlur={handleTypedBlur}
+                // Open the calendar as soon as the field is focused — users who
+                // never think to click the calendar icon still get the picker.
+                // Focus is kept in the input (see Content onOpenAutoFocus) so the
+                // calendar appearing doesn't block typing.
+                onFocus={() => setOpen(true)}
                 placeholder={placeholderText}
                 disabled={disabled}
                 required={required}
@@ -449,7 +404,7 @@ export function DateTimePicker({
                   // --tw-ring-color (light blue); without this the input shows a
                   // blue focus ring (the container's orange focus-within border is
                   // the intended focus indicator). Mirrors the standard Input.
-                  "min-w-0 flex-1 border-0 bg-transparent px-3.5 py-2 text-[16px] text-gray-900 outline-none focus:outline-none focus:ring-[0]",
+                  "min-w-0 flex-1 border-0 bg-transparent px-3.5 py-2 text-gray-900 outline-none focus:outline-none focus:ring-[0]",
                   "placeholder:text-gray-500 disabled:cursor-not-allowed"
                 )}
               />
@@ -479,7 +434,7 @@ export function DateTimePicker({
               aria-label="Select time"
               aria-invalid={error ? true : undefined}
               className={tw(
-                "shrink-0 rounded-[4px] border px-3 py-2 text-[16px] text-gray-900 shadow transition-colors",
+                "shrink-0 rounded-[4px] border px-3 py-2 text-gray-900 shadow transition-colors",
                 "outline-none focus:border-primary-300 focus:ring-[0]",
                 error
                   ? "border-error-300"
@@ -497,17 +452,37 @@ export function DateTimePicker({
               // used inside dialogs (z-[100]); a lower value renders the calendar
               // BEHIND the dialog. This is the shared picker, so it fixes every
               // date field at once.
-              "z-[999999] rounded-lg border border-gray-200 bg-white p-3 shadow-lg",
+              // !mt-0: global.css adds `mt-2` to every popper content; combined
+              // with sideOffset={4} that's a 12px gap. Override to sit tight
+              // under the field (just the 4px offset). Important beats the
+              // higher-specificity global selector.
+              "z-[999999] !mt-0 rounded-lg border border-gray-200 bg-white p-2 shadow-lg",
               "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
             )}
             sideOffset={4}
             align="start"
+            // Keep focus in the text input when the calendar opens (it opens on
+            // focus). Without this, Radix moves focus into the day grid, which
+            // would blur the input and stop the user from typing a date.
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            // The input is the Anchor, not the Trigger, so Radix treats the
+            // focus/pointer-down that OPENS the calendar as an outside
+            // interaction and dismisses it the same tick. Veto dismissal when
+            // the interaction is inside our own field (input or calendar icon).
+            onInteractOutside={(e) => {
+              const target = e.detail.originalEvent.target as Node | null;
+              if (target && fieldRef.current?.contains(target)) {
+                e.preventDefault();
+              }
+            }}
           >
             {/* react-doctor-safe static <style>: neutral shadcn-like day styling
                 (filled dark "selected" pill, subtle "today"). See RDP_STYLE. */}
             <style>{RDP_STYLE}</style>
             <DayPicker
               mode="single"
+              captionLayout="dropdown"
+              {...calendarBounds()}
               selected={selectedDate}
               onSelect={handleDaySelect}
               showOutsideDays
@@ -531,8 +506,6 @@ export function DateTimePicker({
                 </button>
               </div>
             ) : null}
-
-            <Popover.Arrow className="fill-white" />
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
