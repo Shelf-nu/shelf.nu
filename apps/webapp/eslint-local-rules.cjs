@@ -6,4 +6,5 @@ module.exports = {
   "require-react-import-when-using-namespace": require("./eslint-local-rules/require-react-import-when-using-namespace.cjs"),
   "require-button-type": require("./eslint-local-rules/require-button-type.cjs"),
   "require-org-scope-on-id-queries": require("./eslint-local-rules/require-org-scope-on-id-queries.cjs"),
+  "require-complete-404-shape": require("./eslint-local-rules/require-complete-404-shape.cjs"),
 };
