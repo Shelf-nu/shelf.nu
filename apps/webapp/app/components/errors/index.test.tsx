@@ -139,6 +139,24 @@ function buildNotFoundRouteError(overrides?: {
   };
 }
 
+/**
+ * A router-generated 404: what React Router itself throws for an
+ * unmatched/stale URL (an `ErrorResponseImpl` whose `.data` is a plain
+ * `Error`), as opposed to `buildNotFoundRouteError`'s Shelf
+ * `{ error: { message, traceId, label } }` payload. `isRouteErrorResponse`
+ * recognizes this shape (status/statusText/internal/data all present on the
+ * object), but `isRouteError` does not — there's no Shelf error payload to
+ * read `message`/`traceId`/`label` from, so those stay at their defaults.
+ */
+function buildRouterNotFoundError() {
+  return {
+    status: 404,
+    statusText: "Not Found",
+    internal: true,
+    data: new Error('No route matches URL "/stale/path"'),
+  };
+}
+
 /** The workspace-switcher `additionalData` shape: a resource that exists,
  * but in a different organization the user belongs to. */
 function buildWorkspaceSwitcherAdditionalData() {
@@ -258,6 +276,25 @@ describe("ErrorContent not-found screen", () => {
     ).toBeNull();
   });
 
+  it("renders the not-found screen for a router-generated 404 (unmatched/stale URL, no Shelf payload)", () => {
+    mockRouteError = buildRouterNotFoundError();
+    renderErrorContent();
+
+    expect(screen.getByText("Not found")).toBeTruthy();
+    // Generic not-found copy: there is no Shelf `message` to read (the
+    // router error's `.data` is a plain Error, not `{ error: {...} }`)
+    expect(screen.getByText(/doesn't exist/i)).toBeTruthy();
+    // Not the alarming generic framing
+    expect(screen.queryByText(/Oops, something went wrong/i)).toBeNull();
+    // No Shelf trace id to show for a router-generated 404
+    expect(screen.queryByText(/Trace id/)).toBeNull();
+    // Only "Back to home" is offered — no Reload/Report actions
+    expect(screen.queryByRole("link", { name: /reload page/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /report this issue/i })
+    ).toBeNull();
+  });
+
   it("still routes the workspace-switcher 404 shape to <Error404Handler/> (unchanged)", () => {
     const additionalData = buildWorkspaceSwitcherAdditionalData();
     mockRouteError = buildRouteError({
@@ -324,6 +361,21 @@ describe("ErrorContent capturing route-error boundary failures to Sentry", () =>
         status: "404",
       },
     });
+  });
+
+  it("captures a router-generated 404 (unmatched/stale URL) without a shelf_trace_id or label tag", async () => {
+    mockRouteError = buildRouterNotFoundError();
+    renderErrorContent();
+
+    await waitFor(() => expect(mockCaptureException).toHaveBeenCalled());
+    const hint = mockCaptureException.mock.calls.at(-1)?.[1];
+    expect(hint).toMatchObject({
+      tags: { source: "error-boundary", status: "404" },
+    });
+    // No Shelf payload means no traceId/label to report — both tags must be
+    // omitted entirely (not sent as the literal string "undefined")
+    expect(hint?.tags).not.toHaveProperty("shelf_trace_id");
+    expect(hint?.tags).not.toHaveProperty("label");
   });
 
   it("does not capture the benign workspace-switcher 404 case", async () => {

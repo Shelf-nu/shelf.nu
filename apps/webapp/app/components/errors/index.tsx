@@ -154,7 +154,9 @@ function ErrorScreenLayout({
  * - The benign workspace-switcher case (`<Error404Handler/>`): the resource
  *   exists but belongs to another of the user's organizations.
  * - A genuine 404 that is NOT the workspace-switcher shape: a calm
- *   "Not found" screen.
+ *   "Not found" screen. This includes both Shelf-thrown 404s (`{ error }`
+ *   payload) and router-generated 404s for an unmatched/stale URL (a plain
+ *   `Error` payload) — see `isNotFound` below.
  * - Everything else: the generic "Oops, something went wrong" screen.
  *
  * Also captures failures to Sentry: unhandled client-side `Error` instances
@@ -213,9 +215,19 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
    * that is NOT the workspace-switcher shape (that shape renders
    * `<Error404Handler/>` below with its own "switch workspace?" UX instead
    * of this calmer not-found screen).
+   *
+   * Gated on `isRouteErrorResponse` (router shape + status), NOT
+   * `isRouteError` (Shelf payload shape): React Router itself throws a
+   * 404 `ErrorResponse` for an unmatched/stale URL whose `.data` is a plain
+   * `Error`, not Shelf's `{ error: {...} }` payload — `isRouteError` is
+   * `false` for that case even though it is a genuine 404. `error404` above
+   * already handles this safely (`parse404ErrorData` returns
+   * `isError404: false` when there's no Shelf payload to parse).
    */
   const isNotFound =
-    isRouteError(response) && !error404.isError404 && statusCode === 404;
+    isRouteErrorResponse(response) &&
+    !error404.isError404 &&
+    statusCode === 404;
 
   /**
    * Route-error responses in the 4xx range (bad input, permission denials,
@@ -227,13 +239,28 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
    * captured server-side — capturing again here would double-report), and
    * the benign workspace-switcher case is excluded entirely (expected
    * cross-org UX, not a bug).
+   *
+   * Gated on `isRouteErrorResponse` (see `isNotFound` above for why) so
+   * router-generated 4xx responses (e.g. an unmatched-route 404) are
+   * captured too, even though they carry no Shelf payload.
    */
   const shouldCaptureRouteError =
-    isRouteError(response) &&
+    isRouteErrorResponse(response) &&
     !error404.isError404 &&
     statusCode !== undefined &&
     statusCode >= 400 &&
     statusCode < 500;
+
+  /**
+   * Body copy for the not-found screen. A Shelf-thrown 404 carries its own
+   * `message` (extracted above); a router-generated 404 (unmatched/stale
+   * URL) has no Shelf payload, so `message` is still at its generic
+   * "Oops, something went wrong" default — swap in copy appropriate for a
+   * calm not-found screen instead.
+   */
+  const notFoundMessage = isRouteError(response)
+    ? message
+    : "The page or item you're looking for doesn't exist.";
 
   // Capture unhandled Error instances (client-side crashes) client-side,
   // and capturable 4xx route errors (see shouldCaptureRouteError above).
@@ -260,12 +287,17 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
       // groups the issue sensibly by message, like any other captured
       // exception. Not stored in `sentryEventId`: the route-error path
       // shows the shelf trace id to the user, not the Sentry event id.
+      //
+      // `shelf_trace_id`/`label` are only present on Shelf-thrown errors
+      // (see `isRouteError` above); a router-generated 404 has neither, so
+      // both are omitted entirely here rather than sent as the literal
+      // string "undefined".
       Sentry.captureException(new Error(message), {
         tags: {
           source: "error-boundary",
-          shelf_trace_id: traceId,
-          label: errorLabel,
           status: errorStatus,
+          ...(traceId ? { shelf_trace_id: traceId } : {}),
+          ...(errorLabel ? { label: errorLabel } : {}),
         },
         contexts: { route: { pathname: loc.pathname } },
       });
@@ -295,7 +327,7 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
       <ErrorScreenLayout
         className={className}
         title={rawTitle || "Not found"}
-        message={message}
+        message={notFoundMessage}
         traceId={traceId}
         actions={<BackHomeButton />}
       />
