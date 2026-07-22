@@ -128,6 +128,46 @@ type ScannedItem = {
   hasAssetsInCustody?: boolean;
 };
 
+/**
+ * Match scanned items against a booking's outstanding model reservations.
+ *
+ * Shared by the live progress readout and the pre-submit revalidation, so both
+ * use identical rules. Each asset consumes one unit of an outstanding request
+ * for its model; once a model's remaining count hits zero, further units of it
+ * are unmatched — mirroring `materializeModelRequestForAsset`, which returns
+ * `matched: false` once `fulfilledQuantity >= quantity`.
+ */
+function matchScansToReservations(
+  items: ScannedItem[],
+  outstanding: { assetModelId: string; outstandingQuantity: number }[],
+  required: number
+) {
+  const remainingByModel = new Map(
+    outstanding.map((r) => [r.assetModelId, r.outstandingQuantity])
+  );
+  const unmatchedIds = new Set<string>();
+  let matched = 0;
+
+  for (const item of items) {
+    if (item.type !== "asset") continue;
+    const modelId = item.assetModelId ?? null;
+    const remaining = modelId ? remainingByModel.get(modelId) ?? 0 : 0;
+    if (remaining > 0) {
+      remainingByModel.set(modelId as string, remaining - 1);
+      matched += 1;
+    } else {
+      unmatchedIds.add(item.targetId);
+    }
+  }
+
+  return {
+    matched,
+    required,
+    unmatchedIds,
+    isComplete: required > 0 && matched >= required,
+  };
+}
+
 // ── Scanner Content ─────────────────────────────────────
 
 function ScannerContent() {
@@ -1445,7 +1485,7 @@ function ScannerContent() {
    * submit if any reservation is still unassigned, so the operator gets a clear
    * "still N to assign" error rather than a silent partial checkout.
    */
-  const handleBookingFulfil = () => {
+  const handleBookingFulfil = async () => {
     if (
       !bookingId ||
       !currentOrg ||
@@ -1465,15 +1505,49 @@ function ScannerContent() {
      * don't cover the reservation — the exact round trip this whole change
      * exists to remove.
      */
+    /**
+     * Refuse locally what the server would refuse anyway — but only after
+     * confirming against fresh data.
+     *
+     * `fulfilMatch` is computed from the booking context captured when this
+     * screen opened. If someone else fulfilled or shrank a reservation in the
+     * meantime, that snapshot is stale and a purely local block would strand
+     * the operator on a booking the server would happily check out. So on a
+     * local miss, re-read the booking and re-run the SAME matcher; only refuse
+     * if it is still short.
+     */
     if (!fulfilMatch.isComplete) {
-      const short = fulfilMatch.required - fulfilMatch.matched;
-      Alert.alert(
-        "Not ready to check out",
-        `${short} more reserved unit${
-          short === 1 ? "" : "s"
-        } still to assign. Scan units matching the reserved models — items that don't match a reservation don't count towards it.`
+      setIsBookingSubmitting(true);
+      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+      setIsBookingSubmitting(false);
+
+      const freshOutstanding = (fresh?.booking.modelRequests ?? [])
+        .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
+        .map((r) => ({
+          assetModelId: r.assetModelId,
+          outstandingQuantity: r.outstandingQuantity,
+        }));
+      const revalidated = matchScansToReservations(
+        bookingCheckinItems,
+        freshOutstanding,
+        fresh?.booking.outstandingModelUnitCount ?? fulfilMatch.required
       );
-      return;
+
+      if (!revalidated.isComplete) {
+        const short = revalidated.required - revalidated.matched;
+        Alert.alert(
+          "Not ready to check out",
+          `${short} more reserved unit${
+            short === 1 ? "" : "s"
+          } still to assign. Scan units matching the reserved models — items that don't match a reservation don't count towards it.`
+        );
+        // Refresh the on-screen counter so it reflects what we just read.
+        fetchBookingCtx();
+        return;
+      }
+      // Reservations were satisfied server-side while we were open; fall
+      // through and let the submit proceed.
+      fetchBookingCtx();
     }
 
     const assetIds = bookingCheckinItems
@@ -1565,35 +1639,15 @@ function ScannerContent() {
    * treats them (`materializeModelRequestForAsset` returns `matched: false`
    * once `fulfilledQuantity >= quantity`).
    */
-  const fulfilMatch = useMemo(() => {
-    const outstanding = bookingCtx?.outstandingModelRequests ?? [];
-    const remainingByModel = new Map(
-      outstanding.map((r) => [r.assetModelId, r.outstandingQuantity])
-    );
-    const unmatchedIds = new Set<string>();
-    let matched = 0;
-
-    for (const item of bookingCheckinItems) {
-      if (item.type !== "asset") continue;
-      const modelId = item.assetModelId ?? null;
-      const remaining = modelId ? remainingByModel.get(modelId) ?? 0 : 0;
-      if (remaining > 0) {
-        remainingByModel.set(modelId as string, remaining - 1);
-        matched += 1;
-      } else {
-        unmatchedIds.add(item.targetId);
-      }
-    }
-
-    const required = bookingCtx?.outstandingModelUnitCount ?? 0;
-    return {
-      matched,
-      required,
-      unmatchedIds,
-      /** Every reserved unit is covered, so the server will accept a checkout. */
-      isComplete: required > 0 && matched >= required,
-    };
-  }, [bookingCheckinItems, bookingCtx]);
+  const fulfilMatch = useMemo(
+    () =>
+      matchScansToReservations(
+        bookingCheckinItems,
+        bookingCtx?.outstandingModelRequests ?? [],
+        bookingCtx?.outstandingModelUnitCount ?? 0
+      ),
+    [bookingCheckinItems, bookingCtx]
+  );
 
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
@@ -2059,8 +2113,12 @@ function ScannerContent() {
               submitLabel={
                 isBookingFulfilMode
                   ? fulfilMatch.isComplete
-                    ? `Assign & check out ${fulfilMatch.matched} unit${
-                        fulfilMatch.matched === 1 ? "" : "s"
+                    ? // Count every scanned item, not just the matched ones:
+                      // the submit sends the whole list and the service adds
+                      // unmatched assets directly and checks them out too, so
+                      // labelling only `matched` would understate the action.
+                      `Assign & check out ${bookingCheckinItems.length} unit${
+                        bookingCheckinItems.length === 1 ? "" : "s"
                       }`
                     : `${
                         fulfilMatch.required - fulfilMatch.matched
