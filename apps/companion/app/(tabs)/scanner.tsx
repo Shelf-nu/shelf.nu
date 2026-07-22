@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
+  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -220,14 +221,42 @@ function ScannerContent() {
    * Clear the measured height once no drawer can be showing. The drawer host
    * unmounts on close, so its `onLayout` never fires again — without this the
    * manual-entry pill stays floating at the old offset over empty space.
-   * Derived from the item lists rather than the `show*Drawer` flags, which are
-   * computed further down, past an early return.
+   *
+   * Mirrors the `show*Drawer` predicates further down (which sit past an early
+   * return, so a hook can't read them) rather than only checking the item
+   * lists: the drawer also disappears when `action` or booking mode changes.
    */
-  const noScannedItems =
-    scannedItems.length === 0 && bookingCheckinItems.length === 0;
+  const anyDrawerVisible =
+    (!isBookingMode && isBatchAction(action) && scannedItems.length > 0) ||
+    (isBookingMode && bookingCheckinItems.length > 0);
   useEffect(() => {
-    if (noScannedItems) setDrawerHeight(0);
-  }, [noScannedItems]);
+    if (!anyDrawerVisible) setDrawerHeight(0);
+  }, [anyDrawerVisible]);
+
+  /**
+   * Where the floating manual-entry control sits, or `null` when it cannot be
+   * placed without overlapping something.
+   *
+   * It is anchored inside the bottom strip, which is roughly half the space
+   * left over after the 240px frame. Lifting it by the full drawer height
+   * clears the drawer but can push it up INTO the frame and over the
+   * instruction text — the drawer grows to 280px (400px with blockers), so on
+   * a short viewport no offset clears both. In that case we render nothing
+   * rather than recreate the overlap this fix exists to remove: the camera and
+   * the drawer's own actions still work, and clearing an item restores the gap.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const manualEntryBottom = useMemo(() => {
+    const DEFAULT_BOTTOM = 90;
+    const CONTROL_HEIGHT = 48;
+    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
+
+    // Space between the frame's bottom edge and the screen bottom.
+    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
+    const desired = drawerHeight + spacing.md;
+    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
+    return desired > maxBottom ? null : desired;
+  }, [drawerHeight, windowHeight]);
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -1903,75 +1932,68 @@ function ScannerContent() {
             (apps/webapp/app/components/scanner/code-scanner.tsx).
             NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
             control's origin so the existing e2e flows stay stable. */}
-        <View
-          style={[
-            styles.devScanContainer,
-            /**
-             * Float clear of the drawer instead of hiding beneath it. The
-             * drawer's height is variable (it grows with the scanned list), so
-             * it is measured rather than guessed.
-             *
-             * Only lift by the part of the drawer that actually eats into this
-             * section. Adding the full drawer height pushed the pill up over
-             * the scan frame and the instruction text, trading one overlap for
-             * another; `bottom: 90` already clears the tab bar, so the extra
-             * lift needed is whatever the drawer covers beyond that.
-             */
-            drawerHeight > 90 && { bottom: drawerHeight + spacing.md },
-          ]}
-        >
-          {devScanVisible ? (
-            <View style={styles.devScanRow}>
-              <TextInput
-                testID="dev-scan-input"
-                style={styles.devScanInput}
-                value={devScanInput}
-                onChangeText={setDevScanInput}
-                placeholder="Enter QR, barcode, or SAM ID"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="go"
-                onSubmitEditing={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-              />
+        {manualEntryBottom !== null && (
+          <View
+            style={[
+              styles.devScanContainer,
+              // Clamped so the lift never pushes the control into the scan
+              // frame; see `manualEntryBottom`.
+              { bottom: manualEntryBottom },
+            ]}
+          >
+            {devScanVisible ? (
+              <View style={styles.devScanRow}>
+                <TextInput
+                  testID="dev-scan-input"
+                  style={styles.devScanInput}
+                  value={devScanInput}
+                  onChangeText={setDevScanInput}
+                  placeholder="Enter QR, barcode, or SAM ID"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                />
+                <TouchableOpacity
+                  testID="dev-scan-submit"
+                  style={styles.devScanButton}
+                  onPress={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                  accessibilityLabel="Look up code"
+                >
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.devScanClose}
+                  onPress={() => setDevScanVisible(false)}
+                  accessibilityLabel="Close manual entry"
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
               <TouchableOpacity
-                testID="dev-scan-submit"
-                style={styles.devScanButton}
-                onPress={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-                accessibilityLabel="Look up code"
+                testID="dev-scan-toggle"
+                style={styles.devScanToggle}
+                onPress={() => setDevScanVisible(true)}
+                accessibilityLabel="Enter a code manually"
               >
-                <Ionicons name="arrow-forward" size={16} color="#fff" />
+                <Ionicons name="keypad-outline" size={14} color="#fff" />
+                <Text style={styles.devScanToggleText}>Enter code</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.devScanClose}
-                onPress={() => setDevScanVisible(false)}
-                accessibilityLabel="Close manual entry"
-              >
-                <Ionicons name="close" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              testID="dev-scan-toggle"
-              style={styles.devScanToggle}
-              onPress={() => setDevScanVisible(true)}
-              accessibilityLabel="Enter a code manually"
-            >
-              <Ionicons name="keypad-outline" size={14} color="#fff" />
-              <Text style={styles.devScanToggleText}>Enter code</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* ── Drawers ─────────────────────────────────────
