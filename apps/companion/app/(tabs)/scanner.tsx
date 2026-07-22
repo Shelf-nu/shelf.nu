@@ -199,6 +199,13 @@ function ScannerContent() {
     setScannedItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
   }, [blockers]);
 
+  /**
+   * Measured height of the open drawer. The overlay itself never resizes (see
+   * the bottom-section comment), so this is used only to lift the floating
+   * manual-entry pill clear of the drawer.
+   */
+  const [drawerHeight, setDrawerHeight] = useState(0);
+
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
@@ -208,6 +215,19 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  /**
+   * Clear the measured height once no drawer can be showing. The drawer host
+   * unmounts on close, so its `onLayout` never fires again — without this the
+   * manual-entry pill stays floating at the old offset over empty space.
+   * Derived from the item lists rather than the `show*Drawer` flags, which are
+   * computed further down, past an early return.
+   */
+  const noScannedItems =
+    scannedItems.length === 0 && bookingCheckinItems.length === 0;
+  useEffect(() => {
+    if (noScannedItems) setDrawerHeight(0);
+  }, [noScannedItems]);
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -1782,14 +1802,22 @@ function ScannerContent() {
 
         {/* Bottom */}
         <View
-          style={[
-            styles.overlaySection,
-            styles.bottomSection,
-            (showBatchDrawer || showBookingDrawer) && {
-              flex: 0,
-              paddingTop: spacing.md,
-            },
-          ]}
+          /**
+           * The overlay must NOT reflow when a drawer opens.
+           *
+           * This used to collapse to `flex: 0`, but only the BOTTOM section
+           * did — the top kept `flex: 1`, so it absorbed the freed space and
+           * pushed the header and the 240px scan frame downward. The camera is
+           * a static `absoluteFill` layer underneath, so what actually moved
+           * was the cutout sliding down over a still picture: it reads as "the
+           * camera jumped". It also dragged the absolutely-positioned
+           * manual-entry pill (anchored to this section's bottom) up onto the
+           * drawer.
+           *
+           * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
+           * it never needed the overlay to make room in the first place.
+           */
+          style={[styles.overlaySection, styles.bottomSection]}
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -1875,7 +1903,23 @@ function ScannerContent() {
             (apps/webapp/app/components/scanner/code-scanner.tsx).
             NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
             control's origin so the existing e2e flows stay stable. */}
-        <View style={styles.devScanContainer}>
+        <View
+          style={[
+            styles.devScanContainer,
+            /**
+             * Float clear of the drawer instead of hiding beneath it. The
+             * drawer's height is variable (it grows with the scanned list), so
+             * it is measured rather than guessed.
+             *
+             * Only lift by the part of the drawer that actually eats into this
+             * section. Adding the full drawer height pushed the pill up over
+             * the scan frame and the instruction text, trading one overlap for
+             * another; `bottom: 90` already clears the tab bar, so the extra
+             * lift needed is whatever the drawer covers beyond that.
+             */
+            drawerHeight > 90 && { bottom: drawerHeight + spacing.md },
+          ]}
+        >
           {devScanVisible ? (
             <View style={styles.devScanRow}>
               <TextInput
@@ -1936,7 +1980,16 @@ function ScannerContent() {
           drawer inside the overlay left its buttons dead whenever the
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
-        <View style={styles.drawerHost} pointerEvents="box-none">
+        <View
+          style={styles.drawerHost}
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = Math.round(e.nativeEvent.layout.height);
+            // Guard the setState: onLayout re-fires on every relayout, and an
+            // unconditional set would loop.
+            setDrawerHeight((prev) => (prev === h ? prev : h));
+          }}
+        >
           {/* ── Batch Drawer ──────────────────────────── */}
           {showBatchDrawer && (
             <BatchDrawer
