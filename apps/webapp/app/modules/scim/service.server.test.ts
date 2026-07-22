@@ -1,4 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ScimError } from "~/modules/scim/errors.server";
 import {
@@ -587,6 +588,32 @@ describe("replaceScimUser", () => {
     await expect(
       replaceScimUser(ORG_ID, SCIM_ID, { userName: "taken@example.com" })
     ).rejects.toThrow("already in use");
+  });
+
+  it("should throw 409 when the email is claimed after the uniqueness pre-check", async () => {
+    // Lost race: the pre-check sees no conflict, then a concurrent request
+    // claims the address before our UPDATE lands. The unique constraint fires,
+    // and it must surface as the same 409 — a 500 reads as a transient fault,
+    // so the IdP would retry a request that can never succeed.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type: pre-check finds nothing
+    mockDb.db.user.findUnique.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockRejectedValue(
+      new PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "6.19.3",
+      })
+    );
+
+    await expect(
+      replaceScimUser(ORG_ID, SCIM_ID, { userName: "taken@example.com" })
+    ).rejects.toMatchObject({
+      status: 409,
+      scimType: "uniqueness",
+      message: expect.stringContaining("already in use"),
+    });
   });
 
   it("should reject an email change outside the org's SSO domain (400)", async () => {

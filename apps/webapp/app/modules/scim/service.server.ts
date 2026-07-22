@@ -85,33 +85,40 @@ async function assertEmailAllowedForOrg(
 }
 
 /**
+ * The 409 detail returned when provisioning would duplicate a user that is
+ * already SCIM-managed in this organization. Shared by both create paths so the
+ * IdP sees one consistent message whichever of them loses the race.
+ */
+function duplicateUserDetail(email: string): string {
+  return `User with userName "${email}" already exists in this organization`;
+}
+
+/**
  * Rethrows a Prisma unique-constraint violation as the SCIM-spec 409
  * "uniqueness" error; any other error propagates unchanged.
  *
- * Two provisioning paths can lose the same race — creating the Shelf user and
- * creating the SCIM mapping — and both must report it identically, so the
- * translation lives here rather than being duplicated in each catch block.
+ * Every path that writes a user-identifying column does a read-then-write and
+ * can therefore lose a race to a concurrent SCIM request. The pre-checks give a
+ * clean 409 in the common case; this converts the constraint violation that
+ * slips through, so a lost race is still a spec-compliant 409 rather than a 500
+ * the IdP would treat as a transient server fault and retry.
  *
  * Unwraps `ShelfError` first: `createUser` wraps the Prisma error as its
  * `cause`, whereas a direct `db` call throws it raw.
  *
  * @param err - The caught error
- * @param email - The userName reported back to the IdP in the 409 detail
+ * @param detail - Human-readable 409 detail, surfaced in the IdP's logs
  * @throws {ScimError} 409 `uniqueness` on P2002
  * @throws The original error otherwise
  */
-function throwScimUniquenessIfP2002(err: unknown, email: string): never {
+function throwScimUniquenessIfP2002(err: unknown, detail: string): never {
   const cause = isLikeShelfError(err) ? err.cause : err;
 
   if (
     cause instanceof PrismaClientKnownRequestError &&
     cause.code === "P2002"
   ) {
-    throw new ScimError(
-      `User with userName "${email}" already exists in this organization`,
-      409,
-      "uniqueness"
-    );
+    throw new ScimError(detail, 409, "uniqueness");
   }
 
   throw err;
@@ -137,7 +144,7 @@ async function createScimMapping(
       data: { userId, organizationId, scimExternalId },
     });
   } catch (err) {
-    throwScimUniquenessIfP2002(err, email);
+    throwScimUniquenessIfP2002(err, duplicateUserDetail(email));
   }
 }
 
@@ -577,7 +584,7 @@ export async function createScimUser(
       skipPersonalOrg: true,
     });
   } catch (err) {
-    throwScimUniquenessIfP2002(err, email);
+    throwScimUniquenessIfP2002(err, duplicateUserDetail(email));
   }
 
   await createScimMapping(newUser.id, organizationId, externalId, email);
@@ -831,6 +838,9 @@ export async function deactivateScimUser(
  * Throws 409 if the new email is already taken by another user.
  * Silently skips the Supabase auth update for SCIM-provisioned users
  * who haven't logged in yet (no Supabase auth account).
+ *
+ * @throws {ScimError} 409 `uniqueness` if the address is already taken —
+ *   whether detected by the pre-check or by the database constraint.
  */
 async function updateUserEmail(
   userId: string,
@@ -839,23 +849,30 @@ async function updateUserEmail(
 ): Promise<void> {
   if (newEmail === currentEmail) return;
 
+  const conflictDetail = `Email "${newEmail}" is already in use`;
+
   const conflict = await db.user.findUnique({
     where: { email: newEmail },
     select: { id: true },
   });
 
   if (conflict) {
-    throw new ScimError(
-      `Email "${newEmail}" is already in use`,
-      409,
-      "uniqueness"
-    );
+    throw new ScimError(conflictDetail, 409, "uniqueness");
   }
 
-  await db.user.update({
-    where: { id: userId },
-    data: { email: newEmail },
-  });
+  // The check above can lose a race to a concurrent request claiming the same
+  // address, in which case `User.email`'s unique constraint rejects the write.
+  // Translate that to the same 409 the pre-check returns: a 500 here would look
+  // like a transient fault, so the IdP would keep retrying a request that can
+  // never succeed.
+  try {
+    await db.user.update({
+      where: { id: userId },
+      data: { email: newEmail },
+    });
+  } catch (err) {
+    throwScimUniquenessIfP2002(err, conflictDetail);
+  }
 
   // Update Supabase auth email if the user has an auth account.
   // SCIM-provisioned users who haven't logged in via SSO yet won't
