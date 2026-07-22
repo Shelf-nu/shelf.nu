@@ -98,9 +98,15 @@ export const assetsApi = {
     ),
 
   /** Get team members for an organization (for custody picker) */
-  teamMembers: (orgId: string, search?: string) => {
+  teamMembers: (
+    orgId: string,
+    search?: string,
+    params?: { page?: number; perPage?: number }
+  ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (search) searchParams.set("search", search);
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     const path = `/api/mobile/team-members?${searchParams}`;
     // Only cache non-search requests (full list)
     return search
@@ -109,9 +115,15 @@ export const assetsApi = {
   },
 
   /** Get locations for an organization (for location picker) */
-  locations: (orgId: string, search?: string) => {
+  locations: (
+    orgId: string,
+    search?: string,
+    params?: { page?: number; perPage?: number }
+  ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (search) searchParams.set("search", search);
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     const path = `/api/mobile/locations?${searchParams}`;
     // Only cache non-search requests (full list)
     return search

@@ -23,6 +23,11 @@ type Props = {
   onClose: () => void;
 };
 
+/** Rows per request while walking to a complete location set. */
+const LOCATION_PAGE_SIZE = 100;
+/** Safety bound so a pathological workspace can't loop indefinitely. */
+const LOCATION_PAGE_HARD_STOP = 50;
+
 const locationKeyExtractor = (item: LocationNode) => item.id;
 
 /** Location with depth info for hierarchical rendering */
@@ -253,21 +258,64 @@ export function LocationPicker({
     return () => clearTimeout(timer);
   }, [search]);
 
+  /**
+   * Load EVERY location, walking the server's pages until the list is whole.
+   *
+   * Unlike the flat pickers this one cannot lazily page as you scroll:
+   * `buildLocationTree` nests rows by `parentId`, and rows are ordered by
+   * name, so a child routinely lands on a different page from its parent.
+   * Rendering a half-loaded set would show orphaned children at the root —
+   * a wrong hierarchy is worse than a slow one.
+   *
+   * The endpoint used to hard-cap at 50 with no way past it, so a workspace
+   * with more locations than that could not place an asset in the ones that
+   * sorted after the cut. Locations are a small, bounded entity (rooms,
+   * shelves, sites), so completing the set costs one extra request per 100.
+   * `LOCATION_PAGE_HARD_STOP` bounds pathological workspaces rather than
+   * looping forever.
+   */
+  /**
+   * Generation counter so a slow earlier run (older search or org) can't
+   * overwrite fresher state when it finally resolves. The booking picker
+   * already does this; these pickers were missing it.
+   */
+  const requestGenerationRef = useRef(0);
+
   const fetchLocations = useCallback(async () => {
     if (!orgId) return;
+    const generation = ++requestGenerationRef.current;
     setIsLoading(true);
     setError(null);
 
-    const { data, error: fetchErr } = await api.locations(
-      orgId,
-      debouncedSearch || undefined
-    );
+    const collected: Location[] = [];
+    let page = 1;
 
-    if (fetchErr || !data) {
-      setError(fetchErr || "Failed to load locations");
-    } else {
-      setLocations(data.locations);
+    // Loop rather than do/while so `totalPages` is only ever read from the
+    // response that defined it, with no dead initial value.
+    for (;;) {
+      const { data, error: fetchErr } = await api.locations(
+        orgId,
+        debouncedSearch || undefined,
+        { page, perPage: LOCATION_PAGE_SIZE }
+      );
+
+      // Superseded by a newer fetch — drop this result entirely.
+      if (generation !== requestGenerationRef.current) return;
+
+      if (fetchErr || !data) {
+        setError(fetchErr || "Failed to load locations");
+        setIsLoading(false);
+        return;
+      }
+
+      collected.push(...data.locations);
+
+      const totalPages = data.totalPages ?? 1;
+      if (page >= totalPages || page >= LOCATION_PAGE_HARD_STOP) break;
+      page += 1;
     }
+
+    setLocations(collected);
     setIsLoading(false);
   }, [orgId, debouncedSearch]);
 
