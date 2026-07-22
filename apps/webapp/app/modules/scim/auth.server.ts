@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { ScimError } from "./errors.server";
 
@@ -24,11 +25,27 @@ function hashToken(rawToken: string): string {
  * Authenticates a SCIM request by validating the Bearer token.
  * Returns the organization ID the token is scoped to.
  *
+ * This is the single chokepoint for every SCIM route (`Users`, `Users/{id}`,
+ * `ServiceProviderConfig`, `ResourceTypes`, `Schemas`), so it is also where the
+ * `ENABLE_SCIM` feature flag is enforced.
+ *
+ * @throws {ScimError} 404 if SCIM is not enabled on this deployment
  * @throws {ScimError} 401 if the token is missing or invalid
  */
 export async function authenticateScimRequest(
   request: Request
 ): Promise<{ organizationId: string }> {
+  // Checked before the header is read and before any DB access, so a deployment
+  // with SCIM disabled does no work at all on these paths. 404 (not 403) so a
+  // disabled instance is indistinguishable from one that never exposed the
+  // endpoint, and so the response can't hint that a token might be valid.
+  if (!config.enableScim) {
+    throw new ScimError(
+      "SCIM provisioning is not enabled on this instance",
+      404
+    );
+  }
+
   const authHeader = request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new ScimError("Authentication required", 401);

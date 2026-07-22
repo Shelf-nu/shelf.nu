@@ -52,6 +52,18 @@ interface Props {
   currency?: Organization["currency"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   className?: string;
+  /**
+   * Whether SCIM provisioning is enabled on this deployment (the `ENABLE_SCIM`
+   * server flag, passed down through the route loader).
+   *
+   * Must arrive as a prop rather than being read from `~/config/shelf.config`:
+   * `ENABLE_SCIM` is server-only and deliberately absent from `getBrowserEnv()`,
+   * so a client-side config read would always be `false`.
+   *
+   * Only the workspace settings route supplies this, which is also what keeps
+   * the SCIM section off the other route that renders this form.
+   */
+  scimEnabled?: boolean;
   scimTokens?: ScimTokenItem[];
 }
 
@@ -80,6 +92,7 @@ export const WorkspaceEditForms = ({
   currency,
   qrIdDisplayPreference,
   className,
+  scimEnabled,
   scimTokens,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
@@ -90,7 +103,10 @@ export const WorkspaceEditForms = ({
     />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
-    <WorkspaceScimTokensSection scimTokens={scimTokens} />
+    <WorkspaceScimTokensSection
+      scimEnabled={scimEnabled}
+      scimTokens={scimTokens}
+    />
   </div>
 );
 
@@ -686,9 +702,11 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
 };
 
 const WorkspaceScimTokensSection = ({
+  scimEnabled,
   scimTokens,
   className,
 }: {
+  scimEnabled?: boolean;
   scimTokens?: ScimTokenItem[];
   className?: string;
 }) => {
@@ -729,7 +747,12 @@ const WorkspaceScimTokensSection = ({
     }
   }, [revealedToken]);
 
-  if (!isOwner || !organization.enabledSso || !organization.ssoDetails) {
+  if (
+    !scimEnabled ||
+    !isOwner ||
+    !organization.enabledSso ||
+    !organization.ssoDetails
+  ) {
     return null;
   }
 

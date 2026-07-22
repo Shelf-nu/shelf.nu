@@ -11,6 +11,11 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: the ENABLE_SCIM feature flag is read through the config module; mocking
+// it lets us exercise both the enabled and disabled deployments without env vars
+const mockConfig = vi.hoisted(() => ({ enableScim: true }));
+vi.mock("~/config/shelf.config", () => ({ config: mockConfig }));
+
 const mockDb = await import("~/database/db.server");
 
 import {
@@ -48,6 +53,44 @@ describe("generateScimToken", () => {
 describe("authenticateScimRequest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConfig.enableScim = true;
+  });
+
+  describe("when SCIM is disabled on the deployment", () => {
+    beforeEach(() => {
+      mockConfig.enableScim = false;
+    });
+
+    it("should throw 404 even with a valid token", async () => {
+      const rawToken = "valid-token";
+      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+      // @ts-expect-error - vitest mock type
+      mockDb.db.scimToken.findUnique.mockResolvedValue({
+        id: "token-1",
+        organizationId: "org-123",
+        tokenHash,
+      });
+
+      const request = new Request("http://localhost/api/scim/v2/Users", {
+        headers: { Authorization: `Bearer ${rawToken}` },
+      });
+
+      await expect(authenticateScimRequest(request)).rejects.toThrow(
+        "SCIM provisioning is not enabled on this instance"
+      );
+    });
+
+    it("should short-circuit before touching the database", async () => {
+      const request = new Request("http://localhost/api/scim/v2/Users", {
+        headers: { Authorization: "Bearer anything" },
+      });
+
+      await expect(authenticateScimRequest(request)).rejects.toThrow(ScimError);
+
+      // A disabled deployment must do no work at all on these paths.
+      expect(mockDb.db.scimToken.findUnique).not.toHaveBeenCalled();
+      expect(mockDb.db.scimToken.update).not.toHaveBeenCalled();
+    });
   });
 
   it("should throw 401 when Authorization header is missing", async () => {

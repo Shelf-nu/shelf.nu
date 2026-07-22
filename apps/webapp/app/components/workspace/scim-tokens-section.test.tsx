@@ -129,9 +129,10 @@ beforeEach(() => {
 
 /**
  * Renders just the SCIM tokens section by rendering WorkspaceEditForms.
- * The section is conditionally shown when isOwner + enabledSso + ssoDetails.
+ * The section is conditionally shown when the ENABLE_SCIM deployment flag is on
+ * (passed as `scimEnabled`) AND isOwner + enabledSso + ssoDetails.
  */
-function renderScimSection(tokens?: ScimTokenItem[]) {
+function renderScimSection(tokens?: ScimTokenItem[], scimEnabled = true) {
   // why: WorkspaceEditForms renders shared <Button>s that use a Radix Tooltip.
   // In the running app the provider comes from the app-level <TooltipProvider>
   // in root.tsx; the isolated unit test must supply its own to match.
@@ -141,6 +142,7 @@ function renderScimSection(tokens?: ScimTokenItem[]) {
         name="Test Org"
         currency="USD"
         qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+        scimEnabled={scimEnabled}
         scimTokens={tokens}
       />
     </TooltipProvider>
@@ -191,6 +193,31 @@ describe("WorkspaceScimTokensSection", () => {
       mockUseLoaderData.mockReturnValue(createLoaderData({ ssoDetails: null }));
 
       renderScimSection();
+
+      expect(screen.queryByText("SCIM provisioning")).toBeNull();
+    });
+
+    it("should not render when SCIM is disabled on the deployment", () => {
+      // ENABLE_SCIM is off: the section stays hidden even for an owner on a
+      // fully SSO-configured workspace.
+      renderScimSection(undefined, false);
+
+      expect(screen.queryByText("SCIM provisioning")).toBeNull();
+    });
+
+    it("should not render when the host route omits scimEnabled", () => {
+      // Only the workspace settings route passes the flag down. Another route
+      // rendering this shared form must not surface a SCIM section whose
+      // generate/delete submissions it has no action to handle.
+      render(
+        <TooltipProvider>
+          <WorkspaceEditForms
+            name="Test Org"
+            currency="USD"
+            qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+          />
+        </TooltipProvider>
+      );
 
       expect(screen.queryByText("SCIM provisioning")).toBeNull();
     });

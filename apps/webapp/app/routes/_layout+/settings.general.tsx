@@ -26,6 +26,7 @@ import {
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
   getOrganizationAdmins,
@@ -125,8 +126,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getOrganizationAdmins({ organizationId }),
         // Get subscription info for the workspace owner (for transfer dialog)
         getOwnerSubscriptionInfo(currentOrganization.userId, organizationId),
-        // Load SCIM tokens for SSO-enabled organizations
-        currentOrganization.enabledSso
+        // Load SCIM tokens for SSO-enabled organizations. Skipped entirely when
+        // the SCIM feature flag is off, so a deployment with SCIM disabled never
+        // queries the table.
+        config.enableScim && currentOrganization.enabledSso
           ? db.scimToken.findMany({
               where: { organizationId },
               select: {
@@ -175,6 +178,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ownerSubscriptionInfo,
       ownerOtherTeamWorkspacesCount,
       premiumIsEnabled,
+      // Surfaced through the loader (not read from `config` in the component):
+      // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
+      // client-side `config.enableScim` would always be false.
+      scimEnabled: config.enableScim,
       scimTokens: scimTokens.map((t) => ({
         id: t.id,
         label: t.label,
@@ -455,6 +462,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/assets");
       }
       case "generateScimToken": {
+        // Defense in depth: the UI is hidden when SCIM is off, but a
+        // hand-crafted POST must not be able to mint a token either.
+        if (!config.enableScim) {
+          throw new ShelfError({
+            cause: null,
+            message: "SCIM provisioning is not enabled on this instance.",
+            label: "SCIM",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
         if (role !== OrganizationRoles.OWNER) {
           throw new ShelfError({
             cause: null,
@@ -492,6 +511,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return payload({ rawToken });
       }
       case "deleteScimToken": {
+        // Defense in depth — see generateScimToken above.
+        if (!config.enableScim) {
+          throw new ShelfError({
+            cause: null,
+            message: "SCIM provisioning is not enabled on this instance.",
+            label: "SCIM",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
         if (role !== OrganizationRoles.OWNER) {
           throw new ShelfError({
             cause: null,
@@ -543,6 +573,7 @@ export default function GeneralPage() {
   const {
     organization,
     canExportAssets,
+    scimEnabled,
     scimTokens,
     admins,
     ownerSubscriptionInfo,
@@ -555,6 +586,7 @@ export default function GeneralPage() {
         name={organization.name}
         currency={organization.currency}
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
+        scimEnabled={scimEnabled}
         scimTokens={scimTokens}
       />
 
