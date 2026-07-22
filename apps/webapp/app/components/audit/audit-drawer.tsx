@@ -384,6 +384,13 @@ export function AuditDrawer({
       searchParams={
         auditSession ? { auditSessionId: auditSession.id } : undefined
       }
+      // Audits are asset-only: kits have no `AuditAsset` record, so a
+      // scanned kit is rejected here (becomes an error row) instead of
+      // entering the normal scanned-asset pipeline — no detail link, no
+      // persistence attempt. See `use-audit-scan-persistence.ts` for the
+      // matching defensive skip.
+      rejectItemType="kit"
+      rejectItemMessage="Audits track assets, not kits — scan the kit's individual assets."
       renderLoading={(pendingQrId: string, error?: string) => (
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}
@@ -440,16 +447,25 @@ export function AuditDrawer({
               className="size-[54px] rounded-[2px]"
             />
             <div className="flex flex-col gap-1">
-              <Button
-                asChild
-                variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
-                to={`${auditAssetId}/details`}
-              >
-                <span className="word-break whitespace-break-spaces">
+              {/* Only navigate to the details view when we actually have an
+                  AuditAsset id — rendering `to={`${undefined}/details`}` would
+                  produce a broken `/scan/undefined/details` link (404). */}
+              {auditAssetId ? (
+                <Button
+                  asChild
+                  variant="link"
+                  className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                  to={`${auditAssetId}/details`}
+                >
+                  <span className="word-break whitespace-break-spaces">
+                    {"title" in data ? data.title : data.name}
+                  </span>
+                </Button>
+              ) : (
+                <span className="word-break whitespace-break-spaces text-left font-medium text-gray-800">
                   {"title" in data ? data.title : data.name}
                 </span>
-              </Button>
+              )}
               {showLocation && data.location?.name && (
                 <span className="text-xs text-gray-500">
                   {data.location.name}
@@ -496,16 +512,24 @@ export function AuditDrawer({
             />
 
             <div className="flex flex-col gap-1">
-              <Button
-                asChild
-                variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
-                to={`${asset.auditAssetId}/details`}
-              >
-                <span className="word-break whitespace-break-spaces">
+              {/* Same defensive guard as the scanned-item row above — never
+                  link to `/details` without a real AuditAsset id. */}
+              {asset.auditAssetId ? (
+                <Button
+                  asChild
+                  variant="link"
+                  className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                  to={`${asset.auditAssetId}/details`}
+                >
+                  <span className="word-break whitespace-break-spaces">
+                    {asset.name}
+                  </span>
+                </Button>
+              ) : (
+                <span className="word-break whitespace-break-spaces text-left font-medium text-gray-800">
                   {asset.name}
                 </span>
-              </Button>
+              )}
               {showLocation && asset.locationName && (
                 <span className="text-xs text-gray-500">
                   {asset.locationName}
