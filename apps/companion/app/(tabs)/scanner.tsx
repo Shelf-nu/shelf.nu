@@ -114,6 +114,12 @@ type ScannedItem = {
   kitId: string | null;
   /** Assets only: false when the asset is marked unavailable to book. */
   availableToBook?: boolean;
+  /**
+   * Assets only: the model this asset belongs to, or null. Fulfil mode matches
+   * it against the booking's outstanding reservations, so progress counts only
+   * units that genuinely fulfil one instead of counting every scan.
+   */
+  assetModelId?: string | null;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
   /** Kits only: number of contained assets (shown in the drawer row). */
@@ -121,6 +127,46 @@ type ScannedItem = {
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
 };
+
+/**
+ * Match scanned items against a booking's outstanding model reservations.
+ *
+ * Shared by the live progress readout and the pre-submit revalidation, so both
+ * use identical rules. Each asset consumes one unit of an outstanding request
+ * for its model; once a model's remaining count hits zero, further units of it
+ * are unmatched — mirroring `materializeModelRequestForAsset`, which returns
+ * `matched: false` once `fulfilledQuantity >= quantity`.
+ */
+function matchScansToReservations(
+  items: ScannedItem[],
+  outstanding: { assetModelId: string; outstandingQuantity: number }[],
+  required: number
+) {
+  const remainingByModel = new Map(
+    outstanding.map((r) => [r.assetModelId, r.outstandingQuantity])
+  );
+  const unmatchedIds = new Set<string>();
+  let matched = 0;
+
+  for (const item of items) {
+    if (item.type !== "asset") continue;
+    const modelId = item.assetModelId ?? null;
+    const remaining = modelId ? remainingByModel.get(modelId) ?? 0 : 0;
+    if (remaining > 0) {
+      remainingByModel.set(modelId as string, remaining - 1);
+      matched += 1;
+    } else {
+      unmatchedIds.add(item.targetId);
+    }
+  }
+
+  return {
+    matched,
+    required,
+    unmatchedIds,
+    isComplete: required > 0 && matched >= required,
+  };
+}
 
 // ── Scanner Content ─────────────────────────────────────
 
@@ -221,6 +267,8 @@ function ScannerContent() {
     // Book-by-model reservations still awaiting concrete units, so fulfil mode
     // can tell the operator exactly what (and how many) to scan.
     outstandingModelRequests: {
+      /** Needed to match a scanned asset's model against this reservation. */
+      assetModelId: string;
       assetModelName: string;
       outstandingQuantity: number;
     }[];
@@ -241,6 +289,7 @@ function ScannerContent() {
         outstandingModelRequests: (data.booking.modelRequests ?? [])
           .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
           .map((r) => ({
+            assetModelId: r.assetModelId,
             assetModelName: r.assetModelName,
             outstandingQuantity: r.outstandingQuantity,
           })),
@@ -419,6 +468,14 @@ function ScannerContent() {
           // below, which is the kit a kit-linked QR points at directly).
           kitId: string | null;
           availableToBook: boolean;
+          /**
+           * Model this asset belongs to, or null. Fulfil mode matches it
+           * against the booking's outstanding reservations so progress counts
+           * only units that actually fulfil one. Optional: an older server
+           * omits it, and the client then treats the match as unknown rather
+           * than claiming false progress.
+           */
+          assetModelId?: string | null;
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
@@ -903,6 +960,7 @@ function ScannerContent() {
             category: asset.category?.name || null,
             kitId: asset.kitId ?? null,
             availableToBook: asset.availableToBook,
+            assetModelId: asset.assetModelId ?? null,
           };
 
           // ADD mode: no scan-time eligibility gate — the blockers handle
@@ -1427,7 +1485,7 @@ function ScannerContent() {
    * submit if any reservation is still unassigned, so the operator gets a clear
    * "still N to assign" error rather than a silent partial checkout.
    */
-  const handleBookingFulfil = () => {
+  const handleBookingFulfil = async () => {
     if (
       !bookingId ||
       !currentOrg ||
@@ -1439,6 +1497,57 @@ function ScannerContent() {
       bookingBlockers.length > 0
     ) {
       return;
+    }
+
+    /**
+     * Refuse locally what the server would refuse anyway. Without this the
+     * operator taps a confident-looking CTA and only then learns their scans
+     * don't cover the reservation — the exact round trip this whole change
+     * exists to remove.
+     */
+    /**
+     * Refuse locally what the server would refuse anyway — but only after
+     * confirming against fresh data.
+     *
+     * `fulfilMatch` is computed from the booking context captured when this
+     * screen opened. If someone else fulfilled or shrank a reservation in the
+     * meantime, that snapshot is stale and a purely local block would strand
+     * the operator on a booking the server would happily check out. So on a
+     * local miss, re-read the booking and re-run the SAME matcher; only refuse
+     * if it is still short.
+     */
+    if (!fulfilMatch.isComplete) {
+      setIsBookingSubmitting(true);
+      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+      setIsBookingSubmitting(false);
+
+      const freshOutstanding = (fresh?.booking.modelRequests ?? [])
+        .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
+        .map((r) => ({
+          assetModelId: r.assetModelId,
+          outstandingQuantity: r.outstandingQuantity,
+        }));
+      const revalidated = matchScansToReservations(
+        bookingCheckinItems,
+        freshOutstanding,
+        fresh?.booking.outstandingModelUnitCount ?? fulfilMatch.required
+      );
+
+      if (!revalidated.isComplete) {
+        const short = revalidated.required - revalidated.matched;
+        Alert.alert(
+          "Not ready to check out",
+          `${short} more reserved unit${
+            short === 1 ? "" : "s"
+          } still to assign. Scan units matching the reserved models — items that don't match a reservation don't count towards it.`
+        );
+        // Refresh the on-screen counter so it reflects what we just read.
+        fetchBookingCtx();
+        return;
+      }
+      // Reservations were satisfied server-side while we were open; fall
+      // through and let the submit proceed.
+      fetchBookingCtx();
     }
 
     const assetIds = bookingCheckinItems
@@ -1513,6 +1622,32 @@ function ScannerContent() {
       ]
     );
   };
+
+  /**
+   * Fulfil-mode progress, computed against the RESERVATIONS rather than by
+   * counting scans.
+   *
+   * The previous version divided `bookingCheckinItems.length` by the reserved
+   * unit count, which lied in both directions: scanning a camera against a
+   * "Tablecloth x2" reservation read "1/2 scanned" (it fulfils nothing), and
+   * scanning three tablecloths against x2 read "3/2". The server refuses both
+   * at submit, so the operator only discovered it at the very end.
+   *
+   * Each scanned asset is now matched to an outstanding request for its model
+   * and capped at that model's outstanding quantity, so extra units of a model
+   * that is already satisfied count as unmatched — exactly how the server
+   * treats them (`materializeModelRequestForAsset` returns `matched: false`
+   * once `fulfilledQuantity >= quantity`).
+   */
+  const fulfilMatch = useMemo(
+    () =>
+      matchScansToReservations(
+        bookingCheckinItems,
+        bookingCtx?.outstandingModelRequests ?? [],
+        bookingCtx?.outstandingModelUnitCount ?? 0
+      ),
+    [bookingCheckinItems, bookingCtx]
+  );
 
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
@@ -1746,9 +1881,9 @@ function ScannerContent() {
                             (r) =>
                               `${r.assetModelName} ×${r.outstandingQuantity}`
                           )
-                          .join(", ")}  ·  ${bookingCheckinItems.length}/${
-                          bookingCtx.outstandingModelUnitCount
-                        } scanned`}
+                          .join(", ")}  ·  ${fulfilMatch.matched}/${
+                          fulfilMatch.required
+                        } assigned`}
                       </Text>
                     )}
                 </View>
@@ -1977,9 +2112,17 @@ function ScannerContent() {
               }
               submitLabel={
                 isBookingFulfilMode
-                  ? `Assign & check out ${bookingCheckinItems.length} unit${
-                      bookingCheckinItems.length === 1 ? "" : "s"
-                    }`
+                  ? fulfilMatch.isComplete
+                    ? // Count every scanned item, not just the matched ones:
+                      // the submit sends the whole list and the service adds
+                      // unmatched assets directly and checks them out too, so
+                      // labelling only `matched` would understate the action.
+                      `Assign & check out ${bookingCheckinItems.length} unit${
+                        bookingCheckinItems.length === 1 ? "" : "s"
+                      }`
+                    : `${
+                        fulfilMatch.required - fulfilMatch.matched
+                      } more to assign`
                   : isBookingAddMode
                   ? "Add to Booking"
                   : `Check In ${bookingCheckinItems.length} ${

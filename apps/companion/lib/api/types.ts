@@ -243,6 +243,12 @@ export type QrResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+       * matches it against the booking's outstanding reservations so it can
+       * count only units that actually fulfil one. Absent on older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -268,6 +274,12 @@ export type BarcodeResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+       * unit that fulfils a reservation from one that does not. Absent on
+       * older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
