@@ -6,8 +6,10 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -76,9 +78,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // Load the booking's reservation window so the service can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
     // checkout endpoint does). Org-scoped, so a foreign-org id 404s.
+    // `creatorId`/`custodianUserId` feed the ownership guard below.
     const existingBooking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      select: {
+        from: true,
+        to: true,
+        creatorId: true,
+        custodianUserId: true,
+      },
     });
 
     if (!existingBooking) {
@@ -87,6 +95,22 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
+
+    // Cross-user IDOR guard: SELF_SERVICE/BASE hold `booking:checkout` in the
+    // permission map, so the role gate above passes for ANY booking id they
+    // send — they may only fulfil + check out bookings they created or are
+    // custodian of. No-op for ADMIN/OWNER. Web enforces the equivalent via
+    // `canUserManageBookingAssets` in the fulfil-and-checkout loader, and
+    // `fulfilModelRequestsAndCheckout` does NOT check ownership itself (unlike
+    // the scan-add path, whose guard lives in `processBooking`), so without
+    // this the mobile route would be more permissive than web.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role,
+      action: "check out",
+    });
 
     // Same hint derivation as the plain checkout endpoint: native clients can't
     // set the CH-time-zone cookie, so prefer the device timeZone from the body.

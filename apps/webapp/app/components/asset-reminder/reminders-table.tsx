@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
@@ -32,6 +32,18 @@ export default function RemindersTable({
 }: RemindersTableProps) {
   const [isReminderDialogOpen, setIsReminderDialogOpen] = useState(false);
   const { assetId } = useParams<{ assetId: string }>();
+
+  /**
+   * Stable identity across renders so `SetOrEditReminderDialog`'s
+   * success-handling effect (which lists `onClose` as a dependency) doesn't
+   * re-fire on every unrelated re-render. See
+   * `.claude/rules/react-render-stability.md` and the `successHandledRef`
+   * latch in `set-or-edit-reminder-dialog.tsx` for the full mechanism this
+   * guards against.
+   */
+  const handleCloseReminderDialog = useCallback(() => {
+    setIsReminderDialogOpen(false);
+  }, []);
 
   const emptyStateTitle = isAssetReminderPage
     ? "No reminders for this asset"
@@ -92,9 +104,7 @@ export default function RemindersTable({
       <SetOrEditReminderDialog
         action={isAssetReminderPage ? `/assets/${assetId}` : undefined}
         open={isReminderDialogOpen}
-        onClose={() => {
-          setIsReminderDialogOpen(false);
-        }}
+        onClose={handleCloseReminderDialog}
       />
     </ListContentWrapper>
   );

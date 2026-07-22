@@ -4,11 +4,82 @@ import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
 
+/**
+ * Shared `select` clause for the full `BookingSettings` shape.
+ *
+ * Hoisted to module scope so the read-first `findUnique` in
+ * {@link getBookingSettingsForOrganization}, its `upsert` fallback, and the
+ * `update` in {@link updateBookingSettings} all return the exact same shape —
+ * a single source of truth keeps those paths from drifting apart over time.
+ * (The notification-only helpers below deliberately select a leaner subset.)
+ */
+export const BOOKING_SETTINGS_SELECT = {
+  id: true,
+  bufferStartTime: true,
+  maxBookingLength: true,
+  maxBookingLengthSkipClosedDays: true,
+  tagsRequired: true,
+  autoArchiveBookings: true,
+  autoArchiveDays: true,
+  autoArchiveExpiredReservations: true,
+  requireExplicitCheckinForAdmin: true,
+  requireExplicitCheckinForSelfService: true,
+  countKitsAsSingleUnit: true,
+  notifyBookingCreator: true,
+  notifyAdminsOnNewBooking: true,
+  alwaysNotifyTeamMembers: {
+    select: {
+      id: true,
+      name: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSettingsSelect;
+
+/**
+ * Retrieves the `BookingSettings` row for an organization, creating a
+ * default row only on first access.
+ *
+ * This is called from the root authenticated layout loader
+ * (`_layout+/_layout.tsx`), so it runs on **every** authenticated page load
+ * and React Router `.data` revalidation. It is deliberately **read-first**:
+ * a plain `findUnique` satisfies the overwhelming majority of calls (the row
+ * almost always already exists), avoiding an unconditional write + row lock
+ * on every request. Only when the row is genuinely absent do we fall
+ * through to an `upsert` (not a bare `create`) so two concurrent first
+ * requests for the same organization can't race into a unique-constraint
+ * error.
+ *
+ * @param organizationId - The organization whose settings to fetch
+ * @returns The organization's booking settings, creating defaults if absent
+ * @throws {ShelfError} If the database operation fails
+ */
 export async function getBookingSettingsForOrganization(
   organizationId: string
 ) {
   try {
-    // First try to find existing working hours
+    // Hot path: the row exists for almost every call, so a plain read avoids
+    // taking a write lock on every authenticated page load.
+    const existing = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: BOOKING_SETTINGS_SELECT,
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    // Cold path: first access for this organization. Use `upsert` (not
+    // `create`) so a concurrent first-hit from another request doesn't
+    // throw a unique-constraint error.
     const bookingSettings = await db.bookingSettings.upsert({
       where: {
         organizationId,
@@ -29,36 +100,7 @@ export async function getBookingSettingsForOrganization(
         notifyAdminsOnNewBooking: true,
         organizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        tagsRequired: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        autoArchiveExpiredReservations: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      select: BOOKING_SETTINGS_SELECT,
     });
 
     return bookingSettings;
@@ -134,36 +176,7 @@ export async function updateBookingSettings({
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
       data: updateData,
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        autoArchiveExpiredReservations: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      select: BOOKING_SETTINGS_SELECT,
     });
 
     return bookingSettings;

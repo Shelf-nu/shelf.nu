@@ -13,6 +13,14 @@ import {
 import { makeShelfError } from "~/utils/error";
 
 /**
+ * Page size this endpoint requests when the client doesn't specify one.
+ * 100 is the ceiling `getPaginatedAndFilterableAssets` accepts (anything above
+ * it silently falls back to 20), so this is the most a paginationless client
+ * can be given in a single response.
+ */
+const MOBILE_PICKER_MAX_PAGE_SIZE = 100;
+
+/**
  * GET /api/mobile/bookings/available-assets
  *
  * Availability-aware asset picker for the booking create/edit flow — the mobile
@@ -48,8 +56,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // The web booking-asset picker (manage-assets) does NOT scope by
     // self-service custody — any bookable asset is selectable, and the
     // self-service restriction is enforced on the mutation, not the read.
+    /**
+     * The companion's picker has NO pagination UI — `add-assets.tsx` renders a
+     * FlatList with no `onEndReached` and no page state, so whatever this one
+     * response contains is the entire set the operator can ever browse. The
+     * client never sends a `per_page`, so the size comes from
+     * `updateCookieWithPerPage`, whose default is 20 for a request with no
+     * cookie — and mobile never sends one. Every live 1.1.0 install was
+     * therefore capped at 20 assets: a workspace holding exactly 20
+     * tablecloths could reach nothing else except via search.
+     *
+     * Until the app ships real infinite scroll (which needs a store release,
+     * and there is no OTA channel), request the service's maximum page size
+     * whenever the client didn't ask for a specific one. This reaches existing
+     * installs with a plain webapp deploy. Rebuilding the params and passing
+     * them as `filters` keeps every other query param (booking window,
+     * hideUnavailable, search) intact while overriding only the page size.
+     */
+    const pickerParams = new URL(request.url).searchParams;
+    if (!pickerParams.get("per_page")) {
+      pickerParams.set("per_page", String(MOBILE_PICKER_MAX_PAGE_SIZE));
+    }
+
     const { assets, page, perPage, totalAssets, totalPages } =
-      await getPaginatedAndFilterableAssets({ request, organizationId });
+      await getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+        filters: pickerParams.toString(),
+      });
 
     // Resolve the workspace's display code (QR Code ID by default, or a SAM ID
     // / barcode per the org's preference) for each asset so the mobile picker

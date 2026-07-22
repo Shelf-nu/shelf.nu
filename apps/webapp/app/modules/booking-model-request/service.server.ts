@@ -253,6 +253,13 @@ export type BookingModelTabData = {
   }>;
   /** Full-org model count (not the truncated `MODEL_PICKER_LIMIT` list). */
   totalAssetModels: number;
+  /**
+   * How many models match the current `search` (equals `totalAssetModels`
+   * when no search is applied). This is the pagination denominator: a client
+   * that pages through the list needs the count of MATCHING rows, not the
+   * full-org count, to know when it has reached the end.
+   */
+  matchedAssetModels: number;
   /** This booking's existing model-level requests, outstanding + fulfilled. */
   modelRequests: Array<{
     assetModelId: string;
@@ -294,10 +301,23 @@ export async function getBookingModelTabData({
   organizationId,
   booking,
   search,
+  page,
+  perPage,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
   search?: string;
+  /**
+   * 1-based page for callers that paginate the model list (the mobile
+   * picker). Omitted by the web loaders, which render a seed list and reach
+   * the rest through search — they keep the historical single-page shape.
+   */
+  page?: number;
+  /**
+   * Page size for paginating callers. Defaults to `MODEL_PICKER_LIMIT` so
+   * omitting both params reproduces the pre-pagination behaviour exactly.
+   */
+  perPage?: number;
 }): Promise<BookingModelTabData> {
   try {
     const assetModelsCount = await db.assetModel.count({
@@ -322,12 +342,34 @@ export async function getBookingModelTabData({
 
     let assetModels: BookingModelTabAssetModel[] = [];
 
+    /**
+     * Count of models matching the search. Paginating callers need this to
+     * know when they've reached the end; without a search it's the same query
+     * as the full-org count, so reuse that rather than issuing a second one.
+     */
+    const matchedAssetModels = trimmedSearch
+      ? await db.assetModel.count({ where: { organizationId, ...searchWhere } })
+      : assetModelsCount;
+
+    // Page size defaults to the historical cap, so callers that pass neither
+    // param (the web loaders) get byte-identical behaviour to before.
+    const effectivePerPage =
+      perPage && perPage > 0 ? Math.min(perPage, 100) : MODEL_PICKER_LIMIT;
+    const effectivePage = page && page > 1 ? page : 1;
+
     if (showModelsTab) {
       const rawModels = await db.assetModel.findMany({
         where: { organizationId, ...searchWhere },
         select: { id: true, name: true },
-        orderBy: { name: "asc" },
-        take: MODEL_PICKER_LIMIT,
+        /**
+         * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
+         * tied rows can repeat on one page and vanish from the next, leaving
+         * models unreachable — exactly what this pagination exists to prevent.
+         * `id` breaks the tie deterministically.
+         */
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        skip: (effectivePage - 1) * effectivePerPage,
+        take: effectivePerPage,
       });
 
       const availabilities = await Promise.all(
@@ -389,6 +431,7 @@ export async function getBookingModelTabData({
       assetModels,
       initialAssetModels,
       totalAssetModels: assetModelsCount,
+      matchedAssetModels,
       modelRequests,
     };
   } catch (cause) {

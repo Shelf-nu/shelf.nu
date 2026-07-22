@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
+  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -114,6 +115,12 @@ type ScannedItem = {
   kitId: string | null;
   /** Assets only: false when the asset is marked unavailable to book. */
   availableToBook?: boolean;
+  /**
+   * Assets only: the model this asset belongs to, or null. Fulfil mode matches
+   * it against the booking's outstanding reservations, so progress counts only
+   * units that genuinely fulfil one instead of counting every scan.
+   */
+  assetModelId?: string | null;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
   /** Kits only: number of contained assets (shown in the drawer row). */
@@ -121,6 +128,46 @@ type ScannedItem = {
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
 };
+
+/**
+ * Match scanned items against a booking's outstanding model reservations.
+ *
+ * Shared by the live progress readout and the pre-submit revalidation, so both
+ * use identical rules. Each asset consumes one unit of an outstanding request
+ * for its model; once a model's remaining count hits zero, further units of it
+ * are unmatched — mirroring `materializeModelRequestForAsset`, which returns
+ * `matched: false` once `fulfilledQuantity >= quantity`.
+ */
+function matchScansToReservations(
+  items: ScannedItem[],
+  outstanding: { assetModelId: string; outstandingQuantity: number }[],
+  required: number
+) {
+  const remainingByModel = new Map(
+    outstanding.map((r) => [r.assetModelId, r.outstandingQuantity])
+  );
+  const unmatchedIds = new Set<string>();
+  let matched = 0;
+
+  for (const item of items) {
+    if (item.type !== "asset") continue;
+    const modelId = item.assetModelId ?? null;
+    const remaining = modelId ? remainingByModel.get(modelId) ?? 0 : 0;
+    if (remaining > 0) {
+      remainingByModel.set(modelId as string, remaining - 1);
+      matched += 1;
+    } else {
+      unmatchedIds.add(item.targetId);
+    }
+  }
+
+  return {
+    matched,
+    required,
+    unmatchedIds,
+    isComplete: required > 0 && matched >= required,
+  };
+}
 
 // ── Scanner Content ─────────────────────────────────────
 
@@ -199,6 +246,13 @@ function ScannerContent() {
     setScannedItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
   }, [blockers]);
 
+  /**
+   * Measured height of the open drawer. The overlay itself never resizes (see
+   * the bottom-section comment), so this is used only to lift the floating
+   * manual-entry pill clear of the drawer.
+   */
+  const [drawerHeight, setDrawerHeight] = useState(0);
+
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
@@ -208,6 +262,47 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  /**
+   * Clear the measured height once no drawer can be showing. The drawer host
+   * unmounts on close, so its `onLayout` never fires again — without this the
+   * manual-entry pill stays floating at the old offset over empty space.
+   *
+   * Mirrors the `show*Drawer` predicates further down (which sit past an early
+   * return, so a hook can't read them) rather than only checking the item
+   * lists: the drawer also disappears when `action` or booking mode changes.
+   */
+  const anyDrawerVisible =
+    (!isBookingMode && isBatchAction(action) && scannedItems.length > 0) ||
+    (isBookingMode && bookingCheckinItems.length > 0);
+  useEffect(() => {
+    if (!anyDrawerVisible) setDrawerHeight(0);
+  }, [anyDrawerVisible]);
+
+  /**
+   * Where the floating manual-entry control sits, or `null` when it cannot be
+   * placed without overlapping something.
+   *
+   * It is anchored inside the bottom strip, which is roughly half the space
+   * left over after the 240px frame. Lifting it by the full drawer height
+   * clears the drawer but can push it up INTO the frame and over the
+   * instruction text — the drawer grows to 280px (400px with blockers), so on
+   * a short viewport no offset clears both. In that case we render nothing
+   * rather than recreate the overlap this fix exists to remove: the camera and
+   * the drawer's own actions still work, and clearing an item restores the gap.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const manualEntryBottom = useMemo(() => {
+    const DEFAULT_BOTTOM = 90;
+    const CONTROL_HEIGHT = 48;
+    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
+
+    // Space between the frame's bottom edge and the screen bottom.
+    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
+    const desired = drawerHeight + spacing.md;
+    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
+    return desired > maxBottom ? null : desired;
+  }, [drawerHeight, windowHeight]);
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -221,6 +316,8 @@ function ScannerContent() {
     // Book-by-model reservations still awaiting concrete units, so fulfil mode
     // can tell the operator exactly what (and how many) to scan.
     outstandingModelRequests: {
+      /** Needed to match a scanned asset's model against this reservation. */
+      assetModelId: string;
       assetModelName: string;
       outstandingQuantity: number;
     }[];
@@ -241,6 +338,7 @@ function ScannerContent() {
         outstandingModelRequests: (data.booking.modelRequests ?? [])
           .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
           .map((r) => ({
+            assetModelId: r.assetModelId,
             assetModelName: r.assetModelName,
             outstandingQuantity: r.outstandingQuantity,
           })),
@@ -419,6 +517,14 @@ function ScannerContent() {
           // below, which is the kit a kit-linked QR points at directly).
           kitId: string | null;
           availableToBook: boolean;
+          /**
+           * Model this asset belongs to, or null. Fulfil mode matches it
+           * against the booking's outstanding reservations so progress counts
+           * only units that actually fulfil one. Optional: an older server
+           * omits it, and the client then treats the match as unknown rather
+           * than claiming false progress.
+           */
+          assetModelId?: string | null;
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
@@ -903,6 +1009,7 @@ function ScannerContent() {
             category: asset.category?.name || null,
             kitId: asset.kitId ?? null,
             availableToBook: asset.availableToBook,
+            assetModelId: asset.assetModelId ?? null,
           };
 
           // ADD mode: no scan-time eligibility gate — the blockers handle
@@ -1427,7 +1534,7 @@ function ScannerContent() {
    * submit if any reservation is still unassigned, so the operator gets a clear
    * "still N to assign" error rather than a silent partial checkout.
    */
-  const handleBookingFulfil = () => {
+  const handleBookingFulfil = async () => {
     if (
       !bookingId ||
       !currentOrg ||
@@ -1439,6 +1546,57 @@ function ScannerContent() {
       bookingBlockers.length > 0
     ) {
       return;
+    }
+
+    /**
+     * Refuse locally what the server would refuse anyway. Without this the
+     * operator taps a confident-looking CTA and only then learns their scans
+     * don't cover the reservation — the exact round trip this whole change
+     * exists to remove.
+     */
+    /**
+     * Refuse locally what the server would refuse anyway — but only after
+     * confirming against fresh data.
+     *
+     * `fulfilMatch` is computed from the booking context captured when this
+     * screen opened. If someone else fulfilled or shrank a reservation in the
+     * meantime, that snapshot is stale and a purely local block would strand
+     * the operator on a booking the server would happily check out. So on a
+     * local miss, re-read the booking and re-run the SAME matcher; only refuse
+     * if it is still short.
+     */
+    if (!fulfilMatch.isComplete) {
+      setIsBookingSubmitting(true);
+      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+      setIsBookingSubmitting(false);
+
+      const freshOutstanding = (fresh?.booking.modelRequests ?? [])
+        .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
+        .map((r) => ({
+          assetModelId: r.assetModelId,
+          outstandingQuantity: r.outstandingQuantity,
+        }));
+      const revalidated = matchScansToReservations(
+        bookingCheckinItems,
+        freshOutstanding,
+        fresh?.booking.outstandingModelUnitCount ?? fulfilMatch.required
+      );
+
+      if (!revalidated.isComplete) {
+        const short = revalidated.required - revalidated.matched;
+        Alert.alert(
+          "Not ready to check out",
+          `${short} more reserved unit${
+            short === 1 ? "" : "s"
+          } still to assign. Scan units matching the reserved models — items that don't match a reservation don't count towards it.`
+        );
+        // Refresh the on-screen counter so it reflects what we just read.
+        fetchBookingCtx();
+        return;
+      }
+      // Reservations were satisfied server-side while we were open; fall
+      // through and let the submit proceed.
+      fetchBookingCtx();
     }
 
     const assetIds = bookingCheckinItems
@@ -1513,6 +1671,32 @@ function ScannerContent() {
       ]
     );
   };
+
+  /**
+   * Fulfil-mode progress, computed against the RESERVATIONS rather than by
+   * counting scans.
+   *
+   * The previous version divided `bookingCheckinItems.length` by the reserved
+   * unit count, which lied in both directions: scanning a camera against a
+   * "Tablecloth x2" reservation read "1/2 scanned" (it fulfils nothing), and
+   * scanning three tablecloths against x2 read "3/2". The server refuses both
+   * at submit, so the operator only discovered it at the very end.
+   *
+   * Each scanned asset is now matched to an outstanding request for its model
+   * and capped at that model's outstanding quantity, so extra units of a model
+   * that is already satisfied count as unmatched — exactly how the server
+   * treats them (`materializeModelRequestForAsset` returns `matched: false`
+   * once `fulfilledQuantity >= quantity`).
+   */
+  const fulfilMatch = useMemo(
+    () =>
+      matchScansToReservations(
+        bookingCheckinItems,
+        bookingCtx?.outstandingModelRequests ?? [],
+        bookingCtx?.outstandingModelUnitCount ?? 0
+      ),
+    [bookingCheckinItems, bookingCtx]
+  );
 
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
@@ -1746,9 +1930,9 @@ function ScannerContent() {
                             (r) =>
                               `${r.assetModelName} ×${r.outstandingQuantity}`
                           )
-                          .join(", ")}  ·  ${bookingCheckinItems.length}/${
-                          bookingCtx.outstandingModelUnitCount
-                        } scanned`}
+                          .join(", ")}  ·  ${fulfilMatch.matched}/${
+                          fulfilMatch.required
+                        } assigned`}
                       </Text>
                     )}
                 </View>
@@ -1782,14 +1966,22 @@ function ScannerContent() {
 
         {/* Bottom */}
         <View
-          style={[
-            styles.overlaySection,
-            styles.bottomSection,
-            (showBatchDrawer || showBookingDrawer) && {
-              flex: 0,
-              paddingTop: spacing.md,
-            },
-          ]}
+          /**
+           * The overlay must NOT reflow when a drawer opens.
+           *
+           * This used to collapse to `flex: 0`, but only the BOTTOM section
+           * did — the top kept `flex: 1`, so it absorbed the freed space and
+           * pushed the header and the 240px scan frame downward. The camera is
+           * a static `absoluteFill` layer underneath, so what actually moved
+           * was the cutout sliding down over a still picture: it reads as "the
+           * camera jumped". It also dragged the absolutely-positioned
+           * manual-entry pill (anchored to this section's bottom) up onto the
+           * drawer.
+           *
+           * The drawer is an absolutely-positioned sibling at `bottom: 0`, so
+           * it never needed the overlay to make room in the first place.
+           */
+          style={[styles.overlaySection, styles.bottomSection]}
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
@@ -1875,59 +2067,68 @@ function ScannerContent() {
             (apps/webapp/app/components/scanner/code-scanner.tsx).
             NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
             control's origin so the existing e2e flows stay stable. */}
-        <View style={styles.devScanContainer}>
-          {devScanVisible ? (
-            <View style={styles.devScanRow}>
-              <TextInput
-                testID="dev-scan-input"
-                style={styles.devScanInput}
-                value={devScanInput}
-                onChangeText={setDevScanInput}
-                placeholder="Enter QR, barcode, or SAM ID"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="go"
-                onSubmitEditing={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-              />
+        {manualEntryBottom !== null && (
+          <View
+            style={[
+              styles.devScanContainer,
+              // Clamped so the lift never pushes the control into the scan
+              // frame; see `manualEntryBottom`.
+              { bottom: manualEntryBottom },
+            ]}
+          >
+            {devScanVisible ? (
+              <View style={styles.devScanRow}>
+                <TextInput
+                  testID="dev-scan-input"
+                  style={styles.devScanInput}
+                  value={devScanInput}
+                  onChangeText={setDevScanInput}
+                  placeholder="Enter QR, barcode, or SAM ID"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                />
+                <TouchableOpacity
+                  testID="dev-scan-submit"
+                  style={styles.devScanButton}
+                  onPress={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                  accessibilityLabel="Look up code"
+                >
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.devScanClose}
+                  onPress={() => setDevScanVisible(false)}
+                  accessibilityLabel="Close manual entry"
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
               <TouchableOpacity
-                testID="dev-scan-submit"
-                style={styles.devScanButton}
-                onPress={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-                accessibilityLabel="Look up code"
+                testID="dev-scan-toggle"
+                style={styles.devScanToggle}
+                onPress={() => setDevScanVisible(true)}
+                accessibilityLabel="Enter a code manually"
               >
-                <Ionicons name="arrow-forward" size={16} color="#fff" />
+                <Ionicons name="keypad-outline" size={14} color="#fff" />
+                <Text style={styles.devScanToggleText}>Enter code</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.devScanClose}
-                onPress={() => setDevScanVisible(false)}
-                accessibilityLabel="Close manual entry"
-              >
-                <Ionicons name="close" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              testID="dev-scan-toggle"
-              style={styles.devScanToggle}
-              onPress={() => setDevScanVisible(true)}
-              accessibilityLabel="Enter a code manually"
-            >
-              <Ionicons name="keypad-outline" size={14} color="#fff" />
-              <Text style={styles.devScanToggleText}>Enter code</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* ── Drawers ─────────────────────────────────────
@@ -1936,7 +2137,16 @@ function ScannerContent() {
           drawer inside the overlay left its buttons dead whenever the
           camera auto-paused (the paused layer won the hit test). */}
       {(showBatchDrawer || showBookingDrawer) && (
-        <View style={styles.drawerHost} pointerEvents="box-none">
+        <View
+          style={styles.drawerHost}
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = Math.round(e.nativeEvent.layout.height);
+            // Guard the setState: onLayout re-fires on every relayout, and an
+            // unconditional set would loop.
+            setDrawerHeight((prev) => (prev === h ? prev : h));
+          }}
+        >
           {/* ── Batch Drawer ──────────────────────────── */}
           {showBatchDrawer && (
             <BatchDrawer
@@ -1977,9 +2187,17 @@ function ScannerContent() {
               }
               submitLabel={
                 isBookingFulfilMode
-                  ? `Assign & check out ${bookingCheckinItems.length} unit${
-                      bookingCheckinItems.length === 1 ? "" : "s"
-                    }`
+                  ? fulfilMatch.isComplete
+                    ? // Count every scanned item, not just the matched ones:
+                      // the submit sends the whole list and the service adds
+                      // unmatched assets directly and checks them out too, so
+                      // labelling only `matched` would understate the action.
+                      `Assign & check out ${bookingCheckinItems.length} unit${
+                        bookingCheckinItems.length === 1 ? "" : "s"
+                      }`
+                    : `${
+                        fulfilMatch.required - fulfilMatch.matched
+                      } more to assign`
                   : isBookingAddMode
                   ? "Add to Booking"
                   : `Check In ${bookingCheckinItems.length} ${
