@@ -75,9 +75,15 @@ describe("authenticateScimRequest", () => {
         headers: { Authorization: `Bearer ${rawToken}` },
       });
 
-      await expect(authenticateScimRequest(request)).rejects.toThrow(
-        "SCIM provisioning is not enabled on this instance"
-      );
+      // Assert the status too, not just the message: 404 is deliberate (a
+      // disabled instance must look like one that never had the endpoint), so a
+      // regression to 403 would leak that the feature exists.
+      await expect(authenticateScimRequest(request)).rejects.toMatchObject({
+        status: 404,
+        message: expect.stringContaining(
+          "SCIM provisioning is not enabled on this instance"
+        ),
+      });
     });
 
     it("should short-circuit before touching the database", async () => {
@@ -85,7 +91,9 @@ describe("authenticateScimRequest", () => {
         headers: { Authorization: "Bearer anything" },
       });
 
-      await expect(authenticateScimRequest(request)).rejects.toThrow(ScimError);
+      await expect(authenticateScimRequest(request)).rejects.toMatchObject({
+        status: 404,
+      });
 
       // A disabled deployment must do no work at all on these paths.
       expect(mockDb.db.scimToken.findUnique).not.toHaveBeenCalled();
@@ -168,6 +176,27 @@ describe("authenticateScimRequest", () => {
       // per the org-scope IDOR convention, in addition to the unique id.
       where: { id: "token-1", organizationId: "org-123" },
       data: { lastUsedAt: expect.any(Date) },
+    });
+  });
+
+  it("should still authenticate when the lastUsedAt write fails", async () => {
+    // `lastUsedAt` is observability, not auth state. A transient write failure
+    // must not turn a valid provisioning request into a 500, so the update is
+    // fire-and-forget with its rejection swallowed.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.scimToken.findUnique.mockResolvedValue({
+      id: "token-1",
+      organizationId: "org-123",
+    });
+    // @ts-expect-error - vitest mock type
+    mockDb.db.scimToken.update.mockRejectedValue(new Error("db unavailable"));
+
+    const request = new Request("http://localhost/api/scim/v2/Users", {
+      headers: { Authorization: "Bearer some-valid-token" },
+    });
+
+    await expect(authenticateScimRequest(request)).resolves.toEqual({
+      organizationId: "org-123",
     });
   });
 });

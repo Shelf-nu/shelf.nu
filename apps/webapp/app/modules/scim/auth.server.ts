@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { Logger } from "~/utils/logger";
 import { ScimError } from "./errors.server";
 
 /**
@@ -63,15 +64,29 @@ export async function authenticateScimRequest(
     throw new ScimError("Invalid token", 401);
   }
 
-  // Scope the write by the token's own organizationId (resolved above) so it
-  // conforms to the org-scope IDOR convention for org-scoped tables and stays
-  // robust to future refactors. Note the id here is already server-derived from
-  // the secret token hash, so this is a defensive belt-and-suspenders, not a
-  // guard against user-supplied ids.
-  await db.scimToken.update({
-    where: { id: scimToken.id, organizationId: scimToken.organizationId },
-    data: { lastUsedAt: new Date() },
-  });
+  // `lastUsedAt` is observability, not authentication state — nothing downstream
+  // reads it during the request. Deliberately NOT awaited so a transient write
+  // failure can't turn a valid provisioning call into a 500, and so IdP requests
+  // aren't paced by a second round-trip. The rejection is swallowed and logged;
+  // leaving the promise unhandled would crash the process.
+  //
+  // The write is scoped by the token's own organizationId (resolved above) to
+  // follow the org-scope IDOR convention for org-scoped tables. The id is
+  // already server-derived from the secret token hash, so that scoping is
+  // belt-and-braces rather than a guard against user-supplied ids.
+  void db.scimToken
+    .update({
+      where: { id: scimToken.id, organizationId: scimToken.organizationId },
+      data: { lastUsedAt: new Date() },
+    })
+    .catch((cause: unknown) => {
+      Logger.warn(
+        "Failed to record SCIM token lastUsedAt",
+        scimToken.id,
+        scimToken.organizationId,
+        cause
+      );
+    });
 
   return { organizationId: scimToken.organizationId };
 }

@@ -85,6 +85,39 @@ async function assertEmailAllowedForOrg(
 }
 
 /**
+ * Rethrows a Prisma unique-constraint violation as the SCIM-spec 409
+ * "uniqueness" error; any other error propagates unchanged.
+ *
+ * Two provisioning paths can lose the same race — creating the Shelf user and
+ * creating the SCIM mapping — and both must report it identically, so the
+ * translation lives here rather than being duplicated in each catch block.
+ *
+ * Unwraps `ShelfError` first: `createUser` wraps the Prisma error as its
+ * `cause`, whereas a direct `db` call throws it raw.
+ *
+ * @param err - The caught error
+ * @param email - The userName reported back to the IdP in the 409 detail
+ * @throws {ScimError} 409 `uniqueness` on P2002
+ * @throws The original error otherwise
+ */
+function throwScimUniquenessIfP2002(err: unknown, email: string): never {
+  const cause = isLikeShelfError(err) ? err.cause : err;
+
+  if (
+    cause instanceof PrismaClientKnownRequestError &&
+    cause.code === "P2002"
+  ) {
+    throw new ScimError(
+      `User with userName "${email}" already exists in this organization`,
+      409,
+      "uniqueness"
+    );
+  }
+
+  throw err;
+}
+
+/**
  * Creates the SCIM mapping row (`UserScimExternalId`) that links a Shelf user to
  * the IdP's object id within one org. The `scimExternalId` becomes the stable,
  * SCIM-facing resource id (see {@link userToScimResource}); the mapping persists
@@ -104,18 +137,7 @@ async function createScimMapping(
       data: { userId, organizationId, scimExternalId },
     });
   } catch (err) {
-    const cause = isLikeShelfError(err) ? err.cause : err;
-    if (
-      cause instanceof PrismaClientKnownRequestError &&
-      cause.code === "P2002"
-    ) {
-      throw new ScimError(
-        `User with userName "${email}" already exists in this organization`,
-        409,
-        "uniqueness"
-      );
-    }
-    throw err;
+    throwScimUniquenessIfP2002(err, email);
   }
 }
 
@@ -555,18 +577,7 @@ export async function createScimUser(
       skipPersonalOrg: true,
     });
   } catch (err) {
-    const cause = isLikeShelfError(err) ? err.cause : err;
-    if (
-      cause instanceof PrismaClientKnownRequestError &&
-      cause.code === "P2002"
-    ) {
-      throw new ScimError(
-        `User with userName "${email}" already exists in this organization`,
-        409,
-        "uniqueness"
-      );
-    }
-    throw err;
+    throwScimUniquenessIfP2002(err, email);
   }
 
   await createScimMapping(newUser.id, organizationId, externalId, email);
