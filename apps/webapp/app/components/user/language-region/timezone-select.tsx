@@ -87,6 +87,19 @@ type TimezoneSelectProps = {
  * @param props.className - Optional trigger class
  * @returns The timezone selector control
  */
+
+/**
+ * Format an IANA timezone name for DISPLAY: underscores become spaces so
+ * "America/New_York" reads as "America/New York" and "Africa/Addis_Ababa" as
+ * "Africa/Addis Ababa". The stored/submitted value stays the raw IANA name.
+ *
+ * @param tz - the IANA timezone name (e.g. "America/New_York")
+ * @returns the display label with underscores replaced by spaces
+ */
+function formatTimeZoneLabel(tz: string): string {
+  return tz.replace(/_/g, " ");
+}
+
 export function TimezoneSelect({
   name,
   value,
@@ -112,8 +125,12 @@ export function TimezoneSelect({
 
   const filtered = useMemo(() => {
     if (!searchQuery) return TIMEZONE_OPTIONS;
-    const q = searchQuery.toLowerCase();
-    return TIMEZONE_OPTIONS.filter((tz) => tz.toLowerCase().includes(q));
+    // Match against the human display form (underscores → spaces) and normalize
+    // the query the same way, so typing "New York" matches "America/New_York".
+    const q = searchQuery.toLowerCase().replace(/_/g, " ");
+    return TIMEZONE_OPTIONS.filter((tz) =>
+      formatTimeZoneLabel(tz).toLowerCase().includes(q)
+    );
   }, [searchQuery]);
 
   function handleSearch(event: ChangeEvent<HTMLInputElement>) {
@@ -161,7 +178,7 @@ export function TimezoneSelect({
           )}
         >
           <span className="truncate text-sm font-medium text-gray-900">
-            {value}
+            {formatTimeZoneLabel(value)}
           </span>
           <ChevronDownIcon className="size-4 shrink-0 text-gray-500" />
           <input type="hidden" name={name} value={value} />
@@ -211,7 +228,7 @@ export function TimezoneSelect({
                 tabIndex={-1}
                 onClick={() => handleSelect(tz)}
               >
-                {tz}
+                {formatTimeZoneLabel(tz)}
               </div>
             ))}
             {filtered.length === 0 && (

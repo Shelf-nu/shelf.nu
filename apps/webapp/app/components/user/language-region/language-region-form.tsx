@@ -16,6 +16,7 @@
  * @see {@link file://../../../utils/date-format.ts} formatDate
  */
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import type {
   DateFormatPreference,
@@ -73,6 +74,56 @@ const DAY_TO_WEEK_START: Record<0 | 1 | 6, WeekStartPreference> = {
   1: "MONDAY",
   6: "SATURDAY",
 };
+
+/**
+ * One format-preference field: an always-present accessible label wrapping its
+ * selector control, plus an assertive error region.
+ *
+ * `FormRow` renders its visible column label only at `lg` and up
+ * (`hidden lg:block`), so below that breakpoint the selector triggers would
+ * lose their field name entirely — both visually and in the accessibility tree.
+ * This wrapper fixes both:
+ *
+ * - The label `<span>` is a visible block below `lg` (restoring the field name
+ *   the `FormRow` column hides) and `sr-only` at `lg` and up (so it does not
+ *   duplicate that visible column, while staying in the a11y tree at every
+ *   breakpoint — `sr-only` clips rather than `display:none`).
+ * - Because the `<label>` WRAPS the control, the underlying trigger button gets
+ *   this field name as its accessible name at all breakpoints, without reaching
+ *   into the shared selector components.
+ * - The error message is a `role="alert"` live region so failed validation is
+ *   announced when it appears.
+ *
+ * @param props.label - The field name (e.g. "Date format").
+ * @param props.error - Validation message to surface/announce, if any.
+ * @param props.children - The selector control for this field.
+ * @returns The labeled field with its optional error region.
+ */
+function FormatPrefField({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <label className="block w-full">
+        <span className="mb-1 block text-text-sm font-medium text-gray-700 lg:sr-only">
+          {label}
+        </span>
+        {children}
+      </label>
+      {error ? (
+        <p role="alert" className="mt-1 w-full text-sm text-error-500">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+}
 
 /**
  * Language & region settings Card.
@@ -137,57 +188,58 @@ export function LanguageRegionForm({
           className="border-b-0 border-t"
           required={false}
         >
-          <DateFormatSelect
-            name={zo.fields.dateFormat()}
-            value={dateFormat}
-            onChange={setDateFormat}
-          />
-          {validationErrors?.dateFormat?.message ? (
-            <p className="text-sm text-error-500">
-              {validationErrors.dateFormat.message}
-            </p>
-          ) : null}
+          <FormatPrefField
+            label="Date format"
+            error={validationErrors?.dateFormat?.message}
+          >
+            <DateFormatSelect
+              name={zo.fields.dateFormat()}
+              value={dateFormat}
+              onChange={setDateFormat}
+            />
+          </FormatPrefField>
         </FormRow>
 
         <FormRow rowLabel="Time format" required={false}>
-          <TimeFormatSelect
-            name={zo.fields.timeFormat()}
-            value={timeFormat}
-            onChange={setTimeFormat}
-          />
-          {validationErrors?.timeFormat?.message ? (
-            <p className="text-sm text-error-500">
-              {validationErrors.timeFormat.message}
-            </p>
-          ) : null}
+          <FormatPrefField
+            label="Time format"
+            error={validationErrors?.timeFormat?.message}
+          >
+            <TimeFormatSelect
+              name={zo.fields.timeFormat()}
+              value={timeFormat}
+              onChange={setTimeFormat}
+            />
+          </FormatPrefField>
         </FormRow>
 
         <FormRow rowLabel="Week starts on" required={false}>
-          <WeekStartSelect
-            name={zo.fields.weekStart()}
-            value={weekStart}
-            onChange={setWeekStart}
-          />
-          {validationErrors?.weekStart?.message ? (
-            <p className="text-sm text-error-500">
-              {validationErrors.weekStart.message}
-            </p>
-          ) : null}
+          <FormatPrefField
+            label="Week starts on"
+            error={validationErrors?.weekStart?.message}
+          >
+            <WeekStartSelect
+              name={zo.fields.weekStart()}
+              value={weekStart}
+              onChange={setWeekStart}
+            />
+          </FormatPrefField>
         </FormRow>
 
         <FormRow rowLabel="Time zone" required={false}>
-          <TimezoneSelect
-            name={zo.fields.timeZone()}
-            value={timeZone}
-            onChange={setTimeZone}
-          />
-          {validationErrors?.timeZone?.message ||
-          zo.errors.timeZone()?.message ? (
-            <p className="text-sm text-error-500">
-              {validationErrors?.timeZone?.message ||
-                zo.errors.timeZone()?.message}
-            </p>
-          ) : null}
+          <FormatPrefField
+            label="Time zone"
+            error={
+              validationErrors?.timeZone?.message ||
+              zo.errors.timeZone()?.message
+            }
+          >
+            <TimezoneSelect
+              name={zo.fields.timeZone()}
+              value={timeZone}
+              onChange={setTimeZone}
+            />
+          </FormatPrefField>
         </FormRow>
 
         <div
