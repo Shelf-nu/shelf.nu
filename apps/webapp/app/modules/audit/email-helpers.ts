@@ -449,13 +449,18 @@ export function sendAuditReminderEmail({
 }): void {
   const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
-  // The scheduler's assignee rows (AUDIT_INCLUDE_FOR_EMAIL) don't carry the raw
-  // format-preference columns, so prefs resolve from the request hints — the
-  // same locale-derived formatting these reminders used previously.
-  const prefs = resolveFormatPrefs(null, hints);
 
   assignees.forEach(async (assignment) => {
     try {
+      // Resolve THIS recipient's stored formatting prefs (their own
+      // dateFormat/timeFormat/timeZone), not the scheduler-captured creator
+      // hints — otherwise every reminder recipient sees the creator's
+      // format/timezone. The scheduler's assignee rows (AUDIT_INCLUDE_FOR_EMAIL)
+      // don't carry the raw preference columns, so a per-recipient lookup is
+      // required; `hints` is the null-field fallback only. Audits have few
+      // assignees, so the per-recipient fetch is cheap.
+      const prefs = await resolveUserFormatPrefsById(assignment.userId, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading,
@@ -503,7 +508,12 @@ export function sendAuditReminderEmail({
 }
 
 /**
- * Send overdue notice email to both creator and assignees
+ * Send overdue notice email to both creator and assignees.
+ *
+ * Each recipient's dates are rendered in THEIR OWN stored formatting prefs
+ * (dateFormat/timeFormat/timeZone). Pass the recipient's `userId` so their
+ * prefs can be resolved per recipient; when it is absent the render falls back
+ * to the scheduler-captured request `hints`.
  */
 export function sendAuditOverdueEmail({
   audit,
@@ -512,6 +522,13 @@ export function sendAuditOverdueEmail({
 }: {
   audit: AuditForEmail;
   recipients: Array<{
+    /**
+     * Recipient user id — used to resolve their stored formatting prefs so the
+     * dates render in the recipient's own format/timezone rather than the
+     * creator's. Optional because some callers only have the email row; those
+     * recipients fall back to the request `hints` for formatting.
+     */
+    userId?: string;
     email: string;
     firstName: string | null;
     lastName: string | null;
@@ -521,13 +538,17 @@ export function sendAuditOverdueEmail({
 }): void {
   const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
-  // Overdue recipients carry no raw format-preference columns (creator +
-  // assignees mapped to plain email rows), so prefs resolve from the request
-  // hints — the same locale-derived formatting used previously.
-  const prefs = resolveFormatPrefs(null, hints);
 
   recipients.forEach(async (recipient) => {
     try {
+      // Resolve THIS recipient's stored formatting prefs, not the
+      // scheduler-captured creator hints. When the recipient's userId is
+      // available we look up their own dateFormat/timeFormat/timeZone;
+      // otherwise `hints` is the null-field fallback (previous behavior).
+      const prefs = recipient.userId
+        ? await resolveUserFormatPrefsById(recipient.userId, hints)
+        : resolveFormatPrefs(null, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading: `⚠️ Audit overdue: "${audit.name}"`,
