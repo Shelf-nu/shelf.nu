@@ -278,7 +278,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       createdWithInvite,
     });
 
-    const title = "Set up your account";
+    const title = "Configure sua conta";
     const subHeading =
       "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
@@ -555,7 +555,7 @@ export default function Onboarding() {
 
         <div className="md:flex md:gap-6">
           <Input
-            label="First name"
+            label="Nome"
             autoComplete="given-name"
             required
             data-test-id="firstName"
@@ -566,7 +566,7 @@ export default function Onboarding() {
             className="mb-5 md:mb-0 md:flex-1"
           />
           <Input
-            label="Last name"
+            label="Sobrenome"
             autoComplete="family-name"
             required
             data-test-id="lastName"
@@ -579,7 +579,7 @@ export default function Onboarding() {
         </div>
         <div>
           <Input
-            label="Username"
+            label="Nome de usuário"
             addOn="shelf.nu/"
             autoComplete="username"
             required
@@ -599,7 +599,7 @@ export default function Onboarding() {
           <>
             <PasswordInput
               required
-              label="Password"
+              label="Senha"
               placeholder="********"
               data-test-id="password"
               name={zo.fields.password()}
@@ -611,7 +611,7 @@ export default function Onboarding() {
 
             <PasswordInput
               required
-              label="Confirm password"
+              label="Confirmar senha"
               data-test-id="confirmPassword"
               placeholder="********"
               name={zo.fields.confirmPassword()}
@@ -662,7 +662,7 @@ export default function Onboarding() {
 
             <When truthy={!isPersonalUse && requireCompanyName}>
               <Input
-                label="Company/Organization"
+                label="Empresa/Organização"
                 placeholder="Shelf Inc."
                 name={zo.fields.companyName()}
                 error={zo.errors.companyName()?.message}

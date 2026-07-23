@@ -150,7 +150,7 @@ export default function SSOLogin() {
             <Input
               ref={domainInputRef}
               data-test-id="domain"
-              label="Company domain"
+              label="Domínio da empresa"
               placeholder="yourdomain.com"
               required
               name={zo.fields.domain()}

@@ -48,7 +48,7 @@ import {
 import { validEmail } from "~/utils/misc";
 
 export function loader({ context }: LoaderFunctionArgs) {
-  const title = "Log in";
+  const title = "Entrar";
   const subHeading = "Welcome back! Enter your details below to log in.";
   const { disableSignup, disableSSO } = config;
 
@@ -214,7 +214,7 @@ export default function IndexLoginForm() {
           />
         </div>
         <PasswordInput
-          label="Password"
+          label="Senha"
           placeholder="**********"
           data-test-id="password"
           name={zo.fields.password()}

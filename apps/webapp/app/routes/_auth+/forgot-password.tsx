@@ -219,7 +219,7 @@ export default function ForgotPassword() {
                 type="submit"
                 disabled={disabled}
               >
-                {!disabled ? "Reset password" : "Sending code..."}
+                {!disabled ? "Redefinir senha" : "Sending code..."}
               </Button>
             </Form>
             <p className="mt-2 text-center text-gray-500">
@@ -268,7 +268,7 @@ function PasswordResetForm({ email }: { email: string }) {
       <ShelfOTP error={zoReset.errors.otp()?.message} />
 
       <PasswordInput
-        label="New password"
+        label="Nova senha"
         data-test-id="password"
         name={zoReset.fields.password()}
         type="password"

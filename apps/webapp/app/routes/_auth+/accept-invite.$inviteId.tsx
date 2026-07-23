@@ -248,7 +248,7 @@ export default function AcceptInvite() {
               />
 
               <Button type="submit" disabled={disabled || error}>
-                {disabled ? "Validating token..." : "Accept invite"}
+                {disabled ? "Validating token..." : "Aceitar convite"}
               </Button>
             </Form>
           </div>

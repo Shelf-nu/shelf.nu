@@ -174,7 +174,7 @@ export default function Join() {
           </div>
 
           <PasswordInput
-            label="Password"
+            label="Senha"
             placeholder="**********"
             required
             data-test-id="password"

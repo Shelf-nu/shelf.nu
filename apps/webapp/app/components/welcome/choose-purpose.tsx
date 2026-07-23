@@ -108,7 +108,7 @@ const PLAN_DETAILS: Record<
   }
 > = {
   personal: {
-    title: "Personal",
+    title: "Pessoal",
     description:
       "For testing or individual use. Includes 3 custom fields and branded QR labels.",
     chip: "Free",
@@ -118,7 +118,7 @@ const PLAN_DETAILS: Record<
     href: "/assets",
   },
   team: {
-    title: "Team",
+    title: "Equipe",
     description: `For organizations and labs. Includes collaboration features with a ${config.freeTrialDays}-day free trial. No credit card required.`,
     chip: `${config.freeTrialDays}-day trial`,
     badge: "Recommended",

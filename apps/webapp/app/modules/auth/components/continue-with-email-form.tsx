@@ -39,7 +39,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
     <sendOTP.Form method="post" action="/send-otp" ref={zo.ref}>
       <input type="hidden" name="mode" value={mode} />
       <Input
-        label="Email"
+        label="E-mail"
         hideLabel={true}
         type="email"
         name="email"

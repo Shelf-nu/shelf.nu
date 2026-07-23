@@ -156,7 +156,7 @@ export default function SelectPlan() {
     }
 
     return {
-      label: interval === "year" ? "Annual" : "Monthly",
+      label: interval === "year" ? "Anual" : "Mensal",
       price: `${formattedPrice}/${interval === "year" ? "yr" : "mo"}`,
       footnote,
     };
@@ -177,8 +177,8 @@ export default function SelectPlan() {
   const billingLabel = isYearly ? "yr" : "mo";
 
   const selectedAddons = [
-    wantsAudits && "Audits",
-    wantsBarcodes && "Barcodes",
+    wantsAudits && "Auditorias",
+    wantsBarcodes && "Códigos de Barras",
   ].filter(Boolean);
   const trialText =
     selectedAddons.length > 0
