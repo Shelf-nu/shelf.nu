@@ -61,7 +61,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
     const header: HeaderData = {
-      title: "Locations",
+      title: "Locais",
     };
 
     const searchParams = getCurrentSearchParams(request);
@@ -161,7 +161,7 @@ const QRScanner = () => {
     }
   }, [action]);
 
-  // Custom setPaused function that only pauses for "View asset"
+  // only pauses for "View asset"
   const handleSetPaused = useCallback(
     (value: boolean) => {
       // Always use the ref value for the most current action

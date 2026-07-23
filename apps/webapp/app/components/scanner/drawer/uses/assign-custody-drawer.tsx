@@ -689,7 +689,7 @@ function SubmissionState({
           <CheckmarkIcon />
         </span>
         <div className="font-mono">
-          {type === "asset" ? "Assets" : "Kits"} are now in custody of{" "}
+          {type === "asset" ? "Equipamentos" : "Kits"} are now in custody of{" "}
           {custodianName}
         </div>
       </div>

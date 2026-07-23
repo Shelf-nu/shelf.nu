@@ -58,7 +58,7 @@ export function ScannedAssetQuantityInput({
         </label>
         <Input
           id={`scan-qty-${assetId}`}
-          label="Quantity"
+          label="Quantidade"
           hideLabel
           type="number"
           inputMode="numeric"

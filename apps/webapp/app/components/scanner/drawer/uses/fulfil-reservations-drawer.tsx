@@ -12,7 +12,7 @@
  * Buckets (top-to-bottom, per plan §C):
  *
  *   1. Pending model rows       — `booked - matched` synthetic rows
- *                                  per expected model, gray "Pending"
+ *                                  per expected model, gray "Pendente"
  *                                  badge, no actions.
  *   2. Matched scanned rows     — QR scans whose resolved asset's
  *                                  `assetModelId` matches an expected
@@ -190,7 +190,7 @@ export default function FulfilReservationsDrawer({
 
   const scannedBuckets = useMemo(() => {
     // assetModelId → number of scans consumed against that model's
-    // `remaining` quota so far in this iteration. "Remaining" already
+    // `remaining` quota so far in this iteration. "Restante" already
     // accounts for pre-fulfilled units — a model with `quantity: 3,
     // fulfilledQuantity: 2` ships `remaining: 1`, so only one scan can
     // match before we flip to "unmatched" (over-scan).
@@ -395,7 +395,7 @@ export default function FulfilReservationsDrawer({
 
     return (
       <>
-        {/* Bucket 1: pending synthetic rows (gray "Pending" badge). */}
+        {/* Bucket 1: pending synthetic rows (gray "Pendente" badge). */}
         {pendingModelRows.map((row) => (
           <PendingModelRow key={row.key} assetModelName={row.assetModelName} />
         ))}
@@ -545,7 +545,7 @@ function FulfilHeader({
  * Synthetic pending row — one per still-outstanding unit on an
  * expected model. Shows a `Package` icon placeholder in place of an
  * asset thumbnail (no concrete asset to render yet) and a gray
- * "Pending" badge. Not interactive — the operator resolves these by
+ * "Pendente" badge. Not interactive — the operator resolves these by
  * scanning a matching QR.
  */
 function PendingModelRow({ assetModelName }: { assetModelName: string }) {
@@ -611,7 +611,7 @@ function ScannedAssetRowBody({
     <div className="flex items-center gap-2">
       <ImageWithPreview
         thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-        alt={asset.title || "Asset"}
+        alt={asset.title || "Equipamento"}
         className="size-[54px] rounded-[2px]"
       />
       <div className="flex min-w-0 flex-col gap-1">
@@ -702,7 +702,7 @@ function AlreadyIncludedCollapser({
                   <div className="flex items-center gap-2">
                     <ImageWithPreview
                       thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-                      alt={asset.title || "Asset"}
+                      alt={asset.title || "Equipamento"}
                       className="size-[54px] rounded-[2px]"
                     />
                     <div className="flex flex-col gap-1">

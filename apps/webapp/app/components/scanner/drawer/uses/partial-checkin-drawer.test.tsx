@@ -5,7 +5,7 @@
  * refactor introduced:
  *
  *  - Only QUANTITY_TRACKED pending rows expose a
- *    "Check in without scanning" button.
+ *    "Devolver sem escanear" button.
  *  - Clicking that button inserts a synthetic-keyed entry into
  *    `scannedItemsAtom` (so the scanned/pending buckets reclassify).
  *  - The unit-weighted progress numerator counts individuals (1) plus
@@ -121,7 +121,7 @@ function individual(
     kind: "INDIVIDUAL",
     id,
     bookingAssetId: `ba-${id}`,
-    title: "Camera",
+    title: "Câmera",
     mainImage: null,
     thumbnailImage: null,
     kitId: null,
@@ -275,7 +275,7 @@ describe("PartialCheckinDrawer", () => {
     useRouteLoaderDataMock.mockReturnValue({ minimizedSidebar: false });
   });
 
-  it("exposes 'Check in without scanning' only on pending qty-tracked rows", () => {
+  it("exposes 'Devolver sem escanear' only on pending qty-tracked rows", () => {
     const assets: BookingExpectedAsset[] = [
       individual({ id: "asset-ind-1", title: "Camera body" }),
       qty({ id: "asset-qty-1", title: "Battery" }),
@@ -391,7 +391,7 @@ describe("PartialCheckinDrawer", () => {
     // Denominator: 1 + 20 = 21.
     // Numerator: 1 (individual scanned) + 5 (logged) = 6.
     const assets: BookingExpectedAsset[] = [
-      individual({ id: "asset-ind-progress", title: "Camera" }),
+      individual({ id: "asset-ind-progress", title: "Câmera" }),
       qty({
         id: "asset-qty-progress",
         title: "Battery",
@@ -411,7 +411,7 @@ describe("PartialCheckinDrawer", () => {
         codeType: "qr",
         data: {
           id: "asset-ind-progress",
-          title: "Camera",
+          title: "Câmera",
           mainImage: null,
           thumbnailImage: null,
           kitId: null,

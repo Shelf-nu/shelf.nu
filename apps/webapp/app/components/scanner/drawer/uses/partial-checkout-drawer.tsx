@@ -337,7 +337,7 @@ export default function PartialCheckoutDrawer({
   // the same time) so the same renderer can power both directions.
   const expectedAssets = useAtomValue(bookingExpectedAssetsAtom);
 
-  // Dispatcher for inserting a synthetic "Check out without scanning"
+  // Dispatcher for inserting a synthetic "Retirar sem escanear"
   // entry into `scannedItemsAtom`. Wired to the pending-list's
   // `onQuickAction` below.
   const quickCheckoutQtyAsset = useSetAtom(quickCheckoutQtyAssetAtom);
@@ -975,7 +975,7 @@ export default function PartialCheckoutDrawer({
   const onRemoveScanned = removeItem;
 
   /**
-   * Invoked when the operator clicks "Check out without scanning" on a
+   * Invoked when the operator clicks "Retirar sem escanear" on a
    * pending qty row. Dispatches the synthetic-scan atom; the new
    * entry lands under `qty-checkout:<bookingAssetId>` and the drawer
    * reclassifies it into the scanned-this-session bucket on the next
@@ -1140,7 +1140,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // Check if asset is fully checked out — type-aware. For a QT asset with
   // a partial top-off pending (e.g. 5 of 50 already out, 45 left) this is
-  // false so the "Already checked out" badge is suppressed and the qty
+  // false so the "Já retirado" badge is suppressed and the qty
   // input renders.
   const isAlreadyCheckedOut = isAssetFullyCheckedOut(
     asset,
@@ -1229,7 +1229,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         isAlreadyCheckedOut &&
         isInBooking &&
         asset.type !== AssetType.QUANTITY_TRACKED,
-      badgeText: "Already checked out",
+      badgeText: "Já retirado",
       tooltipTitle: "Asset already checked out",
       tooltipContent:
         "This asset has already been checked out for this booking and cannot be checked out again.",
@@ -1238,7 +1238,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // Custom preset for assets in custody
     {
       condition: isInCustody && isInBooking,
-      badgeText: "In custody",
+      badgeText: "Em guarda",
       tooltipTitle: "Asset in custody",
       tooltipContent:
         "This asset is currently in custody. Release the custody before checking it out.",
@@ -1257,7 +1257,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // Custom preset for kit assets - different message based on whether it's the last one
     {
       condition: !!assetKitId && !isRedundant, // Only show if not redundant
-      badgeText: "Part of kit",
+      badgeText: "Parte de kit",
       tooltipTitle: "Asset is part of a kit",
       tooltipContent: isLastKitAssetInBooking
         ? "This is the last asset from this kit in the booking. Checking it out will also mark the entire kit as checked out."
@@ -1501,7 +1501,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     // Custom preset for "already checked out" kits (highest priority - blocking issue)
     {
       condition: allKitAssetsInBookingAreCheckedOut,
-      badgeText: "Already checked out",
+      badgeText: "Já retirado",
       tooltipTitle: "Kit already checked out",
       tooltipContent:
         "All assets from this kit have already been checked out for this booking and cannot be checked out again.",

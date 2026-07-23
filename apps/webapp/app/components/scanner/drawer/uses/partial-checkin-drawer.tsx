@@ -131,8 +131,8 @@ export type CheckinDisposition = z.infer<typeof checkinDispositionSchema>;
  */
 type QtyDispositionState = {
   /**
-   * Primary input. Semantically either "Returned" (TWO_WAY) or
-   * "Consumed" (ONE_WAY) — the drawer picks the label based on the
+   * Primary input. Semantically either "Devolvido" (TWO_WAY) or
+   * "Consumido" (ONE_WAY) — the drawer picks the label based on the
    * asset's consumptionType.
    */
   primary: string;
@@ -1284,7 +1284,7 @@ export default function PartialCheckinDrawer({
   const onRemoveScanned = removeItem;
 
   /**
-   * Invoked when the user clicks "Check in without scanning" on a
+   * Invoked when the user clicks "Devolver sem escanear" on a
    * pending qty row. Dispatches the synthetic-scan atom, flags the
    * slice's bookingAssetId for auto-focus, then clears the flag after
    * 600ms so subsequent re-renders don't keep stealing focus.
@@ -1411,7 +1411,7 @@ export default function PartialCheckinDrawer({
          * `kitId`, the per-slice attribution from the loader):
          *  1. Kit groups — one foldable header, child rows indented.
          *     Children are individuals (no action) AND qty slices (with
-         *     the "Check in without scanning" affordance). A qty asset's
+         *     the "Devolver sem escanear" affordance). A qty asset's
          *     kit-driven slice lands here; its standalone slice does not.
          *  2. Loose individuals (`kitId == null`).
          *  3. Loose qty slices (`kitId == null` — e.g. the standalone
@@ -1688,8 +1688,8 @@ function ReconciledKitGroup({
                 <div className="flex flex-wrap items-center gap-1">
                   <span className={assetTypePillClass}>kit</span>
                   <AvailabilityBadge
-                    badgeText="Checked in"
-                    tooltipTitle="Already checked in"
+                    badgeText="Devolvido"
+                    tooltipTitle="Já devolvido"
                     tooltipContent="All of this kit's assets on the booking have been reconciled."
                     className="border-green-200 bg-green-50 text-green-700"
                   />
@@ -1713,7 +1713,7 @@ function ReconciledKitGroup({
                   <div className="flex items-center gap-2">
                     <ImageWithPreview
                       thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-                      alt={asset.title || "Asset"}
+                      alt={asset.title || "Equipamento"}
                       className="size-[40px] rounded-[2px]"
                     />
                     <div className="flex flex-col gap-1">
@@ -1723,8 +1723,8 @@ function ReconciledKitGroup({
                       <div className="flex flex-wrap items-center gap-1">
                         <span className={assetTypePillClass}>asset</span>
                         <AvailabilityBadge
-                          badgeText="Checked in"
-                          tooltipTitle="Already checked in"
+                          badgeText="Devolvido"
+                          tooltipTitle="Já devolvido"
                           tooltipContent={
                             asset.kind === "QUANTITY_TRACKED"
                               ? "All booked units for this quantity-tracked asset have already been reconciled on this booking."
@@ -1841,7 +1841,7 @@ function ReconciledQtySummary({
 /**
  * Render a row for an asset that has already been fully reconciled
  * (INDIVIDUAL with `alreadyCheckedIn: true`, or qty-tracked with
- * `remaining: 0`). No actions, green "Checked in" badge.
+ * `remaining: 0`). No actions, green "Devolvido" badge.
  */
 function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
   return (
@@ -1851,7 +1851,7 @@ function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
           <div className="flex items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.title || "Asset"}
+              alt={asset.title || "Equipamento"}
               className="size-[54px] rounded-[2px]"
             />
             <div className="flex flex-col gap-1">
@@ -1861,8 +1861,8 @@ function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
               <div className="flex flex-wrap items-center gap-1">
                 <span className={assetTypePillClass}>asset</span>
                 <AvailabilityBadge
-                  badgeText="Checked in"
-                  tooltipTitle="Already checked in"
+                  badgeText="Devolvido"
+                  tooltipTitle="Já devolvido"
                   tooltipContent={
                     asset.kind === "QUANTITY_TRACKED"
                       ? "All booked units for this quantity-tracked asset have already been reconciled on this booking."
@@ -1940,7 +1940,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // An active synthetic entry (via quick-checkin) lives under a key
   // prefixed by `qty-checkin:` + the slice's bookingAssetId. Used below to
-  // pick between the "Scanned" and "Checked in without scan" badges.
+  // pick between the "Escaneado" and "Checked in without scan" badges.
   const isQuickCheckin = Boolean(
     bookingAssetId && items[`${QUICK_CHECKIN_QR_PREFIX}${bookingAssetId}`]
   );
@@ -1959,7 +1959,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // Custom preset for already checked in assets
     {
       condition: isAlreadyCheckedIn && isInBooking,
-      badgeText: "Already checked in",
+      badgeText: "Já devolvido",
       tooltipTitle: "Asset already checked in",
       tooltipContent:
         "This asset has already been checked in for this booking and cannot be checked in again.",
@@ -1978,7 +1978,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // Custom preset for kit assets - different message based on whether it's the last one
     {
       condition: !!assetKitId && !isRedundant, // Only show if not redundant
-      badgeText: "Part of kit",
+      badgeText: "Parte de kit",
       tooltipTitle: "Asset is part of a kit",
       tooltipContent: isLastKitAssetInBooking
         ? "This is the last asset from this kit in the booking. Checking it in will also mark the entire kit as available."
@@ -1995,8 +1995,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     {
       condition:
         isInBooking && !isRedundant && !isAlreadyCheckedIn && !isQuickCheckin,
-      badgeText: "Scanned",
-      tooltipTitle: "Scanned",
+      badgeText: "Escaneado",
+      tooltipTitle: "Escaneado",
       tooltipContent: "This asset has been scanned in this check-in session.",
       priority: 50,
       className: "bg-green-50 border-green-200 text-green-700",
@@ -2115,7 +2115,7 @@ function QuantityDispositionBlock({
     parsed.lost > 0 ||
     parsed.damaged > 0;
 
-  const primaryLabel = isOneWay ? "Consumed" : "Returned";
+  const primaryLabel = isOneWay ? "Consumido" : "Devolvido";
 
   const primaryInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2361,7 +2361,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     // Custom preset for "already checked in" kits (highest priority - blocking issue)
     {
       condition: allKitAssetsInBookingAreCheckedIn,
-      badgeText: "Already checked in",
+      badgeText: "Já devolvido",
       tooltipTitle: "Kit already checked in",
       tooltipContent:
         "All assets from this kit have already been checked in for this booking and cannot be checked in again.",

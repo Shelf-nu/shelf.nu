@@ -415,7 +415,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
       condition: asset.status !== AssetStatus.IN_CUSTODY,
-      badgeText: "Not in custody",
+      badgeText: "Sem guarda",
       tooltipTitle: "Asset is not in custody",
       tooltipContent: "This asset is not in custody and cannot be released.",
       priority: 100,
@@ -471,7 +471,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
     {
       condition: kit.status !== AssetStatus.IN_CUSTODY,
-      badgeText: "Not in custody",
+      badgeText: "Sem guarda",
       tooltipTitle: "Kit is not in custody",
       tooltipContent: "This kit is not in custody and cannot be released.",
       priority: 100,
@@ -592,7 +592,7 @@ function SubmissionState({
           <CheckmarkIcon />
         </span>
         <div className="font-mono">
-          {type === "asset" ? "Assets" : "Kits"} have been released from custody
+          {type === "asset" ? "Equipamentos" : "Kits"} have been released from custody
         </div>
       </div>
     );

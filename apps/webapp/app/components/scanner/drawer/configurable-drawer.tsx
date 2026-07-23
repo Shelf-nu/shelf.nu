@@ -85,7 +85,7 @@ export default function ConfigurableDrawer<T>({
   renderItem,
   Blockers,
   disableSubmit = false,
-  submitButtonText = "Confirm",
+  submitButtonText = "Confirmar",
   submitButtonClassName,
   defaultExpanded = false,
   onSubmit,

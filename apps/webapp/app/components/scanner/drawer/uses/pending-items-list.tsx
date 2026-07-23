@@ -9,8 +9,8 @@
  * The visible difference between the two consumers is small enough to
  * collapse onto a single `mode: "checkin" | "checkout"` discriminator:
  *
- *  - Button label   — "Check in without scanning" vs
- *                     "Check out without scanning".
+ *  - Button label   — "Devolver sem escanear" vs
+ *                     "Retirar sem escanear".
  *  - Tooltip text   — "still to reconcile" vs "still to check out".
  *  - Section header — "Pending check-in" / "Pending check-out" (the
  *                     caller already passes the full label to
@@ -79,9 +79,9 @@ type ModeCopy = {
    * remaining-unit count + pluralise correctly.
    */
   needsTooltipBody: (remaining: number) => string;
-  /** Tooltip body shown on the gray "Pending" pill of a qty row. */
+  /** Tooltip body shown on the gray "Pendente" pill of a qty row. */
   pendingQtyTooltipBody: string;
-  /** Tooltip body shown on the kit-header's "Pending" pill. */
+  /** Tooltip body shown on the kit-header's "Pendente" pill. */
   pendingKitTooltipBody: string;
   /**
    * Prefix used to namespace `Tr` `key`s so two modes can't collide in
@@ -92,7 +92,7 @@ type ModeCopy = {
 
 const COPY_BY_MODE: Record<PendingItemsListMode, ModeCopy> = {
   checkin: {
-    quickActionButton: "Check in without scanning",
+    quickActionButton: "Devolver sem escanear",
     needsTooltipTitle: "Remaining units",
     needsTooltipBody: (remaining) =>
       `${remaining} unit${
@@ -105,7 +105,7 @@ const COPY_BY_MODE: Record<PendingItemsListMode, ModeCopy> = {
     keyPrefix: "pending-checkin",
   },
   checkout: {
-    quickActionButton: "Check out without scanning",
+    quickActionButton: "Retirar sem escanear",
     needsTooltipTitle: "Remaining units",
     needsTooltipBody: (remaining) =>
       `${remaining} unit${
@@ -236,7 +236,7 @@ function PendingKitGroup({
                 <div className="flex flex-wrap items-center gap-1">
                   <span className={assetTypePillClass}>kit</span>
                   <AvailabilityBadge
-                    badgeText="Pending"
+                    badgeText="Pendente"
                     tooltipTitle="Pending kit"
                     tooltipContent={copy.pendingKitTooltipBody}
                     className="border-gray-200 bg-gray-50 text-gray-600"
@@ -272,7 +272,7 @@ function PendingKitGroup({
                     <div className="flex items-center gap-2">
                       <ImageWithPreview
                         thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-                        alt={asset.title || "Asset"}
+                        alt={asset.title || "Equipamento"}
                         className="size-[40px] rounded-[2px]"
                       />
                       <div className="flex flex-col gap-1">
@@ -325,7 +325,7 @@ function PendingKitQtyChild({
           <div className="flex min-w-0 items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.title || "Asset"}
+              alt={asset.title || "Equipamento"}
               className="size-[40px] shrink-0 rounded-[2px]"
             />
             <div className="flex min-w-0 flex-col gap-1">
@@ -343,7 +343,7 @@ function PendingKitQtyChild({
                   />
                 ) : (
                   <AvailabilityBadge
-                    badgeText="Pending"
+                    badgeText="Pendente"
                     tooltipTitle="Pending check-in"
                     tooltipContent={copy.pendingQtyTooltipBody}
                     className="border-gray-200 bg-gray-50 text-gray-600"
@@ -395,7 +395,7 @@ function renderPendingIndividualAsset(
           <div className="flex items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.title || "Asset"}
+              alt={asset.title || "Equipamento"}
               className="size-[54px] rounded-[2px]"
             />
             <div className="flex flex-col gap-1">
@@ -410,7 +410,7 @@ function renderPendingIndividualAsset(
               <div className="flex flex-wrap items-center gap-1">
                 <span className={assetTypePillClass}>asset</span>
                 <AvailabilityBadge
-                  badgeText="Pending"
+                  badgeText="Pendente"
                   tooltipTitle="Pending scan"
                   tooltipContent="This asset is part of the booking but has not been scanned yet."
                   className="border-gray-200 bg-gray-50 text-gray-600"
@@ -431,11 +431,11 @@ function renderPendingIndividualAsset(
 /**
  * Render a pending (not-yet-scanned) QUANTITY_TRACKED asset row.
  *
- * - When `logged === 0`: show a gray "Pending" badge + a "needs N"
+ * - When `logged === 0`: show a gray "Pendente" badge + a "needs N"
  *   chip (N = `remaining`).
  * - When `logged > 0` (partially reconciled by a previous session):
  *   show a progress badge reading "`booked - remaining`/`booked`
- *   reconciled" in place of "Pending".
+ *   reconciled" in place of "Pendente".
  *
  * Always renders a **Check N without scanning** button on the right,
  * since qty-tracked assets typically have no physical barcode.
@@ -461,7 +461,7 @@ function renderPendingQtyAsset(
           <div className="flex min-w-0 items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.title || "Asset"}
+              alt={asset.title || "Equipamento"}
               className="size-[54px] shrink-0 rounded-[2px]"
             />
             <div className="flex min-w-0 flex-col gap-1">
@@ -485,7 +485,7 @@ function renderPendingQtyAsset(
                   />
                 ) : (
                   <AvailabilityBadge
-                    badgeText="Pending"
+                    badgeText="Pendente"
                     tooltipTitle="Pending check-in"
                     tooltipContent={copy.pendingQtyTooltipBody}
                     className="border-gray-200 bg-gray-50 text-gray-600"

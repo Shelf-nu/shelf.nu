@@ -386,7 +386,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     // Custom preset for "already checked out" - blocking issue
     {
       condition: bookingIsCheckedOut && isCheckedOut,
-      badgeText: "Already checked out",
+      badgeText: "Já retirado",
       tooltipTitle: "Asset is checked out",
       tooltipContent:
         "This asset is already checked out and cannot be added to a checked-out booking.",
@@ -470,7 +470,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     // Custom preset for "already checked out" - only show when booking is checked out
     {
       condition: bookingIsCheckedOut && isCheckedOut,
-      badgeText: "Already checked out",
+      badgeText: "Já retirado",
       tooltipTitle: "Kit is checked out",
       tooltipContent:
         "This kit is already checked out and cannot be added to a checked-out booking.",

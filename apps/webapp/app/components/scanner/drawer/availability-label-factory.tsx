@@ -61,7 +61,7 @@ export function createAvailabilityLabels(
       <div className="flex flex-wrap gap-1">
         {activeLabels.map((label) => (
           // `badgeText` is the user-facing label and is unique across the
-          // preset configurations defined below (e.g. "In custody", "Checked
+          // preset configurations defined below (e.g. "Em guarda", "Checked
           // out", etc.), so it serves as a stable identity for this badge.
           <AvailabilityBadge
             key={label.badgeText}
@@ -84,7 +84,7 @@ export function createAvailabilityLabels(
 export const assetLabelPresets = {
   inCustody: (isInCustody: boolean = false): AvailabilityLabelConfig => ({
     condition: isInCustody,
-    badgeText: "In custody",
+    badgeText: "Em guarda",
     tooltipTitle: "Asset is in custody",
     tooltipContent:
       "This asset is already in custody. You need to release it before assigning it again.",
@@ -93,7 +93,7 @@ export const assetLabelPresets = {
 
   checkedOut: (isCheckedOut: boolean = false): AvailabilityLabelConfig => ({
     condition: isCheckedOut,
-    badgeText: "Checked out",
+    badgeText: "Retirado",
     tooltipTitle: "Asset is checked out",
     tooltipContent:
       "This asset is already checked out. You need to check it in before assigning it custody.",
@@ -101,7 +101,7 @@ export const assetLabelPresets = {
   }),
 
   /**
-   * "Part of kit" badge. Copy differs by asset type:
+   * "Parte de kit" badge. Copy differs by asset type:
    *
    *   - INDIVIDUAL — whole asset is committed to the kit; user must
    *     remove it from the kit (or scan the kit QR) to act on it
@@ -117,7 +117,7 @@ export const assetLabelPresets = {
     isQuantityTracked: boolean = false
   ): AvailabilityLabelConfig => ({
     condition: isPartOfKit,
-    badgeText: "Part of kit",
+    badgeText: "Parte de kit",
     tooltipTitle: "Asset is part of a kit",
     tooltipContent: isQuantityTracked
       ? "Part of this asset's quantity is allocated to a kit. The remaining free pool is still available to add individually."
@@ -150,7 +150,7 @@ export const assetLabelPresets = {
 export const kitLabelPresets = {
   inCustody: (isInCustody: boolean = false): AvailabilityLabelConfig => ({
     condition: isInCustody,
-    badgeText: "In custody",
+    badgeText: "Em guarda",
     tooltipTitle: "Kit is in custody",
     tooltipContent:
       "This kit is already in custody. You need to release it before assigning it again.",
@@ -159,7 +159,7 @@ export const kitLabelPresets = {
 
   checkedOut: (isCheckedOut: boolean = false): AvailabilityLabelConfig => ({
     condition: isCheckedOut,
-    badgeText: "Checked out",
+    badgeText: "Retirado",
     tooltipTitle: "Kit is checked out",
     tooltipContent:
       "This kit is already checked out. You need to check it in before assigning it custody.",

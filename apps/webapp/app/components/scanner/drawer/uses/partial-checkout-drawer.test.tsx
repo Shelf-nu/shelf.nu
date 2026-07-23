@@ -239,7 +239,7 @@ function individualExpected(
     kind: "INDIVIDUAL",
     id,
     bookingAssetId: `ba-${id}`,
-    title: "Camera",
+    title: "Câmera",
     mainImage: null,
     thumbnailImage: null,
     kitId: null,
@@ -486,7 +486,7 @@ describe("PartialCheckoutDrawer", () => {
    * but still has units left to check out (loader-computed
    * `remainingToCheckOutByAsset[asset.id] > 0`), the drawer MUST:
    *
-   *  - suppress the "Already checked out" badge on the scanned row;
+   *  - suppress the "Já retirado" badge on the scanned row;
    *  - render the qty input pre-filled with the remaining units and
    *    clamped by `max=remaining` — NOT `bookingAsset.quantity`, since
    *    the booked total would let the operator over-commit;
@@ -520,7 +520,7 @@ describe("PartialCheckoutDrawer", () => {
     const store = seedStore({ "qr-pencils": scannedAsset(pencils) });
     renderDrawer(store);
 
-    // The row renders without the "Already checked out" badge — the
+    // The row renders without the "Já retirado" badge — the
     // asset still has units left, so the binary blocker label must not
     // surface here.
     expect(screen.getByText("Pencils")).toBeInTheDocument();
@@ -536,7 +536,7 @@ describe("PartialCheckoutDrawer", () => {
     expect(Number(input.max)).toBe(45);
   });
 
-  it("shows 'Already checked out' and hides the qty input when remaining = 0", () => {
+  it("shows 'Já retirado' and hides the qty input when remaining = 0", () => {
     const pencils: ScannedAssetFixture = {
       id: "pencils-id",
       title: "Pencils",
@@ -555,7 +555,7 @@ describe("PartialCheckoutDrawer", () => {
     const store = seedStore({ "qr-pencils": scannedAsset(pencils) });
     renderDrawer(store);
 
-    // The asset renders, BUT the "Already checked out" badge surfaces
+    // The asset renders, BUT the "Já retirado" badge surfaces
     // (remaining = 0 → fully out) and the qty input is suppressed.
     expect(screen.getByText("Pencils")).toBeInTheDocument();
     expect(screen.getAllByText(/already checked out/i).length).toBeGreaterThan(
@@ -578,7 +578,7 @@ describe("PartialCheckoutDrawer", () => {
    * object that must be physically confirmed). Already-checked-out
    * individuals are dropped from the pending bucket entirely.
    */
-  it("exposes 'Check out without scanning' only on pending qty-tracked rows", () => {
+  it("exposes 'Retirar sem escanear' only on pending qty-tracked rows", () => {
     const assets: BookingExpectedAsset[] = [
       individualExpected({ id: "asset-ind-1", title: "Camera body" }),
       qtyExpected({ id: "asset-qty-1", title: "Battery" }),
