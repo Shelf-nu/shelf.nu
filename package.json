@@ -47,7 +47,8 @@
     "db:deploy-migration:staging": "pnpm --filter @shelf/database run db:deploy-migration:staging",
     "db:deploy-migration:production": "pnpm --filter @shelf/database run db:deploy-migration:production",
     "db:reset": "pnpm --filter @shelf/database run db:reset",
-    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging"
+    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging",
+    "companion:seed:e2e": "cd apps/companion/.maestro && bash scripts/seed-e2e.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
