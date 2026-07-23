@@ -8,7 +8,7 @@ import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Test Supabase RLS") }];
+export const meta = () => [{ title: appendToMetaTitle("Testar Supabase RLS") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

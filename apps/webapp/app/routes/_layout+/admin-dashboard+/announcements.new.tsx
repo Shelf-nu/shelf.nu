@@ -12,7 +12,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("New announcement") }];
+export const meta = () => [{ title: appendToMetaTitle("Novo comunicado") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -55,7 +55,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           cause,
           message: "Failed to create announcement",
           additionalData: { userId, payload },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 
@@ -90,7 +90,7 @@ export default function NewAnnouncement() {
           />
         </div>
         <Input label={"Link"} name="link" required />
-        <Input label={"Link text"} name="linkText" required />
+        <Input label={"Texto do link"} name="linkText" required />
         <div className="">
           <label className="font-medium text-gray-700" htmlFor="published">
             <span>Published</span>

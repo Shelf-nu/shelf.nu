@@ -157,7 +157,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           cause,
           message: "Failed to load user organizations",
           additionalData: { userId, shelfUserId },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 

@@ -245,7 +245,7 @@ const ListUserContent = ({
     </Td>
     <Td className=" p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        {item?.batch ? (item.batch.printed ? "Yes" : "No") : "N/A"}
+        {item?.batch ? (item.batch.printed ? "Sim" : "Não") : "N/A"}
       </div>
     </Td>
     <Td className=" p-0 md:p-0">

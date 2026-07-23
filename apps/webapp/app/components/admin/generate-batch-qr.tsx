@@ -29,7 +29,7 @@ export const GenerateBatchQr = () => {
         onChange={(e) => setBatchName(e.target.value)}
         placeholder="Dank batch"
         disabled={disabled}
-        label={"Batch name"}
+        label={"Nome do lote"}
       />
       <Input
         type="number"

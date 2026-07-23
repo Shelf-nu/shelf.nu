@@ -12,7 +12,7 @@ import { payload, error, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Announcements") }];
+export const meta = () => [{ title: appendToMetaTitle("Comunicados") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -32,7 +32,7 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
           cause,
           message: "Failed to load announcements",
           additionalData: { userId },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 
@@ -77,7 +77,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           cause,
           message: "Failed to update announcement",
           additionalData: { userId, published, announcementId },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 

@@ -41,7 +41,7 @@ import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
 
 export const meta = () => [
-  { title: appendToMetaTitle("Organization details") },
+  { title: appendToMetaTitle("Detalhes da Organização") },
 ];
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -76,7 +76,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           message:
             "The organization you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, params },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 
@@ -239,7 +239,7 @@ export const action = async ({
             cause: null,
             message: "CSV file is empty",
             additionalData: { intent },
-            label: "Assets",
+            label: "Equipamentos",
           });
         }
 
@@ -260,7 +260,7 @@ export const action = async ({
           title: "Invalid intent",
           message: "The intent provided is not valid",
           additionalData: { intent },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
     }
   } catch (cause) {
@@ -336,7 +336,7 @@ export default function OrgPage() {
                 disabled={isFormProcessing(fetcher.state)} // Disable for self service users
                 defaultChecked={organization?.enabledSso}
                 required
-                title={"Toggle SSO"}
+                title={"Alternar SSO"}
               />
               <input type="hidden" value="toggleSso" name="intent" />
             </div>
@@ -424,7 +424,7 @@ export default function OrgPage() {
 
                 <div className="flex flex-col">
                   <FormRow
-                    rowLabel={"SSO Domain"}
+                    rowLabel={"Domínio SSO"}
                     className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
                     subHeading={
                       "The domain that this workspace is linked to. If you want it changed, please contact support."
@@ -432,7 +432,7 @@ export default function OrgPage() {
                     required
                   >
                     <Input
-                      label="SSO Domain"
+                      label="Domínio SSO"
                       name="domain"
                       hideLabel
                       className="disabled w-full"
@@ -538,10 +538,10 @@ export default function OrgPage() {
       <div className="mt-10">
         <HorizontalTabs
           items={[
-            { to: "assets", content: "Assets" },
-            { to: "qr-codes", content: "QR codes" },
-            { to: "members", content: "Members" },
-            { to: "transfer-ownership", content: "Transfer Ownership" },
+            { to: "assets", content: "Equipamentos" },
+            { to: "qr-codes", content: "Códigos QR" },
+            { to: "members", content: "Membros" },
+            { to: "transfer-ownership", content: "Transferir Propriedade" },
           ]}
         />
         <div>

@@ -17,7 +17,7 @@ import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
-export const meta = () => [{ title: appendToMetaTitle("Updates") }];
+export const meta = () => [{ title: appendToMetaTitle("Atualizações") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

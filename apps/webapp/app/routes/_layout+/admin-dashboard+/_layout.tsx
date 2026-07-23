@@ -22,7 +22,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   }
 }
 
-export const meta = () => [{ title: appendToMetaTitle("Admin dashboard") }];
+export const meta = () => [{ title: appendToMetaTitle("Painel do Administrador") }];
 
 export const handle = {
   breadcrumb: () => <Link to="/admin-dashboard">Admin dashboard</Link>,
@@ -31,7 +31,7 @@ export const handle = {
 const items = [
   {
     to: "users",
-    content: "Users",
+    content: "Usuários",
     isActive: (pathname: string) =>
       pathname.includes("admin-dashboard") &&
       (pathname.includes("users") ||
@@ -39,12 +39,12 @@ const items = [
         pathname.includes("assets") ||
         pathname.includes("qr-codes")),
   },
-  { to: "qrs", content: "QR codes" },
-  { to: "announcements", content: "Announcements" },
-  { to: "updates", content: "Updates" },
-  { to: "move-location-images", content: "Move location images" },
-  { to: "generate-locations", content: "Generate locations" },
-  { to: "test-supabase-rls", content: "Test Supabase RLS" },
+  { to: "qrs", content: "Códigos QR" },
+  { to: "announcements", content: "Comunicados" },
+  { to: "updates", content: "Atualizações" },
+  { to: "move-location-images", content: "Mover imagens de locais" },
+  { to: "generate-locations", content: "Gerar locais" },
+  { to: "test-supabase-rls", content: "Testar Supabase RLS" },
 ];
 
 export default function Area51Page() {

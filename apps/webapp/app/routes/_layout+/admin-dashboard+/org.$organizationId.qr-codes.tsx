@@ -13,7 +13,7 @@ import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const meta = () => [
-  { title: appendToMetaTitle("Organization QR codes") },
+  { title: appendToMetaTitle("Códigos QR da Organização") },
 ];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -48,7 +48,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           message:
             "The organization you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, params },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
       });
 
@@ -105,7 +105,7 @@ export const action = async ({
           title: "Invalid intent",
           message: "The intent provided is not valid",
           additionalData: { intent },
-          label: "Admin dashboard",
+          label: "Painel do Administrador",
         });
     }
   } catch (cause) {

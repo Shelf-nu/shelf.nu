@@ -27,7 +27,7 @@ export const MigrationFormSchema = z.object({
 });
 
 export const meta = () => [
-  { title: appendToMetaTitle("Move location images") },
+  { title: appendToMetaTitle("Mover imagens de locais") },
 ];
 export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();

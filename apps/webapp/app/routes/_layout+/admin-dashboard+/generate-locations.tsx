@@ -25,7 +25,7 @@ const GenerateLocationSchema = z.object({
   numberOfLocations: z.coerce.number().min(1).max(500).default(100),
   image: z.instanceof(File, { message: "Image is required" }),
 });
-export const meta = () => [{ title: appendToMetaTitle("Generate locations") }];
+export const meta = () => [{ title: appendToMetaTitle("Gerar locais") }];
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -69,7 +69,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         cause: null,
         message: "Image is required",
         status: 400,
-        label: "Admin dashboard",
+        label: "Painel do Administrador",
       });
     }
 
@@ -80,7 +80,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
         }MB`,
         status: 400,
-        label: "Admin dashboard",
+        label: "Painel do Administrador",
       });
     }
 
@@ -126,7 +126,7 @@ export default function GenerateLocations() {
       >
         <Input
           className="mb-4"
-          label="Number of location"
+          label="Número de locais"
           type="number"
           min={1}
           max={500}
@@ -138,7 +138,7 @@ export default function GenerateLocations() {
 
         <Input
           className="mb-4"
-          label="Image"
+          label="Imagem"
           type="file"
           required
           name={zo.fields.image()}
