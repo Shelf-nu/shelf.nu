@@ -11,9 +11,9 @@ export default function AssetGrowthChart() {
 
   // Build short month labels: "Mar '25"
   const chartData = assetGrowthData.map(
-    (d: { month: string; year: number; "Total assets": number }) => ({
+    (d: { month: string; year: number; "Total de Equipamentos": number }) => ({
       date: `${d.month.slice(0, 3)} '${String(d.year).slice(2)}`,
-      "Total assets": d["Total assets"],
+      "Total de Equipamentos": d["Total de Equipamentos"],
     })
   );
 
@@ -48,7 +48,7 @@ export default function AssetGrowthChart() {
                 className="h-[180px] w-full"
                 data={chartData}
                 index="date"
-                categories={["Total assets"]}
+                categories={["Total de Equipamentos"]}
                 colors={["orange"]}
                 showAnimation={true}
                 animationDuration={600}
@@ -62,10 +62,10 @@ export default function AssetGrowthChart() {
           </ClientOnly>
         ) : (
           <DashboardEmptyState
-            text="No assets yet"
-            subText="Create assets to see your growth trend here."
+            text="Nenhum equipamento ainda"
+            subText="Crie equipamentos para ver sua tendência de crescimento aqui."
             ctaTo="/assets/new"
-            ctaText="Create an asset"
+            ctaText="Criar um equipamento"
           />
         )}
       </div>

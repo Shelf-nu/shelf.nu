@@ -39,8 +39,8 @@ export default function UpcomingBookings() {
       {!canUseBookings ? (
         <div className="flex flex-1 items-center justify-center p-4">
           <PremiumFeatureTeaser
-            headline="Schedule & track checkouts"
-            description="Reserve assets ahead of time and never double-book equipment again."
+            headline="Agende e acompanhe empréstimos"
+            description="Reserve equipamentos com antecedência e nunca mais reserve o mesmo item duas vezes."
           />
         </div>
       ) : upcomingBookings.length > 0 ? (
@@ -103,10 +103,10 @@ export default function UpcomingBookings() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No planned bookings"
-            subText="Bookings with Reserved status will appear here."
+            text="Nenhuma reserva planejada"
+            subText="Reservas com status de Agendado aparecerão aqui."
             ctaTo="/bookings/new"
-            ctaText="Create a booking"
+            ctaText="Criar uma reserva"
           />
         </div>
       )}

@@ -12,7 +12,7 @@ import { Button } from "../shared/button";
 export function PremiumFeatureTeaser({
   headline,
   description,
-  ctaLabel = "Create a Team workspace",
+  ctaLabel = "Criar uma Área de Trabalho da equipe",
   ctaTo = "/account-details/workspace",
   secondaryLabel,
   secondaryTo,

@@ -119,9 +119,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           .catch((cause) => {
             throw new ShelfError({
               cause,
-              message: "Failed to load asset aggregation",
+              message: "Falha ao carregar agregação de equipamentos",
               additionalData: { userId, organizationId },
-              label: "Dashboard",
+              label: "Painel",
             });
           }),
         db
@@ -141,9 +141,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           .catch((cause) => {
             throw new ShelfError({
               cause,
-              message: "Failed to load asset total valuation",
+              message: "Falha ao carregar valor total dos equipamentos",
               additionalData: { userId, organizationId },
-              label: "Dashboard",
+              label: "Painel",
             });
           }),
       ]).then(([countResult, valuationRows]) => ({
@@ -270,9 +270,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         .catch((cause) => {
           throw new ShelfError({
             cause,
-            message: "Failed to load newest assets",
+            message: "Falha ao carregar equipamentos recentes",
             additionalData: { userId, organizationId },
-            label: "Dashboard",
+            label: "Painel",
           });
         }),
 
@@ -288,9 +288,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         .catch((cause) => {
           throw new ShelfError({
             cause,
-            message: "Failed to load announcement",
+            message: "Falha ao carregar comunicado",
             additionalData: { userId, organizationId },
-            label: "Dashboard",
+            label: "Painel",
           });
         }),
 
@@ -340,7 +340,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalValuation = assetAggregation.totalValuation;
 
     const header: HeaderData = {
-      title: "Home",
+      title: "Início",
     };
 
     return payload({
@@ -387,7 +387,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = () => [
-  { title: appendToMetaTitle("Home") },
+  { title: appendToMetaTitle("Início") },
 ];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];

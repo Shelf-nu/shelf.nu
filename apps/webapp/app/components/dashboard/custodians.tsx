@@ -60,11 +60,11 @@ export default function CustodiansList() {
       {isPersonal ? (
         <div className="flex flex-1 items-center justify-center p-4">
           <PremiumFeatureTeaser
-            headline="Track who has what"
-            description="Add non-registered members to assign asset custody, or create a Team workspace to invite users with full access."
-            ctaLabel="Add a member"
+            headline="Rastreie quem está com o quê"
+            description="Adicione membros não registrados para atribuir guarda de equipamentos ou crie uma Área de Trabalho da equipe para convidar usuários com acesso completo."
+            ctaLabel="Adicionar um membro"
             ctaTo="/settings/team/nrm"
-            secondaryLabel="Or create a Team workspace →"
+            secondaryLabel="Ou crie uma Área de Trabalho da equipe →"
             secondaryTo="/account-details/workspace"
           />
         </div>
@@ -106,10 +106,10 @@ export default function CustodiansList() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No assets in custody"
-            subText="Assign custody of assets to team members to track who has what."
+            text="Nenhum equipamento sob guarda"
+            subText="Atribua a guarda de equipamentos aos membros da equipe para rastrear quem está com o quê."
             ctaTo="/assets"
-            ctaText="Go to assets"
+            ctaText="Ir para Equipamentos"
           />
         </div>
       )}
@@ -149,7 +149,7 @@ function Row({
                     : "/static/images/default_pfp.jpg"
                 }
                 className={"size-10 rounded-[4px]"}
-                alt={`${resolveTeamMemberName(custodian)}'s profile`}
+                alt={`Perfil de ${resolveTeamMemberName(custodian)}`}
               />
               <div>
                 <span className="word-break block">
@@ -167,7 +167,7 @@ function Row({
                     <span className="mt-px">{teamMemberName}</span>
                   )}
                 </span>
-                <span className="block text-gray-600">{count} Assets</span>
+                <span className="block text-gray-600">{count} Equipamentos</span>
               </div>
             </div>
           </span>

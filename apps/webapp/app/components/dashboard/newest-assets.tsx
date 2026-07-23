@@ -51,7 +51,7 @@ export default function NewestAssets() {
                     category: asset?.category
                       ? {
                           id: asset.category.id,
-                          name: asset.category?.name || "Uncategorized",
+                          name: asset.category?.name || "Sem categoria",
                           color: asset.category?.color || "#575757",
                         }
                       : null,
@@ -77,10 +77,10 @@ export default function NewestAssets() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No assets yet"
-            subText="Create your first asset to start building your inventory."
+            text="Nenhum equipamento ainda"
+            subText="Crie seu primeiro equipamento para começar a construir seu inventário."
             ctaTo="/assets/new"
-            ctaText="Create an asset"
+            ctaText="Criar um equipamento"
           />
         </div>
       )}
@@ -110,7 +110,7 @@ const Row = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={`Image of ${item.title}`}
+                alt={`Imagem de ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />

@@ -68,10 +68,10 @@ export default function AssetsByStatusChart() {
           </div>
         ) : (
           <DashboardEmptyState
-            text="No assets yet"
-            subText="Add assets to see their status distribution here."
+            text="Nenhum equipamento ainda"
+            subText="Adicione equipamentos para ver a distribuição de status aqui."
             ctaTo="/assets/new"
-            ctaText="Create an asset"
+            ctaText="Criar um equipamento"
           />
         )}
       </div>

@@ -62,10 +62,10 @@ export default function InventoryValueChart() {
           </div>
         ) : (
           <DashboardEmptyState
-            text="No asset values yet"
-            subText="Add valuations to your assets to see your total inventory value here."
+            text="Nenhum valor de equipamento ainda"
+            subText="Adicione valores aos seus equipamentos para ver o valor total do inventário aqui."
             ctaTo="/assets"
-            ctaText="Go to assets"
+            ctaText="Ir para Equipamentos"
           />
         )}
       </div>

@@ -44,8 +44,8 @@ export default function OverdueBookings() {
       {!canUseBookings ? (
         <div className="flex flex-1 items-center justify-center p-4">
           <PremiumFeatureTeaser
-            headline="Never lose track of returns"
-            description="Get instant visibility into overdue checkouts and keep your team accountable."
+            headline="Nunca perca o controle das devoluções"
+            description="Tenha visibilidade instantânea de empréstimos atrasados e mantenha sua equipe responsável."
           />
         </div>
       ) : overdueBookings.length > 0 ? (
@@ -105,8 +105,8 @@ export default function OverdueBookings() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No overdue bookings"
-            subText="All bookings are on track."
+            text="Nenhuma reserva atrasada"
+            subText="Todas as reservas estão em dia."
           />
         </div>
       )}

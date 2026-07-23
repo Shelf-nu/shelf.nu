@@ -45,8 +45,8 @@ export default function ActiveBookings() {
       {!canUseBookings ? (
         <div className="flex flex-1 items-center justify-center p-4">
           <PremiumFeatureTeaser
-            headline="See who has what, live"
-            description="Track every checked-out asset in real time and know exactly when it's coming back."
+            headline="Veja quem está com o quê, em tempo real"
+            description="Rastreie cada equipamento emprestado em tempo real e saiba exatamente quando ele será devolvido."
           />
         </div>
       ) : activeBookings.length > 0 ? (
@@ -114,8 +114,8 @@ export default function ActiveBookings() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No active bookings"
-            subText="Checked-out bookings will appear here."
+            text="Nenhuma reserva ativa"
+            subText="Reservas com equipamentos emprestados aparecerão aqui."
           />
         </div>
       )}

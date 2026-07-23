@@ -67,10 +67,10 @@ export default function UpcomingReminders() {
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
-            text="No upcoming reminders"
-            subText="Asset reminders you set will appear here."
+            text="Nenhum lembrete próximo"
+            subText="Lembretes de equipamentos que você definir aparecerão aqui."
             ctaTo="/assets"
-            ctaText="Go to assets"
+            ctaText="Ir para Equipamentos"
           />
         </div>
       )}

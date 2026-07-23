@@ -28,22 +28,22 @@ export default function KpiCards() {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
       <KpiCard
-        label="Total assets"
+        label="Total de Equipamentos"
         value={totalAssets.toLocaleString()}
         to="/assets"
       />
       <KpiCard
-        label="Categories"
+        label="Categorias"
         value={categoriesCount.toLocaleString()}
         to="/categories"
       />
       <KpiCard
-        label="Locations"
+        label="Locais"
         value={locationsCount.toLocaleString()}
         to="/locations"
       />
       <KpiCard
-        label="Team members"
+        label="Membros da equipe"
         value={teamMembersCount.toLocaleString()}
         to="/settings/team"
       />
