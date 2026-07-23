@@ -428,6 +428,61 @@ describe("createScimUser", () => {
     expect(result.id).toBe(SCIM_ID);
   });
 
+  it("should provision a user with active:false without granting access", async () => {
+    // An IdP may provision an already-suspended account. Creating it with
+    // membership would hand a disabled user working Shelf access.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUnique.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockUserService.createUser.mockResolvedValue({ id: "new-user-id" });
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUniqueOrThrow.mockResolvedValue({
+      ...mockShelfUser,
+      id: "new-user-id",
+    });
+
+    const result = await createScimUser(ORG_ID, {
+      userName: "jane@example.com",
+      externalId: SCIM_ID,
+      active: false,
+    });
+
+    // Empty roles => createUser skips the UserOrganization association.
+    expect(mockUserService.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ roles: [] })
+    );
+    // No team member either — that link is what notification paths read.
+    expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
+    // The mapping is still created, so the IdP can address and later enable them.
+    expect(mockDb.db.userScimExternalId.create).toHaveBeenCalled();
+    expect(result.active).toBe(false);
+  });
+
+  it("should not grant membership when adopting an existing user as inactive", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUnique.mockResolvedValue({
+      ...mockShelfUser,
+      scimExternalIds: [],
+      userOrganizations: [],
+    });
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
+
+    const result = await createScimUser(ORG_ID, {
+      userName: "jane@example.com",
+      externalId: SCIM_ID,
+      active: false,
+    });
+
+    expect(mockDb.db.userOrganization.create).not.toHaveBeenCalled();
+    expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
+    expect(result.active).toBe(false);
+  });
+
   it("should reject provisioning an email outside the org's SSO domain (400)", async () => {
     await expect(
       createScimUser(ORG_ID, {
@@ -502,22 +557,21 @@ describe("replaceScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.delete.mockResolvedValue({});
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
 
     const result = await replaceScimUser(ORG_ID, SCIM_ID, {
       userName: "jane@example.com",
       active: false,
     });
 
-    // Soft deactivate drops membership only — it must NOT go through the full
-    // `revokeAccessToOrganization`, which would disconnect (orphan) the team
-    // member and make reactivation create a duplicate.
-    expect(mockDb.db.userOrganization.delete).toHaveBeenCalledWith({
-      where: {
-        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
-      },
+    // Deactivation must go through the full revoke, which also disconnects the
+    // team member. That link is what the notification paths read to decide who
+    // receives this org's emails, so leaving it in place would keep sending
+    // booking and reminder mail to a deprovisioned user.
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
+      userId: "user-abc",
+      organizationId: ORG_ID,
     });
-    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(false);
   });
 
@@ -679,20 +733,19 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.delete.mockResolvedValue({});
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
 
     const result = await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "replace", path: "active", value: false }],
     });
 
-    // Soft deactivate drops membership only, keeping the team member linked.
-    expect(mockDb.db.userOrganization.delete).toHaveBeenCalledWith({
-      where: {
-        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
-      },
+    // Full revoke, so the team member is disconnected and the deprovisioned
+    // user stops receiving this org's notification emails.
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
+      userId: "user-abc",
+      organizationId: ORG_ID,
     });
-    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(false);
   });
 
@@ -707,14 +760,14 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.delete.mockResolvedValue({});
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
 
     await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "Replace", path: "active", value: false }],
     });
 
-    expect(mockDb.db.userOrganization.delete).toHaveBeenCalled();
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalled();
   });
 
   it("should deactivate via Entra value-object form", async () => {
@@ -727,14 +780,14 @@ describe("patchScimUser", () => {
       scimMapping({ userOrganizations: [] })
     );
     // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.delete.mockResolvedValue({});
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
 
     await patchScimUser(ORG_ID, SCIM_ID, {
       schemas: PATCH_SCHEMA,
       Operations: [{ op: "replace", value: { active: false } }],
     });
 
-    expect(mockDb.db.userOrganization.delete).toHaveBeenCalled();
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalled();
   });
 
   it("should reactivate a deactivated user via active=true", async () => {
@@ -768,11 +821,16 @@ describe("patchScimUser", () => {
     expect(result.active).toBe(true);
   });
 
-  it("should reuse the linked team member on reactivation instead of duplicating it", async () => {
-    // Regression: a soft deactivate keeps the team member linked, so the
-    // re-grant must rename that row rather than create a second one — a
-    // duplicate would show the person twice in the org and strand their
-    // custody/booking history on the old row.
+  it("should reuse a team member that is still linked rather than duplicating it", async () => {
+    // Idempotency guard on the grant path: when a linked team member already
+    // exists, rename it instead of adding a second row.
+    //
+    // NOTE: this does NOT cover deactivate → reactivate. Deactivation performs a
+    // full revoke, which disconnects the team member (required so notification
+    // paths stop emailing a deprovisioned user), and an orphaned row cannot be
+    // found by userId. Reactivation therefore provisions a NEW team member — an
+    // accepted limitation until the mapping records its team member id. See the
+    // test below.
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
       scimMapping({ userOrganizations: [] })
@@ -800,6 +858,37 @@ describe("patchScimUser", () => {
     expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
   });
 
+  it("should provision a new team member when reactivating an orphaned one", async () => {
+    // Documents the accepted trade: deactivation disconnects the team member so
+    // the deprovisioned user stops receiving this org's emails, which means the
+    // row can no longer be found by userId on reactivation. The person's prior
+    // custody/booking history stays on the orphan until the SCIM mapping records
+    // its team member id.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping({ userOrganizations: [] })
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping()
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userOrganization.create.mockResolvedValue({});
+    // Orphaned row: userId is null, so the org-scoped lookup finds nothing.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockTeamMemberService.createTeamMember.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "replace", path: "active", value: true }],
+    });
+
+    expect(mockTeamMemberService.createTeamMember).toHaveBeenCalled();
+    expect(mockDb.db.teamMember.update).not.toHaveBeenCalled();
+  });
+
   it("should activate on a lowercase 'true' string rather than deactivating", async () => {
     // Regression: `active` arrives as a boolean (Okta), "True" (Entra) or
     // "true" (others). Matching only one spelling resolved the rest to false,
@@ -825,7 +914,7 @@ describe("patchScimUser", () => {
     });
 
     expect(mockDb.db.userOrganization.create).toHaveBeenCalled();
-    expect(mockDb.db.userOrganization.delete).not.toHaveBeenCalled();
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(true);
   });
 
@@ -839,7 +928,6 @@ describe("patchScimUser", () => {
       Operations: [{ op: "replace", path: "active" }],
     });
 
-    expect(mockDb.db.userOrganization.delete).not.toHaveBeenCalled();
     expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
     expect(result.active).toBe(true);
   });

@@ -241,18 +241,25 @@ async function grantScimMembership(
 }
 
 /**
- * Soft-deactivates a SCIM user in one org: deletes their `UserOrganization` so
- * they lose all access, while deliberately KEEPING their `TeamMember` linked.
+ * Removes a SCIM user's access to one org, for both soft deactivation
+ * (`active: false`) and the full DELETE deprovision.
  *
- * This is what separates SCIM `active: false` from a full deprovision.
- * `revokeAccessToOrganization` — used by SCIM DELETE and by admin-initiated
- * revokes — also disconnects the team member. The row survives (so booking and
- * custody history isn't lost) but nothing can ever reconnect it, because the
- * `userId` that identified it is gone. For a soft deactivate that is the wrong
- * trade: the IdP re-enabling the user would create a SECOND team member,
- * showing the person twice in the org and leaving their history on the orphan.
+ * Delegates to `revokeAccessToOrganization`, which deletes the
+ * `UserOrganization` AND disconnects the `TeamMember` (leaving the row behind so
+ * booking and custody history survives). Disconnecting matters beyond tidiness:
+ * a `TeamMember` with no linked user is how the rest of the codebase recognises
+ * revoked access. Notification paths — asset reminders and booking recipients —
+ * read straight through `TeamMember.user` with no membership check, so a
+ * deactivated user who kept that link would carry on receiving emails
+ * containing this org's data.
  *
- * Keeping the link makes deactivate → reactivate a pure membership toggle.
+ * The cost is that reactivation provisions a NEW team member rather than
+ * reconnecting the old one, so the person's prior custody and booking history
+ * stays on the orphaned row. Accepted deliberately: a duplicate row is a
+ * cosmetic and reporting problem, whereas emailing tenant data to someone who
+ * has been deprovisioned is a disclosure. Resolving it properly means recording
+ * the team member on the SCIM mapping so reactivation can reconnect the exact
+ * row — deferred to the SCIM lifecycle-state work.
  *
  * @param userId - The Shelf user losing access
  * @param organizationId - The org the SCIM token is scoped to
@@ -261,28 +268,7 @@ async function revokeScimMembership(
   userId: string,
   organizationId: string
 ): Promise<void> {
-  await db.userOrganization.delete({
-    where: { userId_organizationId: { userId, organizationId } },
-  });
-
-  // Don't leave the user pointing at a workspace they can no longer open.
-  // Raw SQL so the write doesn't bump `User.updatedAt`; best-effort, mirroring
-  // the same cleanup in `revokeAccessToOrganization`.
-  try {
-    await db.$executeRaw`
-      UPDATE "User"
-      SET "lastSelectedOrganizationId" = NULL
-      WHERE "id" = ${userId}
-        AND "lastSelectedOrganizationId" = ${organizationId}
-    `;
-  } catch (cause) {
-    Logger.warn(
-      "Failed to clear lastSelectedOrganizationId during SCIM deactivation",
-      userId,
-      organizationId,
-      cause
-    );
-  }
+  await revokeAccessToOrganization({ userId, organizationId });
 }
 
 /**
@@ -517,6 +503,12 @@ export async function createScimUser(
   const lastName = input.name?.familyName ?? null;
   const displayName = [firstName, lastName].filter(Boolean).join(" ") || email;
 
+  // An IdP may provision a user who is already suspended. RFC 7643 §4.1 treats
+  // `active: false` as "unable to log in", so such a user must be created
+  // WITHOUT org membership — otherwise provisioning a disabled account hands it
+  // working access. Absent `active` means active, per the spec's default.
+  const shouldBeActive = input.active !== false;
+
   // Check if user already exists in Shelf DB
   const existingUser = await db.user.findUnique({
     where: { email },
@@ -543,8 +535,15 @@ export async function createScimUser(
     // already a member (covers a user shared via a common SSO domain), then
     // adopt them by creating the mapping (covers an existing SSO/invite member
     // the IdP now manages). We never mutate the global identity here (see #1).
-    if (existingUser.userOrganizations.length === 0) {
+    //
+    // A user provisioned as inactive is adopted WITHOUT being granted access.
+    // An existing member provisioned as inactive keeps their access: POST is
+    // not the deactivation verb, so we report their real state and leave it to
+    // a PATCH/PUT to remove it.
+    let hasMembership = existingUser.userOrganizations.length > 0;
+    if (!hasMembership && shouldBeActive) {
       await grantScimMembership(existingUser.id, organizationId, displayName);
+      hasMembership = true;
     }
     await createScimMapping(existingUser.id, organizationId, externalId, email);
 
@@ -553,7 +552,7 @@ export async function createScimUser(
       select: scimUserSelect(organizationId),
     });
 
-    return userToScimResource(updatedUser, true);
+    return userToScimResource(updatedUser, hasMembership);
   }
 
   // User doesn't exist — create in Shelf DB only.
@@ -579,7 +578,10 @@ export async function createScimUser(
       firstName,
       lastName,
       organizationId,
-      roles: [OrganizationRoles.SELF_SERVICE],
+      // Empty roles make `createUser` skip the UserOrganization association, so
+      // an inactive user lands in exactly the state deactivation produces:
+      // mapping present, no membership, no access.
+      roles: shouldBeActive ? [OrganizationRoles.SELF_SERVICE] : [],
       isSSO: true,
       skipPersonalOrg: true,
     });
@@ -588,18 +590,23 @@ export async function createScimUser(
   }
 
   await createScimMapping(newUser.id, organizationId, externalId, email);
-  await createTeamMember({
-    name: displayName,
-    organizationId,
-    userId: newUser.id,
-  });
+
+  // No team member for an inactive user: a linked TeamMember is what the
+  // notification paths read to decide who receives this org's emails.
+  if (shouldBeActive) {
+    await createTeamMember({
+      name: displayName,
+      organizationId,
+      userId: newUser.id,
+    });
+  }
 
   const createdUser = await db.user.findUniqueOrThrow({
     where: { id: newUser.id },
     select: scimUserSelect(organizationId),
   });
 
-  return userToScimResource(createdUser, true);
+  return userToScimResource(createdUser, shouldBeActive);
 }
 
 // ──────────────────────────────────────────────
@@ -805,13 +812,10 @@ export async function deactivateScimUser(
   // resolves (later GET → 404).
   const user = await findScimResourceOrThrow(organizationId, scimId);
 
-  // Revoke actual access if the user is still a member. This uses the full
-  // `revokeAccessToOrganization` (not the soft `revokeScimMembership`) on
-  // purpose: a full deprovision should behave exactly like an admin revoking
-  // access from the Team settings, which orphans the team member so the org
-  // keeps their booking/custody history without the person staying linked.
+  // Access removal is identical to `active: false` — what makes DELETE a full
+  // deprovision is dropping the mapping below, so the id stops resolving.
   if (user.userOrganizations.length > 0) {
-    await revokeAccessToOrganization({ userId: user.id, organizationId });
+    await revokeScimMembership(user.id, organizationId);
   }
 
   // Remove the SCIM identity. The global User row is intentionally left intact —
