@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isValidImageUrl } from "./misc";
+import { emailMatchesDomains, isValidImageUrl, parseDomains } from "./misc";
 
 /**
  * `isValidImageUrl` is a well-formedness pre-filter for the CSV-import image
@@ -38,5 +38,36 @@ describe("isValidImageUrl", () => {
     expect(isValidImageUrl("")).toBe(false);
     expect(isValidImageUrl("not a url")).toBe(false);
     expect(isValidImageUrl("example.com/image.png")).toBe(false);
+  });
+});
+
+describe("parseDomains", () => {
+  it("splits, trims and lowercases a comma-separated list", () => {
+    expect(parseDomains("Example.com, Foo.IO ,bar.net")).toEqual([
+      "example.com",
+      "foo.io",
+      "bar.net",
+    ]);
+  });
+
+  it("drops empty segments", () => {
+    expect(parseDomains("a.com,, ,b.com")).toEqual(["a.com", "b.com"]);
+  });
+});
+
+describe("emailMatchesDomains", () => {
+  it("matches a domain present in the list (case-insensitive)", () => {
+    expect(emailMatchesDomains("Example.com", "example.com,other.com")).toBe(
+      true
+    );
+  });
+
+  it("returns false when the domain is absent", () => {
+    expect(emailMatchesDomains("attacker.test", "example.com")).toBe(false);
+  });
+
+  it("returns false for empty domain or null list", () => {
+    expect(emailMatchesDomains("", "example.com")).toBe(false);
+    expect(emailMatchesDomains("example.com", null)).toBe(false);
   });
 });

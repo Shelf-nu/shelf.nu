@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 
-import { loader, HEALTHCHECK_DB_TIMEOUT_MS } from "./healthcheck";
-import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
+import { loader, HEALTHCHECK_DB_TIMEOUT_MS } from "~/routes/healthcheck";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // why: isolate the loader from a real Prisma connection -- only
 // `db.user.findFirst` is exercised by the route, so only it needs stubbing.

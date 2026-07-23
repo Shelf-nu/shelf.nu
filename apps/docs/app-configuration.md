@@ -124,6 +124,28 @@ Disables Single Sign-On functionality even if SSO providers are configured.
 disableSSO: true;
 ```
 
+### enableScim
+
+Enables SCIM 2.0 user provisioning, so an identity provider (Microsoft Entra ID,
+Okta) can create, update and deactivate users in a workspace automatically.
+
+Unlike the other flags this one is **opt-in** — SCIM stays off unless you
+explicitly enable it. While disabled, the SCIM API responds `404` and the SCIM
+section in workspace settings is hidden.
+
+Requires SSO to be configured on the workspace: SCIM only provisions users whose
+email domain matches the workspace's verified SSO domain.
+
+> Not currently available on Shelf Cloud. Self-hosted deployments can enable it.
+
+**Default value:** `false`  
+**Environment variable:** `ENABLE_SCIM`
+
+```ts
+// Enable SCIM provisioning
+enableScim: true;
+```
+
 ### logoPath
 
 Defines the paths to your application logos. These are used throughout the application interface.
@@ -174,6 +196,7 @@ ENABLE_PREMIUM_FEATURES=false
 FREE_TRIAL_DAYS=14
 DISABLE_SIGNUP=false
 DISABLE_SSO=false
+ENABLE_SCIM=false
 COLLECT_BUSINESS_INTEL=true
 # SHOW_HOW_DID_YOU_FIND_US=true  # Deprecated, use COLLECT_BUSINESS_INTEL instead
 ```
