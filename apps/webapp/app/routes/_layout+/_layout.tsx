@@ -186,7 +186,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message:
           "You are not part of any organization. Please contact support.",
         status: 403,
-        label: "Organization",
+        label: "Organização",
       });
     }
 
@@ -256,7 +256,7 @@ export const meta: MetaFunction<typeof loader> = ({ error }) => {
     return [{ title: "" }];
   }
 
-  let title = "Something went wrong";
+  let title = "Algo deu errado";
 
   if (isRouteError(error)) {
     title = error.data.error?.title ?? "";
@@ -325,7 +325,7 @@ export default function App() {
           ) : (
             <>
               <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
-                <Link to="." title="Home" className="block h-8">
+                <Link to="." title="Início" className="block h-8">
                   <ShelfMobileLogo />
                 </Link>
                 <div className="flex items-center space-x-2">

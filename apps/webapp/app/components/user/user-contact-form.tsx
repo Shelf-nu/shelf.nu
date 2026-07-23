@@ -49,14 +49,14 @@ export function UserContactDetailsForm({
       </div>
       <Form method="post" ref={zo.ref} className="" replace>
         <FormRow
-          rowLabel="Phone number"
+          rowLabel="Número de telefone"
           className="border-t"
           required={zodFieldIsRequired(
             UserContactDetailsFormSchema.shape.phone
           )}
         >
           <Input
-            label="Phone"
+            label="Telefone"
             type="tel"
             autoComplete="tel"
             hideLabel
@@ -74,7 +74,7 @@ export function UserContactDetailsForm({
         </FormRow>
 
         <FormRow
-          rowLabel="Street address"
+          rowLabel="Endereço"
           required={zodFieldIsRequired(
             UserContactDetailsFormSchema.shape.street
           )}
@@ -98,11 +98,11 @@ export function UserContactDetailsForm({
         </FormRow>
 
         <FormRow
-          rowLabel="City"
+          rowLabel="Cidade"
           required={zodFieldIsRequired(UserContactDetailsFormSchema.shape.city)}
         >
           <Input
-            label="City"
+            label="Cidade"
             type="text"
             hideLabel
             autoComplete="city"
@@ -118,14 +118,14 @@ export function UserContactDetailsForm({
         </FormRow>
 
         <FormRow
-          rowLabel="State/Province and Postal Code"
+          rowLabel="Estado/Província e Código Postal"
           required={zodFieldIsRequired(
             UserContactDetailsFormSchema.shape.stateProvince
           )}
         >
           <div className="flex gap-6">
             <Input
-              label="State/Province"
+              label="Estado/Província"
               hideLabel
               autoComplete="state"
               type="text"
@@ -142,7 +142,7 @@ export function UserContactDetailsForm({
               disabled={isDisabled}
             />
             <Input
-              label="ZIP/Postal Code"
+              label="Código Postal"
               type="text"
               hideLabel
               autoComplete="postal-code"
@@ -162,14 +162,14 @@ export function UserContactDetailsForm({
         </FormRow>
 
         <FormRow
-          rowLabel="Country/Region"
+          rowLabel="País/Região"
           className="border-b-0 pb-0"
           required={zodFieldIsRequired(
             UserContactDetailsFormSchema.shape.countryRegion
           )}
         >
           <Input
-            label="Country/Region"
+            label="País/Região"
             type="text"
             hideLabel
             autoComplete="country"

@@ -88,7 +88,7 @@ export async function resolveUserAction(
             cause,
             message: "Failed to delete team member",
             additionalData: { teamMemberId, userId, organizationId },
-            label: "Team",
+            label: "Equipe",
           });
         });
 
@@ -128,7 +128,7 @@ export async function resolveUserAction(
             cause,
             message: "Organization not found",
             additionalData: { organizationId, targetUserId, userId },
-            label: "Team",
+            label: "Equipe",
           });
         });
 
@@ -180,7 +180,7 @@ export async function resolveUserAction(
             cause,
             message: "Failed to cancel invites",
             additionalData: { userId, organizationId, inviteeEmail },
-            label: "Team",
+            label: "Equipe",
           });
         });
 
@@ -225,7 +225,7 @@ export async function resolveUserAction(
           cause: null,
           message: "Invalid role",
           additionalData: { userFriendlyRole },
-          label: "Team",
+          label: "Equipe",
         });
       }
 
@@ -247,7 +247,7 @@ export async function resolveUserAction(
               cause,
               message: "Failed to invalidate previous invites",
               additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
+              label: "Equipe",
             });
           }),
 
@@ -307,7 +307,7 @@ export async function resolveUserAction(
         throw new ShelfError({
           cause: null,
           message: "You cannot change your own role",
-          label: "Team",
+          label: "Equipe",
         });
       }
 
@@ -320,7 +320,7 @@ export async function resolveUserAction(
         throw new ShelfError({
           cause: null,
           message: "User is not a member of this organization",
-          label: "Team",
+          label: "Equipe",
           shouldBeCaptured: false,
         });
       }
@@ -347,7 +347,7 @@ export async function resolveUserAction(
               cause: null,
               message:
                 "Transfer recipient is not a member of this organization",
-              label: "Team",
+              label: "Equipe",
               additionalData: { transferToUserId, organizationId },
             });
           }
@@ -452,7 +452,7 @@ export async function resolveUserAction(
         cause: null,
         message: "Invalid action",
         additionalData: { intent },
-        label: "Team",
+        label: "Equipe",
       });
     }
   }

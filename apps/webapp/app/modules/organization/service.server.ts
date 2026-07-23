@@ -29,7 +29,7 @@ import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
-const label: ErrorLabel = "Organization";
+const label: ErrorLabel = "Organização";
 
 export async function getOrganizationById<T extends Prisma.OrganizationInclude>(
   id: Organization["id"],
@@ -248,7 +248,7 @@ export async function createOrganization({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating the organization. Please try again or contact support.",
+        "Algo deu errado ao criar a organização. Tente novamente ou contate o suporte.",
       additionalData: { name, userId },
       label,
     });
@@ -389,7 +389,7 @@ export async function updateOrganization({
       cause,
       message: isLikeShelfError(cause)
         ? cause.message
-        : "Something went wrong while updating the organization. Please try again or contact support.",
+        : "Algo deu errado ao atualizar a organização. Tente novamente ou contate o suporte.",
       additionalData: { id, userId, name },
       label,
     });
@@ -450,7 +450,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching user organizations. Please try again or contact support.",
+        "Algo deu errado ao buscar organizações do usuário. Tente novamente ou contate o suporte.",
       additionalData: { userId },
       label,
     });
@@ -484,7 +484,7 @@ export async function getOrganizationAdminsEmails({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching organization admins emails. Please try again or contact support.",
+        "Algo deu errado ao buscar e-mails dos administradores. Tente novamente ou contate o suporte.",
       additionalData: { organizationId },
       label,
     });
@@ -535,7 +535,7 @@ export async function getOrganizationAdminsForNotification({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
+        "Algo deu errado ao buscar administradores para notificação. Tente novamente ou contate o suporte.",
       additionalData: { organizationId },
       label,
     });
@@ -560,7 +560,7 @@ export async function toggleOrganizationSso({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while toggling organization SSO. Please try again or contact support.",
+        "Algo deu errado ao alternar SSO da organização. Tente novamente ou contate o suporte.",
       additionalData: { organizationId, enabledSso },
       label,
     });
@@ -585,7 +585,7 @@ export async function toggleWorkspaceDisabled({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while toggling workspace disabled. Please try again or contact support.",
+        "Algo deu errado ao alternar Área de Trabalho desativada. Tente novamente ou contate o suporte.",
       additionalData: { organizationId, workspaceDisabled },
       label,
     });
@@ -611,7 +611,7 @@ export async function toggleBarcodeEnabled({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while toggling barcode functionality. Please try again or contact support.",
+        "Algo deu errado ao alternar funcionalidade de código de barras. Tente novamente ou contate o suporte.",
       additionalData: { organizationId, barcodesEnabled },
       label,
     });
@@ -637,7 +637,7 @@ export async function toggleAuditEnabled({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while toggling audit functionality. Please try again or contact support.",
+        "Algo deu errado ao alternar funcionalidade de auditoria. Tente novamente ou contate o suporte.",
       additionalData: { organizationId, auditsEnabled },
       label,
     });
@@ -748,7 +748,7 @@ export async function getOrganizationAdmins({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching organization admins.",
+      message: "Algo deu errado ao buscar administradores da organização.",
       label,
     });
   }
@@ -770,7 +770,7 @@ export async function transferOwnership({
     if (currentOrganization.type === OrganizationType.PERSONAL) {
       throw new ShelfError({
         cause: null,
-        message: "Personal workspaces cannot be transferred.",
+        message: "Áreas de trabalho pessoais não podem ser transferidas.",
         label,
       });
     }
@@ -783,7 +783,7 @@ export async function transferOwnership({
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Something went wrong while fetching current user.",
+          message: "Algo deu errado ao buscar o usuário atual.",
           label,
         });
       });
@@ -858,7 +858,7 @@ export async function transferOwnership({
     if (!newOwnerUserOrg) {
       throw new ShelfError({
         cause: null,
-        message: "New owner is not a member of the organization.",
+        message: "O novo proprietário não é membro da organização.",
         label,
       });
     }
@@ -867,7 +867,7 @@ export async function transferOwnership({
     if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
       throw new ShelfError({
         cause: null,
-        message: "New owner is not an admin of the organization.",
+        message: "O novo proprietário não é administrador da organização.",
         label,
       });
     }
@@ -1022,7 +1022,7 @@ export async function transferOwnership({
       const subscriptionStatus = subscriptionTransferError
         ? `Failed - ${subscriptionTransferError.message}`
         : subscriptionTransferred
-        ? "Yes"
+        ? "Sim"
         : "No (not requested)";
 
       sendEmail({
@@ -1063,7 +1063,7 @@ ${
       cause,
       message: isLikeShelfError(cause)
         ? cause.message
-        : "Something went wrong while transferring ownership. Please try again or contact support.",
+        : "Algo deu errado ao transferir propriedade. Tente novamente ou contate o suporte.",
       additionalData: { currentOrganization, newOwnerId },
       label,
     });
@@ -1092,7 +1092,7 @@ export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while resetting personal workspace branding.",
+        "Algo deu errado ao redefinir identidade da Área de Trabalho pessoal.",
       additionalData: { userId },
       label,
     });

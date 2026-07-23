@@ -39,12 +39,12 @@ export function DisplayNameForm({
       </div>
       <Form method="post" ref={zo.ref} replace>
         <FormRow
-          rowLabel="Display name"
+          rowLabel="Nome de exibição"
           className="border-b-0 border-t"
           required={false}
         >
           <Input
-            label="Display name"
+            label="Nome de exibição"
             hideLabel
             type="text"
             name={zo.fields.displayName()}

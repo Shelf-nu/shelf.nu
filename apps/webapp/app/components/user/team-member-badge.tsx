@@ -52,7 +52,7 @@ export function TeamMemberBadge({
                 "/static/images/default_pfp.jpg"
               }
               className="mr-1 size-4 rounded-full"
-              alt={"Team member profile"}
+              alt={"Perfil do membro da equipe"}
             />
           ) : null}
           <span className="mt-px">

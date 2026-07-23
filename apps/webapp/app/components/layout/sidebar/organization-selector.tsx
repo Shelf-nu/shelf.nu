@@ -40,7 +40,7 @@ export default function OrganizationSelector() {
   );
   invariant(
     typeof currentOrganization !== "undefined",
-    "Something went wrong. Current organization is not in the list of organizations."
+    "Algo deu errado. A organização atual não está na lista de organizações."
   );
 
   function handleSwitchOrganization(organizationId: string) {

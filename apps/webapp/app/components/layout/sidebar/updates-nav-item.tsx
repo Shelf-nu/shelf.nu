@@ -12,7 +12,7 @@ export default function UpdatesNavItem() {
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild tooltip="Updates">
+      <SidebarMenuButton asChild tooltip="Atualizações">
         <NavLink
           to="/updates"
           className={tw(

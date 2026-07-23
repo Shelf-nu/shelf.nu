@@ -32,7 +32,7 @@ export const createChangeEmailSchema = (
           }
         )
         .refine((email) => email.toLowerCase() !== currentEmail.toLowerCase(), {
-          message: "New email must be different from your current email",
+          message: "O novo e-mail deve ser diferente do e-mail atual",
         }),
       confirmEmail: z.string(),
     })
@@ -151,8 +151,8 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
             <div>
               <h4 className="font-medium">
                 {formState.isAwaitingOtp
-                  ? "Verify Email Change"
-                  : "Change Email Address"}
+                  ? "Verificar Alteração de E-mail"
+                  : "Alterar Endereço de E-mail"}
               </h4>
               <p className="text-sm text-gray-500">
                 {formState.isAwaitingOtp
@@ -175,7 +175,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                   placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
-                  label="New email address"
+                  label="Novo endereço de e-mail"
                   error={emailZo.errors.email()?.message}
                 />
 
@@ -186,7 +186,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                   placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
-                  label="Confirm new email"
+                  label="Confirmar novo e-mail"
                   error={emailZo.errors.confirmEmail()?.message}
                 />
 
@@ -220,7 +220,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                     name="intent"
                     value="initiateEmailChange"
                   >
-                    {disabled ? "Updating..." : "Update email"}
+                    {disabled ? "Atualizando..." : "Atualizar e-mail"}
                   </Button>
                 </div>
               </div>
@@ -242,7 +242,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                   placeholder="Enter 6-digit code"
                   disabled={disabled}
                   className="w-full"
-                  label="Verification code"
+                  label="Código de verificação"
                   maxLength={6}
                   defaultValue=""
                   error={
@@ -311,7 +311,7 @@ function ResendCodeForm({
           });
         }}
       >
-        {localDisabled ? "Sending code..." : "Resend code"}
+        {localDisabled ? "Enviando código..." : "Reenviar código"}
       </Button>
     </div>
   ) : null;

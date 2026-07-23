@@ -50,8 +50,8 @@ export const shouldRevalidate = () => false;
 
 export default function AccountDetailsPage() {
   const items = [
-    { to: "general", content: "General" },
-    { to: "workspace", content: "Workspaces" },
+    { to: "general", content: "Geral" },
+    { to: "workspace", content: "Áreas de Trabalho" },
     { to: "calendars", content: "Calendars" },
   ];
 
@@ -60,7 +60,7 @@ export default function AccountDetailsPage() {
   )?.enablePremium;
 
   if (enablePremium) {
-    items.push({ to: "subscription", content: "Subscription" });
+    items.push({ to: "subscription", content: "Assinatura" });
   }
 
   return (

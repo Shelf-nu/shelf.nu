@@ -76,7 +76,7 @@ export function UserDetailsForm({
         >
           <div className="flex gap-6">
             <Input
-              label="First name"
+              label="Nome"
               autoComplete="given-name"
               type="text"
               name={zo.fields.firstName()}
@@ -88,7 +88,7 @@ export function UserDetailsForm({
               disabled={isDisabled}
             />
             <Input
-              label="Last name"
+              label="Sobrenome"
               autoComplete="family-name"
               type="text"
               name={zo.fields.lastName()}
@@ -102,7 +102,7 @@ export function UserDetailsForm({
           </div>
         </FormRow>
         <FormRow
-          rowLabel="Email address"
+          rowLabel="Endereço de e-mail"
           className="relative"
           required={zodFieldIsRequired(
             UserDetailsFormSchema.shape.email._def.schema
@@ -152,7 +152,7 @@ export function UserDetailsForm({
           />
         </FormRow>
         <FormRow
-          rowLabel="Profile picture"
+          rowLabel="Foto de perfil"
           // subHeading="This will be displayed on your profile."
           className="border-b-0"
         >

@@ -88,12 +88,12 @@ function NavItemRenderer({
 
     case "button": {
       // Special handling for Updates button
-      if (navItem.title === "Updates") {
+      if (navItem.title === "Atualizações") {
         return <UpdatesNavItem />;
       }
 
       // Special handling for Feedback button
-      if (navItem.title === "Questions/Feedback") {
+      if (navItem.title === "Dúvidas/Feedback") {
         return <FeedbackNavItem />;
       }
 

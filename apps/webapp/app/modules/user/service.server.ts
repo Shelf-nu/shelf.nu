@@ -872,7 +872,7 @@ export async function updateUser<T extends Prisma.UserInclude>(
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while updating your profile. Please try again or contact support.",
+        "Algo deu errado ao atualizar seu perfil. Tente novamente ou contate o suporte.",
       additionalData: { ...cleanClone, validationErrors },
       label,
       shouldBeCaptured: !isUniqueViolation,
@@ -908,7 +908,7 @@ export async function updateUserEmail({
       throw new ShelfError({
         cause: error,
         message:
-          "Failed to update email in auth. Please try again and if the issue persists, contact support",
+          "Falha ao atualizar e-mail na autenticação. Tente novamente e, se o problema persistir, contate o suporte",
         additionalData: { userId, newEmail, currentEmail },
         label,
       });
@@ -929,7 +929,7 @@ export async function updateUserEmail({
         // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
         throw new ShelfError({
           cause,
-          message: "Failed to update email in shelf",
+          message: "Falha ao atualizar e-mail no Atlas",
           additionalData: { userId, newEmail, currentEmail },
           label,
         });
@@ -1113,7 +1113,7 @@ export async function updateProfilePicture({
       cause,
       message: isLikeShelfError(cause)
         ? cause.message
-        : "Something went wrong while updating your profile picture. Please try again or contact support.",
+        : "Algo deu errado ao atualizar sua foto de perfil. Tente novamente ou contate o suporte.",
       additionalData: { userId, field: "profile-picture" },
       label,
     });
@@ -1408,7 +1408,7 @@ export async function changeUserRole({
       throw new ShelfError({
         cause: null,
         message:
-          "Cannot assign Owner role directly. Use ownership transfer instead.",
+          "Não é possível atribuir o papel de proprietário diretamente. Use a transferência de propriedade.",
         label,
         shouldBeCaptured: false,
       });
@@ -1451,7 +1451,7 @@ export async function changeUserRole({
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",
-        message: "Only the workspace owner can promote users to Administrator.",
+        message: "Apenas o proprietário da Área de Trabalho pode promover usuários a Administrador.",
         label,
         status: 403,
         shouldBeCaptured: false,
@@ -1466,7 +1466,7 @@ export async function changeUserRole({
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",
-        message: "Only the workspace owner can change an Administrator's role.",
+        message: "Apenas o proprietário da Área de Trabalho pode alterar o papel de um Administrador.",
         label,
         status: 403,
         shouldBeCaptured: false,

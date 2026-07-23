@@ -56,8 +56,8 @@ export default function Me() {
   });
 
   const TABS: Item[] = [
-    { to: "assets", content: "Assets" },
-    { to: "bookings", content: "Bookings" },
+    { to: "assets", content: "Equipamentos" },
+    { to: "bookings", content: "Reservas" },
     ...(canReadNotes ? [{ to: "notes", content: "Notes" }] : []),
   ];
 
