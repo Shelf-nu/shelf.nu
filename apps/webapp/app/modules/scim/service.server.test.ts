@@ -455,8 +455,15 @@ describe("createScimUser", () => {
     );
     // No team member either — that link is what notification paths read.
     expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
-    // The mapping is still created, so the IdP can address and later enable them.
-    expect(mockDb.db.userScimExternalId.create).toHaveBeenCalled();
+    // The mapping is still persisted, so the IdP can address and later enable
+    // them; assert the args so a regression that skips it can't slip through.
+    expect(mockDb.db.userScimExternalId.create).toHaveBeenCalledWith({
+      data: {
+        userId: "new-user-id",
+        organizationId: ORG_ID,
+        scimExternalId: SCIM_ID,
+      },
+    });
     expect(result.active).toBe(false);
   });
 
@@ -480,6 +487,14 @@ describe("createScimUser", () => {
 
     expect(mockDb.db.userOrganization.create).not.toHaveBeenCalled();
     expect(mockTeamMemberService.createTeamMember).not.toHaveBeenCalled();
+    // The mapping must still be persisted, so this user is now SCIM-managed.
+    expect(mockDb.db.userScimExternalId.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-abc",
+        organizationId: ORG_ID,
+        scimExternalId: SCIM_ID,
+      },
+    });
     expect(result.active).toBe(false);
   });
 
@@ -509,6 +524,15 @@ describe("createScimUser", () => {
     expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "user-abc",
       organizationId: ORG_ID,
+    });
+    // Access is revoked, but the mapping must still be persisted so SCIM now
+    // manages this user (and can later reactivate them).
+    expect(mockDb.db.userScimExternalId.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-abc",
+        organizationId: ORG_ID,
+        scimExternalId: SCIM_ID,
+      },
     });
     expect(result.active).toBe(false);
   });
