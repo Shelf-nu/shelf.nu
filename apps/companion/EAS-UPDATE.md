@@ -14,15 +14,19 @@ of an already-installed build.
 | Bug fixes in `app/`, `components/`, `lib/` | App version bump (new `runtimeVersion`)      |
 
 If in doubt: touched only files under `apps/companion/{app,components,lib,...}`
-→ OTA. Touched `ios/`, `android/`, `app.json` native keys, or added a dep → build.
+→ OTA. Touched `ios/`, `android/`, `app.json` native keys, or added a **native**
+dependency (one with an iOS/Android module) → build. A pure-JS dependency can
+ride an OTA bundle.
 
 ## Runtime version = app version
 
 `app.json` sets `runtimeVersion: { policy: "appVersion" }`. An OTA update only
 reaches builds whose **app version matches**. So an update published while the
-app is `1.2.0` reaches every `1.2.0` build, and is ignored by a future `1.3.0`
-build until you publish an update for `1.3.0`. This is the safety net: JS that
-assumes new native code can never land on a build that lacks it.
+app is `1.2.0` reaches every **OTA-capable** `1.2.0` build (one built with
+`expo-updates` — the pre-`expo-updates` 1.2.0 binaries currently live can't
+check for updates at all), and is ignored by a future `1.3.0` build until you
+publish an update for `1.3.0`. This is the safety net: JS that assumes new
+native code can never land on a build that lacks it.
 
 > **iOS version now lives in FOUR spots** — bump all together on a release:
 > `app.json` `version`, `ios/Shelf/Info.plist` `CFBundleShortVersionString`,
@@ -41,15 +45,29 @@ assumes new native code can never land on a build that lacks it.
 | `preview`     | `preview`     | internal-distribution builds  |
 | `development` | `development` | dev-client builds             |
 
-A build listens on its channel; `eas update --channel <name>` publishes to it.
+A production/preview build listens on its own channel; `eas update --channel
+<name>` publishes to it. Dev-client builds (`developmentClient: true`) are the
+exception — they can load a compatible update from **any** channel via the
+dev-client Extensions UI, so the `development` row is the default, not a hard
+scope.
 
 ## Publishing an update
 
 ```bash
 cd apps/companion
 # JS-only fix already merged to main and checked out:
-eas update --channel production --message "fix: <what changed> (#PR)"
+eas update --channel production --environment production \
+  --message "fix: <what changed> (#PR)"
 ```
+
+> **⚠️ Always pass `--environment production` (or otherwise set the production
+> `EXPO_PUBLIC_API_URL`).** `eas update` re-bundles the JS and inlines
+> `EXPO_PUBLIC_*` at publish time. Publishing from a dev checkout without the
+> production environment would bake the local fallback
+> (`http://localhost:3000`) into the bundle and ship it to live users, breaking
+> every API call. The env vars must match what the production **build** used —
+> configure them as EAS environment variables (or export them in CI) before
+> publishing.
 
 Users get it on the **next app launch**: the running app launches instantly from
 its cached bundle (`fallbackToCacheTimeout: 0`) and downloads the new bundle in
@@ -83,19 +101,26 @@ key**.
 - Public certificate: `certs/certificate.pem` — committed, embedded in the app.
 - Private key: `keys/private-key.pem` — **gitignored, never committed.**
 
-Publish signs with the private key:
+Publish signs with the private key (kept as a temporary untracked local copy or
+injected by CI — see custody below):
 
 ```bash
-eas update --channel production --message "fix: … (#PR)" \
-  --private-key-path ./keys/private-key.pem
+eas update --channel production --environment production \
+  --message "fix: … (#PR)" --private-key-path ./keys/private-key.pem
 ```
 
 ### 🔑 Key custody — do this before the first production OTA build
 
-The whole point is that an **EAS-account compromise can't sign updates**. So:
+Only the **public certificate** (`certs/certificate.pem`) is committed and
+embedded in the app. The **private key is never committed** — the `keys/`
+directory is gitignored, and any local copy used to sign must stay untracked (or
+be a CI-injected file). The whole point is that an **EAS-account compromise
+can't sign updates**, so the private key must live outside EAS. Steps:
 
-1. **Regenerate the key pair yourself** — the committed cert/key were generated
-   in an automated session and must not be trusted for production:
+1. **Regenerate the key pair yourself** — the pair currently referenced here was
+   generated in an automated session, so its private key must be treated as
+   exposed and replaced before production. Rotate (new pair + new build) any
+   time a private key is exposed or was ever tracked in git:
    ```bash
    cd apps/companion
    npx expo-updates codesigning:generate \
