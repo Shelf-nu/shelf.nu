@@ -324,12 +324,22 @@ function ScannerContent() {
     outstandingModelUnitCount: number;
   } | null>(null);
 
+  // Monotonic token so a slow in-flight `api.booking` response for a booking
+  // the operator has since navigated away from can't overwrite the current
+  // booking's context. Bumped on every fetch; the response only lands if its
+  // token is still the latest.
+  const bookingCtxRequestRef = useRef(0);
+
   // Also called from the scan paths when a code arrives before the first
   // fetch lands (or after it failed) — a scan-while-loading retries it.
   const fetchBookingCtx = useCallback(() => {
     if (!isBookingMode || !bookingId || !currentOrg) return;
+    const requestId = ++bookingCtxRequestRef.current;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
       if (!data) return;
+      // A newer fetch (or a context reset, which also bumps the token) started
+      // while this was in flight — drop this stale response.
+      if (requestId !== bookingCtxRequestRef.current) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
@@ -451,6 +461,20 @@ function ScannerContent() {
     setScanResult(null);
     lastScanRef.current = "";
   }, [bookingId, bookingAction, setScanResult, lastScanRef]);
+
+  /**
+   * Drop the previous booking's `bookingCtx` the instant the booking changes.
+   * Keyed on `bookingId` alone (not `bookingAction` — an add→fulfil switch on
+   * the SAME booking keeps the same membership + reservations, and the fetch
+   * effect won't refetch it). Without this, the window between navigation and
+   * the new `api.booking` response resolving would let a scan match against the
+   * old booking's reservations. The in-flight guard in `fetchBookingCtx` (via
+   * `bookingCtxRequestRef`) separately drops a stale response for the old
+   * booking; the fetch effect refetches for the new one.
+   */
+  useEffect(() => {
+    setBookingCtx(null);
+  }, [bookingId]);
 
   // Animation for scan line (shared hook)
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
@@ -1721,14 +1745,21 @@ function ScannerContent() {
   );
 
   /**
-   * Scanned items that don't fulfil any reservation. They still ride along on
-   * submit (the service adds them to the booking and checks them out, same as
-   * web), so the CTA names them separately rather than folding them into the
-   * assigned total.
+   * Scanned ASSETS that don't fulfil any reservation. They ride along on submit
+   * (the service adds them to the booking and checks them out, same as web), so
+   * the CTA names them separately rather than folding them into the assigned
+   * total.
+   *
+   * Counted from asset rows only. A scanned KIT is forwarded via `kitIds` and
+   * `fulfilModelRequestsAndCheckout` merely flips its status to CHECKED_OUT — it
+   * does NOT add the kit's members as booking assets — so a kit contributes no
+   * "added" unit and must not inflate this count. `matched` is always assets, so
+   * subtracting it from the asset-row count never goes negative.
    */
   const fulfilExtras = Math.max(
     0,
-    bookingCheckinItems.length - fulfilMatch.matched
+    bookingCheckinItems.filter((i) => i.type === "asset").length -
+      fulfilMatch.matched
   );
 
   const handleBookingCheckin = () => {

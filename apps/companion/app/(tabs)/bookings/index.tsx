@@ -294,7 +294,11 @@ function BookingsListContent() {
           activeOpacity={0.6}
           accessibilityLabel={`Booking: ${item.name}, ${formatStatus(
             item.status
-          )}, ${item.assetCount} assets`}
+          )}, ${item.assetCount} assets${
+            (item.outstandingModelUnitCount ?? 0) > 0
+              ? `, ${item.outstandingModelUnitCount} reserved`
+              : ""
+          }`}
           accessibilityRole="button"
         >
           <View style={styles.bookingHeader}>
