@@ -185,6 +185,8 @@ export const loader = async ({
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
+          // Anchor trend-chart axis labels in the acting user's timezone (D2).
+          timeZone: prefs.timeZone,
           page: 1,
           pageSize: 10000, // PDF can handle large tables
         });

@@ -157,6 +157,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await bookingComplianceReport({
         organizationId,
         timeframe,
+        // Anchor trend-chart axis labels in the acting user's timezone (D2).
+        timeZone: formatPrefs.timeZone,
         page: parseInt(url.searchParams.get("page") || "1", 10),
         pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
         sortBy,
