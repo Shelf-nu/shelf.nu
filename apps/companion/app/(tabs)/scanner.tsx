@@ -1720,6 +1720,17 @@ function ScannerContent() {
     [bookingCheckinItems, bookingCtx]
   );
 
+  /**
+   * Scanned items that don't fulfil any reservation. They still ride along on
+   * submit (the service adds them to the booking and checks them out, same as
+   * web), so the CTA names them separately rather than folding them into the
+   * assigned total.
+   */
+  const fulfilExtras = Math.max(
+    0,
+    bookingCheckinItems.length - fulfilMatch.matched
+  );
+
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
@@ -2210,13 +2221,18 @@ function ScannerContent() {
               submitLabel={
                 isBookingFulfilMode
                   ? fulfilMatch.isComplete
-                    ? // Count every scanned item, not just the matched ones:
-                      // the submit sends the whole list and the service adds
-                      // unmatched assets directly and checks them out too, so
-                      // labelling only `matched` would understate the action.
-                      `Assign & check out ${bookingCheckinItems.length} unit${
-                        bookingCheckinItems.length === 1 ? "" : "s"
-                      }`
+                    ? // Name the two halves separately. The submit sends the
+                      // WHOLE list: matched units fulfil the reservation, and
+                      // anything else is added to the booking and checked out
+                      // alongside (deliberate, mirrors web). A single total
+                      // hid that, so "check out 3 units" could appear against
+                      // a 2-unit reservation with no hint that the third was
+                      // never reserved.
+                      fulfilExtras > 0
+                      ? `Assign ${fulfilMatch.required} · add ${fulfilExtras} · check out`
+                      : `Assign & check out ${fulfilMatch.required} unit${
+                          fulfilMatch.required === 1 ? "" : "s"
+                        }`
                     : `${
                         fulfilMatch.required - fulfilMatch.matched
                       } more to assign`
