@@ -206,7 +206,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         userId,
         page: 1,
-        perPage: 1000,
+        // `perPage` clamps to 20; `takeCap` is the bounded escape hatch so
+        // the custodian merge sees every ONGOING/OVERDUE booking, not the
+        // first page of them.
+        takeCap: 1000,
         statuses: ["ONGOING", "OVERDUE"],
         includeAssets: false,
         extraInclude: {

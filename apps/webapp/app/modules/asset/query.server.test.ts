@@ -1110,12 +1110,29 @@ describe("buildAdvancedAssetsQuery", () => {
     expect(sql).toContain('ORDER BY saq."__sortRank"');
   });
 
-  it("keeps the slim cheap phase to id + light sort keys (no heavy projection)", () => {
-    const sql = getQuerySqlString(build());
+  it("gates direct sort-key columns in the cheap phase on the active sort", () => {
+    // The heavy lateral also emits `assetValue`/`assetQuantity` aliases, so a
+    // full-SQL assertion can't catch a cheap-phase regression — slice the
+    // CHEAP phase (everything before `sorted_asset_query`) like the name-sort
+    // test below.
+    const cheap = (overrides?: Parameters<typeof build>[0]) => {
+      const sql = getQuerySqlString(build(overrides));
+      return sql.slice(0, sql.indexOf("sorted_asset_query"));
+    };
 
-    // Base sort keys are always selected directly off the scan.
-    expect(sql).toContain('a.value AS "assetValue"');
-    expect(sql).toContain('a.quantity AS "assetQuantity"');
+    // Default sort materializes only its own keys — value/quantity stay out.
+    const def = cheap({ sortBy: [] });
+    expect(def).toContain('a."createdAt" AS "assetCreatedAt"');
+    expect(def).not.toContain('a.value AS "assetValue"');
+    expect(def).not.toContain('a.quantity AS "assetQuantity"');
+
+    // An active sort pulls exactly its key back into the slim SELECT.
+    expect(cheap({ sortBy: ["valuation:asc"] })).toContain(
+      'a.value AS "assetValue"'
+    );
+    expect(cheap({ sortBy: ["quantity:asc"] })).toContain(
+      'a.quantity AS "assetQuantity"'
+    );
   });
 
   it("gates a name-sort column in the cheap phase on the active sort", () => {

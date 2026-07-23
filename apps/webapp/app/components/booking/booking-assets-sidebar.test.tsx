@@ -17,11 +17,11 @@
  *    model reservations is still openable (Book-by-Model), while a
  *    booking with nothing to show keeps an inert trigger.
  *
- * @see {@link file://./../../../app/components/booking/booking-assets-sidebar.tsx}
- * @see {@link file://./../../../app/routes/api+/bookings.$bookingId.assets-sidebar.ts}
+ * @see {@link file://./booking-assets-sidebar.tsx}
+ * @see {@link file://./../../routes/api+/bookings.$bookingId.assets-sidebar.ts}
  */
 
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,8 +86,9 @@ let fetcherStub: FetcherStub = createFetcherStub();
 // swapped for a plain anchor for the same reason (the "Scan to assign"
 // link and the asset-title `Button to=` both need a router at runtime).
 vi.mock("react-router", async () => {
-  const actual =
-    await vi.importActual<typeof import("react-router")>("react-router");
+  // Typed as a plain record: the module type can't be named here without a
+  // namespace import of react-router, which trips no-restricted-imports.
+  const actual = await vi.importActual<Record<string, unknown>>("react-router");
 
   return {
     ...actual,
