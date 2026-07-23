@@ -770,30 +770,50 @@ async function computeComplianceTrend(
 
 /**
  * Format day as "Mon 21" style label.
+ *
+ * Both the weekday name and the day number are resolved in UTC so every chart
+ * axis tick derives from the same zone as the UTC-based month labels — the
+ * absolute bucket instant otherwise splits across the server-local day boundary
+ * (a "Sun 9" mismatch near midnight). The weekday NAME stays English by design.
  */
 function formatDayLabel(date: Date): string {
   // why: kept ISO/English on purpose — chart-axis labels stay in English so
   // the report visuals read consistently regardless of the viewer's locale
-  // or date-format preference; not user-facing prose.
-  const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
-  const dayNum = date.getDate();
+  // or date-format preference; not user-facing prose. Resolved in UTC to match
+  // the month-label path and keep name + number in one zone.
+  const dayName = date.toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone: "UTC",
+  });
+  const dayNum = date.getUTCDate();
   return `${dayName} ${dayNum}`;
 }
 
 /**
  * Format week range as "Mar 3-9" style label.
+ *
+ * Month names and day numbers are resolved in UTC so every chart axis tick
+ * derives from the same zone as the UTC-based month labels; the month NAMES
+ * stay English by design.
  */
 function formatWeekLabel(start: Date, end: Date): string {
   // why: kept ISO/English on purpose — chart-axis month labels stay in
   // English for consistent report visuals; not affected by the user's
-  // display date-format preference.
-  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
+  // display date-format preference. Resolved in UTC to match the month-label
+  // path and keep names + numbers in one zone.
+  const startMonth = start.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+  const startDay = start.getUTCDate();
+  const endDay = end.getUTCDate();
 
   // If same month, show "Mar 3-9"
   // If different months, show "Mar 28-Apr 3"
-  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  const endMonth = end.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
   if (startMonth === endMonth) {
     return `${startMonth} ${startDay}-${endDay}`;
   }
