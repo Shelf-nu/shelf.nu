@@ -270,7 +270,7 @@ export default function LocationKits() {
                       deletedAt: null,
                     }}
                     label="Filter by custodian"
-                    placeholder="Search team members"
+                    placeholder="Pesquisar membros da equipe"
                     initialDataKey="teamMembers"
                     countKey="totalTeamMembers"
                     renderItem={(item) => resolveTeamMemberName(item, true)}

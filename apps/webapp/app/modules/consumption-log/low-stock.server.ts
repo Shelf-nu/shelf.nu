@@ -7,7 +7,7 @@
  * and an email alert is sent to the organization owner so they can take
  * corrective action (e.g., restock).
  *
- * "Available" is computed as total quantity minus units currently in custody.
+ * "Disponível" is computed as total quantity minus units currently in custody.
  *
  * @see {@link file://./service.server.ts} - adjustQuantity that triggers this check
  * @see {@link file://../../utils/emitter/send-notification.server.ts} - notification emitter

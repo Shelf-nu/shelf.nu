@@ -8,7 +8,7 @@
  *
  * The set of asset IDs submitted is the selected ASSETS (kits are excluded —
  * they only provide grouping) that are part of the booking and NOT already
- * checked out. "Already checked out" means the asset id is in the loader's
+ * checked out. "Já emprestado" means the asset id is in the loader's
  * `checkedOutAssetIds` (per-booking partial-checkout records) OR the asset's
  * own `status === CHECKED_OUT`.
  *
@@ -103,7 +103,7 @@ export const BulkPartialCheckoutSchema = z.object({
 /**
  * Per-row qty picker for a single QUANTITY_TRACKED slice. Mirrors the
  * partial-check-IN drawer's `QuantityDispositionBlock` layout but collapses
- * to a single "Checked out" input — checkout has no Lost/Damaged/Consumed
+ * to a single "Emprestado" input — checkout has no Lost/Damaged/Consumed
  * split, just "how many units leave the pool now". The input clamps to
  * `[1..max]` via DOM attrs; the parent component additionally clamps the
  * serialized payload defensively.

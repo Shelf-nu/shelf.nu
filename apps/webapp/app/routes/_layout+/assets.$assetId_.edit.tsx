@@ -243,7 +243,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id,
       title,
       description,
-      categoryId: category ? category : "uncategorized",
+      categoryId: category ? category : "sem categoria",
       assetModelId: assetModelId || null,
       tags,
       newLocationId,

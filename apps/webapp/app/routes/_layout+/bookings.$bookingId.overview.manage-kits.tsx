@@ -276,7 +276,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         title: `Manage kits for '${booking?.name}'`,
         subHeading: "Fill up the booking with the kits of your choice",
       },
-      searchFieldLabel: "Search kits",
+      searchFieldLabel: "Pesquisar kits",
       searchFieldTooltip: {
         title: "Search your kit database",
         text: "Search kits based on name or description",

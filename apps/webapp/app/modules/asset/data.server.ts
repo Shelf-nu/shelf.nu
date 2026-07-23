@@ -383,7 +383,7 @@ export async function simpleModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && canImport,
-      searchFieldLabel: "Search assets",
+      searchFieldLabel: "Pesquisar equipamentos",
       searchFieldTooltip: {
         title: "Search your asset database",
         text: parseMarkdownToReact(searchFieldTooltipText),
@@ -669,7 +669,7 @@ export async function advancedModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && advCanImport,
-      searchFieldLabel: "Search assets",
+      searchFieldLabel: "Pesquisar equipamentos",
       searchFieldTooltip: {
         title: "Search your asset database",
         text: parseMarkdownToReact(searchFieldTooltipText),

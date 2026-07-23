@@ -989,7 +989,7 @@ export async function getAssets(params: {
      * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
      * is a slice, not whole-asset exclusion — the free pool stays bookable
      * as a standalone slice. Picker's availability math subtracts the
-     * kit-committed sum downstream so the displayed "Available" count is
+     * kit-committed sum downstream so the displayed "Disponível" count is
      * already correct.
      */
     if (hideUnavailable === true) {
@@ -1992,7 +1992,7 @@ export async function bulkCreateAssetsFromModel({
 
 /**
  * Resolves the `AssetLocation.quantity` to write when the asset-overview
- * "Update location" dialog rewrites the asset's single primary placement.
+ * "Atualizar local" dialog rewrites the asset's single primary placement.
  *
  * QUANTITY_TRACKED honours the submitted dialog value (already validated
  * against `Asset.quantity` upstream). When the dialog omitted the input
@@ -2037,7 +2037,7 @@ export async function updateAsset({
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
-     * The asset-overview "Update location" dialog surfaces a per-asset
+     * The asset-overview "Atualizar local" dialog surfaces a per-asset
      * qty input for QUANTITY_TRACKED rows. Setting a new qty (with or
      * without changing the target location) is also a placement edit
      * — both branches share the kit-guard and the pivot rewrite.

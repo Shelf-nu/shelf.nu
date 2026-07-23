@@ -216,7 +216,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
      * every qty-tracked asset currently visible on this page. Feeds
      * the `BookingAssetsSidebar` so it can render the same qty
-     * progress indicator and "Partially checked in" badge the
+     * progress indicator and "Parcialmente devolvido" badge the
      * overview page uses.
      *
      * Strategy: one aggregate query scoped to the bookingIds on this

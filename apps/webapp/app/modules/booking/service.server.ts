@@ -134,7 +134,7 @@ import { createNotes } from "../note/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getUserByID } from "../user/service.server";
 
-const label: ErrorLabel = "Reserva";
+const label: ErrorLabel = "Booking";
 
 /**
  * Sends a booking email to all resolved notification recipients.
@@ -2899,7 +2899,7 @@ export async function fulfilModelRequestsAndCheckout({
  * - CONSUME: unit used as intended (ONE_WAY; pool decrement)
  * - LOSS / DAMAGE: unit gone (pool decrement, distinct for reporting)
  *
- * "Pending" units are *absence* of logs — tracked implicitly via
+ * "Pendente" units are *absence* of logs — tracked implicitly via
  * `remaining = BookingAsset.quantity − Σ(these categories)`.
  */
 const CHECKIN_DISPOSITION_CATEGORIES = [

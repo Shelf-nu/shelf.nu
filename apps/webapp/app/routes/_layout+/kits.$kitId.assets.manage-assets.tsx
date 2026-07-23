@@ -196,7 +196,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         title: `Add assets for ${kit.name}`,
         subHeading: "Fill up the kit with the assets of your choice.",
       },
-      searchFieldLabel: "Search assets",
+      searchFieldLabel: "Pesquisar equipamentos",
       searchFieldTooltip: {
         title: "Search your asset database",
         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",

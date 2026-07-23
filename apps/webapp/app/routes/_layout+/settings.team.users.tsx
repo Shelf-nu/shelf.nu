@@ -88,7 +88,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       organization,
       searchFieldLabel: "Pesquisar por nome ou e-mail",
       searchFieldTooltip: {
-        title: "Search team members",
+        title: "Pesquisar membros da equipe",
         text: "Search team members by first name, last name, or email address.",
       },
     };

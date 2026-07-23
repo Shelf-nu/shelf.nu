@@ -2867,7 +2867,7 @@ async function computeDistributionByStatus(
   const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
 
   const statusLabels: Record<string, string> = {
-    AVAILABLE: "Available",
+    AVAILABLE: "Disponível",
     IN_CUSTODY: "In Custody",
     CHECKED_OUT: "Checked Out",
   };
@@ -3206,7 +3206,7 @@ async function computeInventoryKpis(
     },
     {
       id: "available_count",
-      label: "Available",
+      label: "Disponível",
       value: availableCount.toLocaleString(),
       rawValue: availableCount,
       format: "number",
@@ -4016,8 +4016,8 @@ function buildActivityDescription(event: {
     ASSET_CUSTOM_FIELD_CHANGED: "Custom field updated",
     CUSTODY_ASSIGNED: "Custody assigned",
     CUSTODY_RELEASED: "Custody released",
-    BOOKING_CHECKED_OUT: "Checked out",
-    BOOKING_CHECKED_IN: "Checked in",
+    BOOKING_CHECKED_OUT: "Emprestado",
+    BOOKING_CHECKED_IN: "Devolvido",
   };
 
   const label =

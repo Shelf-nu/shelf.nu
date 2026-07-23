@@ -363,7 +363,7 @@ export default function ListAssetContent({
                are progressively checked OUT with nothing back yet.
                Shows `checkedOut / booked` in amber-700 (matches the
                new `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge)
-               with a simpler "Partially checked out" tooltip.
+               with a simpler "Parcialmente emprestado" tooltip.
             3. Otherwise — plain booked count, no progress display. */}
       <Td className={tw("text-center", isKitAsset ? "bg-gray-50/50" : "")}>
         {isQuantityTracked(item) && qtyBooked > 0 ? (
@@ -386,7 +386,7 @@ export default function ListAssetContent({
                     <div className="font-semibold text-gray-900">
                       {qtyRemaining === 0
                         ? "All units checked in"
-                        : "Partially checked in"}
+                        : "Parcialmente devolvido"}
                     </div>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-gray-600">Booked</span>
@@ -460,7 +460,7 @@ export default function ListAssetContent({
             // when ALL booked units are out (25/25), the asset status is
             // already CHECKED_OUT and the row falls through to the plain
             // booked-total display below — paired with the violet
-            // "Checked out" status badge above.
+            // "Emprestado" status badge above.
             <TooltipProvider delayDuration={150}>
               <Tooltip>
                 <TooltipTrigger asChild>

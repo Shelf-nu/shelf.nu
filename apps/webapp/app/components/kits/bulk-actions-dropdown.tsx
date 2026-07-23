@@ -218,7 +218,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="release-custody"
-                  label="Release custody"
+                  label="Liberar guarda"
                   onClick={closeMenu}
                   disabled={
                     !allKitsInCustody || disableReleaseCustody
@@ -234,7 +234,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={isSelfService ? "Take custody" : "Atribuir guarda"}
                   onClick={closeMenu}
                   disabled={
                     !allKitsAvailable ||

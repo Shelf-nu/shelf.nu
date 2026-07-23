@@ -979,7 +979,7 @@ function CustodyEnumField({
     label: "Filter by custodian",
     hideLabel: true,
     hideCounter: true,
-    placeholder: "Search team members",
+    placeholder: "Pesquisar membros da equipe",
     withValueItem: {
       id: "in-custody",
       name: "Em guarda",
@@ -1099,7 +1099,7 @@ function CategoryEnumField({
     },
     transformItem: (item: any) => ({
       ...item,
-      id: item.id === "uncategorized" ? "uncategorized" : item.id,
+      id: item.id === "uncategorized" ? "sem categoria" : item.id,
     }),
     renderItem: (item: any) => (
       <div className="flex items-center gap-2">
@@ -1344,7 +1344,7 @@ function LocationEnumField({
     label: "Filter by location",
     hideLabel: true,
     hideCounter: true,
-    placeholder: "Search locations",
+    placeholder: "Pesquisar locais",
     withValueItem: {
       id: "in-location",
       name: "In a location",
@@ -1473,7 +1473,7 @@ function KitEnumField({
     label: "Filter by kit",
     hideLabel: true,
     hideCounter: true,
-    placeholder: "Search kits",
+    placeholder: "Pesquisar kits",
     withValueItem: {
       id: "in-kit",
       name: "In a kit",
@@ -1600,7 +1600,7 @@ function UpcomingBookingsEnumField({
     label: "Filter by booking",
     hideLabel: true,
     hideCounter: true,
-    placeholder: "Search bookings",
+    placeholder: "Pesquisar reservas",
     withValueItem: {
       id: "has-booking",
       name: "Has upcoming bookings",

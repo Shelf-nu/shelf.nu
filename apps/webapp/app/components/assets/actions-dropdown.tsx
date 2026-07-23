@@ -281,7 +281,7 @@ const ConditionalActionsDropdown = () => {
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="location" />{" "}
-                      {isQtyTracked ? "Gerenciar posicionamentos" : "Update location"}
+                      {isQtyTracked ? "Gerenciar posicionamentos" : "Atualizar local"}
                     </span>
                   </Button>
                 </div>

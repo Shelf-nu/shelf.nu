@@ -679,7 +679,7 @@ export function CommandPalette() {
               {errorMessage || "Something went wrong"}
             </span>
           ) : (
-            "No results found"
+            "Nenhum resultado encontrado"
           )}
         </CommandEmpty>
 
@@ -875,7 +875,7 @@ export function CommandPalette() {
         ) : null}
 
         {actionResults.length > 0 ? (
-          <CommandGroup heading="Quick actions">
+          <CommandGroup heading="Ações rápidas">
             {actionResults.map((command) => (
               <CommandItem
                 key={command.id}

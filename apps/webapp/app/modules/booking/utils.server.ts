@@ -5,7 +5,7 @@ import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
-const label: ErrorLabel = "Reserva";
+const label: ErrorLabel = "Booking";
 
 export function getBookingWhereInput({
   organizationId,

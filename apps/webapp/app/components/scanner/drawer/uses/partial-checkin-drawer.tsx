@@ -1780,7 +1780,7 @@ function ReconciledQtySummary({
             <div className="font-semibold text-gray-900">
               {remaining === 0
                 ? "All units checked in"
-                : "Partially checked in"}
+                : "Parcialmente devolvido"}
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-gray-600">Booked</span>

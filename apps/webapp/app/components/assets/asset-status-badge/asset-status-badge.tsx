@@ -138,7 +138,7 @@ export function AssetStatusBadge({
    * For quantity-tracked assets, render the qty-aware branch even before
    * the lazy fetch resolves. The label falls back to the asset's bare
    * status until the breakdown lands; on resolve, "Emprestado" may refine
-   * to "Partially checked out" etc. The hover-card stays empty until
+   * to "Parcialmente emprestado" etc. The hover-card stays empty until
    * either inline or lazy data is available — Radix HoverCard skips
    * rendering when the content is empty.
    */
@@ -150,7 +150,7 @@ export function AssetStatusBadge({
      * They describe the asset's state *for this specific booking* and
      * must win over the global qty-aware breakdown — otherwise an asset
      * that's been fully checked back inside a kit slice keeps showing
-     * "Partially checked out" because its global `bookingAssets`
+     * "Parcialmente emprestado" because its global `bookingAssets`
      * snapshot still reflects the reservation.
      */
     const isBookingContextStatus =

@@ -493,7 +493,7 @@ describe("updateKit", () => {
     expect(result).toEqual(updatedKit);
   });
 
-  it("should disconnect category when categoryId is 'uncategorized'", async () => {
+  it("should disconnect category when categoryId is 'sem categoria'", async () => {
     expect.assertions(1);
     //@ts-expect-error missing vitest type
     db.kit.update.mockResolvedValue(mockKitData);
@@ -503,7 +503,7 @@ describe("updateKit", () => {
       name: "Updated Kit",
       createdById: "user-1",
       organizationId: "org-1",
-      categoryId: "uncategorized",
+      categoryId: "sem categoria",
       locationId: null,
     });
 

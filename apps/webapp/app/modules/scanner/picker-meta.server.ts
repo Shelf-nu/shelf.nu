@@ -98,7 +98,7 @@ export async function getScannerPickerMeta({
     };
   }
 
-  // Booking: matches the asset overview's "Available" formula so the
+  // Booking: matches the asset overview's "Disponível" formula so the
   // scanner MAX agrees with what the user sees on the asset page:
   //
   //   maxAllowed = Asset.quantity

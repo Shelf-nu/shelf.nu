@@ -557,7 +557,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         ).filter(Boolean);
 
         if (values.includes("uncategorized")) {
-          // Remove "uncategorized" from the values array
+          // Remove "sem categoria" from the values array
           const categoryIds = values.filter((v) => v !== "uncategorized");
 
           if (categoryIds.length === 0) {

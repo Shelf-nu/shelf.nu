@@ -598,7 +598,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Sum already-dispositioned units per qty-tracked asset for this
      * booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
      * Attached per-row to each enriched view item below so the row UI can:
-     *   - show "Partially checked in" when `dispositioned > 0 && remaining > 0`
+     *   - show "Parcialmente devolvido" when `dispositioned > 0 && remaining > 0`
      *   - render `remaining / booked` in the Qty column for partials
      *   - show the fully-reconciled state once `dispositioned == booked`
      *

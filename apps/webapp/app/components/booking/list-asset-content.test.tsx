@@ -70,7 +70,7 @@ vi.mock("./asset-row-actions-dropdown", () => ({
 }));
 
 // why: exercising the REAL `AvailabilityLabel` + `InsufficientStockBadge`
-// from this module so the QT-aware "Checked out" / "In custody" guards
+// from this module so the QT-aware "Emprestado" / "Em guarda" guards
 // (which short-circuit for QUANTITY_TRACKED) and the red insufficient-stock
 // badge can be observed by these tests. No mock — the originals are pure
 // and only depend on `useLoaderData` (already mocked) + shared utils.
@@ -368,7 +368,7 @@ describe("ListAssetContent", () => {
   });
 
   // QT booking-row badge cleanup: QUANTITY_TRACKED rows must not surface the
-  // global-status amber "Checked out" / "In custody" badges that
+  // global-status amber "Emprestado" / "In custody" badges that
   // `AvailabilityLabel` shows for INDIVIDUAL assets — for QT the asset can be
   // checked out / in-custody elsewhere while still having free units to book.
   // The status badge + dedicated `InsufficientStockBadge` carry that signal
@@ -412,8 +412,8 @@ describe("ListAssetContent", () => {
      * No `bookingAssets` entry for any OTHER booking — that would make
      * `hasAssetBookingConflicts` return true and steer the label into the
      * "Already booked" branch (a separate signal). Test (d) is specifically
-     * pinning the "Checked out" branch: asset is globally CHECKED_OUT with
-     * no overlapping reservation, which surfaces the amber "Checked out"
+     * pinning the "Emprestado" branch: asset is globally CHECKED_OUT with
+     * no overlapping reservation, which surfaces the amber "Emprestado"
      * `AvailabilityBadge`.
      */
     const individualCheckedOutAsset = {
@@ -425,7 +425,7 @@ describe("ListAssetContent", () => {
     } as unknown as AssetWithBooking;
 
     it("renders only the AVAILABLE status badge for a QT row whose asset is CHECKED_OUT elsewhere on a DRAFT booking", () => {
-      // (a) — QT short-circuits the amber "Checked out" branch in
+      // (a) — QT short-circuits the amber "Emprestado" branch in
       // `AvailabilityLabel`, and there's no separate "Partial custody" badge.
       // The status badge resolves to AVAILABLE (no qty disposition/checkout
       // activity on this row).
@@ -457,7 +457,7 @@ describe("ListAssetContent", () => {
       expect(assetStatusBadgeMock).toHaveBeenCalledWith(
         expect.objectContaining({ status: "AVAILABLE" })
       );
-      // No amber "Checked out" availability badge for QT rows.
+      // No amber "Emprestado" availability badge for QT rows.
       expect(screen.queryByText("Emprestado")).not.toBeInTheDocument();
       // No blue "Partial custody" badge exists for QT in this surface.
       expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
@@ -466,7 +466,7 @@ describe("ListAssetContent", () => {
     });
 
     it("renders only the AVAILABLE status badge for a QT row with global custody on a RESERVED booking", () => {
-      // (b) — QT short-circuits the "In custody" branch in
+      // (b) — QT short-circuits the "Em guarda" branch in
       // `AvailabilityLabel` even when a custody row exists on the asset.
       mockUseLoaderData.mockReturnValue({
         booking: {
@@ -496,7 +496,7 @@ describe("ListAssetContent", () => {
       expect(assetStatusBadgeMock).toHaveBeenCalledWith(
         expect.objectContaining({ status: "AVAILABLE" })
       );
-      expect(screen.queryByText("In custody")).not.toBeInTheDocument();
+      expect(screen.queryByText("Em guarda")).not.toBeInTheDocument();
       expect(screen.queryByText("Emprestado")).not.toBeInTheDocument();
     });
 
@@ -554,7 +554,7 @@ describe("ListAssetContent", () => {
     it("still renders the amber 'Emprestado' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
       // (d) — Regression guard: the QT short-circuits MUST NOT affect the
       // INDIVIDUAL path. An INDIVIDUAL asset with global CHECKED_OUT status
-      // still surfaces the amber "Checked out" availability badge on a DRAFT
+      // still surfaces the amber "Emprestado" availability badge on a DRAFT
       // booking exactly as it did before this cleanup.
       mockUseLoaderData.mockReturnValue({
         booking: {
@@ -634,7 +634,7 @@ describe("ListAssetContent", () => {
   // progress (`checkedOutQuantity` vs `bookedQuantity`), NOT the global
   // `Asset.status` — which only flips to CHECKED_OUT when EVERY slice is fully
   // out, so a single fully-checked-out slice would otherwise wrongly read
-  // "Available". Mirrors the existing per-row check-IN completion handling.
+  // "Disponível". Mirrors the existing per-row check-IN completion handling.
   describe("QT per-slice checkout status", () => {
     const qtKitSliceRow = {
       ...baseAsset,

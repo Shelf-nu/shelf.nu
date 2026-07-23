@@ -43,7 +43,7 @@ export function AssetDistributionContent({
   const { locale } = useHints();
 
   // Navigate to assets filtered by the clicked item
-  // IDs match the special filter values: "uncategorized", "without-location", or actual IDs
+  // IDs match the special filter values: "sem categoria", "without-location", or actual IDs
   const handleCategoryClick = (item: { id: string }) => {
     void navigate(`/assets?category=${encodeURIComponent(item.id)}`);
   };

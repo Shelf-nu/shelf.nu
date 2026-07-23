@@ -11,9 +11,9 @@ export function userFriendlyKitStatus(status: ExtendedKitStatus) {
     case KitStatus.CHECKED_OUT:
       return "Checked Out";
     case "PARTIALLY_CHECKED_IN":
-      return "Already checked in";
+      return "Já devolvido";
     default:
-      return "Available";
+      return "Disponível";
   }
 }
 

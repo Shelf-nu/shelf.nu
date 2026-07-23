@@ -161,7 +161,7 @@ function resolveCopy({
           fromLocation?.quantity ?? 0
         } ${unitLabel} available at the source.`,
         destinationLabel: "Destination location",
-        destinationPlaceholder: "Select a location",
+        destinationPlaceholder: "Selecione um local",
         submitIdle: "Move",
         submitBusy: "Moving...",
       };
@@ -183,7 +183,7 @@ function resolveCopy({
           unplacedQuantity ?? 0
         } ${unitLabel} available.`,
         destinationLabel: "Destination location",
-        destinationPlaceholder: "Select a location",
+        destinationPlaceholder: "Selecione um local",
         submitIdle: "Place",
         submitBusy: "Placing...",
       };

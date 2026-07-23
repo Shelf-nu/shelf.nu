@@ -111,7 +111,7 @@ function ListContent({
 }) {
   const now = new Date();
   const status =
-    now < new Date(item.alertDateTime) ? "Pending" : "Reminder sent";
+    now < new Date(item.alertDateTime) ? "Pendente" : "Reminder sent";
 
   return (
     <>
@@ -135,7 +135,7 @@ function ListContent({
       <Td>
         <Badge
           color={
-            status === "Pending" ? colors.yellow["500"] : colors.green["500"]
+            status === "Pendente" ? colors.yellow["500"] : colors.green["500"]
           }
         >
           {status}

@@ -316,9 +316,9 @@ function MetricBox({
 /** Status badge for asset status */
 function AssetStatusBadge({ status }: { status: string }) {
   const labels: Record<string, string> = {
-    AVAILABLE: "Available",
-    IN_CUSTODY: "In custody",
-    CHECKED_OUT: "Checked out",
+    AVAILABLE: "Disponível",
+    IN_CUSTODY: "Em guarda",
+    CHECKED_OUT: "Emprestado",
   };
 
   const colors: Record<string, string> = {
@@ -544,7 +544,7 @@ function AssetInventoryPreview({
             })}
           />
           <MetricBox
-            label="Available"
+            label="Disponível"
             value={pdfMeta.statusBreakdown.available}
           />
           <MetricBox

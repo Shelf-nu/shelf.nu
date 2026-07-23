@@ -299,7 +299,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     sendNotification({
-      title: "Checked out",
+      title: "Emprestado",
       message: "Your booking has been checked out successfully",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,

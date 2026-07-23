@@ -29,7 +29,7 @@ import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
-const label: ErrorLabel = "Organização";
+const label: ErrorLabel = "Organization";
 
 export async function getOrganizationById<T extends Prisma.OrganizationInclude>(
   id: Organization["id"],

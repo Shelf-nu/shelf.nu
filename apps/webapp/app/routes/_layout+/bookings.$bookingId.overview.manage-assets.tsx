@@ -127,7 +127,7 @@ export type AssetWithBooking = Asset & {
    * Units already dispositioned on this booking via check-in activity —
    * sum of `RETURN + CONSUME + LOSS + DAMAGE` ConsumptionLog rows for
    * this (booking, asset) pair. Used by the booking overview to render
-   * the "Partially checked in" status and the `remaining / booked` qty
+   * the "Parcialmente devolvido" status and the `remaining / booked` qty
    * progress indicator. 0 when no check-in activity has happened yet.
    * Only meaningful for QUANTITY_TRACKED assets.
    */
@@ -236,7 +236,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Kits MUST be in the formula — qty-tracked-in-kit assets are
      * selectable in the picker for their free pool, so the picker's
      * MAX has to subtract the slices committed to any kit. Matches the
-     * asset-overview "Available" formula in `quantity-overview-card.tsx`
+     * asset-overview "Disponível" formula in `quantity-overview-card.tsx`
      * so the two surfaces agree.
      */
     const qtyAssetIds = assets
@@ -390,7 +390,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         title: `Add assets for '${booking?.name}'`,
         subHeading: "Fill up the booking with the assets of your choice",
       },
-      searchFieldLabel: "Search assets",
+      searchFieldLabel: "Pesquisar equipamentos",
       searchFieldTooltip: {
         title: "Search your asset database",
         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",

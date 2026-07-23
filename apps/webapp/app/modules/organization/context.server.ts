@@ -12,7 +12,7 @@ import { ShelfError } from "~/utils/error";
 import type { OrganizationFromUser } from "./service.server";
 import { getUserOrganizations } from "./service.server";
 
-const label: ErrorLabel = "Organização";
+const label: ErrorLabel = "Organization";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,

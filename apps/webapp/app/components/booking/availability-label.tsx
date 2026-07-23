@@ -74,7 +74,7 @@ export function AvailabilityLabel({
   if (isPartOfKit && showKitStatus) {
     return (
       <AvailabilityBadge
-        badgeText="Part of kit"
+        badgeText="Parte de kit"
         tooltipTitle="Asset is part of a kit"
         tooltipContent="Remove the asset from the kit to add it individually."
       />
@@ -92,7 +92,7 @@ export function AvailabilityLabel({
   ) {
     return (
       <AvailabilityBadge
-        badgeText={"In custody"}
+        badgeText={"Em guarda"}
         tooltipTitle={"Asset is in custody"}
         tooltipContent={
           "This asset is in custody of a team member making it currently unavailable for bookings."
@@ -183,7 +183,7 @@ export function AvailabilityLabel({
 
     return (
       <AvailabilityBadge
-        badgeText={"Checked out"}
+        badgeText={"Emprestado"}
         tooltipTitle={"Asset is currently checked out"}
         tooltipContent={
           conflictingBooking ? (
@@ -306,7 +306,7 @@ export function AvailabilityBadge({
  * units elsewhere in the workspace.
  *
  * NEVER renders for INDIVIDUAL assets — they have their own
- * "Already booked" / "Checked out" paths via `AvailabilityLabel`. Callers
+ * "Already booked" / "Emprestado" paths via `AvailabilityLabel`. Callers
  * must gate on `isQuantityTracked` before mounting this component.
  *
  * @param bookedQuantity - units this booking reserves of the asset
@@ -416,7 +416,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   if (isInCustody) {
     return (
       <AvailabilityBadge
-        badgeText="In custody"
+        badgeText="Em guarda"
         tooltipTitle="Kit is in custody"
         tooltipContent="This kit is in custody or it contains some assets that are in custody."
       />
@@ -426,7 +426,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   if (isCheckedOut) {
     return (
       <AvailabilityBadge
-        badgeText="Checked out"
+        badgeText="Emprestado"
         tooltipTitle="Kit is checked out"
         tooltipContent={
           isCheckedOutInANonConflictingBooking

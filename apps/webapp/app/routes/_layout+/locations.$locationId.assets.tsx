@@ -305,7 +305,7 @@ export default function LocationAssets() {
                       deletedAt: null,
                     }}
                     label="Filter by custodian"
-                    placeholder="Search team members"
+                    placeholder="Pesquisar membros da equipe"
                     initialDataKey="teamMembers"
                     countKey="totalTeamMembers"
                     withoutValueItem={{

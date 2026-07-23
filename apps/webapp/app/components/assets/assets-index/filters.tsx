@@ -157,7 +157,7 @@ export function AssetIndexFilters({
                 }}
                 renderItem={(item) => resolveTeamMemberName(item, true)}
                 label="Filter by custodian"
-                placeholder="Search team members"
+                placeholder="Pesquisar membros da equipe"
                 initialDataKey="teamMembers"
                 countKey="totalTeamMembers"
                 withoutValueItem={{

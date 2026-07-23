@@ -158,8 +158,8 @@ function BookingSelect({
               <Input
                 ref={searchInputRef}
                 type="text"
-                label="Search bookings"
-                placeholder="Search bookings"
+                label="Pesquisar reservas"
+                placeholder="Pesquisar reservas"
                 hideLabel
                 className="text-gray-500"
                 icon="search"

@@ -363,7 +363,7 @@ function formatReturnStatus(
   }
 
   if (latenessMs === null) {
-    return "Pending";
+    return "Pendente";
   }
 
   // Format lateness as human-readable
@@ -621,9 +621,9 @@ function generateAssetActivityCsv(rows: AssetActivityRow[]): string {
  */
 function formatAssetStatus(status: string): string {
   const labels: Record<string, string> = {
-    AVAILABLE: "Available",
-    IN_CUSTODY: "In custody",
-    CHECKED_OUT: "Checked out",
+    AVAILABLE: "Disponível",
+    IN_CUSTODY: "Em guarda",
+    CHECKED_OUT: "Emprestado",
   };
   return labels[status] || status;
 }
@@ -637,8 +637,8 @@ function formatActivityType(type: string): string {
     UPDATED: "Asset updated",
     CUSTODY_ASSIGNED: "Custody assigned",
     CUSTODY_RELEASED: "Custody released",
-    BOOKING_CHECKED_OUT: "Checked out",
-    BOOKING_CHECKED_IN: "Checked in",
+    BOOKING_CHECKED_OUT: "Emprestado",
+    BOOKING_CHECKED_IN: "Devolvido",
     LOCATION_CHANGED: "Location changed",
     CATEGORY_CHANGED: "Category changed",
   };

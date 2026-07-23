@@ -7,7 +7,7 @@
  *
  *  - When the caller opts out via `suppressQtyAware`, the global
  *    qty-aware breakdown (custody/other-booking inference into
- *    "Partial custody" / "Partially checked out" relabels) is bypassed
+ *    "Partial custody" / "Parcialmente emprestado" relabels) is bypassed
  *    for QUANTITY_TRACKED assets — the caller-supplied `status` wins.
  *  - Booking-context pseudo-statuses (e.g. `PARTIALLY_CHECKED_OUT_QTY`)
  *    still render with their dedicated label + color in the suppressed
@@ -16,7 +16,7 @@
  *    treatment regardless of which branch renders it.
  *  - When `suppressQtyAware` is left at its default (`false`), the
  *    existing qty-aware branch is preserved for QT assets (hover-card +
- *    "Partial custody"/"Partially checked out" relabels).
+ *    "Partial custody"/"Parcialmente emprestado" relabels).
  *  - When `suppressQtyAware` is set, the lazy
  *    `/api/assets/:id/quantity-breakdown` fetch is skipped — booking
  *    rows render 50+ rows at a time and must not fan out per-row HTTP
@@ -117,10 +117,10 @@ describe("AssetStatusBadge", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("renders the violet 'Partially checked out' pseudo-status for PARTIALLY_CHECKED_OUT_QTY", () => {
+    it("renders the violet 'Parcialmente emprestado' pseudo-status for PARTIALLY_CHECKED_OUT_QTY", () => {
       // Case (b): caller-supplied pseudo-status wins. The dedicated
       // `userFriendlyAssetStatus` mapping converts the pseudo-status
-      // into the user-facing "Partially checked out" label with the
+      // into the user-facing "Parcialmente emprestado" label with the
       // violet color treatment — and this must survive
       // `suppressQtyAware` because the pseudo-status itself encodes
       // the row's authoritative booking-context state.
@@ -134,7 +134,7 @@ describe("AssetStatusBadge", () => {
         />
       );
 
-      expect(screen.getByText("Partially checked out")).toBeInTheDocument();
+      expect(screen.getByText("Parcialmente emprestado")).toBeInTheDocument();
     });
 
     it("preserves the qty-aware hover-card branch when suppressQtyAware is left at its default (false)", () => {

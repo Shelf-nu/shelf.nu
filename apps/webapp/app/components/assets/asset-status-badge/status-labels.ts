@@ -49,7 +49,7 @@ export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
     case "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN":
       // Qty-tracked: some units progressively checked out, but no
       // disposition (return/consume/loss/damage) recorded yet. Same
-      // user-facing wording as the violet "Partially checked out" state —
+      // user-facing wording as the violet "Parcialmente emprestado" state —
       // the amber colour carries the "no returns yet, action required"
       // semantic without inventing a second label users have to learn.
       return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_OUT;
@@ -75,7 +75,7 @@ export const assetStatusColorMap = (
       // this row, unlike the solid blue "done for this row" state.
       return BADGE_COLORS.amber;
     case "PARTIALLY_CHECKED_OUT_QTY":
-      // Violet matches the global qty-aware "Partially checked out"
+      // Violet matches the global qty-aware "Parcialmente emprestado"
       // colour so a partly-returned row reads as still-out, not as a
       // distinct "this row is partway in" state.
       return BADGE_COLORS.violet;

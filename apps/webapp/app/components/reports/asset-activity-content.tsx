@@ -54,8 +54,8 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         UPDATED: "Asset updated",
         CUSTODY_ASSIGNED: "Assigned to team member",
         CUSTODY_RELEASED: "Returned from team member",
-        BOOKING_CHECKED_OUT: "Checked out",
-        BOOKING_CHECKED_IN: "Checked in",
+        BOOKING_CHECKED_OUT: "Emprestado",
+        BOOKING_CHECKED_IN: "Devolvido",
         LOCATION_CHANGED: "Location changed",
         CATEGORY_CHANGED: "Category changed",
       };

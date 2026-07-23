@@ -241,7 +241,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         search,
         hasActiveFilters,
-        searchFieldLabel: "Search kits",
+        searchFieldLabel: "Pesquisar kits",
         teamMembers,
         totalTeamMembers,
         currentUserTeamMember,
@@ -323,7 +323,7 @@ export default function KitsIndexPage() {
               }
               model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
               label="Filter by custodian"
-              placeholder="Search team members"
+              placeholder="Pesquisar membros da equipe"
               countKey="totalTeamMembers"
               initialDataKey="teamMembers"
               transformItem={(item) => ({

@@ -74,8 +74,8 @@ export type AuditStatusLabel = "Esperado" | "Encontrado" | "Ausente" | "Inespera
  * Used to display status badges in the "ALL" filter view.
  *
  * The label changes based on audit completion state:
- * - Active/Pending audit: Expected assets show "Expected" or "Found"
- * - Completed audit: Expected assets that weren't scanned show "Missing" instead of "Expected"
+ * - Active/Pending audit: Expected assets show "Esperado" or "Encontrado"
+ * - Completed audit: Expected assets that weren't scanned show "Ausente" instead of "Esperado"
  *
  * @param auditData - The asset's audit status data
  * @param isAuditCompleted - Whether the audit has been completed (default: false)
@@ -102,8 +102,8 @@ export function getAuditStatusLabel(
   }
 
   // Expected assets with PENDING status:
-  // - On completed audit: Show as "Missing" (they weren't scanned)
-  // - On active/pending audit: Show as "Expected" (still waiting to be scanned)
+  // - On completed audit: Show as "Ausente" (they weren't scanned)
+  // - On active/pending audit: Show as "Esperado" (still waiting to be scanned)
   if (auditData.expected && auditData.auditStatus === "PENDING") {
     return isAuditCompleted ? "Ausente" : "Esperado";
   }

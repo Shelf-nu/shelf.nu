@@ -36,7 +36,7 @@ import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
-const label: ErrorLabel = "Reserva";
+const label: ErrorLabel = "Booking";
 
 /** Booking statuses that claim availability for a given window. */
 const ACTIVE_BOOKING_STATUSES = [

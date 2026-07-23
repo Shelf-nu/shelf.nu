@@ -367,7 +367,7 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
-                  label="Add to kit"
+                  label="Adicionar ao kit"
                   type="add-to-kit"
                   onClick={closeMenu}
                   disabled={
@@ -382,7 +382,7 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
               <DropdownMenuItem className=" py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
-                  label="Remove from kit"
+                  label="Remover do kit"
                   type="remove-from-kit"
                   onClick={closeMenu}
                   disabled={isLoading}

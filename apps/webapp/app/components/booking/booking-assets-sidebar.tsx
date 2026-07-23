@@ -163,7 +163,7 @@ interface BookingAssetsSidebarProps {
    * i.e. sum of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows.
    * When provided, the sidebar renders the qty column as `N / M`
    * progress with an explanatory tooltip and swaps the status badge
-   * to "Partially checked in" for qty-tracked assets that have some
+   * to "Parcialmente devolvido" for qty-tracked assets that have some
    * units dispositioned but a non-zero remaining. When undefined, the
    * sidebar falls back to the plain `× N` booked-quantity display —
    * which keeps older call sites working without changes.
@@ -172,7 +172,7 @@ interface BookingAssetsSidebarProps {
   /**
    * Optional map of `assetId → per-category split`. Lets the tooltip
    * show Returned / Consumed / Lost / Damaged separately instead of
-   * conflating them into a single "Checked in" total — lost and
+   * conflating them into a single "Devolvido" total — lost and
    * damaged units shouldn't read the same as units back in the pool.
    * When undefined, the tooltip falls back to the single-total layout.
    */
@@ -352,7 +352,7 @@ function AssetTitleAndStatus({
     qtyCheckedOut > 0 &&
     // Upper guard: ONLY when SOME but not all booked units are out — the
     // service flips `asset.status = CHECKED_OUT` when all are out, so the
-    // row falls through to the base status (violet "Checked out") instead
+    // row falls through to the base status (violet "Emprestado") instead
     // of being shadowed by the amber pending-return badge.
     qtyCheckedOut < qtyBooked &&
     qtyDispositioned === 0 &&
@@ -360,7 +360,7 @@ function AssetTitleAndStatus({
 
   /**
    * Sidebar mirrors the booking-row badge precedence:
-   *  1. Fully reconciled → `PARTIALLY_CHECKED_IN` ("Already checked in",
+   *  1. Fully reconciled → `PARTIALLY_CHECKED_IN` ("Já devolvido",
    *     blue).
    *  2. Partly reconciled (some disposition, more outstanding) →
    *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
@@ -441,7 +441,7 @@ function AssetTitleAndStatus({
                     <div className="font-semibold text-gray-900">
                       {qtyRemaining === 0
                         ? "All units checked in"
-                        : "Partially checked in"}
+                        : "Parcialmente devolvido"}
                     </div>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-gray-600">Booked</span>
