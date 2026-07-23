@@ -880,6 +880,11 @@ export async function deleteCustomFieldGroup({
   organizationId: string;
 }) {
   try {
+    await db.customField.updateMany({
+      where: { groupId: id, organizationId },
+      data: { groupId: null },
+    });
+
     return await db.customFieldGroup.delete({
       where: { id, organizationId },
     });

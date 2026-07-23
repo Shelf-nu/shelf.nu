@@ -7,8 +7,10 @@
 import { useEffect, useState } from "react";
 import { ArrowUpIcon, ArrowDownIcon, TrashIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, Link, useLoaderData, Form, useFetcher } from "react-router";
+import { data, Link, useLoaderData, useActionData, Form, useFetcher } from "react-router";
 import { z } from "zod";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
@@ -89,7 +91,7 @@ export const handle = {
 const GroupActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("create"),
-    name: z.string().min(1, "Name is required"),
+    name: z.string().trim().min(1, "Name is required"),
   }),
   z.object({
     intent: z.literal("delete"),
@@ -192,14 +194,14 @@ export function DeleteCustomFieldGroupDialog({
   group: { id: string; name: string };
   disabled: boolean;
 }) {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<DataOrErrorResponse<{ success?: boolean }>>();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (
       fetcher.state === "idle" &&
       fetcher.data &&
-      !(fetcher.data as any).error
+      !("error" in fetcher.data)
     ) {
       setOpen(false);
     }
@@ -266,6 +268,10 @@ export function DeleteCustomFieldGroupDialog({
  */
 export default function CustomFieldGroupsPage() {
   const { groups } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const validationErrors = getValidationErrors<typeof GroupActionSchema>(
+    actionData?.error
+  );
   const fetcher = useFetcher();
   const disabled = useDisabled();
   const reorderDisabled = useDisabled(fetcher);
@@ -298,6 +304,11 @@ export default function CustomFieldGroupsPage() {
             <h3 className="mb-4 text-base font-semibold">Create New Group</h3>
             <Form method="post" className="flex flex-col gap-4">
               <input type="hidden" name="intent" value="create" />
+              {actionData?.error && !validationErrors && (
+                <div className="text-sm text-error-500">
+                  {actionData.error.message}
+                </div>
+              )}
               <FormRow
                 rowLabel="Group Name"
                 className="border-b-0 py-0"
@@ -311,6 +322,7 @@ export default function CustomFieldGroupsPage() {
                   required
                   className="w-full"
                   disabled={disabled}
+                  error={validationErrors?.name?.message}
                 />
               </FormRow>
               <Button

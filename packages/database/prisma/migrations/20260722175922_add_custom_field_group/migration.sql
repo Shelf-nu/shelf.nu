@@ -23,16 +23,19 @@ CREATE UNIQUE INDEX "CustomFieldGroup_id_organizationId_key" ON "CustomFieldGrou
 -- CreateUniqueIndex
 CREATE UNIQUE INDEX "CustomFieldGroup_organizationId_name_key" ON "CustomFieldGroup"("organizationId", "name");
 
--- CreateIndex
--- NOTE: In production environments, run this outside of a transaction block to use CONCURRENTLY.
--- If running inside a standard transaction block where CONCURRENTLY is not allowed, remove the CONCURRENTLY keyword.
-CREATE INDEX CONCURRENTLY "CustomField_groupId_organizationId_idx" ON "CustomField"("groupId", "organizationId");
-
--- AddForeignKey (with NOT VALID to avoid locking write operations)
-ALTER TABLE "CustomField" ADD CONSTRAINT "CustomField_groupId_organizationId_fkey" FOREIGN KEY ("groupId", "organizationId") REFERENCES "CustomFieldGroup"("id", "organizationId") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-
--- Validate constraint
-ALTER TABLE "CustomField" VALIDATE CONSTRAINT "CustomField_groupId_organizationId_fkey";
+-- AddForeignKey (with ON DELETE NO ACTION to prevent database set null error on composite key constraint)
+ALTER TABLE "CustomField" ADD CONSTRAINT "CustomField_groupId_organizationId_fkey" FOREIGN KEY ("groupId", "organizationId") REFERENCES "CustomFieldGroup"("id", "organizationId") ON DELETE NO ACTION ON UPDATE CASCADE NOT VALID;
 
 -- AddForeignKey
 ALTER TABLE "CustomFieldGroup" ADD CONSTRAINT "CustomFieldGroup_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Commit the NOT VALID foreign keys first to finish current transaction
+COMMIT;
+
+-- Create index concurrently outside transaction boundary
+CREATE INDEX CONCURRENTLY "CustomField_groupId_organizationId_idx" ON "CustomField"("groupId", "organizationId");
+
+-- Validate constraint in a separate transaction block
+BEGIN;
+ALTER TABLE "CustomField" VALIDATE CONSTRAINT "CustomField_groupId_organizationId_fkey";
+COMMIT;
