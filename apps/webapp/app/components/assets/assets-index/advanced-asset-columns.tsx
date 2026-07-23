@@ -288,7 +288,7 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      return <TextColumn value={item.availableToBook ? "Sim" : "Não"} />;
 
     case "upcomingReminder":
       return (

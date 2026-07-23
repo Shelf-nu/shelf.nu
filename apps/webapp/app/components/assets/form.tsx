@@ -582,7 +582,7 @@ export const AssetForm = ({
         <div className="flex items-start justify-between border-b pb-5">
           <div className=" ">
             <h2 className="mb-1 text-[18px] font-semibold">
-              {bulkMode ? "Bulk create from model" : "Basic fields"}
+              {bulkMode ? "Bulk create from model" : "Campos básicos"}
             </h2>
             <p>
               {bulkMode
@@ -601,13 +601,13 @@ export const AssetForm = ({
 
         <When truthy={!bulkMode}>
           <FormRow
-            rowLabel={"Name"}
+            rowLabel={"Nome"}
             className="border-b-0 pb-[10px]"
             required={true}
           >
             <Input
               ref={titleInputRef}
-              label="Name"
+              label="Nome"
               hideLabel
               name="title"
               disabled={disabled}
@@ -717,7 +717,7 @@ export const AssetForm = ({
 
         <When truthy={!bulkMode}>
           <FormRow
-            rowLabel={"Tracking method"}
+            rowLabel={"Método de rastreamento"}
             className="border-b-0 pb-[10px]"
             subHeading={
               isEditMode
@@ -744,14 +744,14 @@ export const AssetForm = ({
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
-              rowLabel="Quantity"
+              rowLabel="Quantidade"
               className="border-b-0 pb-[10px]"
               subHeading="Total number of items in this pool."
               required={true}
             >
               <Input
                 type="number"
-                label="Quantity"
+                label="Quantidade"
                 hideLabel
                 name="quantity"
                 disabled={disabled}
@@ -768,12 +768,12 @@ export const AssetForm = ({
             </FormRow>
 
             <FormRow
-              rowLabel="Unit of measure"
+              rowLabel="Unidade de medida"
               className="border-b-0 pb-[10px]"
               subHeading="Label for the unit (e.g. pcs, boxes, liters)."
             >
               <Input
-                label="Unit of measure"
+                label="Unidade de medida"
                 hideLabel
                 name="unitOfMeasure"
                 disabled={disabled}
@@ -784,13 +784,13 @@ export const AssetForm = ({
             </FormRow>
 
             <FormRow
-              rowLabel="Min quantity"
+              rowLabel="Quantidade mínima"
               className="border-b-0 pb-[10px]"
               subHeading="Low-stock alert threshold. You will be notified when available quantity falls to or below this number."
             >
               <Input
                 type="number"
-                label="Min quantity"
+                label="Quantidade mínima"
                 hideLabel
                 name="minQuantity"
                 disabled={disabled}
@@ -802,7 +802,7 @@ export const AssetForm = ({
             </FormRow>
 
             <FormRow
-              rowLabel="Consumption type"
+              rowLabel="Tipo de consumo"
               className="border-b-0 pb-[10px]"
               subHeading={
                 'Choose "Used up (one-way)" for items that are consumed and not returned, or "Returnable (two-way)" for items that are checked out and returned.'
@@ -825,7 +825,7 @@ export const AssetForm = ({
             from the same sequence. Hide entirely under bulkMode. */}
         <When truthy={!bulkMode}>
           <FormRow
-            rowLabel={"Asset ID"}
+            rowLabel={"ID do Equipamento"}
             className="border-b-0 pb-[10px]"
             subHeading={
               id
@@ -864,7 +864,7 @@ export const AssetForm = ({
           </FormRow>
         </When>
 
-        <FormRow rowLabel={"Main image"} className="pt-[10px]">
+        <FormRow rowLabel={"Imagem principal"} className="pt-[10px]">
           <div className="flex items-center gap-2">
             {id && thumbnailImage && mainImageExpiration ? (
               <AssetImage
@@ -897,7 +897,7 @@ export const AssetForm = ({
                 name="mainImage"
                 type="file"
                 onChange={validateFile}
-                label={"Main image"}
+                label={"Imagem principal"}
                 hideLabel
                 error={mainImageError}
                 className="mt-2"
@@ -912,7 +912,7 @@ export const AssetForm = ({
 
         <div>
           <FormRow
-            rowLabel={"Description"}
+            rowLabel={"Descrição"}
             subHeading={
               <p>
                 This is the initial object description. It will be shown on the
@@ -925,7 +925,7 @@ export const AssetForm = ({
             <Input
               inputType="textarea"
               maxLength={1000}
-              label={"Description"}
+              label={"Descrição"}
               name="description"
               defaultValue={description || ""}
               hideLabel
@@ -945,7 +945,7 @@ export const AssetForm = ({
         <When truthy={!bulkMode}>{assetModelFormRow}</When>
 
         <FormRow
-          rowLabel="Category"
+          rowLabel="Categoria"
           subHeading={
             <p>
               Make it unique. Each asset can have 1 category. It will show on
@@ -971,8 +971,8 @@ export const AssetForm = ({
             }
             model={{ name: "category", queryKey: "name" }}
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            contentLabel="Categories"
-            label="Category"
+            contentLabel="Categorias"
+            label="Categoria"
             hideLabel
             initialDataKey="categories"
             countKey="totalCategories"
@@ -1001,7 +1001,7 @@ export const AssetForm = ({
         </FormRow>
 
         <FormRow
-          rowLabel="Tags"
+          rowLabel="Etiquetas"
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
@@ -1026,7 +1026,7 @@ export const AssetForm = ({
         </FormRow>
 
         <FormRow
-          rowLabel="Location"
+          rowLabel="Local"
           subHeading={
             <p>
               A location is a place where an item is supposed to be located.
@@ -1058,8 +1058,8 @@ export const AssetForm = ({
                   triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
                   defaultValue={locationId || undefined}
                   model={{ name: "location", queryKey: "name" }}
-                  contentLabel="Locations"
-                  label="Location"
+                  contentLabel="Locais"
+                  label="Local"
                   hideLabel
                   initialDataKey="locations"
                   countKey="totalLocations"
@@ -1084,8 +1084,8 @@ export const AssetForm = ({
               triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
               defaultValue={locationId || undefined}
               model={{ name: "location", queryKey: "name" }}
-              contentLabel="Locations"
-              label="Location"
+              contentLabel="Locais"
+              label="Local"
               hideLabel
               initialDataKey="locations"
               countKey="totalLocations"
@@ -1125,7 +1125,7 @@ export const AssetForm = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"Value"}
+          rowLabel={"Valor"}
           subHeading={
             <p>
               Specify the value of assets to get an idea of the total value of
@@ -1137,7 +1137,7 @@ export const AssetForm = ({
           <div className="relative w-full">
             <Input
               type="number"
-              label="Value"
+              label="Valor"
               inputClassName="pl-[70px] valuation-input"
               hideLabel
               name="valuation"
@@ -1163,7 +1163,7 @@ export const AssetForm = ({
           {canUseBarcodes ? (
             <>
               <FormRow
-                rowLabel={"Barcodes"}
+                rowLabel={"Códigos de barras"}
                 className="border-b-0"
                 subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
               >
@@ -1193,7 +1193,7 @@ export const AssetForm = ({
               />
             </>
           ) : (
-            <FormRow rowLabel={"Barcodes"} className="border-b-0">
+            <FormRow rowLabel={"Códigos de barras"} className="border-b-0">
               <UnlockBarcodesBanner />
             </FormRow>
           )}

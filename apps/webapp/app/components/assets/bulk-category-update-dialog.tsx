@@ -25,11 +25,11 @@ export default function BulkCategoryUpdateDialog() {
             <DynamicSelect
               disabled={disabled}
               model={{ name: "category", queryKey: "name" }}
-              placeholder="Uncategorized"
+              placeholder="Sem categoria"
               initialDataKey="categories"
               countKey="totalCategories"
               fieldName="category"
-              contentLabel="Categories"
+              contentLabel="Categorias"
               closeOnSelect
               allowClear
               extraContent={({ onItemCreated, closePopover }) => (

@@ -56,7 +56,7 @@ export async function releaseCustody({
         message:
           "Self service user can only release custody of assets assigned to their user.",
         additionalData: { userId, assetId },
-        label: "Custody",
+        label: "Guarda",
         status: 403,
         shouldBeCaptured: false,
       });
@@ -115,7 +115,7 @@ export async function releaseCustody({
       message:
         "Something went wrong while releasing the custody. Please try again or contact support.",
       additionalData: { assetId },
-      label: "Custody",
+      label: "Guarda",
     });
   }
 }

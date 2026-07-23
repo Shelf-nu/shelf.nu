@@ -244,7 +244,7 @@ const ConditionalActionsDropdown = () => {
                 >
                   {/*
                     QUANTITY_TRACKED assets route to the multi-row
-                    "Manage placements" dialog instead of the single-
+                    "Gerenciar posicionamentos" dialog instead of the single-
                     location quick-set dialog — placements are the
                     asset's primary location concept once multiple
                     slices are possible. INDIVIDUAL assets keep the
@@ -281,7 +281,7 @@ const ConditionalActionsDropdown = () => {
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="location" />{" "}
-                      {isQtyTracked ? "Manage placements" : "Update location"}
+                      {isQtyTracked ? "Gerenciar posicionamentos" : "Update location"}
                     </span>
                   </Button>
                 </div>

@@ -36,7 +36,7 @@ export const DeleteAssetModel = ({
       type="button"
       className="text-[12px]"
       icon={"trash"}
-      title={"Delete"}
+      title={"Excluir"}
     />
   );
 
@@ -76,7 +76,7 @@ export const DeleteAssetModel = ({
               type="submit"
               disabled={disabled}
             >
-              {disabled ? "Deleting..." : "Delete"}
+              {disabled ? "Deleting..." : "Excluir"}
             </Button>
           </fetcher.Form>
         </AlertDialogFooter>

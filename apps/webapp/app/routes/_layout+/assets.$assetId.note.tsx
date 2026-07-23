@@ -20,7 +20,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Asset notes") }];
+export const meta = () => [{ title: appendToMetaTitle("Notas do Equipamento") }];
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { assetId } = getParams(params, z.object({ assetId: z.string() }));

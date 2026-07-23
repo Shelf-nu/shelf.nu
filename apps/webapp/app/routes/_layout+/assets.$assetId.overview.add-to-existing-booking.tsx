@@ -48,7 +48,7 @@ const updateBookingSchema = z.object({
   quantity: z.coerce.number().int().positive().optional(),
 });
 
-export const meta = () => [{ title: appendToMetaTitle("Add to booking") }];
+export const meta = () => [{ title: appendToMetaTitle("Adicionar à reserva") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -162,7 +162,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             message: `Cannot reserve ${quantity} units of "${asset.title}". Only ${availability.available} available.`,
-            label: "Booking",
+            label: "Reserva",
             shouldBeCaptured: false,
             status: 400,
           });
@@ -183,7 +183,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
         status: 400,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }

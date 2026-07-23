@@ -135,7 +135,7 @@ function formatFieldName(name: string): string {
   const specialCases: Record<string, string> = {
     mainImage: "Image",
     availableToBook: "Available to book",
-    customField: "Custom field",
+    customField: "Campo personalizado",
   };
 
   if (specialCases[name]) return specialCases[name];
@@ -205,7 +205,7 @@ function formatSingleValue(
 
   // Handle special filter values for custody, location, and kit
   const specialValues: Record<string, string> = {
-    "in-custody": "In custody",
+    "in-custody": "Em guarda",
     "without-custody": "Without custody",
     "in-location": "In a location",
     "without-location": "Without location",
@@ -253,7 +253,7 @@ function formatSingleValue(
 
   // Boolean values
   if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+    return value ? "Sim" : "Não";
   }
 
   // Date values

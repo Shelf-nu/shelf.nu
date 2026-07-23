@@ -186,7 +186,7 @@ function ConditionalActionsDropdown() {
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="bookings"
-                  label="Create new booking"
+                  label="Criar nova reserva"
                   onClick={closeMenu}
                   disabled={disabledReason}
                 />

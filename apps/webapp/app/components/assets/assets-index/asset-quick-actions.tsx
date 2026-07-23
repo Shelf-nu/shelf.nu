@@ -84,8 +84,8 @@ export default function AssetQuickActions({
           variant="secondary"
           className={"p-2"}
           to={`/assets/${asset.id}/overview/duplicate`}
-          aria-label="Duplicate asset"
-          tooltip="Duplicate asset"
+          aria-label="Duplicar Equipamento"
+          tooltip="Duplicar Equipamento"
         >
           <CopyIcon className="size-4" />
         </Button>

@@ -41,7 +41,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         where: { assetId },
       });
 
-    const header: HeaderData = { title: "Reminders" };
+    const header: HeaderData = { title: "Lembretes" };
     const modelName = {
       singular: "reminder",
       plural: "reminders",

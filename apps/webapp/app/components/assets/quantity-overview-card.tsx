@@ -42,7 +42,7 @@ export interface QuantityOverviewCardProps {
   consumptionType: ConsumptionType | null;
   /**
    * Booking-aware availability (total - inCustody - reserved - checkedOut),
-   * shown on the "Available" row. This is what's available to reserve for a
+   * shown on the "Disponível" row. This is what's available to reserve for a
    * future booking.
    */
   availableQuantity?: number;
@@ -55,7 +55,7 @@ export interface QuantityOverviewCardProps {
   custodyAvailableQuantity?: number;
   /**
    * Operator-only custody (excludes kit-allocated rows). Surfaced on the
-   * "In custody" row.
+   * "Em guarda" row.
    */
   inCustodyQuantity?: number;
   /**
@@ -226,13 +226,13 @@ export function QuantityOverviewCard({
       {/* Detail rows */}
       <OverviewRow label="Total quantity" value={formatWithUnit(qty, unit)} />
       <OverviewRow
-        label="Available"
+        label="Disponível"
         value={formatWithUnit(available, unit)}
         warning={isLowStock}
       />
       {/* Render the kit allocation total only when the asset is actually
           in a kit. Mirrors the same conditional pattern used for "Reserved"
-          / "Checked out" below — clutter-free for assets that don't belong
+          / "Emprestado" below — clutter-free for assets that don't belong
           to any kit. The detailed per-kit breakdown lives in the dedicated
           "Included in kits" card. */}
       {inKits > 0 ? (
@@ -252,7 +252,7 @@ export function QuantityOverviewCard({
       {inLocations > 0 && unplaced > 0 ? (
         <OverviewRow label="Unplaced" value={formatWithUnit(unplaced, unit)} />
       ) : null}
-      <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
+      <OverviewRow label="Em guarda" value={formatWithUnit(inCustody, unit)} />
       {reserved > 0 ? (
         <OverviewRow
           label="Reserved (bookings)"
@@ -265,7 +265,7 @@ export function QuantityOverviewCard({
           value={formatWithUnit(checkedOut, unit)}
         />
       ) : null}
-      <OverviewRow label="Unit of measure" value={unit ?? "—"} />
+      <OverviewRow label="Unidade de medida" value={unit ?? "—"} />
       {minQuantity != null ? (
         <OverviewRow
           label="Min quantity (alert)"

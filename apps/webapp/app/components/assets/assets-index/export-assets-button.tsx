@@ -287,7 +287,7 @@ export function ExportAssetsButton() {
             onClick={handleExport}
             disabled={isDownloading}
           >
-            {isDownloading ? "Preparing…" : "Download CSV"}
+            {isDownloading ? "Preparing…" : "Baixar CSV"}
           </Button>
         </PopoverContent>
       </PopoverPortal>

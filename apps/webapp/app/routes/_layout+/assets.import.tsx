@@ -88,7 +88,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     return payload({
       header: {
-        title: "Import assets",
+        title: "Importar Equipamentos",
       },
     });
   } catch (cause) {

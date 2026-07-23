@@ -129,7 +129,7 @@ export function PresetListItem({
               }
             }}
             className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-            title="Delete"
+            title="Excluir"
           >
             <Trash2 className="size-3.5" />
           </button>

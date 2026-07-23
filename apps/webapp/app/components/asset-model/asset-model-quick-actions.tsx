@@ -39,8 +39,8 @@ export default function AssetModelQuickActions({
           variant="secondary"
           className={"p-2"}
           to={`${assetModel.id}/edit`}
-          aria-label="Edit asset model"
-          tooltip="Edit asset model"
+          aria-label="Editar modelo de Equipamento"
+          tooltip="Editar modelo de Equipamento"
         >
           <PencilIcon className="size-4" />
         </Button>
@@ -61,8 +61,8 @@ export default function AssetModelQuickActions({
               size="sm"
               variant="secondary"
               className={"p-2"}
-              aria-label="Delete asset model"
-              tooltip="Delete asset model"
+              aria-label="Excluir modelo de Equipamento"
+              tooltip="Excluir modelo de Equipamento"
             >
               <Trash2Icon className="size-4" />
             </Button>

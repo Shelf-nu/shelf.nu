@@ -141,7 +141,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * OUT-flow, units can be scanned out progressively via
      * `PartialBookingCheckout` — so the BOOKED total may overstate what's
      * actually checked out at any given moment. The header
-     * `AssetStatusBadge` tooltip's "Checked out" line needs the EFFECTIVE
+     * `AssetStatusBadge` tooltip's "Emprestado" line needs the EFFECTIVE
      * count (`booked − remaining-to-check-out`), otherwise it over-reports
      * while a booking is partially scanned out (bug #96).
      *
@@ -472,15 +472,15 @@ export default function AssetDetailsPage() {
   const { roles } = useUserRoleHelper();
 
   const items = [
-    { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
-    { to: "bookings", content: "Bookings" },
+    { to: "overview", content: "Visão geral" },
+    { to: "activity", content: "Atividade" },
+    { to: "bookings", content: "Reservas" },
     ...(userHasPermission({
       roles,
       entity: PermissionEntity.assetReminders,
       action: PermissionAction.read,
     })
-      ? [{ to: "reminders", content: "Reminders" }]
+      ? [{ to: "reminders", content: "Lembretes" }]
       : []),
   ];
 

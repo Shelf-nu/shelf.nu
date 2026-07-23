@@ -613,7 +613,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   }}
                   disabled={disabled}
                 >
-                  {isSubmitting ? "Importing..." : "Import"}
+                  {isSubmitting ? "Importing..." : "Importar"}
                 </Button>
               </>
             )}

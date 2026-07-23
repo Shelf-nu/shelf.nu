@@ -23,7 +23,7 @@ import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
-  title: "Name",
+  title: "Nome",
   createdAt: "Date created",
   updatedAt: "Date updated",
 } as const;
@@ -98,7 +98,7 @@ export function AssetIndexFilters({
               countKey="totalCategories"
               withoutValueItem={{
                 id: "uncategorized",
-                name: "Uncategorized",
+                name: "Sem categoria",
               }}
             />
             <DynamicDropdown

@@ -41,7 +41,7 @@ type AssetCodeBadgeProps = ResolvedDisplayCode & {
   /**
    * Set true when the chip is rendered inside a column that explicitly
    * displays one specific code type (e.g., the dedicated "SAM ID", "QR ID",
-   * or "Barcode" columns in the advanced asset table). In that mode the
+   * or "Código de barras" columns in the advanced asset table). In that mode the
    * workspace-relative tooltip ("matches your workspace's preferred display
    * code", "set as a per-asset override", "fallback") is misleading because
    * the column itself selects the value — the chip is not the org's chosen

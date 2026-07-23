@@ -1,7 +1,7 @@
 /**
  * Manage Placements Form
  *
- * Multi-row editor used by the asset-overview "Manage placements"
+ * Multi-row editor used by the asset-overview "Gerenciar posicionamentos"
  * dialog (Phase 4b-Polish-3 Fix 2). Lets the user spread a
  * QUANTITY_TRACKED asset across multiple locations at distinct
  * per-location quantities, or remove placements entirely.

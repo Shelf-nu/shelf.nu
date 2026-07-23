@@ -137,7 +137,7 @@ export function AssetStatusBadge({
   /**
    * For quantity-tracked assets, render the qty-aware branch even before
    * the lazy fetch resolves. The label falls back to the asset's bare
-   * status until the breakdown lands; on resolve, "Checked out" may refine
+   * status until the breakdown lands; on resolve, "Emprestado" may refine
    * to "Partially checked out" etc. The hover-card stays empty until
    * either inline or lazy data is available — Radix HoverCard skips
    * rendering when the content is empty.
@@ -162,7 +162,7 @@ export function AssetStatusBadge({
     // When the caller has opted out via `suppressQtyAware`, the
     // caller-supplied `status` is authoritative — we never relabel based
     // on the global qty breakdown. This is what keeps an AVAILABLE QT
-    // booking row reading as "Available" even though the global
+    // booking row reading as "Disponível" even though the global
     // `bookingAssets` snapshot might otherwise infer "Partial custody"
     // from other-booking/custody activity.
     const useCallerStatus =

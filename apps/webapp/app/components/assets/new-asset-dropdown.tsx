@@ -2,7 +2,7 @@
  * "+New asset" Split-Button Dropdown
  *
  * Surfaces the alternative creation paths next to the primary
- * "New asset" CTA on the `/assets` index page without changing the
+ * "Novo Equipamento" CTA on the `/assets` index page without changing the
  * default click target. The main button still navigates to
  * `/assets/new` (no regression for users who don't engage the menu);
  * the caret button next to it opens a Popover with shortcuts to:

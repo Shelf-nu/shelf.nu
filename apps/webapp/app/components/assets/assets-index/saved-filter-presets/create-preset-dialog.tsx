@@ -100,7 +100,7 @@ export function CreatePresetDialog({
                 Cancel
               </Button>
               <Button type="submit" disabled={!name.trim() || isSubmitting}>
-                {isSubmitting ? "Saving..." : "Save"}
+                {isSubmitting ? "Saving..." : "Salvar"}
               </Button>
             </div>
           </Form>

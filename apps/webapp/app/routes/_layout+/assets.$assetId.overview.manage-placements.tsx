@@ -50,7 +50,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Manage placements") }];
+export const meta = () => [{ title: appendToMetaTitle("Gerenciar posicionamentos") }];
 
 export function links() {
   return [{ rel: "stylesheet", href: styles }];

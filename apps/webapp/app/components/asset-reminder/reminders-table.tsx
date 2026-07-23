@@ -21,7 +21,7 @@ type RemindersTableProps = {
 };
 
 export const REMINDERS_SORTING_OPTIONS = {
-  name: "Name",
+  name: "Nome",
   alertDateTime: "Alert Time",
   createdAt: "Date Created",
   updatedAt: "Date Updated",

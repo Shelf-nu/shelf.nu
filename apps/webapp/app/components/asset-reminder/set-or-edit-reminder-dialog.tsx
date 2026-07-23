@@ -121,7 +121,7 @@ export default function SetOrEditReminderDialog({
               error={
                 validationErrors?.name?.message || zo.errors.name()?.message
               }
-              label="Name"
+              label="Nome"
               disabled={disabled}
               required
               placeholder="Enter name of reminder"
@@ -136,7 +136,7 @@ export default function SetOrEditReminderDialog({
                   validationErrors?.message?.message ||
                   zo.errors.message()?.message
                 }
-                label="Message"
+                label="Mensagem"
                 disabled={disabled}
                 required
                 placeholder="Enter description..."
@@ -172,7 +172,7 @@ export default function SetOrEditReminderDialog({
                   validationErrors?.alertDateTime?.message ||
                   zo.errors.alertDateTime()?.message
                 }
-                label="Reminder Date"
+                label="Data do lembrete"
                 disabled={disabled}
                 required
                 placeholder="Enter description..."

@@ -22,7 +22,7 @@ export const ImportButton = ({
           }
         : false
     }
-    title="Import assets"
+    title="Importar Equipamentos"
   >
     Import
   </Button>

@@ -96,7 +96,7 @@ function makeQtAssetWithCustodyElsewhere(): QuantityAwareAsset {
 
 describe("AssetStatusBadge", () => {
   describe("suppressQtyAware (booking-row escape hatch)", () => {
-    it("renders 'Available' for an AVAILABLE QT row even when global custody would infer 'Partial custody'", () => {
+    it("renders 'Disponível' for an AVAILABLE QT row even when global custody would infer 'Partial custody'", () => {
       // Case (a): the booking-row use case. The caller knows this row
       // is AVAILABLE for THIS booking; the global custody slice on the
       // pooled asset must not bleed in as "Partial custody".
@@ -110,7 +110,7 @@ describe("AssetStatusBadge", () => {
         />
       );
 
-      expect(screen.getByText("Available")).toBeInTheDocument();
+      expect(screen.getByText("Disponível")).toBeInTheDocument();
       expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
       expect(
         screen.queryByText(/partially checked out/i)
@@ -153,7 +153,7 @@ describe("AssetStatusBadge", () => {
       );
 
       expect(screen.getByText("Partial custody")).toBeInTheDocument();
-      expect(screen.queryByText("Available")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disponível")).not.toBeInTheDocument();
     });
 
     it("does not enable the lazy /quantity-breakdown fetch when suppressQtyAware is set on a QT asset", () => {
@@ -211,7 +211,7 @@ describe("AssetStatusBadge", () => {
           asset={individualAsset}
         />
       );
-      expect(screen.getByText("Available")).toBeInTheDocument();
+      expect(screen.getByText("Disponível")).toBeInTheDocument();
 
       // Flip the flag — output must stay identical.
       rerender(
@@ -223,7 +223,7 @@ describe("AssetStatusBadge", () => {
           asset={individualAsset}
         />
       );
-      expect(screen.getByText("Available")).toBeInTheDocument();
+      expect(screen.getByText("Disponível")).toBeInTheDocument();
     });
   });
 });

@@ -41,7 +41,7 @@ export default function BookingActionsDropdown() {
       indexType: "asset",
       id: asset.id,
       disabled,
-      label: "Create new booking",
+      label: "Criar nova reserva",
       icon: "bookings",
       to: "overview/create-new-booking",
     },

@@ -202,7 +202,7 @@ export function ConfigureColumnsDropdown() {
                               }
                             }}
                             className="flex flex-1 items-center text-[14px] font-medium text-gray-700 hover:cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-                            title="Custom field"
+                            title="Campo personalizado"
                           >
                             {" "}
                             <FakeCheckbox

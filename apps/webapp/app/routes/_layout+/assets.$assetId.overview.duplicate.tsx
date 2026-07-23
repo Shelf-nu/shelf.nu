@@ -31,7 +31,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Duplicate asset") }];
+export const meta = () => [{ title: appendToMetaTitle("Duplicar Equipamento") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

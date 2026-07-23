@@ -23,7 +23,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Create new booking") }];
+export const meta = () => [{ title: appendToMetaTitle("Criar nova reserva") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
@@ -48,7 +48,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         title: "Not allowed",
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -79,7 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message:
           "Seems like something is wrong with your user. Please contact support to get this resolved. Make sure to include the trace id seen below.",
-        label: "Booking",
+        label: "Reserva",
       });
     }
 

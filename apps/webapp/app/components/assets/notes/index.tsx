@@ -1,7 +1,7 @@
 /**
  * Asset activity log UI.
  *
- * Renders an asset's notes (the "Activity" tab) using the shared list toolbar
+ * Renders an asset's notes (the "Atividade" tab) using the shared list toolbar
  * (`Filters` + `StatusFilter` + `Pagination`, with `SearchForm` built into
  * `Filters`) so the stream can be filtered by type, searched, and paginated
  * like every other list in the app. Reads the paginated list-response shape

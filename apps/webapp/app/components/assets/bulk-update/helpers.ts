@@ -9,7 +9,7 @@
  */
 
 /** Identifier columns we accept, in order of preference */
-export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
+export const ACCEPTED_ID_COLUMNS = ["ID do Equipamento", "ID"] as const;
 
 /** Maximum number of asset change rows to display in the preview */
 export const PREVIEW_DISPLAY_LIMIT = 50;

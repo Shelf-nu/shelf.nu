@@ -23,7 +23,7 @@ vitest.mock("~/utils/custom-fields", () => ({
 
     // Simulate boolean field behavior
     if (Object.hasOwnProperty.call(value, "valueBoolean")) {
-      return value.valueBoolean ? "Yes" : "No";
+      return value.valueBoolean ? "Sim" : "Não";
     }
 
     // Simulate multi-line text field behavior (returns React node object)
@@ -561,7 +561,7 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
     { id: "field1", name: "Is Active", type: "BOOLEAN" as CustomFieldType },
     {
       id: "field2",
-      name: "Description",
+      name: "Descrição",
       type: "MULTILINE_TEXT" as CustomFieldType,
     },
   ];
@@ -592,8 +592,8 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
     expect(result).toEqual([
       {
         customFieldName: "Is Active",
-        previousValue: "Yes",
-        newValue: "No",
+        previousValue: "Sim",
+        newValue: "Não",
         isFirstTimeSet: false,
       },
     ]);
@@ -607,7 +607,7 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
         value: { valueMultiLineText: true, raw: "Old markdown content" },
         customField: {
           id: "field2",
-          name: "Description",
+          name: "Descrição",
           type: "MULTILINE_TEXT" as CustomFieldType,
         },
       },
@@ -627,7 +627,7 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
 
     expect(result).toEqual([
       {
-        customFieldName: "Description",
+        customFieldName: "Descrição",
         previousValue: "Old markdown content",
         newValue: "New markdown content",
         isFirstTimeSet: false,

@@ -518,7 +518,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Overview",
+  breadcrumb: () => "Visão geral",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -962,14 +962,14 @@ export default function AssetOverview() {
 
               <InlineEditableField
                 fieldName="category"
-                label="Category"
+                label="Categoria"
                 canEdit={canEditAsset}
                 renderDisplay={() => (
                   <Badge
                     color={asset.category?.color ?? "#808080"}
                     withDot={false}
                   >
-                    {asset.category?.name ?? "Uncategorized"}
+                    {asset.category?.name ?? "Sem categoria"}
                   </Badge>
                 )}
                 renderEditor={() => (
@@ -977,7 +977,7 @@ export default function AssetOverview() {
                     fieldName="fieldValue"
                     defaultValue={asset.category?.id ?? undefined}
                     model={{ name: "category", queryKey: "name" }}
-                    contentLabel="Categories"
+                    contentLabel="Categorias"
                     placeholder="Select category"
                     initialDataKey="categories"
                     countKey="totalCategories"
@@ -992,7 +992,7 @@ export default function AssetOverview() {
                 /*
                  * QUANTITY_TRACKED variant: render every placement with
                  * its per-location qty, and route the pencil edit
-                 * button to the multi-row "Manage placements" modal
+                 * button to the multi-row "Gerenciar posicionamentos" modal
                  * instead of the inline single-location editor. Same
                  * shell as `InlineEditableField` so the row visually
                  * matches the rest of the detail list. INDIVIDUAL
@@ -1078,8 +1078,8 @@ export default function AssetOverview() {
                         // because it's mounted from the parent route.
                         to="manage-placements"
                         variant="link"
-                        aria-label="Manage placements"
-                        title="Manage placements"
+                        aria-label="Gerenciar posicionamentos"
+                        title="Gerenciar posicionamentos"
                         className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
                       >
                         <Icon icon="pen" />
@@ -1090,7 +1090,7 @@ export default function AssetOverview() {
               ) : (
                 <InlineEditableField
                   fieldName="location"
-                  label="Location"
+                  label="Local"
                   canEdit={canEditAsset}
                   isEmpty={!location}
                   renderDisplay={() =>
@@ -1124,18 +1124,18 @@ export default function AssetOverview() {
 
               <InlineEditableField
                 fieldName="description"
-                label="Description"
+                label="Descrição"
                 canEdit={canEditAsset}
                 isEmpty={!asset.description}
                 renderDisplay={() => (
                   <div className="whitespace-pre-wrap text-gray-600">
-                    {asset.description || "No description"}
+                    {asset.description || "Sem descrição"}
                   </div>
                 )}
                 renderEditor={() => (
                   <div>
                     <Input
-                      label="Description"
+                      label="Descrição"
                       hideLabel
                       inputType="textarea"
                       name="fieldValue"
@@ -1179,7 +1179,7 @@ export default function AssetOverview() {
 
               <InlineEditableField
                 fieldName="valuation"
-                label="Value"
+                label="Valor"
                 canEdit={canEditAsset}
                 isEmpty={asset.valuation == null}
                 renderDisplay={() => (
@@ -1211,7 +1211,7 @@ export default function AssetOverview() {
                    * the numeric keypad.
                    */
                   <Input
-                    label="Value"
+                    label="Valor"
                     hideLabel
                     type="text"
                     inputMode="decimal"
@@ -1353,7 +1353,7 @@ export default function AssetOverview() {
           (canEditAsset && allCustomFields.length > 0) ? (
             <>
               <TextualDivider
-                text="Custom fields"
+                text="Campos personalizados"
                 className="mb-8 pt-3 lg:hidden"
               />
               <Card className="my-3 px-[-4] py-[-5] md:border">
@@ -1374,7 +1374,7 @@ export default function AssetOverview() {
                         })
                       : null;
 
-                    /* Hide "Not set" rows from view-only users */
+                    /* Hide "Não definido" rows from view-only users */
                     if (!hasValue && !canEditAsset) return null;
 
                     return (
@@ -1941,7 +1941,7 @@ export default function AssetOverview() {
  * Supports tri-state: yes / no / unset (empty string).
  * When `isUnset` is true the hidden input sends "" which
  * `buildCustomFieldValue` treats as undefined (no value stored).
- * This prevents "Not set" booleans from being forced to "no" on save.
+ * This prevents "Não definido" booleans from being forced to "no" on save.
  */
 function BooleanCustomFieldEditor({
   name,

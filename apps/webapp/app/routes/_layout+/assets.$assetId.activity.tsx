@@ -107,7 +107,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Activity",
+  breadcrumb: () => "Atividade",
 };
 
 export default function AssetActivity() {
@@ -122,7 +122,7 @@ export default function AssetActivity() {
     <div className="w-full">
       {canReadNotes ? (
         <>
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+          <TextualDivider text="Notas" className="mb-8 lg:hidden" />
           <Notes />
         </>
       ) : (

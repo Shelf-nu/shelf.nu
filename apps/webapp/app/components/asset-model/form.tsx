@@ -120,7 +120,7 @@ export default function AssetModelForm({
         <div className="gap-4 md:flex md:items-end">
           <Input
             ref={nameInputRef}
-            label="Name"
+            label="Nome"
             placeholder="Asset model name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
@@ -131,7 +131,7 @@ export default function AssetModelForm({
             defaultValue={assetModel?.name}
           />
           <Input
-            label="Description"
+            label="Descrição"
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}
@@ -161,7 +161,7 @@ export default function AssetModelForm({
               className="flex-1"
               disabled={disabled}
             >
-              {disabled ? "Creating..." : "Create"}
+              {disabled ? "Creating..." : "Criar"}
             </Button>
           </div>
 
@@ -233,13 +233,13 @@ function FullPageForm({
 
         {/* -- Name -- */}
         <FormRow
-          rowLabel="Name"
+          rowLabel="Nome"
           className="border-b-0 pb-[10px]"
           required={true}
         >
           <Input
             ref={nameInputRef}
-            label="Name"
+            label="Nome"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
@@ -253,14 +253,14 @@ function FullPageForm({
 
         {/* -- Description -- */}
         <FormRow
-          rowLabel="Description"
+          rowLabel="Descrição"
           subHeading="A short description of this asset model. Maximum 1000 characters."
           className="border-b-0 pb-[10px]"
         >
           <Input
             inputType="textarea"
             maxLength={1000}
-            label="Description"
+            label="Descrição"
             hideLabel
             name={zo.fields.description()}
             disabled={disabled}
@@ -281,8 +281,8 @@ function FullPageForm({
             defaultValue={assetModel?.defaultCategoryId ?? undefined}
             model={{ name: "category", queryKey: "name" }}
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left"
-            contentLabel="Categories"
-            label="Category"
+            contentLabel="Categorias"
+            label="Categoria"
             hideLabel
             fieldName="defaultCategoryId"
             initialDataKey="categories"
@@ -346,7 +346,7 @@ function Actions({ disabled }: { disabled: boolean }) {
     <>
       {/* Save is first in DOM so Enter triggers it */}
       <Button type="submit" disabled={disabled} className="order-last">
-        {disabled ? "Saving..." : "Save"}
+        {disabled ? "Saving..." : "Salvar"}
       </Button>
       <Button
         variant="secondary"

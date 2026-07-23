@@ -598,7 +598,7 @@ function BooleanField({
     if (disabled) return;
     setIsPopoverOpen(open);
     if (open) {
-      // Seed highlight on the current value — "Yes" (0) or "No" (1).
+      // Seed highlight on the current value — "Sim" (0) or "Não" (1).
       setSelectedIndex(boolValue ? 0 : 1);
     }
   }
@@ -646,7 +646,7 @@ function BooleanField({
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
             <span className="ml-2">
-              {disabled ? "Select a column first" : boolValue ? "Yes" : "No"}
+              {disabled ? "Select a column first" : boolValue ? "Sim" : "Não"}
             </span>{" "}
           </Button>
         </PopoverTrigger>
@@ -982,7 +982,7 @@ function CustodyEnumField({
     placeholder: "Search team members",
     withValueItem: {
       id: "in-custody",
-      name: "In custody",
+      name: "Em guarda",
     },
     withoutValueItem: {
       id: "without-custody",
@@ -1014,7 +1014,7 @@ function CustodyEnumField({
                   ? selectedIds
                       .map((id) => {
                         if (id === "in-custody") {
-                          return "In custody";
+                          return "Em guarda";
                         }
                         if (id === "without-custody") {
                           return "Without custody";
@@ -1066,7 +1066,7 @@ function CustodyEnumField({
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
-      contentLabel="Custodian"
+      contentLabel="Responsável"
     />
   );
 }
@@ -1118,7 +1118,7 @@ function CategoryEnumField({
     placeholder: "Search categories",
     withoutValueItem: {
       id: "uncategorized",
-      name: "Uncategorized",
+      name: "Sem categoria",
     },
     disabled,
   };
@@ -1148,7 +1148,7 @@ function CategoryEnumField({
                   ? selectedIds
                       .map((id) => {
                         if (id === "uncategorized") {
-                          return "Uncategorized";
+                          return "Sem categoria";
                         }
                         const category = data.categories?.find(
                           (cat) => cat.id === id
@@ -1188,7 +1188,7 @@ function CategoryEnumField({
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
-      contentLabel="Category"
+      contentLabel="Categoria"
     />
   );
 }
@@ -1303,7 +1303,7 @@ function AssetModelEnumField({
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
-      contentLabel="Asset model"
+      contentLabel="Modelo de Equipamento"
     />
   );
 }
@@ -1432,7 +1432,7 @@ function LocationEnumField({
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
-      contentLabel="Location"
+      contentLabel="Local"
     />
   );
 }
@@ -1688,7 +1688,7 @@ function UpcomingBookingsEnumField({
       closeOnSelect={true}
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
-      contentLabel="Booking"
+      contentLabel="Reserva"
     />
   );
 }

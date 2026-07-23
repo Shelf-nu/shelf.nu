@@ -49,7 +49,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { slugify } from "~/utils/slugify";
 
-const title = "New asset";
+const title = "Novo Equipamento";
 const header = {
   title,
 };
