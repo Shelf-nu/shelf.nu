@@ -30,6 +30,7 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
+import { passwordSchema } from "~/utils/zod";
 
 const ForgotPasswordSchema = z.object({
   email: z
@@ -44,10 +45,10 @@ const OtpSchema = z
   .object({
     otp: z.string().min(6, "OTP is required."),
     email: z.string().transform((email) => email.toLowerCase()),
-    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
-    confirmPassword: z
-      .string()
-      .min(8, "Password is too short. Minimum 8 characters."),
+    password: passwordSchema("Password is too short. Minimum 8 characters."),
+    confirmPassword: passwordSchema(
+      "Password is too short. Minimum 8 characters."
+    ),
   })
   .superRefine(({ password, confirmPassword, otp, email }, ctx) => {
     if (password !== confirmPassword) {

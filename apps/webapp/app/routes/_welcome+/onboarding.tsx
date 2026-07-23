@@ -60,6 +60,7 @@ import {
 } from "~/utils/http.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import { passwordSchema } from "~/utils/zod";
 
 const trimString = (value: unknown) =>
   typeof value === "string" ? value.trim() : value;
@@ -106,12 +107,15 @@ function createOnboardingSchema({
         .min(4, { message: "Must be at least 4 characters long" }),
       firstName: z.string().min(1, { message: "First name is required" }),
       lastName: z.string().min(1, { message: "Last name is required" }),
+      // When the user already has a password (e.g. signed up via email/pass),
+      // the field is optional and unconstrained — they are not setting one here.
+      // Only the setter branch enforces the 8–72 char bounds.
       password: userSignedUpWithPassword
         ? z.string().optional()
-        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+        : passwordSchema("Password is too short. Minimum 8 characters."),
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
-        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+        : passwordSchema("Password is too short. Minimum 8 characters."),
       referralSource: shouldCollectBusinessIntel
         ? z.string().min(5, "Field is required.")
         : z.string().optional().nullable(),
