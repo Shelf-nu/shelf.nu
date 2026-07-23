@@ -48,6 +48,27 @@ export function isExpectedErrorBoundaryStatus(
   );
 }
 
+/** A single serialized exception entry within a Sentry error event. */
+type SentryExceptionValue = NonNullable<
+  NonNullable<ErrorEvent["exception"]>["values"]
+>[number];
+
+/**
+ * Whether an exception value has NO first-party (`in_app`) stack frame — i.e.
+ * no application-code origin we could act on.
+ *
+ * Noise filters use this to stay narrow: an error thrown by OUR code carries
+ * `in_app` frames (it identifies a fixable bug and its on-screen Error ID must
+ * stay resolvable in Sentry), whereas the browser/extension/gateway noise we
+ * want to drop has no first-party origin.
+ *
+ * @param value - A serialized Sentry exception entry
+ * @returns `true` when none of its frames are first-party
+ */
+function hasNoFirstPartyFrame(value: SentryExceptionValue): boolean {
+  return !(value.stacktrace?.frames?.some((f) => f.in_app === true) ?? false);
+}
+
 /**
  * Bare 3-digit gateway codes (502/503/504) that show up as an error `value`
  * with no JS origin — transient deploy/gateway blips, not app bugs.
@@ -82,9 +103,7 @@ function isBareGatewayStatusError(event: ErrorEvent): boolean {
       return false;
     }
     // No first-party frames → no JS origin we could act on.
-    const hasFirstPartyFrame =
-      v.stacktrace?.frames?.some((f) => f.in_app === true) ?? false;
-    return !hasFirstPartyFrame;
+    return hasNoFirstPartyFrame(v);
   });
 }
 
@@ -134,11 +153,18 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
     return null;
   }
 
-  // Hard-filter `DataCloneError` ("The object can not be cloned."). Thrown by
-  // structuredClone / postMessage / IndexedDB when a non-cloneable value is
-  // passed; always unhandled and never actionable from app code. Matched by
-  // the serialized error name (Sentry puts the constructor name in `.type`).
-  if (event.exception?.values?.some((v) => v.type === "DataCloneError")) {
+  // Hard-filter `DataCloneError` ("The object can not be cloned.") that has NO
+  // first-party origin. Thrown by structuredClone / postMessage / IndexedDB on
+  // a non-cloneable value — usually from browser internals or extensions.
+  // Matched by the serialized error name (Sentry puts the constructor name in
+  // `.type`). The no-first-party-frames guard keeps a DataCloneError thrown by
+  // OUR code capturable: it flags a fixable bug and its on-screen Error ID must
+  // stay resolvable in Sentry (see hasNoFirstPartyFrame).
+  if (
+    event.exception?.values?.some(
+      (v) => v.type === "DataCloneError" && hasNoFirstPartyFrame(v)
+    )
+  ) {
     return null;
   }
 

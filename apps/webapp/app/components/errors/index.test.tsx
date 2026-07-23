@@ -73,6 +73,10 @@ vi.mock("./error-404-handler", () => ({
   default: mockError404Handler,
 }));
 
+// why: react-doctor flags this as no-barrel-import, but index.tsx DEFINES
+// ErrorContent (it is not a re-export barrel), so this is the only import path.
+// Extracting ErrorContent to its own module would turn index.tsx into a true
+// barrel and flag all ~44 route consumers instead. Advisory-only; left as-is.
 import { ErrorContent } from "./index";
 
 /** The Back-to-home/Reload link buttons need a router context to render */

@@ -63,12 +63,24 @@ describe("isExpectedErrorBoundaryStatus", () => {
 });
 
 describe("handleClientBeforeSend — noise filters", () => {
-  it("drops DataCloneError (unactionable structuredClone/postMessage noise)", () => {
+  it("drops a DataCloneError with no first-party frames (browser/extension noise)", () => {
     const event = makeEvent({
       type: "DataCloneError",
       value: "The object can not be cloned.",
     });
     expect(handleClientBeforeSend(event)).toBeNull();
+  });
+
+  it("keeps a DataCloneError that carries first-party frames (fixable app bug)", () => {
+    // A DataCloneError thrown by OUR code (structuredClone/postMessage of a
+    // non-cloneable value) has in_app frames → it flags a fixable bug and must
+    // stay capturable so its on-screen Error ID resolves in Sentry.
+    const event = makeEvent({
+      type: "DataCloneError",
+      value: "The object can not be cloned.",
+      inApp: true,
+    });
+    expect(handleClientBeforeSend(event)).toBe(event);
   });
 
   it("drops a bare gateway-status blip (Error: 502 with no first-party frames)", () => {
