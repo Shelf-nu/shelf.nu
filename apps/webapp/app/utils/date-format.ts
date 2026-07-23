@@ -327,6 +327,58 @@ function pad2(value: string): string {
 }
 
 /**
+ * Bounded, module-level cache of `Intl.DateTimeFormat` instances.
+ *
+ * `formatDate` builds several formatters per call (numeric parts, month name,
+ * weekday, time-zone name), so a large export (e.g. 10k rows) would otherwise
+ * allocate tens of thousands of formatter objects. Constructing an
+ * `Intl.DateTimeFormat` is comparatively expensive; memoizing by
+ * `(locale, options)` lets repeated calls with the same shape reuse one
+ * instance. This is a pure performance optimization — the same formatter yields
+ * byte-identical output, so no caller output changes.
+ *
+ * `Map` preserves insertion order, so eviction below is FIFO.
+ */
+const FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>();
+
+/** Max cached formatters before the oldest entry is FIFO-evicted. */
+const FORMATTER_CACHE_MAX = 200;
+
+/**
+ * Return a memoized `Intl.DateTimeFormat` for `(locale, options)`, constructing
+ * one on first use. The cache key includes the locale and every option that
+ * affects output (including `timeZone`, via `JSON.stringify`), so distinct
+ * shapes never share an instance. Bounded to {@link FORMATTER_CACHE_MAX}
+ * entries with FIFO eviction to prevent unbounded growth from many distinct
+ * timezones/option shapes.
+ *
+ * @param locale - the BCP-47 locale (always "en-US" on the format path)
+ * @param options - the Intl field set to request (incl. any `timeZone`)
+ * @returns the memoized formatter instance
+ * @throws {RangeError} if `Intl.DateTimeFormat` rejects the options (e.g. an
+ *   invalid `timeZone`) — construction happens before caching, so a bad key is
+ *   never stored.
+ */
+export function getCachedFormatter(
+  locale: string,
+  options: Intl.DateTimeFormatOptions
+): Intl.DateTimeFormat {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  const cached = FORMATTER_CACHE.get(key);
+  if (cached) return cached;
+  // Construct BEFORE mutating the cache so a throwing options set (bad timeZone)
+  // never leaves a partially-populated/undefined entry behind.
+  const formatter = new Intl.DateTimeFormat(locale, options);
+  if (FORMATTER_CACHE.size >= FORMATTER_CACHE_MAX) {
+    // Oldest key is first in insertion order — FIFO eviction.
+    const oldestKey = FORMATTER_CACHE.keys().next().value;
+    if (oldestKey !== undefined) FORMATTER_CACHE.delete(oldestKey);
+  }
+  FORMATTER_CACHE.set(key, formatter);
+  return formatter;
+}
+
+/**
  * Run a fixed-"en-US" formatToParts against the instant and return a
  * type→value map (literals dropped). `timeZone` undefined ⇒ no conversion.
  *
@@ -348,9 +400,9 @@ function partsFor(
   // never throw mid-loop and drop everyone else's notifications. Fall back to UTC.
   let formatter: Intl.DateTimeFormat;
   try {
-    formatter = new Intl.DateTimeFormat("en-US", options);
+    formatter = getCachedFormatter("en-US", options);
   } catch {
-    formatter = new Intl.DateTimeFormat("en-US", {
+    formatter = getCachedFormatter("en-US", {
       ...intlOptions,
       timeZone: "UTC",
     });

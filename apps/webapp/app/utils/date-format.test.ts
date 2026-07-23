@@ -162,7 +162,7 @@ describe("resolveFormatPrefs", () => {
   });
 });
 
-import { formatDate, isValidTimeZone } from "./date-format";
+import { formatDate, getCachedFormatter, isValidTimeZone } from "./date-format";
 import type {
   DateFormatOptions,
   RawFormatPrefs,
@@ -502,5 +502,66 @@ describe("timezone validation — corrupted/forged zones never throw", () => {
     expect(() => formatDate(V, corrupted)).not.toThrow();
     // Falls back to UTC: V = 2026-06-22T21:05Z → 06/22/2026 in UTC.
     expect(formatDate(V, corrupted)).toBe("06/22/2026");
+  });
+});
+
+describe("getCachedFormatter — memoizes Intl.DateTimeFormat instances", () => {
+  it("returns the SAME instance for identical (locale, options)", () => {
+    const options: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      timeZone: "America/New_York",
+    };
+    const first = getCachedFormatter("en-US", options);
+    // A fresh options object with the same shape must hit the cache, not
+    // reconstruct — the key is (locale, JSON.stringify(options)), not identity.
+    const second = getCachedFormatter("en-US", { ...options });
+    expect(second).toBe(first);
+  });
+
+  it("returns DIFFERENT instances when a relevant option (incl. timeZone) differs", () => {
+    const base: Intl.DateTimeFormatOptions = {
+      hour: "numeric",
+      minute: "2-digit",
+    };
+    const ny = getCachedFormatter("en-US", {
+      ...base,
+      timeZone: "America/New_York",
+    });
+    const tokyo = getCachedFormatter("en-US", {
+      ...base,
+      timeZone: "Asia/Tokyo",
+    });
+    const noTz = getCachedFormatter("en-US", base);
+    expect(ny).not.toBe(tokyo);
+    expect(ny).not.toBe(noTz);
+    expect(tokyo).not.toBe(noTz);
+  });
+
+  it("produces the same formatted output as a freshly-constructed formatter", () => {
+    // The cached formatter must be behaviorally identical to a new one.
+    const options: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: "Europe/Sofia",
+    };
+    const instant = new Date("2026-06-22T21:05:00Z");
+    const cached = getCachedFormatter("en-US", options).format(instant);
+    const fresh = new Intl.DateTimeFormat("en-US", options).format(instant);
+    expect(cached).toBe(fresh);
+  });
+
+  it("does not change formatDate output (memoization is transparent)", () => {
+    // Repeated calls (the export hot path) must be byte-identical to a
+    // single call — the cache only affects allocation, never output.
+    const once = formatDate(V, US, { dateStyle: "short", timeStyle: "short" });
+    for (let i = 0; i < 5; i++) {
+      expect(
+        formatDate(V, US, { dateStyle: "short", timeStyle: "short" })
+      ).toBe(once);
+    }
+    expect(once).toBe("06/22/2026, 5:05 PM");
   });
 });
