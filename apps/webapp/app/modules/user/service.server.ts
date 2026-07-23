@@ -626,10 +626,6 @@ export async function updateUserFromSSO(
           (uo) => uo.organization.id === org.id
         );
 
-        if (desiredRole) {
-          firstMatchedOrg ??= org;
-        }
-
         if (existingOrgAccess) {
           const transition = await handleSCIMTransition(
             userId,
@@ -638,6 +634,13 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
+
+          // The user keeps access only when a role still maps; a null
+          // desiredRole makes handleSCIMTransition revoke it, so that org must
+          // not become the post-login landing org.
+          if (desiredRole) {
+            firstMatchedOrg ??= org;
+          }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
           await createUserOrgAssociation(db, {
             userId: user.id,
@@ -658,7 +661,13 @@ export async function updateUserFromSSO(
             newRole: desiredRole,
             transitionType: "ACCESS_GRANTED",
           });
+
+          // Access was just granted, so this org is a valid landing org.
+          firstMatchedOrg ??= org;
         }
+        // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
+        // (SCIM-deactivated user): returning an org the user cannot access sends
+        // the SSO callback to a 403 instead of /sso-pending-assignment.
       }
     }
 

@@ -531,19 +531,25 @@ export async function createScimUser(
       );
     }
 
-    // Exists but not yet SCIM-managed here. Grant membership if they aren't
-    // already a member (covers a user shared via a common SSO domain), then
-    // adopt them by creating the mapping (covers an existing SSO/invite member
-    // the IdP now manages). We never mutate the global identity here (see #1).
+    // Exists but not yet SCIM-managed here. Adopt them by creating the mapping
+    // (covers an existing SSO/invite member the IdP now manages) and reconcile
+    // their access to the requested `active` state. We never mutate the global
+    // identity here (see #1).
     //
-    // A user provisioned as inactive is adopted WITHOUT being granted access.
-    // An existing member provisioned as inactive keeps their access: POST is
-    // not the deactivation verb, so we report their real state and leave it to
-    // a PATCH/PUT to remove it.
+    // Adoption makes SCIM authoritative for this user in this org, so the
+    // returned lifecycle state must match what was requested — an inactive
+    // resource must not have access (RFC 7643 §4.1), whether it was newly
+    // created or adopted:
+    //  - inactive + not a member  → stay without access;
+    //  - inactive + existing member → revoke, so we don't return active:true;
+    //  - active + not a member    → grant.
     let hasMembership = existingUser.userOrganizations.length > 0;
     if (!hasMembership && shouldBeActive) {
       await grantScimMembership(existingUser.id, organizationId, displayName);
       hasMembership = true;
+    } else if (hasMembership && !shouldBeActive) {
+      await revokeScimMembership(existingUser.id, organizationId);
+      hasMembership = false;
     }
     await createScimMapping(existingUser.id, organizationId, externalId, email);
 

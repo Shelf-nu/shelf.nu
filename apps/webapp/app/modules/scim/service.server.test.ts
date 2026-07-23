@@ -483,6 +483,36 @@ describe("createScimUser", () => {
     expect(result.active).toBe(false);
   });
 
+  it("should revoke access when adopting an existing MEMBER as inactive", async () => {
+    // Adoption makes SCIM authoritative, so an active:false POST must not return
+    // an active user. An existing member is revoked so the state matches the
+    // request (otherwise a suspended identity keeps access).
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUnique.mockResolvedValue({
+      ...mockShelfUser,
+      scimExternalIds: [],
+      userOrganizations: [{ id: "uo-1" }],
+    });
+    // @ts-expect-error - vitest mock type
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.create.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
+
+    const result = await createScimUser(ORG_ID, {
+      userName: "jane@example.com",
+      externalId: SCIM_ID,
+      active: false,
+    });
+
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalledWith({
+      userId: "user-abc",
+      organizationId: ORG_ID,
+    });
+    expect(result.active).toBe(false);
+  });
+
   it("should reject provisioning an email outside the org's SSO domain (400)", async () => {
     await expect(
       createScimUser(ORG_ID, {
