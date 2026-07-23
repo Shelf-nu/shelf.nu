@@ -98,7 +98,7 @@ export default function LocationActivity() {
     <div className="w-full">
       {canReadNotes ? (
         <>
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+          <TextualDivider text="Notas" className="mb-8 lg:hidden" />
           <LocationNotes
             canCreate={canCreateNotes}
             canDelete={canDeleteNotes}

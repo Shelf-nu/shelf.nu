@@ -136,7 +136,7 @@ export default function NewTag() {
           <div className="gap-3 lg:flex lg:items-end">
             <Input
               ref={nameInputRef}
-              label="Name"
+              label="Nome"
               placeholder="Tag name"
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
@@ -146,7 +146,7 @@ export default function NewTag() {
               required={zodFieldIsRequired(NewTagFormSchema.shape.name)}
             />
             <Input
-              label="Description"
+              label="Descrição"
               placeholder="Description (optional)"
               name={zo.fields.description()}
               disabled={disabled}

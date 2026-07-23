@@ -39,8 +39,8 @@ export default function CategoryQuickActions({
           variant="secondary"
           className={"p-2"}
           to={`${category.id}/edit`}
-          aria-label="Edit category"
-          tooltip="Edit category"
+          aria-label="Editar categoria"
+          tooltip="Editar categoria"
         >
           <PencilIcon className="size-4" />
         </Button>
@@ -61,8 +61,8 @@ export default function CategoryQuickActions({
               size="sm"
               variant="secondary"
               className={"p-2"}
-              aria-label="Delete category"
-              tooltip="Delete category"
+              aria-label="Excluir categoria"
+              tooltip="Excluir categoria"
             >
               <Trash2Icon className="size-4" />
             </Button>

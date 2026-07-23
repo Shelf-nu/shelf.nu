@@ -34,7 +34,7 @@ export const UpdateCategoryFormSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
 });
 
-const title = "Edit category";
+const title = "Editar categoria";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -141,7 +141,7 @@ export default function EditCategory() {
         <div className="gap-3 lg:flex lg:items-end">
           <Input
             ref={nameInputRef}
-            label="Name"
+            label="Nome"
             placeholder="Category name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
@@ -152,7 +152,7 @@ export default function EditCategory() {
             defaultValue={category.name}
           />
           <Input
-            label="Description"
+            label="Descrição"
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}

@@ -172,7 +172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     await deleteLocation({ id, organizationId });
 
     sendNotification({
-      title: "Location deleted",
+      title: "Local excluído",
       message: "Your location has been deleted successfully",
       icon: { name: "trash", variant: "error" },
       senderId: authSession.userId,
@@ -203,8 +203,8 @@ export default function LocationPage() {
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   const items = [
-    { to: "overview", content: "Overview" },
-    { to: "assets", content: "Assets" },
+    { to: "overview", content: "Visão geral" },
+    { to: "assets", content: "Equipamentos" },
     { to: "kits", content: "Kits" },
     { to: "activity", content: "Activity" },
   ];

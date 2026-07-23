@@ -64,7 +64,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalLocations / perPage);
 
     const header: HeaderData = {
-      title: "Locations",
+      title: "Locais",
     };
     const modelName = {
       singular: "location",

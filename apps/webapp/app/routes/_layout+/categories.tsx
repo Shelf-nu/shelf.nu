@@ -72,7 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalCategories / perPage);
 
     const header: HeaderData = {
-      title: "Categories",
+      title: "Categorias",
     };
     const modelName = {
       singular: "category",
@@ -130,7 +130,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await deleteCategory({ id, organizationId });
 
     sendNotification({
-      title: "Category deleted",
+      title: "Categoria excluída",
       message: "Your category has been deleted successfully",
       icon: { name: "trash", variant: "error" },
       senderId: userId,

@@ -23,7 +23,7 @@ export const TagsAutocomplete = ({
 }) => (
   <MultiSelect
     className="w-full"
-    label="Tags"
+    label="Etiquetas"
     items={suggestions}
     defaultSelected={existingTags}
     labelKey="label"

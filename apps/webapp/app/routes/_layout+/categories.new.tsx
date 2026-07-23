@@ -15,7 +15,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-const title = "New category";
+const title = "Nova categoria";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

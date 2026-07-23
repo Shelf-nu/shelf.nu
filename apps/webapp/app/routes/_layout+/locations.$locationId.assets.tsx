@@ -279,7 +279,7 @@ export default function LocationAssets() {
       <ContextualSidebar />
       <ContextualModal />
 
-      <TextualDivider text="Assets" className="mb-4 lg:hidden" />
+      <TextualDivider text="Equipamentos" className="mb-4 lg:hidden" />
       <div className="flex flex-col md:gap-2">
         <Filters
           className="responsive-filters mb-2 lg:mb-0"

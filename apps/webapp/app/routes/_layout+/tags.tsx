@@ -74,7 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalTags / perPage);
 
     const header: HeaderData = {
-      title: "Tags",
+      title: "Etiquetas",
     };
     const modelName = {
       singular: "tag",
@@ -134,7 +134,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await deleteTag({ id, organizationId });
 
     sendNotification({
-      title: "Tag deleted",
+      title: "Etiqueta excluída",
       message: "Your tag has been deleted successfully",
       icon: { name: "trash", variant: "error" },
       senderId: userId,

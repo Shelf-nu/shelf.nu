@@ -51,8 +51,8 @@ export default function LocationQuickActions({
           variant="secondary"
           className="p-2"
           to={`/locations/${location.id}/edit`}
-          aria-label="Edit location"
-          tooltip="Edit location"
+          aria-label="Editar local"
+          tooltip="Editar local"
         >
           <PencilIcon className="size-4" />
         </Button>
@@ -96,8 +96,8 @@ export default function LocationQuickActions({
               size="sm"
               variant="secondary"
               className="p-2"
-              aria-label="Delete location"
-              tooltip="Delete location"
+              aria-label="Excluir local"
+              tooltip="Excluir local"
             >
               <Trash2Icon className="size-4" />
             </Button>

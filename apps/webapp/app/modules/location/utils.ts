@@ -16,7 +16,7 @@ import {
  */
 export const LOCATION_SORTING_OPTIONS = {
   createdAt: "Date created",
-  name: "Name",
+  name: "Nome",
   assets: "Number of assets",
 } as const;
 

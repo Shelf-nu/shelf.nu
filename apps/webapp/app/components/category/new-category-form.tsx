@@ -96,7 +96,7 @@ export default function NewCategoryForm({
       <div className={tw("gap-4 md:flex md:items-center", className)}>
         <Input
           ref={nameInputRef}
-          label="Name"
+          label="Nome"
           placeholder="Category name"
           className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
           name={zo.fields.name()}
@@ -107,7 +107,7 @@ export default function NewCategoryForm({
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />
         <Input
-          label="Description"
+          label="Descrição"
           placeholder="Description (optional)"
           name={zo.fields.description()}
           disabled={disabled}
@@ -163,7 +163,7 @@ export default function NewCategoryForm({
             className="flex-1"
             disabled={disabled}
           >
-            {disabled ? "Creating..." : "Create"}
+            {disabled ? "Creating..." : "Criar"}
           </Button>
         </div>
 

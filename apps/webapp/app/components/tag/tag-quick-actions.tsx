@@ -39,8 +39,8 @@ export default function TagQuickActions({
           variant="secondary"
           className={"p-2"}
           to={`${tag.id}/edit`}
-          aria-label="Edit tag"
-          tooltip="Edit tag"
+          aria-label="Editar etiqueta"
+          tooltip="Editar etiqueta"
         >
           <PencilIcon className="size-4" />
         </Button>
@@ -61,8 +61,8 @@ export default function TagQuickActions({
               size="sm"
               variant="secondary"
               className={"p-2"}
-              aria-label="Delete tag"
-              tooltip="Delete tag"
+              aria-label="Excluir etiqueta"
+              tooltip="Excluir etiqueta"
             >
               <Trash2Icon className="size-4" />
             </Button>

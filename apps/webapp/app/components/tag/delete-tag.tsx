@@ -35,7 +35,7 @@ export const DeleteTag = ({
       type="button"
       className="text-[12px]"
       icon={"trash"}
-      title={"Delete"}
+      title={"Excluir"}
       data-test-id="deleteCategoryButton"
     />
   );

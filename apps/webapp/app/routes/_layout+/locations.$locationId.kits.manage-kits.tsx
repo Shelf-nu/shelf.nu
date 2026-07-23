@@ -100,7 +100,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           message:
             "The location you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { locationId, userId, organizationId },
-          label: "Location",
+          label: "Local",
         });
       });
 

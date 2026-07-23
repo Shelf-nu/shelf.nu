@@ -1921,7 +1921,7 @@ export async function updateLocationAssets({
             message: "Location not found",
             additionalData: { locationId, userId, organizationId },
             status: 404,
-            label: "Location",
+            label: "Local",
             shouldBeCaptured: false,
           });
         }
@@ -2067,7 +2067,7 @@ export async function updateLocationAssets({
           message:
             "Something went wrong while fetching the assets. Please try again or contact support.",
           additionalData: { assetIds, removedAssetIds, userId, locationId },
-          label: "Assets",
+          label: "Equipamentos",
         });
       });
 
@@ -2179,7 +2179,7 @@ export async function updateLocationAssets({
           oversubscribed,
         },
         status: 400,
-        label: "Location",
+        label: "Local",
         shouldBeCaptured: false,
       });
     }
@@ -2429,7 +2429,7 @@ export async function updateLocationKits({
             message: "Location not found",
             additionalData: { locationId, userId, organizationId },
             status: 404,
-            label: "Location",
+            label: "Local",
             shouldBeCaptured: false,
           });
         }
@@ -2593,7 +2593,7 @@ export async function updateLocationKits({
             message:
               "Something went wrong while adding the kits to the location. Please try again or contact support.",
             additionalData: { kitIds, userId, locationId },
-            label: "Location",
+            label: "Local",
           });
         });
 
@@ -2769,7 +2769,7 @@ export async function updateLocationKits({
             message:
               "Something went wrong while removing the kits from the location. Please try again or contact support.",
             additionalData: { removedKitIds, userId, locationId },
-            label: "Location",
+            label: "Local",
           });
         });
 

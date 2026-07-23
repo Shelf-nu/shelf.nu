@@ -140,7 +140,7 @@ async function assertLocationBelongsToOrganization({
       message: "Location not found or access denied",
       status: 404,
       additionalData: { locationId, organizationId },
-      label: "Location",
+      label: "Local",
       shouldBeCaptured: false,
     });
   }

@@ -181,7 +181,7 @@ export default function ScanAssetsKitsForLocation() {
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Location"
+          backButtonText="Local"
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}

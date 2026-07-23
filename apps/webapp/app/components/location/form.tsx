@@ -171,13 +171,13 @@ export const LocationForm = ({
           truthy={hasOnSuccessFunc}
           fallback={
             <FormRow
-              rowLabel={"Name"}
+              rowLabel={"Nome"}
               className="border-b-0 pb-[10px] pt-0"
               required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
             >
               <Input
                 ref={nameInputRef}
-                label="Name"
+                label="Nome"
                 hideLabel
                 name={zo.fields.name()}
                 disabled={disabled}
@@ -194,7 +194,7 @@ export const LocationForm = ({
         >
           <Input
             ref={nameInputRef}
-            label="Name"
+            label="Nome"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
@@ -286,7 +286,7 @@ export const LocationForm = ({
           truthy={hasOnSuccessFunc}
           fallback={
             <FormRow
-              rowLabel={"Address"}
+              rowLabel={"Endereço"}
               subHeading={
                 <p>
                   Will set location’s geo position to address. Make sure to add
@@ -298,7 +298,7 @@ export const LocationForm = ({
               required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
             >
               <Input
-                label="Address"
+                label="Endereço"
                 hideLabel
                 name={zo.fields.address()}
                 disabled={disabled}
@@ -313,7 +313,7 @@ export const LocationForm = ({
           }
         >
           <Input
-            label="Address"
+            label="Endereço"
             name={zo.fields.address()}
             disabled={disabled}
             error={zo.errors.address()?.message}
@@ -327,7 +327,7 @@ export const LocationForm = ({
           truthy={hasOnSuccessFunc}
           fallback={
             <FormRow
-              rowLabel="Description"
+              rowLabel="Descrição"
               subHeading={
                 <p>
                   This is the initial object description. It will be shown on
@@ -340,7 +340,7 @@ export const LocationForm = ({
             >
               <Input
                 inputType="textarea"
-                label="Description"
+                label="Descrição"
                 hideLabel
                 name={zo.fields.description()}
                 defaultValue={description || ""}
@@ -357,7 +357,7 @@ export const LocationForm = ({
         >
           <Input
             inputType="textarea"
-            label="Description"
+            label="Descrição"
             name={zo.fields.description()}
             defaultValue={description || ""}
             placeholder="Add a description for your location."
@@ -377,7 +377,7 @@ export const LocationForm = ({
         <FormRow className="border-y-0 py-2" rowLabel="">
           <div className="ml-auto">
             <Button type="submit" disabled={disabled}>
-              {disabled ? <Spinner /> : "Save"}
+              {disabled ? <Spinner /> : "Salvar"}
             </Button>
           </div>
         </FormRow>
