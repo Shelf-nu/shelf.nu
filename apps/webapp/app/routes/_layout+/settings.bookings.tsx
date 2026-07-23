@@ -84,7 +84,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         title: "Not allowed",
         message:
           "You are not allowed to access working hours in a personal workspace.",
-        label: "Settings",
+        label: "Configurações",
         shouldBeCaptured: false,
       });
     }
@@ -96,7 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ]);
 
     const header: HeaderData = {
-      title: "Bookings settings",
+      title: "Configurações de Reservas",
     };
 
     return payload({
@@ -113,7 +113,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => "Bookings",
+  breadcrumb: () => "Reservas",
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -162,7 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         cause: null,
         message: "Invalid action",
         additionalData: { intent },
-        label: "Working hours",
+        label: "Horário comercial",
       });
     }
 
@@ -376,7 +376,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
                 {} as Record<string, string>
               ),
             },
-            label: "Working hours",
+            label: "Horário comercial",
           });
         }
 
@@ -428,7 +428,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "Override ID is required",
             additionalData: { intent },
-            label: "Working hours",
+            label: "Horário comercial",
           });
         }
 
@@ -585,7 +585,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           cause: null,
           message: "Invalid action",
           additionalData: { intent },
-          label: "Working hours",
+          label: "Horário comercial",
         });
       }
     }
@@ -605,7 +605,7 @@ export default function GeneralPage() {
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
         header={{
-          title: "Explicit check-in requirement",
+          title: "Exigência de devolução explícita",
           subHeading:
             "Control whether specific roles must use the scanner-based explicit check-in flow instead of the one-click quick check-in. Only workspace owners can change this setting.",
         }}
@@ -621,7 +621,7 @@ export default function GeneralPage() {
       <div>
         <ProgressiveCheckinSettings
           header={{
-            title: "Counting options",
+            title: "Opções de contagem",
             subHeading:
               "Choose how kits are counted when visualising booking check-in/out progress.",
           }}
@@ -632,7 +632,7 @@ export default function GeneralPage() {
       {/* Tags required settings form */}
       <TagsRequiredSettings
         header={{
-          title: "Tags requirement",
+          title: "Exigência de etiquetas",
           subHeading:
             "Control whether users must add tags to their bookings. This helps with categorization and organization of bookings.",
         }}
@@ -642,7 +642,7 @@ export default function GeneralPage() {
       {/* Auto-archive settings form */}
       <AutoArchiveSettings
         header={{
-          title: "Automation",
+          title: "Automação",
           subHeading:
             "Configure automatic actions for completed bookings to keep your workspace clean.",
         }}
@@ -656,7 +656,7 @@ export default function GeneralPage() {
       {/* Time settings form */}
       <TimeSettings
         header={{
-          title: "Booking time restrictions",
+          title: "Restrições de horário de reserva",
           subHeading:
             "Control booking timing constraints including minimum advance notice and maximum booking duration.",
         }}
@@ -671,7 +671,7 @@ export default function GeneralPage() {
       <EnableWorkingHoursForm
         enabled={workingHours.enabled}
         header={{
-          title: "Working hours",
+          title: "Horário comercial",
           subHeading:
             "Manage your workspace's working hours. This will allow you to limit when bookings' start and end times and dates.",
         }}

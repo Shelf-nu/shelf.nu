@@ -131,7 +131,7 @@ export function DeleteCustomFieldDialog({
               name="intent"
               value="delete"
             >
-              {disabled ? "Deleting..." : "Delete"}
+              {disabled ? "Deleting..." : "Excluir"}
             </Button>
           </AlertDialogFooter>
         </fetcher.Form>

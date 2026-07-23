@@ -32,7 +32,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const title = "Settings";
+    const title = "Configurações";
     const subHeading = "Manage your preferences here.";
     const header = {
       title,
@@ -58,8 +58,8 @@ export const shouldRevalidate = () => false;
 export default function SettingsPage() {
   const { _isPersonalOrg } = useLoaderData<typeof loader>();
   let items = [
-    { to: "general", content: "General" },
-    ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
+    { to: "general", content: "Geral" },
+    ...(!_isPersonalOrg ? [{ to: "bookings", content: "Reservas" }] : []),
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
     { to: "asset-models", content: "Asset models" },

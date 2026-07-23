@@ -105,7 +105,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await deleteAssetModel({ id, organizationId });
 
     sendNotification({
-      title: "Asset model deleted",
+      title: "Modelo de equipamento excluído",
       message: "Your asset model has been deleted successfully",
       icon: { name: "trash", variant: "error" },
       senderId: userId,

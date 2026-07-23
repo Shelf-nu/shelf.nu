@@ -59,7 +59,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAssetModels / perPage);
 
     const header: HeaderData = {
-      title: "Asset Models",
+      title: "Modelos de Equipamento",
       subHeading:
         "Asset models are templates for grouping similar assets. Use them to define default values and track groups of identical items like laptop models or equipment types.",
     };

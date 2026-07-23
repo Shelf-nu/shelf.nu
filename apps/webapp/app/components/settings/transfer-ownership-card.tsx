@@ -293,7 +293,7 @@ export default function TransferOwnershipCard({
                       <p className="mt-1 text-sm">
                         You own {ownerOtherTeamWorkspacesCount} other team{" "}
                         {ownerOtherTeamWorkspacesCount === 1
-                          ? "workspace"
+                          ? "área de trabalho"
                           : "workspaces"}
                         . If you transfer your subscription, those workspaces
                         will lose premium features until you subscribe again.

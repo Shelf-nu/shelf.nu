@@ -72,7 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalCustomFields / perPageParam);
 
     const header: HeaderData = {
-      title: "Custom Fields",
+      title: "Campos Personalizados",
     };
     const modelName = {
       singular: "custom fields",
@@ -185,7 +185,7 @@ function CustomFieldRow({
       </Td>
       <Td>
         <span className="text-text-sm font-medium capitalize text-gray-600">
-          {item.required ? "Yes" : "No"}
+          {item.required ? "Sim" : "Não"}
         </span>
       </Td>
       <Td>

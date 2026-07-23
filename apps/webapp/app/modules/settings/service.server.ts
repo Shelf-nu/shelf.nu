@@ -12,7 +12,7 @@ import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 
-const label = "Settings";
+const label = "Configurações";
 
 export interface TeamMembersWithUserOrInvite {
   id: string;

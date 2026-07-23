@@ -87,7 +87,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await softDeleteCustomField({ id, organizationId });
 
     sendNotification({
-      title: "Custom field deleted",
+      title: "Campo personalizado excluído",
       message: `The custom field "${customField.name}" has been deleted. You can now create a new field with the same name if needed.`,
       icon: { name: "success", variant: "success" },
       senderId: userId,

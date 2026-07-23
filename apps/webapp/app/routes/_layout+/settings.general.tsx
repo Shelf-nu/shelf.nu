@@ -111,7 +111,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             cause,
             message: "User not found",
             additionalData: { userId, organizationId },
-            label: "Settings",
+            label: "Configurações",
           });
         }),
       /* Check the tier limit */
@@ -125,7 +125,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ]);
 
     const header: HeaderData = {
-      title: "General",
+      title: "Geral",
     };
 
     const canHideBranding = canHideShelfBranding(tierLimit);
@@ -167,7 +167,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => "General",
+  breadcrumb: () => "Geral",
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -242,7 +242,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             message: "You are not allowed to edit this organization.",
-            label: "Organization",
+            label: "Organização",
             shouldBeCaptured: false,
           });
         }
@@ -269,7 +269,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
                 DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
               }MB`,
               status: 400,
-              label: "Organization",
+              label: "Organização",
               additionalData: { organizationId, field: "image" },
               shouldBeCaptured: false,
             });
@@ -321,7 +321,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             message: "You are not allowed to edit this organization.",
-            label: "Organization",
+            label: "Organização",
             shouldBeCaptured: false,
           });
         }
@@ -351,7 +351,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
-            label: "Settings",
+            label: "Configurações",
           });
         }
 
@@ -359,7 +359,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             message: "SSO is not enabled for this organization.",
-            label: "Settings",
+            label: "Configurações",
           });
         }
         const schema = EditWorkspaceSSOSettingsFormSchema(
@@ -378,7 +378,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             message: "You are not allowed to edit this organization.",
-            label: "Organization",
+            label: "Organização",
             shouldBeCaptured: false,
           });
         }

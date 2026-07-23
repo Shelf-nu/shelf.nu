@@ -272,7 +272,7 @@ function FullPageForm({
 
         {/* -- Default Category -- */}
         <FormRow
-          rowLabel="Default category"
+          rowLabel="Categoria padrão"
           subHeading="Assets created from this model will inherit this category."
           className="border-b-0 pb-[10px]"
         >
@@ -295,14 +295,14 @@ function FullPageForm({
 
         {/* -- Default Valuation -- */}
         <FormRow
-          rowLabel="Default valuation"
+          rowLabel="Valor padrão"
           subHeading="Assets created from this model will inherit this value."
           className="border-b-0 py-[10px]"
         >
           <div className="relative w-full">
             <Input
               type="number"
-              label="Default valuation"
+              label="Valor padrão"
               inputClassName="pl-[70px] valuation-input"
               hideLabel
               name={zo.fields.defaultValuation()}

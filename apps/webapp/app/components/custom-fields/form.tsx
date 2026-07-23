@@ -129,13 +129,13 @@ export const CustomFieldForm = ({
         encType="multipart/form-data"
       >
         <FormRow
-          rowLabel={"Name"}
+          rowLabel={"Nome"}
           className="border-b-0 pb-[10px] pt-0"
           required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.name)}
         >
           <Input
             ref={nameInputRef}
-            label="Name"
+            label="Nome"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
@@ -153,7 +153,7 @@ export const CustomFieldForm = ({
             Type
           </label>
           <FormRow
-            rowLabel={"Type"}
+            rowLabel={"Tipo"}
             className="border-b-0 pb-[10px] pt-[6px]"
             required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.type)}
           >
@@ -258,7 +258,7 @@ export const CustomFieldForm = ({
 
         <div>
           <FormRow
-            rowLabel="Category"
+            rowLabel="Categoria"
             subHeading={
               <p>
                 Select asset categories for which you want to use this custom
@@ -347,7 +347,7 @@ export const CustomFieldForm = ({
             Cancel
           </Button>
           <Button type="submit" disabled={disabled}>
-            {disabled ? <Spinner /> : "Save"}
+            {disabled ? <Spinner /> : "Salvar"}
           </Button>
         </div>
       </Form>

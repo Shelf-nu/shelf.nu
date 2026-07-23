@@ -49,14 +49,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         cause: null,
         title: "Not allowed",
         message: "Email settings are not available for personal workspaces.",
-        label: "Settings",
+        label: "Configurações",
         shouldBeCaptured: false,
         status: 403,
       });
     }
 
     const header: HeaderData = {
-      title: "Email settings",
+      title: "Configurações de E-mail",
     };
 
     return payload({
@@ -105,7 +105,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           new ShelfError({
             cause: null,
             message: result.error || "Invalid email footer",
-            label: "Settings",
+            label: "Configurações",
             shouldBeCaptured: false,
             additionalData: {
               validationErrors: {
@@ -247,7 +247,7 @@ export default function EmailSettingsPage() {
 
           <div>
             <Button type="submit" disabled={disabled}>
-              {disabled ? "Saving..." : "Save"}
+              {disabled ? "Saving..." : "Salvar"}
             </Button>
           </div>
         </Form>

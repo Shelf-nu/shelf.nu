@@ -23,7 +23,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-const title = "New asset model";
+const title = "Novo modelo de equipamento";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
