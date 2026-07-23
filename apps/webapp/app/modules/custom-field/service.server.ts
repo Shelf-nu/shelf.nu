@@ -40,6 +40,22 @@ export async function createCustomField({
   position = 0,
 }: CustomFieldDraftPayload) {
   try {
+    if (groupId) {
+      const group = await db.customFieldGroup.findFirst({
+        where: { id: groupId, organizationId },
+        select: { id: true },
+      });
+      if (!group) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Custom field group not found or does not belong to this organization.",
+          label,
+          status: 403,
+        });
+      }
+    }
+
     const [customField, assetIndexSettingsEntries] = await Promise.all([
       db.customField.create({
         data: {
@@ -49,7 +65,11 @@ export async function createCustomField({
           required,
           active,
           options,
-          group: groupId ? { connect: { id: groupId } } : undefined,
+          group: groupId
+            ? {
+                connect: { id_organizationId: { id: groupId, organizationId } },
+              }
+            : undefined,
           position: position || 0,
           organization: {
             connect: {
@@ -297,6 +317,22 @@ export async function updateCustomField(payload: {
   } = payload;
 
   try {
+    if (groupId) {
+      const group = await db.customFieldGroup.findFirst({
+        where: { id: groupId, organizationId },
+        select: { id: true },
+      });
+      if (!group) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Custom field group not found or does not belong to this organization.",
+          label,
+          status: 403,
+        });
+      }
+    }
+
     //dont ever update type
     //updating type would require changing all custom field values to that type
     //which might fail when changing to incompatible type hence need a careful definition
@@ -310,7 +346,7 @@ export async function updateCustomField(payload: {
         groupId === undefined
           ? undefined
           : groupId
-          ? { connect: { id: groupId } }
+          ? { connect: { id_organizationId: { id: groupId, organizationId } } }
           : { disconnect: true },
       position,
     } satisfies Prisma.CustomFieldUpdateInput;
@@ -638,8 +674,11 @@ export async function getActiveCustomFields({
       },
       orderBy: [
         { group: { position: "asc" } },
+        { group: { name: "asc" } },
+        { group: { id: "asc" } },
         { position: "asc" },
         { name: "asc" },
+        { id: "asc" },
       ],
     });
   } catch (cause) {
@@ -750,21 +789,38 @@ export async function bulkActivateOrDeactivateCustomFields({
   }
 }
 
+/**
+ * Creates a new custom field group. Calculates the next position atomically if not provided.
+ * @param params.name - Name of the group
+ * @param params.organizationId - ID of the organization
+ * @param params.position - Optional starting position
+ * @returns The created custom field group
+ * @throws ShelfError if unique constraints are violated
+ */
 export async function createCustomFieldGroup({
   name,
   organizationId,
-  position = 0,
+  position,
 }: {
   name: string;
   organizationId: string;
   position?: number;
 }) {
   try {
+    let resolvedPosition = position;
+    if (resolvedPosition === undefined) {
+      const agg = await db.customFieldGroup.aggregate({
+        where: { organizationId },
+        _max: { position: true },
+      });
+      resolvedPosition = (agg._max.position ?? -1) + 1;
+    }
+
     return await db.customFieldGroup.create({
       data: {
         name,
         organizationId,
-        position,
+        position: resolvedPosition,
       },
     });
   } catch (cause) {
@@ -774,6 +830,15 @@ export async function createCustomFieldGroup({
   }
 }
 
+/**
+ * Updates an existing custom field group.
+ * @param params.id - ID of the group
+ * @param params.name - Updated name
+ * @param params.position - Updated position
+ * @param params.organizationId - ID of the organization
+ * @returns The updated custom field group
+ * @throws ShelfError if unique constraints are violated
+ */
 export async function updateCustomFieldGroup({
   id,
   name,
@@ -800,6 +865,13 @@ export async function updateCustomFieldGroup({
   }
 }
 
+/**
+ * Deletes a custom field group.
+ * @param params.id - ID of the group
+ * @param params.organizationId - ID of the organization
+ * @returns The deleted custom field group
+ * @throws ShelfError if deletion fails
+ */
 export async function deleteCustomFieldGroup({
   id,
   organizationId,
@@ -821,6 +893,12 @@ export async function deleteCustomFieldGroup({
   }
 }
 
+/**
+ * Fetches all custom field groups belonging to the organization, sorted deterministically.
+ * @param params.organizationId - ID of the organization
+ * @returns Array of custom field groups
+ * @throws ShelfError if fetch fails
+ */
 export async function getCustomFieldGroups({
   organizationId,
 }: {
@@ -829,7 +907,7 @@ export async function getCustomFieldGroups({
   try {
     return await db.customFieldGroup.findMany({
       where: { organizationId },
-      orderBy: { position: "asc" },
+      orderBy: [{ position: "asc" }, { name: "asc" }, { id: "asc" }],
     });
   } catch (cause) {
     throw new ShelfError({
@@ -841,6 +919,12 @@ export async function getCustomFieldGroups({
   }
 }
 
+/**
+ * Reorders custom field groups.
+ * @param params.organizationId - ID of the organization
+ * @param params.groupIds - Ordered list of group IDs
+ * @throws ShelfError if transaction fails
+ */
 export async function reorderCustomFieldGroups({
   organizationId,
   groupIds,
@@ -867,6 +951,12 @@ export async function reorderCustomFieldGroups({
   }
 }
 
+/**
+ * Reorders custom fields within an organization.
+ * @param params.organizationId - ID of the organization
+ * @param params.fieldIds - Ordered list of field IDs
+ * @throws ShelfError if transaction fails
+ */
 export async function reorderCustomFields({
   organizationId,
   fieldIds,

@@ -200,14 +200,45 @@ export default function AssetCustomFields({
     ),
   };
 
+  type LoaderCustomField = ReturnType<
+    typeof useLoaderData<typeof loader>
+  >["customFields"][number];
+
+  const renderCustomFieldRow = (field: LoaderCustomField, index: number) => (
+    <FormRow
+      key={field.id + index}
+      rowLabel={field.name}
+      subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
+      className="border-b-0"
+      required={field.required}
+    >
+      {fieldTypeToCompMap[field.type as CustomFieldType]?.(
+        field as unknown as CustomField
+      ) ?? (
+        <Input
+          hideLabel
+          placeholder={field.helpText || undefined}
+          type={field.type.toLowerCase()}
+          label={field.name}
+          name={`cf-${field.id}`}
+          error={getFieldError(field.id)}
+          disabled={disabled}
+          defaultValue={getCustomFieldVal(field.id)}
+          className="w-full"
+          required={isFieldRequired(field.id)}
+        />
+      )}
+    </FormRow>
+  );
+
   const hasGroups = useMemo(
-    () => customFields.some((field: any) => field.group),
+    () => customFields.some((field: LoaderCustomField) => field.group),
     [customFields]
   );
 
   const groupedFields = useMemo(() => {
     if (!hasGroups) return [];
-    const groupsMap = new Map<string | null, any[]>();
+    const groupsMap = new Map<string | null, LoaderCustomField[]>();
     for (const field of customFields) {
       const gName = field.group?.name || null;
       if (!groupsMap.has(gName)) {
@@ -215,7 +246,10 @@ export default function AssetCustomFields({
       }
       groupsMap.get(gName)!.push(field);
     }
-    const result: Array<{ groupName: string | null; fields: any[] }> = [];
+    const result: Array<{
+      groupName: string | null;
+      fields: LoaderCustomField[];
+    }> = [];
     for (const [groupName, fields] of groupsMap.entries()) {
       result.push({ groupName, fields });
     }
@@ -254,34 +288,9 @@ export default function AssetCustomFields({
                   <h5 className="mb-3 text-base font-semibold text-gray-800">
                     {groupName || "Other Fields"}
                   </h5>
-                  {fields.map((field, index) => (
-                    <FormRow
-                      key={field.id + index}
-                      rowLabel={field.name}
-                      subHeading={
-                        field.helpText ? <p>{field.helpText}</p> : undefined
-                      }
-                      className="border-b-0"
-                      required={field.required}
-                    >
-                      {fieldTypeToCompMap[field.type as CustomFieldType]?.(
-                        field as CustomField
-                      ) ?? (
-                        <Input
-                          hideLabel
-                          placeholder={field.helpText || undefined}
-                          type={field.type.toLowerCase()}
-                          label={field.name}
-                          name={`cf-${field.id}`}
-                          error={getFieldError(field.id)}
-                          disabled={disabled}
-                          defaultValue={getCustomFieldVal(field.id)}
-                          className="w-full"
-                          required={isFieldRequired(field.id)}
-                        />
-                      )}
-                    </FormRow>
-                  ))}
+                  {fields.map((field, index) =>
+                    renderCustomFieldRow(field, index)
+                  )}
                 </div>
               ))}
             </div>
@@ -290,63 +299,17 @@ export default function AssetCustomFields({
               {requiredFields.length > 0 && (
                 <div className="border-t pt-4">
                   <h5>Required Fields</h5>
-                  {requiredFields.map((field, index) => (
-                    <FormRow
-                      key={field.id + index}
-                      rowLabel={field.name}
-                      subHeading={
-                        field.helpText ? <p>{field.helpText}</p> : undefined
-                      }
-                      className="border-b-0"
-                      required={field.required}
-                    >
-                      {fieldTypeToCompMap[field.type]?.(field) ?? (
-                        <Input
-                          hideLabel
-                          placeholder={field.helpText || undefined}
-                          type={field.type.toLowerCase()}
-                          label={field.name}
-                          name={`cf-${field.id}`}
-                          error={getFieldError(field.id)}
-                          disabled={disabled}
-                          defaultValue={getCustomFieldVal(field.id)}
-                          className="w-full"
-                          required={isFieldRequired(field.id)}
-                        />
-                      )}
-                    </FormRow>
-                  ))}
+                  {requiredFields.map((field, index) =>
+                    renderCustomFieldRow(field, index)
+                  )}
                 </div>
               )}
               {optionalFields.length > 0 && (
                 <div className="border-t pt-4">
                   <h5>Optional Fields</h5>
-                  {optionalFields.map((field, index) => (
-                    <FormRow
-                      key={field.id + index}
-                      rowLabel={field.name}
-                      subHeading={
-                        field.helpText ? <p>{field.helpText}</p> : undefined
-                      }
-                      className="border-b-0"
-                      required={field.required}
-                    >
-                      {fieldTypeToCompMap[field.type]?.(field) ?? (
-                        <Input
-                          hideLabel
-                          placeholder={field.helpText || undefined}
-                          type={field.type.toLowerCase()}
-                          label={field.name}
-                          name={`cf-${field.id}`}
-                          error={getFieldError(field.id)}
-                          disabled={disabled}
-                          defaultValue={getCustomFieldVal(field.id)}
-                          className="w-full"
-                          required={isFieldRequired(field.id)}
-                        />
-                      )}
-                    </FormRow>
-                  ))}
+                  {optionalFields.map((field, index) =>
+                    renderCustomFieldRow(field, index)
+                  )}
                 </div>
               )}
             </>

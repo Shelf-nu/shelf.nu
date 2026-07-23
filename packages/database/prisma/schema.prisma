@@ -1164,7 +1164,7 @@ model CustomField {
   categories Category[]
 
   groupId  String?
-  group    CustomFieldGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  group    CustomFieldGroup? @relation(fields: [groupId, organizationId], references: [id, organizationId], onDelete: SetNull)
   position Int               @default(0)
 
   // Datetime
@@ -1178,7 +1178,7 @@ model CustomField {
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, deletedAt])
-  @@index([groupId])
+  @@index([groupId, organizationId])
 }
 
 model CustomFieldGroup {
@@ -1191,6 +1191,7 @@ model CustomFieldGroup {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
+  @@unique([id, organizationId])
   @@unique([organizationId, name])
   @@index([organizationId])
 }

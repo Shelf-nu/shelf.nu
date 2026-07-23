@@ -17,14 +17,22 @@ CREATE TABLE "CustomFieldGroup" (
 -- CreateIndex
 CREATE INDEX "CustomFieldGroup_organizationId_idx" ON "CustomFieldGroup"("organizationId");
 
--- CreateIndex
+-- CreateUniqueIndex for Organization scope unique constraint
+CREATE UNIQUE INDEX "CustomFieldGroup_id_organizationId_key" ON "CustomFieldGroup"("id", "organizationId");
+
+-- CreateUniqueIndex
 CREATE UNIQUE INDEX "CustomFieldGroup_organizationId_name_key" ON "CustomFieldGroup"("organizationId", "name");
 
 -- CreateIndex
-CREATE INDEX "CustomField_groupId_idx" ON "CustomField"("groupId");
+-- NOTE: In production environments, run this outside of a transaction block to use CONCURRENTLY.
+-- If running inside a standard transaction block where CONCURRENTLY is not allowed, remove the CONCURRENTLY keyword.
+CREATE INDEX CONCURRENTLY "CustomField_groupId_organizationId_idx" ON "CustomField"("groupId", "organizationId");
 
--- AddForeignKey
-ALTER TABLE "CustomField" ADD CONSTRAINT "CustomField_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "CustomFieldGroup"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- AddForeignKey (with NOT VALID to avoid locking write operations)
+ALTER TABLE "CustomField" ADD CONSTRAINT "CustomField_groupId_organizationId_fkey" FOREIGN KEY ("groupId", "organizationId") REFERENCES "CustomFieldGroup"("id", "organizationId") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+
+-- Validate constraint
+ALTER TABLE "CustomField" VALIDATE CONSTRAINT "CustomField_groupId_organizationId_fkey";
 
 -- AddForeignKey
 ALTER TABLE "CustomFieldGroup" ADD CONSTRAINT "CustomFieldGroup_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;

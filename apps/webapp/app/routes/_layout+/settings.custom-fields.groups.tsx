@@ -1,12 +1,30 @@
+/**
+ * @file settings.custom-fields.groups.tsx
+ * @description Route for managing custom field groups inside the organization's settings.
+ * Supports group creation, reordering, and deletion with safety guards and confirmation alerts.
+ */
+
+import { useEffect, useState } from "react";
 import { ArrowUpIcon, ArrowDownIcon, TrashIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, Link, useLoaderData, Form } from "react-router";
+import { data, Link, useLoaderData, Form, useFetcher } from "react-router";
 import { z } from "zod";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
+import { useDisabled } from "~/hooks/use-disabled";
 import {
   createCustomFieldGroup,
   deleteCustomFieldGroup,
@@ -15,7 +33,7 @@ import {
 } from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -25,6 +43,13 @@ import { requirePermission } from "~/utils/roles.server";
 
 const title = "Manage Custom Field Groups";
 
+/**
+ * Loader function to retrieve all Custom Field Groups for the organization.
+ * Requires customField read permissions.
+ *
+ * @param args - Loader function arguments containing context and request
+ * @returns Payload with loader data (header, groups) or throws serialized error
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -76,26 +101,39 @@ const GroupActionSchema = z.discriminatedUnion("intent", [
   }),
 ]);
 
+/**
+ * Action handler for creating, deleting, or reordering groups.
+ * Performs granular permission verification depending on intent.
+ *
+ * @param args - Loader/Action arguments containing context and request
+ * @returns Success payload or error response
+ */
 export async function action({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
+    const body = parseData(await request.formData(), GroupActionSchema);
+
+    // Granular permission check based on action intent
+    let permissionAction: PermissionAction = PermissionAction.update;
+    if (body.intent === "create") {
+      permissionAction = PermissionAction.create;
+    } else if (body.intent === "delete") {
+      permissionAction = PermissionAction.delete;
+    }
+
     const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.customField,
-      action: PermissionAction.update,
+      action: permissionAction,
     });
 
-    const body = parseData(await request.formData(), GroupActionSchema);
-
     if (body.intent === "create") {
-      const existing = await getCustomFieldGroups({ organizationId });
       await createCustomFieldGroup({
         name: body.name,
         organizationId,
-        position: existing.length,
       });
 
       sendNotification({
@@ -115,6 +153,25 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       });
     } else if (body.intent === "reorder") {
       const ids = body.groupIds.split(",").filter(Boolean);
+      const existing = await getCustomFieldGroups({ organizationId });
+      const existingIds = existing.map((g) => g.id);
+
+      // Validate that the submitted set matches the organization's complete group set
+      const hasDuplicates = new Set(ids).size !== ids.length;
+      const isComplete =
+        ids.length === existingIds.length &&
+        ids.every((id) => existingIds.includes(id));
+
+      if (hasDuplicates || !isComplete) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Invalid reorder payload: group IDs are invalid, duplicate, or incomplete.",
+          label: "Custom fields",
+          status: 400,
+        });
+      }
+
       await reorderCustomFieldGroups({ organizationId, groupIds: ids });
     }
 
@@ -125,34 +182,109 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Custom Confirmation Dialog for deleting custom field groups.
+ */
+export function DeleteCustomFieldGroupDialog({
+  group,
+  disabled,
+}: {
+  group: { id: string; name: string };
+  disabled: boolean;
+}) {
+  const fetcher = useFetcher();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      !(fetcher.data as any).error
+    ) {
+      setOpen(false);
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          variant="secondary"
+          className="p-2 text-red-600 hover:bg-red-50"
+          title="Delete Group"
+          aria-label={`Delete Group ${group.name}`}
+          disabled={disabled}
+        >
+          <TrashIcon className="size-4" />
+        </Button>
+      </AlertDialogTrigger>
+
+      <AlertDialogContent>
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="delete" />
+          <input type="hidden" name="id" value={group.id} />
+          <AlertDialogHeader>
+            <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600 md:mx-0">
+              <TrashIcon className="size-4" />
+            </div>
+            <AlertDialogTitle>Delete "{group.name}" group</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>
+                <strong>Are you sure you want to delete this group?</strong>
+              </p>
+              <p>
+                Deleting this group will NOT delete the custom fields inside it.
+                Instead, all custom fields assigned to this group will lose
+                their grouping and become ungrouped.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter className="mt-6 flex">
+            <AlertDialogCancel asChild>
+              <Button type="button" variant="secondary" disabled={disabled}>
+                Cancel
+              </Button>
+            </AlertDialogCancel>
+            <Button
+              className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
+              type="submit"
+              disabled={disabled}
+            >
+              {disabled ? "Deleting..." : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </fetcher.Form>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * Manage Custom Field Groups UI Component.
+ */
 export default function CustomFieldGroupsPage() {
   const { groups } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
+  const disabled = useDisabled();
+  const reorderDisabled = useDisabled(fetcher);
 
   const handleMove = (index: number, direction: "up" | "down") => {
     const newGroups = [...groups];
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newGroups.length) return;
 
-    // Swap
+    // Swap positions
     const temp = newGroups[index];
     newGroups[index] = newGroups[targetIndex];
     newGroups[targetIndex] = temp;
 
     const ids = newGroups.map((g) => g.id).join(",");
-    const formData = new FormData();
-    formData.append("intent", "reorder");
-    formData.append("groupIds", ids);
-
-    const form = document.getElementById("reorder-form") as HTMLFormElement;
-    if (form) {
-      const input = form.querySelector(
-        'input[name="groupIds"]'
-      ) as HTMLInputElement;
-      if (input) {
-        input.value = ids;
-        form.requestSubmit();
-      }
-    }
+    void fetcher.submit(
+      { intent: "reorder", groupIds: ids },
+      { method: "post" }
+    );
   };
 
   return (
@@ -178,12 +310,14 @@ export default function CustomFieldGroupsPage() {
                   placeholder="e.g. Procurement"
                   required
                   className="w-full"
+                  disabled={disabled}
                 />
               </FormRow>
               <Button
                 type="submit"
                 variant="primary"
                 className="w-full justify-center"
+                disabled={disabled}
               >
                 Create Group
               </Button>
@@ -195,10 +329,6 @@ export default function CustomFieldGroupsPage() {
         <div className="w-full lg:w-2/3">
           <Card className="p-5">
             <h3 className="mb-4 text-base font-semibold">Existing Groups</h3>
-            <Form id="reorder-form" method="post" className="hidden">
-              <input type="hidden" name="intent" value="reorder" />
-              <input type="hidden" name="groupIds" value="" />
-            </Form>
 
             {groups.length === 0 ? (
               <div className="py-6 text-center text-gray-500">
@@ -226,9 +356,10 @@ export default function CustomFieldGroupsPage() {
                       <Button
                         type="button"
                         variant="secondary"
-                        disabled={index === 0}
+                        disabled={index === 0 || disabled || reorderDisabled}
                         onClick={() => handleMove(index, "up")}
                         title="Move Up"
+                        aria-label="Move Up"
                         className="p-2"
                       >
                         <ArrowUpIcon className="size-4" />
@@ -236,27 +367,24 @@ export default function CustomFieldGroupsPage() {
                       <Button
                         type="button"
                         variant="secondary"
-                        disabled={index === groups.length - 1}
+                        disabled={
+                          index === groups.length - 1 ||
+                          disabled ||
+                          reorderDisabled
+                        }
                         onClick={() => handleMove(index, "down")}
                         title="Move Down"
+                        aria-label="Move Down"
                         className="p-2"
                       >
                         <ArrowDownIcon className="size-4" />
                       </Button>
 
                       {/* Delete */}
-                      <Form method="post" className="inline">
-                        <input type="hidden" name="intent" value="delete" />
-                        <input type="hidden" name="id" value={group.id} />
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          className="p-2 text-red-600 hover:bg-red-50"
-                          title="Delete Group"
-                        >
-                          <TrashIcon className="size-4" />
-                        </Button>
-                      </Form>
+                      <DeleteCustomFieldGroupDialog
+                        group={group}
+                        disabled={disabled || reorderDisabled}
+                      />
                     </div>
                   </div>
                 ))}

@@ -63,7 +63,11 @@ export const NewCustomFieldFormSchema = z.object({
   position: z
     .string()
     .optional()
-    .transform((val) => (val ? parseInt(val, 10) : 0)),
+    .transform((val) => {
+      if (!val) return 0;
+      const parsed = parseInt(val, 10);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -124,11 +128,11 @@ export const CustomFieldForm = ({
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
-  const loaderData = useLoaderData<any>() || {};
-  const groups = (loaderData?.groups || []) as Array<{
-    id: string;
-    name: string;
-  }>;
+  type FormLoaderData = {
+    groups?: Array<{ id: string; name: string }>;
+  };
+  const loaderData = (useLoaderData<FormLoaderData>() || {}) as FormLoaderData;
+  const groups = loaderData?.groups || [];
 
   // Focus the Name field on mount — the form is the entry point for both
   // create and edit pages, so initial focus belongs on the first field.
@@ -379,6 +383,13 @@ export const CustomFieldForm = ({
               ))}
             </SelectContent>
           </Select>
+          {(validationErrors?.groupId?.message ||
+            zo.errors.groupId()?.message) && (
+            <div className="mt-1 text-sm text-error-500">
+              {validationErrors?.groupId?.message ||
+                zo.errors.groupId()?.message}
+            </div>
+          )}
         </FormRow>
 
         <FormRow rowLabel="Position" className="border-b-0 pb-[10px] pt-[6px]">
@@ -390,6 +401,10 @@ export const CustomFieldForm = ({
             disabled={disabled}
             defaultValue={position !== undefined ? String(position) : "0"}
             placeholder="0"
+            error={
+              validationErrors?.position?.message ||
+              zo.errors.position()?.message
+            }
             className="w-full"
           />
         </FormRow>
