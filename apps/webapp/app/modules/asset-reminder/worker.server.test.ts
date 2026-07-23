@@ -47,6 +47,8 @@ vi.mock("./emails", () => ({
   assetAlertEmailText: vi.fn().mockReturnValue("text body"),
 }));
 
+// why: preventing real email delivery while exercising the worker's
+// failure/retry paths — the tests assert on rethrow + logging, not on email I/O
 vi.mock("~/emails/mail.server", () => ({
   sendEmail: vi.fn(),
 }));

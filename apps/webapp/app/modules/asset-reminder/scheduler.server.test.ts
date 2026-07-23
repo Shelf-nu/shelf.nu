@@ -33,36 +33,43 @@ vi.mock("~/utils/scheduler.server", () => ({
   },
 }));
 
+/**
+ * Builds a `scheduleAssetReminder` input with sensible defaults, so each test
+ * only states the fields it actually cares about.
+ *
+ * @param overrides - Partial fields to override the defaults.
+ * @returns The `{ data, when }` argument for `scheduleAssetReminder`.
+ */
+function buildScheduleInput(
+  overrides: Partial<Parameters<typeof scheduleAssetReminder>[0]> = {}
+): Parameters<typeof scheduleAssetReminder>[0] {
+  return {
+    data: { reminderId: "reminder-1", eventType: "REMINDER" as const },
+    when: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
+
 describe("scheduleAssetReminder", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("enqueues with a bounded retry policy (retryLimit + retryDelay)", async () => {
-    const data = {
-      reminderId: "reminder-1",
-      eventType: "REMINDER" as const,
-    };
-    const when = new Date("2026-01-01T00:00:00Z");
+    const input = buildScheduleInput();
 
-    await scheduleAssetReminder({ data, when });
+    await scheduleAssetReminder(input);
 
     expect(scheduler.sendAfter).toHaveBeenCalledWith(
       QueueNames.assetsQueue,
-      data,
+      input.data,
       { retryLimit: 2, retryDelay: 60 },
-      when
+      input.when
     );
   });
 
   it("persists the returned scheduler reference on the reminder", async () => {
-    const data = {
-      reminderId: "reminder-1",
-      eventType: "REMINDER" as const,
-    };
-    const when = new Date("2026-01-01T00:00:00Z");
-
-    await scheduleAssetReminder({ data, when });
+    await scheduleAssetReminder(buildScheduleInput());
 
     expect(db.assetReminder.update).toHaveBeenCalledWith({
       where: { id: "reminder-1" },
@@ -76,10 +83,7 @@ describe("scheduleAssetReminder", () => {
     scheduler.sendAfter.mockRejectedValue(cause);
 
     await expect(
-      scheduleAssetReminder({
-        data: { reminderId: "reminder-1", eventType: "REMINDER" },
-        when: new Date("2026-01-01T00:00:00Z"),
-      })
+      scheduleAssetReminder(buildScheduleInput())
     ).rejects.toMatchObject({
       message: "Something went wrong while schedulng asset alert",
     });
