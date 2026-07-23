@@ -519,6 +519,46 @@ async function handleSCIMTransition(
  * Updates an existing SSO user on subsequent logins.
  * Handles both Pure SSO and SCIM SSO scenarios for multiple domains.
  */
+/**
+ * Whether SCIM has deliberately deactivated this user in this organization.
+ *
+ * SCIM represents deactivation as "mapping row survives, membership removed"
+ * (see `~/modules/scim/service.server`), so a `UserScimExternalId` with no
+ * matching `UserOrganization` is a user the IdP has switched off — not one who
+ * was never provisioned.
+ *
+ * The distinction matters on SSO login: without it, group claims that still
+ * grant a role would immediately re-create the membership SCIM just removed,
+ * letting a deprovisioned user back in — potentially as an admin — whenever
+ * group propagation lags behind the SCIM deactivation, or whenever group
+ * membership is managed separately from SCIM scoping. A user SCIM never touched
+ * has no mapping, so normal SSO provisioning is unaffected.
+ *
+ * This infers state rather than reading it; an explicit SCIM lifecycle column is
+ * the robust fix and is deferred to the lifecycle-state work.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organizationId - The org whose group mapping matched
+ * @returns `true` when SCIM manages this user here and has removed their access
+ */
+async function isScimDeactivated(
+  userId: string,
+  organizationId: string
+): Promise<boolean> {
+  const mapping = await db.userScimExternalId.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { id: true },
+  });
+
+  if (mapping) {
+    Logger.info(
+      `SSO login: skipping role grant for user ${userId} in org ${organizationId} — SCIM has deactivated them`
+    );
+  }
+
+  return !!mapping;
+}
+
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
@@ -586,10 +626,6 @@ export async function updateUserFromSSO(
           (uo) => uo.organization.id === org.id
         );
 
-        if (desiredRole) {
-          firstMatchedOrg ??= org;
-        }
-
         if (existingOrgAccess) {
           const transition = await handleSCIMTransition(
             userId,
@@ -598,7 +634,14 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
-        } else if (desiredRole) {
+
+          // The user keeps access only when a role still maps; a null
+          // desiredRole makes handleSCIMTransition revoke it, so that org must
+          // not become the post-login landing org.
+          if (desiredRole) {
+            firstMatchedOrg ??= org;
+          }
+        } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -618,7 +661,13 @@ export async function updateUserFromSSO(
             newRole: desiredRole,
             transitionType: "ACCESS_GRANTED",
           });
+
+          // Access was just granted, so this org is a valid landing org.
+          firstMatchedOrg ??= org;
         }
+        // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
+        // (SCIM-deactivated user): returning an org the user cannot access sends
+        // the SSO callback to a 403 instead of /sso-pending-assignment.
       }
     }
 
@@ -657,6 +706,7 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    skipPersonalOrg?: boolean;
   }
 ) {
   const {
@@ -669,12 +719,14 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    skipPersonalOrg,
   } = payload;
 
   /**
    * We only create a personal org if the signup is not disabled
-   * */
-  const shouldCreatePersonalOrg = !config.disableSignup;
+   * and the caller hasn't opted out (e.g. SCIM provisioning)
+   */
+  const shouldCreatePersonalOrg = !skipPersonalOrg && !config.disableSignup;
 
   try {
     const createdUser = await db.$transaction(
