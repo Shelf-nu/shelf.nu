@@ -27,9 +27,9 @@ import {
   upsertBookingModelRequest,
 } from "~/modules/booking-model-request/service.server";
 
-import { action } from "./bookings.$bookingId.model-requests";
+import { action } from "~/routes/api+/mobile+/bookings.$bookingId.model-requests";
 
-import { assertIsDataWithResponseInit } from "../../../../test/helpers/assertions";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // @vitest-environment node
 

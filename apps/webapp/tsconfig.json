@@ -19,6 +19,8 @@
       "@factories": ["./test/factories"],
       "@mocks/*": ["./test/mocks/*"],
       "@mocks": ["./test/mocks"],
+      "@helpers/*": ["./test/helpers/*"],
+      "@helpers": ["./test/helpers"],
       "@server/*": ["./server/*"]
     },
     "skipLibCheck": true,
