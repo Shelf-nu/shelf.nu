@@ -85,6 +85,7 @@ export type FailureReason = {
     | "User"
     | "User Contact"
     | "Scanner"
+    | "SCIM"
     | "SSO"
     | "Kit"
     | "Note"

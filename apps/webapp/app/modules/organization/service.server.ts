@@ -13,6 +13,7 @@ import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
   customerHasPaymentMethod,
@@ -653,33 +654,6 @@ export async function toggleAuditEnabled({
       label,
     });
   }
-}
-
-/**
- * Utility function to parse and validate domains from a comma-separated string
- * @param domainsString - Comma-separated string of domains
- * @returns Array of cleaned domain strings
- */
-export function parseDomains(domainsString: string): string[] {
-  return domainsString
-    .split(",")
-    .map((domain) => domain.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-/**
- * Checks if a given email matches any of the provided comma-separated domains
- * @param email - Email address to check
- * @param domainsString - Comma-separated string of domains
- * @returns boolean indicating if email matches any domain
- */
-export function emailMatchesDomains(
-  emailDomain: string,
-  domainsString: string | null
-): boolean {
-  if (!emailDomain || !domainsString) return false;
-  const domains = parseDomains(domainsString);
-  return domains.includes(emailDomain.toLowerCase());
 }
 
 /** Permissions functions */

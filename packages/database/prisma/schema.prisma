@@ -133,6 +133,9 @@ model User {
   assetModels        AssetModel[]
   consumptionLogs    ConsumptionLog[]
 
+  // Org-scoped SCIM external IDs (one per org, managed by the org's identity provider)
+  scimExternalIds UserScimExternalId[]
+
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
   roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
@@ -969,9 +972,13 @@ model Organization {
   auditImages        AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  roleChangeLogs      RoleChangeLog[]
+  
+  scimTokens      ScimToken[]
+  scimExternalIds UserScimExternalId[]
+  roleChangeLogs  RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
   activityEvents      ActivityEvent[]
+
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1075,6 +1082,46 @@ model SsoDetails {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ScimToken {
+  id        String @id @default(cuid())
+  tokenHash String @unique // SHA-256 hash of the raw bearer token
+
+  label String // Human-friendly label, e.g. "Entra ID Production"
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  createdById String // User ID of the admin who created this token
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([organizationId])
+}
+
+/**
+ * Org-scoped SCIM external ID linking a Shelf user to an identity-provider
+ * object within a specific organization.  A single Shelf user can appear in
+ * multiple organizations, each managed by a different identity provider, so the
+ * external ID must be scoped to the (user, organization) pair.
+ */
+model UserScimExternalId {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  scimExternalId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, organizationId])
+  // The SCIM-facing resource id is the per-org external id (the IdP object id),
+  // so it must be unique within an org and safe to resolve `/Users/{id}` against.
+  @@unique([organizationId, scimExternalId])
+  @@index([organizationId])
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.

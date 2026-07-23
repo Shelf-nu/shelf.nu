@@ -20,6 +20,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import { DEFAULT_SSO_DOMAIN } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -90,6 +91,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             await mobilePkceChallengeCookie.serialize(validChallenge),
         },
       });
+    }
+
+    // If a default SSO domain is configured, skip the domain input form and
+    // redirect straight to the identity provider. Guarded to web only: mobile
+    // (PKCE) requests are handled above and must complete their own handoff,
+    // so they should not be short-circuited into the web SSO redirect.
+    if (DEFAULT_SSO_DOMAIN && !isMobile) {
+      const redirectUrl = await signInWithSSO(DEFAULT_SSO_DOMAIN);
+      return redirect(redirectUrl);
     }
 
     return payload({ title, subHeading });
