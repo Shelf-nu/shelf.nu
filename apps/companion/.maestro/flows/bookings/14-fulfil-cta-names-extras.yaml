@@ -41,7 +41,7 @@ tags:
     visible: ".*Current workspace.*"
     timeout: 8000
 - tapOn: ".*Current workspace.*"
-- tapOn: "GRANULAR WORKSPACE"
+- tapOn: ${SHELF_TEST_WORKSPACE}
 - waitForAnimationToEnd
 
 # ── Fix 1: the list card surfaces the reserved-unit count ──
