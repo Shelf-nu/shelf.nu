@@ -15,11 +15,11 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type UserFriendlyRoles =
-  | "Administrator"
-  | "Owner"
+  | "Administrador"
+  | "Proprietário"
   | "Base"
-  | "Self service";
-export const meta = () => [{ title: appendToMetaTitle("Team settings") }];
+  | "Autoatendimento";
+export const meta = () => [{ title: appendToMetaTitle("Configurações da Equipe") }];
 
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -42,10 +42,10 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 };
 
 export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
-  [OrganizationRoles.ADMIN]: "Administrator",
-  [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.ADMIN]: "Administrador",
+  [OrganizationRoles.OWNER]: "Proprietário",
   [OrganizationRoles.BASE]: "Base",
-  [OrganizationRoles.SELF_SERVICE]: "Self service",
+  [OrganizationRoles.SELF_SERVICE]: "Autoatendimento",
 };
 
 export default function TeamSettings() {
@@ -54,11 +54,11 @@ export default function TeamSettings() {
   const TABS: Item[] = [
     ...(!isPersonalOrg
       ? [
-          { to: "users", content: "Users" },
-          { to: "invites", content: "Invites" },
+          { to: "users", content: "Usuários" },
+          { to: "invites", content: "Convites" },
         ]
       : []),
-    { to: "nrm", content: "Non-registered members" },
+    { to: "nrm", content: "Membros Não Registrados" },
   ];
 
   const params = useParams();
@@ -68,7 +68,7 @@ export default function TeamSettings() {
       <When truthy={!params.userId}>
         <div className="rounded border bg-white p-4 md:px-10 md:py-8">
           <h1 className="text-[18px] font-semibold">
-            {isPersonalOrg ? "Team" : `${orgName}’s team`}
+            {isPersonalOrg ? "Equipe" : `${orgName}’s team`}
           </h1>
           <p className="mb-6 text-sm text-gray-600">
             Manage your existing team and give team members custody to certain

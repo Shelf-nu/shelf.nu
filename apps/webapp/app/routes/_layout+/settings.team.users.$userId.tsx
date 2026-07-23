@@ -138,9 +138,9 @@ export default function UserPage() {
   });
 
   const TABS: Item[] = [
-    { to: "assets", content: "Assets" },
-    { to: "bookings", content: "Bookings" },
-    ...(canReadUserNotes ? [{ to: "notes", content: "Notes" }] : []),
+    { to: "assets", content: "Equipamentos" },
+    { to: "bookings", content: "Reservas" },
+    ...(canReadUserNotes ? [{ to: "notes", content: "Notas" }] : []),
   ];
   /**
    * We find the user's role in the current organization
@@ -179,7 +179,7 @@ export default function UserPage() {
         subHeading={<UserSubheading user={user} />}
       />
 
-      <When truthy={userOrgRole !== "Owner"}>
+      <When truthy={userOrgRole !== "Proprietário"}>
         <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}

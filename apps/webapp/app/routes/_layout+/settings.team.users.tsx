@@ -86,7 +86,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       modelName,
       hasActiveFilters,
       organization,
-      searchFieldLabel: "Search by name or email",
+      searchFieldLabel: "Pesquisar por nome ou e-mail",
       searchFieldTooltip: {
         title: "Search team members",
         text: "Search team members by first name, last name, or email address.",
@@ -224,7 +224,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {item.role !== "Proprietário" ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}

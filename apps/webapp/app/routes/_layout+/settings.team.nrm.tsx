@@ -147,7 +147,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               cause,
               message: "Failed to delete team member",
               additionalData: { teamMemberId, userId, organizationId },
-              label: "Team",
+              label: "Equipe",
             });
           });
 
@@ -158,7 +158,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           cause: null,
           message: "Invalid action",
           additionalData: { intent },
-          label: "Team",
+          label: "Equipe",
         });
       }
     }
@@ -205,7 +205,7 @@ export default function NrmSettings() {
             title: "No team members on database",
             text: "What are you waiting for? Add your first team member now!",
             newButtonRoute: "add-member",
-            newButtonContent: "Add NRM",
+            newButtonContent: "Adicionar MNR",
           }}
           hideFirstHeaderColumn
           headerChildren={

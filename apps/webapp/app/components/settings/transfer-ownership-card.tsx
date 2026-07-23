@@ -156,7 +156,7 @@ export default function TransferOwnershipCard({
             </Button>
           </AlertDialogTrigger>
 
-          <AlertDialogContent aria-describedby="Transfer ownership">
+          <AlertDialogContent aria-describedby="Transferir propriedade">
             <AlertDialogHeader>
               <AlertDialogTitle>Transfer Workspace Ownership</AlertDialogTitle>
               <AlertDialogDescription>

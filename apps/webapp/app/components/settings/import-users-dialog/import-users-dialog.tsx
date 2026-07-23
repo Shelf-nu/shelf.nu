@@ -170,7 +170,7 @@ export default function ImportUsersDialog({
               >
                 <Input
                   inputType="textarea"
-                  label="Enter your message to user"
+                  label="Digite sua mensagem para o usuário"
                   name="message"
                   className="mb-2"
                   disabled={disabled}
@@ -180,7 +180,7 @@ export default function ImportUsersDialog({
                 <Input
                   type="file"
                   name="file"
-                  label="Select a csv file"
+                  label="Selecionar arquivo csv"
                   required
                   accept=".csv"
                   className="mb-2"

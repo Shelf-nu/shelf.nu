@@ -62,7 +62,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         cause: null,
         message: "Organization not found",
         additionalData: { organizationId, userId },
-        label: "Team",
+        label: "Equipe",
       });
     }
 
@@ -220,7 +220,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {item.role !== "Proprietário" ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}

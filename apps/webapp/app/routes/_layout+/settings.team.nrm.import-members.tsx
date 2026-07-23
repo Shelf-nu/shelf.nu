@@ -31,7 +31,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportNRM } from "~/utils/subscription.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Import team members") }];
+export const meta = () => [{ title: appendToMetaTitle("Importar membros") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -135,12 +135,12 @@ export default function ImportNRMs() {
 }
 
 function ImportForm() {
-  const [agreed, setAgreed] = useState<"I AGREE" | "">("");
+  const [agreed, setAgreed] = useState<"EU CONCORDO" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher<typeof action>();
 
   const { data, state } = fetcher;
-  const disabled = isFormProcessing(state) || agreed !== "I AGREE";
+  const disabled = isFormProcessing(state) || agreed !== "EU CONCORDO";
   const isSuccessful = data && !data.error && data.success;
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
@@ -188,7 +188,7 @@ function ImportForm() {
             {!isSuccessful ? (
               <>
                 <AlertDialogDescription>
-                  You need to type: <b>"I AGREE"</b> in the field below to
+                  You need to type: <b>"EU CONCORDO"</b> in the field below to
                   accept the import. By doing this you agree that you have read
                   the requirements and you understand the limitations and
                   consequences of using this feature.
@@ -199,7 +199,7 @@ function ImportForm() {
                   name="agree"
                   value={agreed}
                   onChange={(e) => setAgreed(e.target.value as any)}
-                  placeholder="I AGREE"
+                  placeholder="EU CONCORDO"
                   pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
                   required
                 />
@@ -243,7 +243,7 @@ function ImportForm() {
                   }}
                   disabled={disabled}
                 >
-                  {isFormProcessing(fetcher.state) ? "Importing..." : "Import"}
+                  {isFormProcessing(fetcher.state) ? "Importing..." : "Importar"}
                 </Button>
               </>
             )}

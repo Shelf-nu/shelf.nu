@@ -53,7 +53,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
-export const meta = () => [{ title: appendToMetaTitle("Edit team member") }];
+export const meta = () => [{ title: appendToMetaTitle("Editar membro") }];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -121,7 +121,7 @@ export default function EditNrm() {
           defaultValue={teamMember.name}
           name={zo.fields.name()}
           type="text"
-          label="Name"
+          label="Nome"
           className="mb-8"
           placeholder="Enter team member’s name"
           required

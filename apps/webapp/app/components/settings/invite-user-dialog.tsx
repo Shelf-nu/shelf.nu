@@ -57,9 +57,9 @@ export const InviteUserFormSchema = z.object({
 });
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
-  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.ADMIN]: "Administrador",
   [OrganizationRoles.BASE]: "Base",
-  [OrganizationRoles.SELF_SERVICE]: "Self service",
+  [OrganizationRoles.SELF_SERVICE]: "Autoatendimento",
 };
 
 export default function InviteUserDialog({

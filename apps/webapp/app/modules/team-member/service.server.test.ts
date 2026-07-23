@@ -208,7 +208,7 @@ describe("getTeamMember", () => {
         cause: null,
         message: "Custom error",
         additionalData: {},
-        label: "Assets",
+        label: "Equipamentos",
       });
 
       mockTeamMemberFindUniqueOrThrow.mockRejectedValue(originalError);

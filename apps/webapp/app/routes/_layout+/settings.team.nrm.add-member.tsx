@@ -20,7 +20,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-export const meta = () => [{ title: appendToMetaTitle("Add team member") }];
+export const meta = () => [{ title: appendToMetaTitle("Adicionar membro") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -116,7 +116,7 @@ export default function AddMember() {
             ref={nameInputRef}
             name={zo.fields.name()}
             type="text"
-            label="Name"
+            label="Nome"
             className="mb-8"
             placeholder="Enter team member’s name"
             required

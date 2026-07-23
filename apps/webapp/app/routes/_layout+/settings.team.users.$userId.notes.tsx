@@ -1,7 +1,7 @@
 /**
  * User Notes Tab Route — `/settings/team/users/:userId/notes`
  *
- * Renders the "Notes" tab on the admin user profile page.
+ * Renders the "Notas" tab on the admin user profile page.
  * This tab is only visible to ADMIN and OWNER roles.
  *
  * The loader resolves the target user's TeamMember in the current workspace,
@@ -79,7 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const header: HeaderData = {
-      title: "Notes",
+      title: "Notas",
     };
 
     return payload({
@@ -128,7 +128,7 @@ export default function UserNotesPage() {
     <div className="mt-4 w-full">
       {canReadNotes ? (
         <>
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+          <TextualDivider text="Notas" className="mb-8 lg:hidden" />
           <UserNotes
             notes={notes}
             canCreate={canCreateNotes}
