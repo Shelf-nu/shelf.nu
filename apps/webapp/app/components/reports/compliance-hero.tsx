@@ -49,9 +49,10 @@ function formatPriorPeriodLabel(
   fromDate?: Date,
   toDate?: Date
 ): string {
-  // For custom ranges, show the actual dates
+  // For custom ranges, show the actual dates in the user's resolved format
+  // prefs (no shape options — the pref decides numeric-vs-name and order).
   if (periodLabel === "prior period" && fromDate && toDate) {
-    const fmt = (d: Date) => formatDate(d, { month: "short", day: "numeric" });
+    const fmt = (d: Date) => formatDate(d);
     return `${fmt(fromDate)} – ${fmt(toDate)}`;
   }
   return periodLabel;

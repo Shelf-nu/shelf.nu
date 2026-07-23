@@ -298,22 +298,30 @@ export function StatusCell({
  * Date cell renderer with consistent formatting.
  *
  * Delegates to the shared {@link DateS} component so dates render in the
- * user's locale + timezone (from `useHints()`) rather than a hardcoded
- * `en-US` format — per the CLAUDE.md "Date Display" rule that all UI dates
- * must go through `DateS`. The outer span preserves `tabular-nums` column
- * alignment in report tables.
+ * acting user's resolved format prefs (order, numeric-vs-name month,
+ * separator, and timezone) rather than any hardcoded shape — per the
+ * CLAUDE.md "Date Display" rule that all UI dates must go through `DateS`.
+ * The outer span preserves `tabular-nums` column alignment in report tables.
+ *
+ * @param date - the value to render, or `null` for an em-dash placeholder.
+ * @param includeTime - when true, append the time portion (per the user's
+ *   time-format pref). Used by datetime columns such as the Asset-Activity
+ *   "Date & Time" column.
  */
-export function DateCell({ date }: { date: Date | null }) {
+export function DateCell({
+  date,
+  includeTime,
+}: {
+  date: Date | null;
+  includeTime?: boolean;
+}) {
   if (!date) {
     return <span className="text-gray-400">—</span>;
   }
 
   return (
     <span className="tabular-nums">
-      <DateS
-        date={date}
-        options={{ month: "short", day: "numeric", year: "numeric" }}
-      />
+      <DateS date={date} includeTime={includeTime} />
     </span>
   );
 }
