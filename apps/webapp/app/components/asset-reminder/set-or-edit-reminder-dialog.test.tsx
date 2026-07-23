@@ -37,6 +37,22 @@ vi.mock("../layout/dialog", () => ({
   ),
 }));
 
+// why: the dialog reads `useFormatPrefs()` and its embedded `DateTimePicker`
+// reads `useDateFormatter()`; both funnel through `useRequestInfo().formatPrefs`,
+// which needs the root data-router loader (absent under MemoryRouter). Stub the
+// resolved prefs so the dialog renders — the success-effect under test is
+// prefs-agnostic.
+vi.mock("~/utils/request-info", () => ({
+  useRequestInfo: () => ({
+    formatPrefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+  }),
+}));
+
 /** Total times any `onClose` instance handed to the dialog was invoked. */
 let onCloseCallCount = 0;
 /** Returns a fresh `onClose` reference each call — mirrors the pre-fix
