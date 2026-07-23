@@ -152,24 +152,55 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
 /**
  * This function is used to register asset workers.
  * Workers are used to process scheduled events.
+ *
+ * On handler failure we log (last-retry only, mirroring the email worker's
+ * noise control in `emails/email.worker.server.ts`) and **rethrow** so
+ * pg-boss marks the job failed and retries it per the bounded `retryLimit`
+ * set on enqueue in `scheduler.server.ts`. Previously the catch swallowed the
+ * error and returned, so pg-boss marked the job COMPLETED even on failure —
+ * silently losing the reminder with no retry.
+ *
+ * @throws {ShelfError} Rethrows the wrapped cause after logging, so pg-boss
+ * treats the job as failed and retries it.
  */
 export async function regierAssetWorkers() {
   await scheduler.work<AssetsSchedulerData>(
     QueueNames.assetsQueue,
+    // why: includeMetadata exposes job.retrycount/job.retrylimit on the job
+    // object below, which we need to only log on the final retry attempt
+    { includeMetadata: true },
     async (job) => {
       const handler = ASSET_SCHEDULER_EVENT_HANDLERS[job.data.eventType];
 
       try {
         await handler(job);
       } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Something went wrong while executing scheduled work.",
-            additionalData: { data: job.data, work: job.data.eventType },
-            label: "Asset Scheduler",
-          })
-        );
+        // why: pg-boss increments retrycount at fetch time, so with N retries
+        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
+        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
+        // both the second-to-last AND the final attempt).
+        const isLastRetry =
+          job.retrycount != null &&
+          job.retrylimit != null &&
+          job.retrycount >= job.retrylimit;
+
+        if (isLastRetry) {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while executing scheduled work.",
+              additionalData: {
+                data: job.data,
+                work: job.data.eventType,
+                retryCount: job.retrycount,
+                retryLimit: job.retrylimit,
+              },
+              label: "Asset Scheduler",
+            })
+          );
+        }
+
+        throw cause;
       }
     }
   );
