@@ -1126,13 +1126,18 @@ describe("buildAdvancedAssetsQuery", () => {
     expect(def).not.toContain('a.value AS "assetValue"');
     expect(def).not.toContain('a.quantity AS "assetQuantity"');
 
-    // An active sort pulls exactly its key back into the slim SELECT.
-    expect(cheap({ sortBy: ["valuation:asc"] })).toContain(
-      'a.value AS "assetValue"'
-    );
-    expect(cheap({ sortBy: ["quantity:asc"] })).toContain(
-      'a.quantity AS "assetQuantity"'
-    );
+    // Sorting by valuation orders by TOTAL value (assetValue *
+    // assetQuantity), so both keys legitimately enter the slim SELECT —
+    // but unrelated keys must stay out (catches all-or-nothing gating).
+    const valuationSort = cheap({ sortBy: ["valuation:asc"] });
+    expect(valuationSort).toContain('a.value AS "assetValue"');
+    expect(valuationSort).toContain('a.quantity AS "assetQuantity"');
+    expect(valuationSort).not.toContain('a.title AS "assetTitle"');
+
+    // A single-key sort pulls exactly its key back in, nothing else.
+    const quantitySort = cheap({ sortBy: ["quantity:asc"] });
+    expect(quantitySort).toContain('a.quantity AS "assetQuantity"');
+    expect(quantitySort).not.toContain('a.value AS "assetValue"');
   });
 
   it("gates a name-sort column in the cheap phase on the active sort", () => {
