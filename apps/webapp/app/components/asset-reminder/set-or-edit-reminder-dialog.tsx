@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { DateTime } from "luxon";
 import { Form, useNavigation, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -9,6 +10,7 @@ import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -16,17 +18,88 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
-export const setReminderSchema = z.object({
-  name: z.string().min(1, "Please enter name."),
-  message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce
-    .date()
-    .min(new Date(), "Please select a date in the future"),
-  teamMembers: z
-    .array(z.string())
-    .min(1, "Please select at least one team member"),
-  redirectTo: z.string().optional(),
-});
+/** Options accepted by {@link createSetReminderSchema}. */
+type CreateSetReminderSchemaOptions = {
+  /**
+   * The acting user's resolved IANA timezone preference — the SAME zone the
+   * server parses submitted wall-clock times in and persists against. When
+   * provided, the submitted `alertDateTime` wall-clock ("yyyy-MM-ddTHH:mm") is
+   * interpreted in this zone (via Luxon) before the future-date check, so
+   * client-side validation matches persistence exactly even when the browser
+   * zone differs from the user's preference. When omitted (e.g. the shared
+   * server constant that has no request context), the value is coerced in the
+   * runtime's local zone as a best-effort fallback.
+   */
+  timeZone?: string;
+};
+
+/**
+ * Builds the set/edit-reminder form schema.
+ *
+ * Two behaviours matter here:
+ *
+ * 1. The future-date cutoff for `alertDateTime` is evaluated **per validation**
+ *    — the refinement reads a fresh `Date.now()` each time the schema runs — so
+ *    a long-lived process never validates against a "now" frozen at module
+ *    load. Because the refinement lives on the field (not the object), the
+ *    return value stays a plain `ZodObject`, keeping `.extend(...)` usable by
+ *    server callers.
+ * 2. When `timeZone` is supplied, the submitted wall-clock string is
+ *    interpreted in that timezone before the cutoff comparison, mirroring how
+ *    the server persists it — so "future" is judged against the SAME instant
+ *    that will be stored.
+ *
+ * @param options - Optional resolved format prefs (currently the timezone).
+ * @returns A Zod object schema for the set/edit reminder form.
+ */
+export function createSetReminderSchema(
+  options: CreateSetReminderSchemaOptions = {}
+) {
+  const { timeZone } = options;
+
+  return z.object({
+    name: z.string().min(1, "Please enter name."),
+    message: z.string().min(1, "Please enter message."),
+    alertDateTime: z
+      .preprocess((value) => {
+        // Interpret the submitted wall-clock in the acting user's timezone so
+        // "future" is judged against the SAME instant that will be persisted.
+        // Fall back to native coercion when no timezone is known or the value
+        // doesn't match the expected format (Invalid Date then surfaces the
+        // standard "Invalid date" error, preserving the existing UX).
+        if (typeof value === "string" && timeZone) {
+          const parsed = DateTime.fromFormat(value, DATE_TIME_FORMAT, {
+            zone: timeZone,
+          });
+          if (parsed.isValid) {
+            return parsed.toJSDate();
+          }
+        }
+        return value;
+      }, z.coerce.date())
+      // Fresh `Date.now()` on every validation — never a module-load snapshot.
+      .refine(
+        (date) => date.getTime() > Date.now(),
+        "Please select a date in the future"
+      ),
+    teamMembers: z
+      .array(z.string())
+      .min(1, "Please select at least one team member"),
+    redirectTo: z.string().optional(),
+  });
+}
+
+/**
+ * Default reminder schema instance for server-side parsing where no request
+ * timezone is threaded through the schema (e.g. `setReminderSchema.extend(...)`
+ * in the edit action, or `parseData(formData, setReminderSchema)` in the create
+ * action). Built via {@link createSetReminderSchema} so it inherits the
+ * per-validation future-date cutoff. The server actions re-parse the wall-clock
+ * in the user's resolved timezone with Luxon for persistence; client code
+ * should prefer `createSetReminderSchema(timeZone)` so its future-date check is
+ * timezone-accurate too.
+ */
+export const setReminderSchema = createSetReminderSchema();
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
@@ -61,7 +134,18 @@ export default function SetOrEditReminderDialog({
       : "?success=true"
   }`;
 
-  const zo = useZorm("SetOrEditReminder", setReminderSchema);
+  /**
+   * Client-side schema bound to the acting user's timezone so the future-date
+   * check judges the submitted wall-clock in the SAME zone the server persists
+   * it (see the reminder actions in `modules/asset-reminder/utils.server.ts`).
+   * Memoized on `timeZone` for a stable identity across re-renders.
+   */
+  const schema = useMemo(
+    () => createSetReminderSchema({ timeZone }),
+    [timeZone]
+  );
+
+  const zo = useZorm("SetOrEditReminder", schema);
 
   const actionData = useActionData<DataOrErrorResponse>();
   /** This handles server side errors in case client side validation fails */
