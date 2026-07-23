@@ -324,22 +324,15 @@ function ScannerContent() {
     outstandingModelUnitCount: number;
   } | null>(null);
 
-  // Monotonic token so a slow in-flight `api.booking` response for a booking
-  // the operator has since navigated away from can't overwrite the current
-  // booking's context. Bumped on every fetch; the response only lands if its
-  // token is still the latest.
-  const bookingCtxRequestRef = useRef(0);
-
   // Also called from the scan paths when a code arrives before the first
-  // fetch lands (or after it failed) — a scan-while-loading retries it.
+  // fetch lands (or after it failed) — a scan-while-loading retries it. A
+  // cross-booking stale response can't land here because the whole component
+  // remounts on a booking change (see the keyed default export), so this
+  // closure and its state setter belong to a single booking's mount.
   const fetchBookingCtx = useCallback(() => {
     if (!isBookingMode || !bookingId || !currentOrg) return;
-    const requestId = ++bookingCtxRequestRef.current;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
       if (!data) return;
-      // A newer fetch (or a context reset, which also bumps the token) started
-      // while this was in flight — drop this stale response.
-      if (requestId !== bookingCtxRequestRef.current) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
@@ -440,41 +433,10 @@ function ScannerContent() {
     lastScanRef.current = "";
   }, [dismissResultBase, lastScanRef]);
 
-  /**
-   * Drop everything scanned when the scan CONTEXT changes.
-   *
-   * The scanner is a single tab screen reused across every flow, so entering it
-   * from a different booking (or the same booking in a different mode) only
-   * changes the route params — the component is never remounted and the scan
-   * list survives. That let items scanned for booking A show up in booking B's
-   * drawer, and in fulfil mode the carried-over rows sat under a progress
-   * banner they had nothing to do with.
-   *
-   * `handleActionChange` already clears the list, but ONLY for the in-scanner
-   * action picker; navigating in by route param never reaches it. Keyed on the
-   * params rather than on `action` so it fires exactly when the context the
-   * scans were collected for is no longer the context on screen.
-   */
-  useEffect(() => {
-    setScannedItems([]);
-    setBookingCheckinItems([]);
-    setScanResult(null);
-    lastScanRef.current = "";
-  }, [bookingId, bookingAction, setScanResult, lastScanRef]);
-
-  /**
-   * Drop the previous booking's `bookingCtx` the instant the booking changes.
-   * Keyed on `bookingId` alone (not `bookingAction` — an add→fulfil switch on
-   * the SAME booking keeps the same membership + reservations, and the fetch
-   * effect won't refetch it). Without this, the window between navigation and
-   * the new `api.booking` response resolving would let a scan match against the
-   * old booking's reservations. The in-flight guard in `fetchBookingCtx` (via
-   * `bookingCtxRequestRef`) separately drops a stale response for the old
-   * booking; the fetch effect refetches for the new one.
-   */
-  useEffect(() => {
-    setBookingCtx(null);
-  }, [bookingId]);
+  // The scan list and booking context are reset by remounting the whole
+  // ScannerContent on any scan-context change — the default export keys it on
+  // `bookingId` + `bookingAction`. No reset-in-effect is needed here (and
+  // react-doctor forbids that pattern anyway).
 
   // Animation for scan line (shared hook)
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
@@ -2323,9 +2285,20 @@ function ScannerContent() {
 // ── Default export wraps with error boundary ─────────────
 
 export default function ScannerScreen() {
+  // The scanner is one reused tab screen: navigating from a different booking,
+  // or the same booking in a different mode, only updates the route params —
+  // expo-router keeps the component mounted, so its scanned-items list and
+  // cached booking context would survive across contexts they don't belong to.
+  // Keying the content on the scan context remounts it on any such change, so
+  // React resets ALL of its state cleanly (no reset-in-effect, and no window
+  // where a scan matches the previous booking's reservations).
+  const { bookingId, bookingAction } = useLocalSearchParams<{
+    bookingId?: string;
+    bookingAction?: string;
+  }>();
   return (
     <ScannerErrorBoundary label="Scanner">
-      <ScannerContent />
+      <ScannerContent key={`${bookingId ?? ""}:${bookingAction ?? ""}`} />
     </ScannerErrorBoundary>
   );
 }
