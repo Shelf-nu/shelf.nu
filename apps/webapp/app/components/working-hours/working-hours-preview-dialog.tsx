@@ -150,7 +150,13 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
             <div className="mb-1 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-gray-900">
                 <DateS
-                  date={override.date}
+                  // Overrides are absolute real-world calendar dates that must
+                  // never shift with the viewer's timezone. The stored value can
+                  // be a UTC-midnight instant; passing it straight to DateS reads
+                  // its browser-local components and lands a day west of UTC.
+                  // Collapse it to a bare "YYYY-MM-DD" first so formatDate takes
+                  // its no-shift path and renders the calendar date exactly.
+                  date={getOverrideDateKey(override.date)}
                   localeOnly
                   options={{
                     weekday: "long",
