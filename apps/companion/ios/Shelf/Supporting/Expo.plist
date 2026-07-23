@@ -1,16 +1,43 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
-    <key>EXUpdatesCheckOnLaunch</key>
-    <string>ALWAYS</string>
-    <key>EXUpdatesEnabled</key>
-    <true/>
-    <key>EXUpdatesLaunchWaitMs</key>
-    <integer>0</integer>
-    <key>EXUpdatesRuntimeVersion</key>
-    <string>1.2.0</string>
-    <key>EXUpdatesURL</key>
-    <string>https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58</string>
-  </dict>
+<dict>
+	<key>EXUpdatesCheckOnLaunch</key>
+	<string>ALWAYS</string>
+	<key>EXUpdatesCodeSigningCertificate</key>
+	<string>-----BEGIN CERTIFICATE-----
+MIIC4TCCAcmgAwIBAgIJQxvgKJQFkd+ZMA0GCSqGSIb3DQEBCwUAMBoxGDAWBgNV
+BAMTD1NoZWxmIENvbXBhbmlvbjAeFw0yNjA3MjMxMzMxMjhaFw0zNjA3MjMxMzMx
+MjhaMBoxGDAWBgNVBAMTD1NoZWxmIENvbXBhbmlvbjCCASIwDQYJKoZIhvcNAQEB
+BQADggEPADCCAQoCggEBAKuC7hymK+qRU+d/DoX/9BvX7Sg9oNpSM5vsXkgx9SdR
+lZSOv2FXSuZSHpKeaefF3p1lehv0Ws8TbxKs7b0Acd5UZTmNAcVRp9ZEhV89jyEX
+5VHNcFMO8Ck6+J0cudJc+sfMNLJJzuAi37Li5Pw1vODMhxoMqoW2XNXqiTjLQq+i
+CkcEybtsMYoQzIrc1YxGcVnbx2EbUbeViYQA9RVUzBsIjLdjoPPeq5QOlf0KW9Gx
+dm29in5k9pgIRr+ZL53cLDtaq5AJnrD9h8KIk0PZpLVb4nZJTwOhtj41LmKtmRXD
+wbhAo0E2VwfaWEWV3uqXs5SdkUJlefy2BJEBWy05qs8CAwEAAaMqMCgwDgYDVR0P
+AQH/BAQDAgeAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMDMA0GCSqGSIb3DQEBCwUA
+A4IBAQCoHLK56Z11U5QnDCu4ifi8OLlQHkvLDH8B5MM2NuVJOZp+31bEP670pRxt
+QMhe7iugM10sMF752FgCOMUnrKWsJPYKh4xq6v1UtLVrlZKkVHWkX25+sTsxN1Pl
+7aEzi/2jKiWpn/CJoh5ihprpGY5P6Sir58+lRnlaY9meibjmcgCa28pSb2NhtORx
+Lbzh9rzgS5mvv7WidhDHa39N/AQWRqQBA1UE48JSq8tbI/5sGPEmWCUgk8ygM7yU
+FdTopFhPIMXwkXG0E+eNm8Wm9+gIUb8l2y1Ri8fUOWZQ/ln4n4xiGKHl0VF8sQnJ
+4skJ2H4ZHEZ7UrdCT1WD/dSHW/rE
+-----END CERTIFICATE-----
+</string>
+	<key>EXUpdatesCodeSigningMetadata</key>
+	<dict>
+		<key>alg</key>
+		<string>rsa-v1_5-sha256</string>
+		<key>keyid</key>
+		<string>main</string>
+	</dict>
+	<key>EXUpdatesEnabled</key>
+	<true/>
+	<key>EXUpdatesLaunchWaitMs</key>
+	<integer>0</integer>
+	<key>EXUpdatesRuntimeVersion</key>
+	<string>1.2.0</string>
+	<key>EXUpdatesURL</key>
+	<string>https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58</string>
+</dict>
 </plist>

@@ -67,3 +67,49 @@ build onward, every JS-only fix on that app version ships free via `eas update`.
 
 So: merge this → cut one more build (the last "paid" one for a while) → publish
 JS fixes over the air after that.
+
+## Code signing (required — the client verifies every bundle)
+
+OTA without code signing means the app trusts **any** bundle the EAS endpoint
+serves, so a compromised EAS account or CI token could push malicious JS to
+every install silently. Code signing closes that: the app embeds a public
+**certificate** and refuses any update not signed by the matching **private
+key**.
+
+- `app.json` → `updates.codeSigningCertificate` + `codeSigningMetadata`.
+- `ios/Shelf/Supporting/Expo.plist` → `EXUpdatesCodeSigningCertificate` (PEM
+  inline) + `EXUpdatesCodeSigningMetadata` (bare iOS reads the plist, not
+  app.json).
+- Public certificate: `certs/certificate.pem` — committed, embedded in the app.
+- Private key: `keys/private-key.pem` — **gitignored, never committed.**
+
+Publish signs with the private key:
+
+```bash
+eas update --channel production --message "fix: … (#PR)" \
+  --private-key-path ./keys/private-key.pem
+```
+
+### 🔑 Key custody — do this before the first production OTA build
+
+The whole point is that an **EAS-account compromise can't sign updates**. So:
+
+1. **Regenerate the key pair yourself** — the committed cert/key were generated
+   in an automated session and must not be trusted for production:
+   ```bash
+   cd apps/companion
+   npx expo-updates codesigning:generate \
+     --key-output-directory keys --certificate-output-directory certs \
+     --certificate-validity-duration-years 10 \
+     --certificate-common-name "Shelf Companion"
+   npx expo-updates codesigning:configure \
+     --certificate-input-directory=certs --key-input-directory=keys
+   ```
+   Then re-add the new cert to `Expo.plist` (the `EXUpdatesCodeSigning*` keys)
+   and commit the new `certs/certificate.pem`.
+2. **Store the private key in a secrets manager / CI secret — NOT in the EAS
+   account and NOT in the repo.** Whoever runs `eas update` pulls it at publish
+   time via `--private-key-path`.
+3. **Rotate** if the key is ever exposed: generate a new pair, cut a new build
+   with the new certificate. Old builds keep trusting the old cert until users
+   update the binary, so treat a leak as build-worthy.
