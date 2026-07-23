@@ -7,6 +7,7 @@
  * @see {@link file://./types.ts}
  */
 
+import { DateTime } from "luxon";
 import {
   formatDate,
   HARDCODED_DEFAULT_PREFS,
@@ -17,12 +18,17 @@ import type { TimeframePreset, ResolvedTimeframe } from "./types";
 /**
  * Resolve a timeframe preset to actual dates.
  *
+ * Preset boundaries are anchored to wall-clock time in the user's pref
+ * timezone (`prefs.timeZone`) via Luxon — so "this month" starts at midnight on
+ * the 1st in the user's zone, not on the machine running the loader. The
+ * returned `from`/`to` are `Date` instants (via `.toJSDate()`).
+ *
  * @param preset - The timeframe preset
  * @param customFrom - Custom start date (required if preset is "custom")
  * @param customTo - Custom end date (required if preset is "custom")
- * @param prefs - Resolved user format prefs driving label ordering. Optional;
- *   defaults to {@link HARDCODED_DEFAULT_PREFS} so server callers keep
- *   compiling until Phase 7 threads acting-user prefs into them.
+ * @param prefs - Resolved user format prefs driving both the boundary timezone
+ *   and label ordering. Optional; defaults to {@link HARDCODED_DEFAULT_PREFS}
+ *   (UTC), which is acceptable for the internal error-path fallbacks below.
  * @returns Resolved timeframe with actual dates and label
  */
 export function resolveTimeframe(
@@ -31,104 +37,106 @@ export function resolveTimeframe(
   customTo?: Date,
   prefs: ResolvedFormatPrefs = HARDCODED_DEFAULT_PREFS
 ): ResolvedTimeframe {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const zone = prefs.timeZone ?? "UTC";
+  const now = DateTime.now().setZone(zone);
+  const startOfToday = now.startOf("day");
 
   switch (preset) {
     case "today":
       return {
         preset,
-        from: today,
-        to: now,
+        from: startOfToday.toJSDate(),
+        to: now.toJSDate(),
         label: "Today",
       };
 
     case "last_7d": {
       // 7 days = today + 6 days before = subtract 6
-      const from = new Date(today);
-      from.setDate(from.getDate() - 6);
       return {
         preset,
-        from,
-        to: now,
+        from: startOfToday.minus({ days: 6 }).toJSDate(),
+        to: now.toJSDate(),
         label: "Last 7 days",
       };
     }
 
     case "last_30d": {
       // 30 days = today + 29 days before = subtract 29
-      const from = new Date(today);
-      from.setDate(from.getDate() - 29);
       return {
         preset,
-        from,
-        to: now,
+        from: startOfToday.minus({ days: 29 }).toJSDate(),
+        to: now.toJSDate(),
         label: "Last 30 days",
       };
     }
 
     case "last_90d": {
       // 90 days = today + 89 days before = subtract 89
-      const from = new Date(today);
-      from.setDate(from.getDate() - 89);
       return {
         preset,
-        from,
-        to: now,
+        from: startOfToday.minus({ days: 89 }).toJSDate(),
+        to: now.toJSDate(),
         label: "Last 90 days",
       };
     }
 
     case "this_month": {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      const from = now.startOf("month");
       return {
         preset,
-        from,
-        to: now,
-        label: formatMonthLabel(from, prefs),
+        from: from.toJSDate(),
+        to: now.toJSDate(),
+        // formatMonthLabel is locale-only (no tz conversion) and reads the
+        // machine-local components of the Date it receives — pass a local
+        // wall-clock date built from the pref-tz month so the label names the
+        // correct month regardless of the machine's timezone.
+        label: formatMonthLabel(new Date(from.year, from.month - 1, 1), prefs),
       };
     }
 
     case "last_month": {
-      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const from = now.startOf("month").minus({ months: 1 });
+      const to = now.startOf("month").minus({ seconds: 1 });
       return {
         preset,
-        from,
-        to,
-        label: formatMonthLabel(from, prefs),
+        from: from.toJSDate(),
+        to: to.toJSDate(),
+        // See this_month: label date is a machine-local wall-clock proxy.
+        label: formatMonthLabel(new Date(from.year, from.month - 1, 1), prefs),
       };
     }
 
     case "this_quarter": {
-      const quarter = Math.floor(now.getMonth() / 3);
-      const from = new Date(now.getFullYear(), quarter * 3, 1);
+      const from = now.startOf("quarter");
       return {
         preset,
-        from,
-        to: now,
-        label: `Q${quarter + 1} ${now.getFullYear()}`,
+        from: from.toJSDate(),
+        to: now.toJSDate(),
+        label: `Q${now.quarter} ${now.year}`,
       };
     }
 
     case "this_year": {
-      const from = new Date(now.getFullYear(), 0, 1);
+      const from = now.startOf("year");
       return {
         preset,
-        from,
-        to: now,
-        label: `${now.getFullYear()}`,
+        from: from.toJSDate(),
+        to: now.toJSDate(),
+        label: `${now.year}`,
       };
     }
 
     case "all_time": {
       // Use a far past date - organization creation date would be ideal
       // but we use 2020 as a reasonable start for most organizations
-      const from = new Date(2020, 0, 1);
+      const from = DateTime.fromObject(
+        { year: 2020, month: 1, day: 1 },
+        { zone }
+      );
       return {
         preset,
-        from,
-        to: now,
+        from: from.toJSDate(),
+        to: now.toJSDate(),
         label: "All time",
       };
     }
@@ -173,21 +181,19 @@ function formatMonthLabel(date: Date, prefs: ResolvedFormatPrefs): string {
 }
 
 /**
- * Format a short day/month/year label (e.g. "3 Apr 2026") in the caller's
- * configured date-part order. Month names stay English; only ORDER is
- * prefs-driven.
+ * Format the custom-range indicator's date label in the user's own format.
  *
- * @param date - The date to label
+ * No `month`/`day`/`year` shape options are passed, so the pref alone decides
+ * the rendering (numeric-vs-name, order, separator) — e.g. "06/07/2026" for a
+ * DD_MM_YYYY user. `localeOnly` keeps the given wall-clock date absolute (no
+ * timezone conversion), matching how the custom range is entered.
+ *
+ * @param date - The date to label (interpreted as a local wall-clock date)
  * @param prefs - Resolved user format prefs
- * @returns the assembled short date label
+ * @returns the assembled custom-range date label
  */
 function formatDateShort(date: Date, prefs: ResolvedFormatPrefs): string {
-  return formatDate(date, prefs, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    localeOnly: true,
-  });
+  return formatDate(date, prefs, { localeOnly: true });
 }
 
 /**
@@ -195,22 +201,4 @@ function formatDateShort(date: Date, prefs: ResolvedFormatPrefs): string {
  */
 export function getDefaultTimeframe(): ResolvedTimeframe {
   return resolveTimeframe("last_30d");
-}
-
-/**
- * Parse timeframe from URL search params.
- */
-export function parseTimeframeFromParams(
-  searchParams: URLSearchParams
-): ResolvedTimeframe {
-  const preset =
-    (searchParams.get("timeframe") as TimeframePreset) || "last_30d";
-  const customFrom = searchParams.get("from");
-  const customTo = searchParams.get("to");
-
-  return resolveTimeframe(
-    preset,
-    customFrom ? new Date(customFrom) : undefined,
-    customTo ? new Date(customTo) : undefined
-  );
 }
