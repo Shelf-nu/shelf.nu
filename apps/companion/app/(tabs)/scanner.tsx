@@ -2289,16 +2289,25 @@ export default function ScannerScreen() {
   // or the same booking in a different mode, only updates the route params —
   // expo-router keeps the component mounted, so its scanned-items list and
   // cached booking context would survive across contexts they don't belong to.
-  // Keying the content on the scan context remounts it on any such change, so
-  // React resets ALL of its state cleanly (no reset-in-effect, and no window
-  // where a scan matches the previous booking's reservations).
+  // Keying on the scan context remounts on any such change, so React resets ALL
+  // of that state cleanly (no reset-in-effect, and no window where a scan
+  // matches the previous booking's reservations).
+  //
+  // The key sits on the error boundary, not on ScannerContent: the boundary
+  // holds its own `hasError` state, so keying only the child would leave a
+  // caught error's fallback up when the operator navigates to a new booking.
+  // Remounting the boundary clears `hasError` and remounts ScannerContent with
+  // it.
   const { bookingId, bookingAction } = useLocalSearchParams<{
     bookingId?: string;
     bookingAction?: string;
   }>();
   return (
-    <ScannerErrorBoundary label="Scanner">
-      <ScannerContent key={`${bookingId ?? ""}:${bookingAction ?? ""}`} />
+    <ScannerErrorBoundary
+      key={`${bookingId ?? ""}:${bookingAction ?? ""}`}
+      label="Scanner"
+    >
+      <ScannerContent />
     </ScannerErrorBoundary>
   );
 }
