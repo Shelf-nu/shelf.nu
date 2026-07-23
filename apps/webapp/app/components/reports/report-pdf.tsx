@@ -353,12 +353,12 @@ function CompliancePreview({ pdfMeta }: { pdfMeta: CompliancePdfMeta }) {
         <h2 className="mb-3 text-sm font-semibold text-gray-700">Summary</h2>
         <div className="flex gap-6">
           <MetricBox
-            label="Compliance Rate"
+            label="Taxa de Conformidade"
             value={`${pdfMeta.complianceRate}%`}
             highlight
           />
           <MetricBox label="On-time" value={pdfMeta.onTimeCount} />
-          <MetricBox label="Late" value={pdfMeta.lateCount} />
+          <MetricBox label="Atrasado" value={pdfMeta.lateCount} />
           <MetricBox label="Total" value={pdfMeta.totalCount} />
           {pdfMeta.overdueCount > 0 && (
             <MetricBox
@@ -469,7 +469,7 @@ function BookingStatusBadge({ status }: { status: string }) {
     DRAFT: "Draft",
     RESERVED: "Reserved",
     ONGOING: "Ongoing",
-    OVERDUE: "Overdue",
+    OVERDUE: "Atrasado",
     COMPLETE: "Complete",
     CANCELLED: "Cancelled",
     ARCHIVED: "Archived",
@@ -531,12 +531,12 @@ function AssetInventoryPreview({
         <h2 className="mb-3 text-sm font-semibold text-gray-700">Summary</h2>
         <div className="flex gap-6">
           <MetricBox
-            label="Total Assets"
+            label="Total de Equipamentos"
             value={pdfMeta.totalCount}
             highlight
           />
           <MetricBox
-            label="Total Value"
+            label="Valor Total"
             value={formatCurrency({
               value: pdfMeta.totalValuation,
               currency: pdfMeta.currency,
@@ -637,7 +637,7 @@ function CustodySnapshotPreview({
           />
           <MetricBox label="Team Members" value={pdfMeta.totalCustodians} />
           <MetricBox
-            label="Total Value"
+            label="Valor Total"
             value={formatCurrency({
               value: pdfMeta.totalValuation,
               currency: pdfMeta.currency,

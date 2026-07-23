@@ -39,7 +39,7 @@ import { tw } from "~/utils/tw";
 const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
   {
     accessorKey: "assetName",
-    header: "Asset",
+    header: "Equipamento",
     cell: ({ row }) => (
       <AssetCell
         name={row.original.assetName}
@@ -81,13 +81,13 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
   },
   {
     accessorKey: "category",
-    header: "Category",
+    header: "Categoria",
     cell: ({ row }) =>
       row.original.category || <span className="text-gray-400">—</span>,
   },
   {
     accessorKey: "location",
-    header: "Location",
+    header: "Local",
     cell: ({ row }) =>
       row.original.location || <span className="text-gray-400">—</span>,
   },

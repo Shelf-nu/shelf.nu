@@ -69,7 +69,7 @@ export const loader = async ({
       throw new ShelfError({
         cause: null,
         message: "Report ID is required for export",
-        label: "Report",
+        label: "Relatório",
         status: 400,
       });
     }
@@ -80,7 +80,7 @@ export const loader = async ({
       throw new ShelfError({
         cause: null,
         message: `Report "${reportId}" not found`,
-        label: "Report",
+        label: "Relatório",
         status: 404,
       });
     }
@@ -89,7 +89,7 @@ export const loader = async ({
       throw new ShelfError({
         cause: null,
         message: `Report "${reportDef.title}" does not support export`,
-        label: "Report",
+        label: "Relatório",
         status: 403,
       });
     }
@@ -250,7 +250,7 @@ export const loader = async ({
         throw new ShelfError({
           cause: null,
           message: `Export not implemented for report "${reportId}"`,
-          label: "Report",
+          label: "Relatório",
           status: 500,
         });
     }
@@ -312,8 +312,8 @@ function generateCustodySnapshotCsv(rows: CustodySnapshotRow[]): string {
   const headers = [
     "Asset ID",
     "Asset Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Assigned To",
     "Assigned Date",
     "Days Held",
@@ -342,7 +342,7 @@ function formatStatus(status: string): string {
     DRAFT: "Draft",
     RESERVED: "Reserved",
     ONGOING: "Ongoing",
-    OVERDUE: "Overdue",
+    OVERDUE: "Atrasado",
     COMPLETE: "Complete",
     CANCELLED: "Cancelled",
     ARCHIVED: "Archived",
@@ -359,7 +359,7 @@ function formatReturnStatus(
   latenessMs: number | null
 ): string {
   if (isOnTime) {
-    return "On time";
+    return "No prazo";
   }
 
   if (latenessMs === null) {
@@ -448,8 +448,8 @@ function generateIdleAssetsCsv(rows: IdleAssetRow[]): string {
   const headers = [
     "Asset ID",
     "Asset Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Last Booked",
     "Days Idle",
     "Valuation",
@@ -476,8 +476,8 @@ function generateTopBookedAssetsCsv(rows: TopBookedAssetRow[]): string {
     "Rank",
     "Asset ID",
     "Asset Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Booking Count",
     "Total Days Booked",
     "Avg Days per Booking",
@@ -507,8 +507,8 @@ function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
     "Rank",
     "Kit ID",
     "Kit Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Booking Count",
     "Total Days Booked",
     "Avg Days per Booking",
@@ -537,10 +537,10 @@ function generateAssetInventoryCsv(rows: AssetInventoryRow[]): string {
   const headers = [
     "Asset ID",
     "Asset Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Status",
-    "Custodian",
+    "Responsável",
     "Valuation",
     "Created Date",
     "QR Code ID",
@@ -568,8 +568,8 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
   const headers = [
     "Asset ID",
     "Asset Name",
-    "Category",
-    "Location",
+    "Categoria",
+    "Local",
     "Booking Count",
     "Days in Use",
     "Total Days",
@@ -595,11 +595,11 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
  */
 function generateAssetActivityCsv(rows: AssetActivityRow[]): string {
   const headers = [
-    "Date",
+    "Data",
     "Asset ID",
     "Asset Name",
     "Activity Type",
-    "Description",
+    "Descrição",
     "Performed By",
   ];
 
@@ -673,8 +673,8 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
     ]);
 
   const allRows = [
-    ...formatRows("Category", breakdown.byCategory),
-    ...formatRows("Location", breakdown.byLocation),
+    ...formatRows("Categoria", breakdown.byCategory),
+    ...formatRows("Local", breakdown.byLocation),
     ...formatRows("Status", breakdown.byStatus),
   ];
 

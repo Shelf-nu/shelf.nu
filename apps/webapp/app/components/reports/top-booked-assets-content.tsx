@@ -56,7 +56,7 @@ function AvgDurationHeader() {
 const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
   {
     accessorKey: "assetName",
-    header: "Asset",
+    header: "Equipamento",
     cell: ({ row }) => (
       <AssetCell
         name={row.original.assetName}
@@ -67,7 +67,7 @@ const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
   },
   {
     accessorKey: "bookingCount",
-    header: "Bookings",
+    header: "Reservas",
     cell: ({ row }) => (
       <Link
         to={`/assets/${row.original.assetId}/bookings`}
@@ -126,13 +126,13 @@ const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
   },
   {
     accessorKey: "category",
-    header: "Category",
+    header: "Categoria",
     cell: ({ row }) =>
       row.original.category || <span className="text-gray-400">—</span>,
   },
   {
     accessorKey: "location",
-    header: "Location",
+    header: "Local",
     cell: ({ row }) =>
       row.original.location || <span className="text-gray-400">—</span>,
   },

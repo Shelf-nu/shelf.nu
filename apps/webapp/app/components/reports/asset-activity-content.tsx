@@ -34,7 +34,7 @@ import { tw } from "~/utils/tw";
 const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
   {
     accessorKey: "assetName",
-    header: "Asset",
+    header: "Equipamento",
     cell: ({ row }) => (
       <AssetCell
         name={row.original.assetName}

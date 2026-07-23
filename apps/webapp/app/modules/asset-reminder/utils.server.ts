@@ -74,7 +74,7 @@ export async function resolveRemindersActions({
       await deleteAssetReminder({ id, organizationId });
 
       sendNotification({
-        title: "Reminder deleted",
+        title: "Lembrete excluído",
         message: "Your asset reminder has been deleted successfully",
         icon: { name: "trash", variant: "error" },
         senderId: userId,

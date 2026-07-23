@@ -62,10 +62,10 @@ export interface TimeframePickerProps {
 /** Preset button configuration */
 const PRESETS: { id: TimeframePreset; label: string; shortLabel: string }[] = [
   { id: "today", label: "Today", shortLabel: "Today" },
-  { id: "last_7d", label: "Last 7 days", shortLabel: "7d" },
-  { id: "last_30d", label: "Last 30 days", shortLabel: "30d" },
-  { id: "last_90d", label: "Last 90 days", shortLabel: "90d" },
-  { id: "this_month", label: "This month", shortLabel: "Month" },
+  { id: "last_7d", label: "Últimos 7 dias", shortLabel: "7d" },
+  { id: "last_30d", label: "Últimos 30 dias", shortLabel: "30d" },
+  { id: "last_90d", label: "Últimos 90 dias", shortLabel: "90d" },
+  { id: "this_month", label: "Este mês", shortLabel: "Month" },
   { id: "this_quarter", label: "This quarter", shortLabel: "Qtr" },
   { id: "this_year", label: "This year", shortLabel: "Year" },
   { id: "all_time", label: "All time", shortLabel: "All" },

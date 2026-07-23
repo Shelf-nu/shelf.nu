@@ -35,7 +35,7 @@ import type { AssetUtilizationRow, ReportKpi } from "~/modules/reports/types";
 const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
   {
     accessorKey: "assetName",
-    header: "Asset",
+    header: "Equipamento",
     cell: ({ row }) => (
       <AssetCell
         name={row.original.assetName}
@@ -75,12 +75,12 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
   },
   {
     accessorKey: "bookingCount",
-    header: "Bookings",
+    header: "Reservas",
     cell: ({ row }) => <NumberCell value={row.original.bookingCount} />,
   },
   {
     accessorKey: "category",
-    header: "Category",
+    header: "Categoria",
     cell: ({ row }) =>
       row.original.category || <span className="text-gray-400">—</span>,
   },

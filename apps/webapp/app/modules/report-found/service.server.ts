@@ -42,7 +42,7 @@ export async function createReport({
       message:
         "Something went wrong while creating the report. Please try again or contact support.",
       additionalData: { email, content, assetId, kitId },
-      label: "Report",
+      label: "Relatório",
     });
   }
 }
@@ -92,7 +92,7 @@ export function sendReportEmails({
       cause,
       message: "Failed to send report emails",
       additionalData: { ownerEmail, reporterEmail, item, type, normalizedName },
-      label: "Report",
+      label: "Relatório",
     });
   }
 }

@@ -31,7 +31,7 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data?.header?.title || "Reports") },
+  { title: appendToMetaTitle(data?.header?.title || "Relatórios") },
 ];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -51,7 +51,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   // Standard header object for app Header component
   const header = {
-    title: "Reports",
+    title: "Relatórios",
     subHeading: "Track and analyze your asset management operations",
   };
 

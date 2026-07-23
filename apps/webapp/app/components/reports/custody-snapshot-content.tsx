@@ -78,7 +78,7 @@ export function CustodySnapshotContent({
     () => [
       {
         accessorKey: "assetName",
-        header: "Asset",
+        header: "Equipamento",
         cell: ({ row }) => (
           <AssetCell
             name={row.original.assetName}
@@ -122,13 +122,13 @@ export function CustodySnapshotContent({
       },
       {
         accessorKey: "category",
-        header: "Category",
+        header: "Categoria",
         cell: ({ row }) =>
           row.original.category || <span className="text-gray-400">—</span>,
       },
       {
         accessorKey: "location",
-        header: "Location",
+        header: "Local",
         cell: ({ row }) =>
           row.original.location || <span className="text-gray-400">—</span>,
       },

@@ -218,7 +218,7 @@ export async function bookingComplianceReport(
     return {
       report: {
         id: "booking-compliance",
-        title: "Booking Compliance",
+        title: "Conformidade de Reservas",
         description:
           "Track on-time return rates for bookings within the selected timeframe.",
       },
@@ -241,7 +241,7 @@ export async function bookingComplianceReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Booking Compliance report",
       additionalData: { organizationId, timeframe: timeframe.preset },
     });
@@ -279,7 +279,7 @@ async function computeBookingComplianceKpis(
   return [
     {
       id: "total_bookings",
-      label: "Total Bookings",
+      label: "Total de Reservas",
       value: total.toLocaleString(),
       rawValue: total,
       format: "number",
@@ -288,7 +288,7 @@ async function computeBookingComplianceKpis(
     },
     {
       id: "currently_overdue",
-      label: "Overdue",
+      label: "Atrasado",
       value: overdue.toLocaleString(),
       rawValue: overdue,
       format: "number",
@@ -484,7 +484,7 @@ function formatStatusLabel(status: BookingStatus): string {
     DRAFT: "Draft",
     RESERVED: "Reserved",
     ONGOING: "Ongoing",
-    OVERDUE: "Overdue",
+    OVERDUE: "Atrasado",
     COMPLETE: "Complete",
     CANCELLED: "Cancelled",
     ARCHIVED: "Archived",
@@ -987,7 +987,7 @@ export async function overdueItemsReport(
     return {
       report: {
         id: "overdue-items",
-        title: "Overdue Items",
+        title: "Itens Atrasados",
         description:
           "Live view of all currently overdue bookings requiring immediate attention.",
       },
@@ -1005,7 +1005,7 @@ export async function overdueItemsReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Overdue Items report",
       additionalData: { organizationId },
     });
@@ -1360,7 +1360,7 @@ export async function idleAssetsReport(
     return {
       report: {
         id: "idle-assets",
-        title: "Idle Assets",
+        title: "Equipamentos Ociosos",
         description:
           "Find assets that haven't been booked or checked out recently.",
       },
@@ -1378,7 +1378,7 @@ export async function idleAssetsReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Idle Assets report",
       additionalData: { organizationId, idleThresholdDays },
     });
@@ -1649,7 +1649,7 @@ async function computeIdleAssetsKpis(
   return [
     {
       id: "total_idle",
-      label: "Idle Assets",
+      label: "Equipamentos Ociosos",
       value: totalIdle.toLocaleString(),
       rawValue: totalIdle,
       format: "number",
@@ -1780,7 +1780,7 @@ export async function custodySnapshotReport(
     return {
       report: {
         id: "custody-snapshot",
-        title: "Custody Snapshot",
+        title: "Instantâneo de Guarda",
         description:
           "Live view of all assets currently in custody and their assigned team members.",
       },
@@ -1798,7 +1798,7 @@ export async function custodySnapshotReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Custody Snapshot report",
       additionalData: { organizationId },
     });
@@ -1972,7 +1972,7 @@ async function computeCustodyKpis(
     },
     {
       id: "total_custody_value",
-      label: "Total Value",
+      label: "Valor Total",
       value: totalValue > 0 ? `$${totalValue.toLocaleString()}` : "—",
       rawValue: totalValue,
       format: "currency",
@@ -2061,7 +2061,7 @@ export async function topBookedAssetsReport(
     return {
       report: {
         id: "top-booked-assets",
-        title: "Top Booked Assets",
+        title: "Equipamentos Mais Reservados",
         description:
           "Identify your most frequently booked assets and their utilization patterns.",
       },
@@ -2080,7 +2080,7 @@ export async function topBookedAssetsReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Top Booked Assets report",
       additionalData: { organizationId, timeframe: timeframe.preset },
     });
@@ -2311,7 +2311,7 @@ async function computeTopBookedKpis(
   return [
     {
       id: "total_bookings",
-      label: "Total Bookings",
+      label: "Total de Reservas",
       value: totalBookings.toLocaleString(),
       rawValue: totalBookings,
       format: "number",
@@ -2406,7 +2406,7 @@ export async function topBookedKitsReport(
     return {
       report: {
         id: "top-booked-kits",
-        title: "Top Booked Kits",
+        title: "Kits Mais Reservados",
         description:
           "Identify your most frequently booked kits and their utilization patterns.",
       },
@@ -2425,7 +2425,7 @@ export async function topBookedKitsReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Top Booked Kits report",
       additionalData: { organizationId, timeframe: timeframe.preset },
     });
@@ -2617,7 +2617,7 @@ function buildTopBookedKitsKpis({
   return [
     {
       id: "total_kit_bookings",
-      label: "Total Bookings",
+      label: "Total de Reservas",
       value: totalKitBookings.toLocaleString(),
       rawValue: totalKitBookings,
       format: "number",
@@ -2714,7 +2714,7 @@ export async function assetDistributionReport(
     return {
       report: {
         id: "distribution",
-        title: "Asset Distribution",
+        title: "Distribuição de Equipamentos",
         description:
           "Breakdown of assets by category, location, and status for inventory planning.",
       },
@@ -2737,7 +2737,7 @@ export async function assetDistributionReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Asset Distribution report",
       additionalData: { organizationId },
     });
@@ -2911,7 +2911,7 @@ async function computeDistributionKpis(
   return [
     {
       id: "total_assets",
-      label: "Total Assets",
+      label: "Total de Equipamentos",
       value: totalAssets.toLocaleString(),
       rawValue: totalAssets,
       format: "number",
@@ -2920,7 +2920,7 @@ async function computeDistributionKpis(
     },
     {
       id: "total_value",
-      label: "Total Value",
+      label: "Valor Total",
       value: totalAssetValue > 0 ? `$${totalAssetValue.toLocaleString()}` : "—",
       rawValue: totalAssetValue,
       format: "currency",
@@ -2938,7 +2938,7 @@ async function computeDistributionKpis(
     },
     {
       id: "total_locations",
-      label: "Locations",
+      label: "Locais",
       value: locationCount.toLocaleString(),
       rawValue: locationCount,
       format: "number",
@@ -3025,7 +3025,7 @@ export async function assetInventoryReport(
     return {
       report: {
         id: "asset-inventory",
-        title: "Asset Inventory",
+        title: "Inventário de Equipamentos",
         description: "Complete snapshot of your asset inventory.",
       },
       filters: {
@@ -3042,7 +3042,7 @@ export async function assetInventoryReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Asset Inventory report",
       additionalData: { organizationId },
     });
@@ -3188,7 +3188,7 @@ async function computeInventoryKpis(
   return [
     {
       id: "total_assets",
-      label: "Total Assets",
+      label: "Total de Equipamentos",
       value: totalAssets.toLocaleString(),
       rawValue: totalAssets,
       format: "number",
@@ -3197,7 +3197,7 @@ async function computeInventoryKpis(
     },
     {
       id: "total_value",
-      label: "Total Value",
+      label: "Valor Total",
       value: totalAssetValue > 0 ? `$${totalAssetValue.toLocaleString()}` : "—",
       rawValue: totalAssetValue,
       format: "currency",
@@ -3375,7 +3375,7 @@ export async function monthlyBookingTrendsReport(
     const kpis: ReportKpi[] = [
       {
         id: "total_bookings",
-        label: "Total Bookings",
+        label: "Total de Reservas",
         value: totalBookings.toLocaleString(),
         rawValue: totalBookings,
         format: "number",
@@ -3458,7 +3458,7 @@ export async function monthlyBookingTrendsReport(
     return {
       report: {
         id: "monthly-booking-trends",
-        title: "Monthly Booking Trends",
+        title: "Tendências Mensais de Reservas",
         description:
           "Booking volume trends over time with month-over-month comparisons.",
       },
@@ -3477,7 +3477,7 @@ export async function monthlyBookingTrendsReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Monthly Booking Trends report",
       additionalData: { organizationId },
     });
@@ -3709,7 +3709,7 @@ export async function assetUtilizationReport(
     return {
       report: {
         id: "asset-utilization",
-        title: "Asset Utilization",
+        title: "Utilização de Equipamentos",
         description:
           "Measure how effectively assets are being used based on booking time.",
       },
@@ -3727,7 +3727,7 @@ export async function assetUtilizationReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Asset Utilization report",
       additionalData: { organizationId },
     });
@@ -3968,7 +3968,7 @@ export async function assetActivityReport(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      label: "Report",
+      label: "Relatório",
       message: "Failed to generate Asset Activity Summary report",
       additionalData: { organizationId },
     });
@@ -4044,6 +4044,6 @@ function formatFieldValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? "Sim" : "Não";
   return JSON.stringify(value);
 }

@@ -47,7 +47,7 @@ export function ComplianceTrend({
   // Transform data for Tremor chart - use null for empty periods (creates gaps)
   const chartData = data.map((point) => ({
     period: point.label,
-    "Compliance Rate": point.rate, // null values create gaps in chart
+    "Taxa de Conformidade": point.rate, // null values create gaps in chart
     "On-time": point.onTime,
     Late: point.late,
     hasData: point.total > 0,

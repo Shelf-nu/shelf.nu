@@ -30,7 +30,7 @@ export const REPORTS: ReportDefinition[] = [
   // -------------------------------------------------------------------------
   {
     id: "booking-compliance",
-    title: "Booking Compliance",
+    title: "Conformidade de Reservas",
     description:
       "Track booking lifecycle compliance: on-time checkouts, late returns, and overdue items.",
     category: "bookings",
@@ -38,68 +38,68 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R2 — the first report we're building
     filters: [
       { type: "status", label: "Status", multi: true },
-      { type: "team_member", label: "Custodian", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "team_member", label: "Responsável", multi: false },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: true,
     exportable: true,
   },
   {
     id: "top-booked-assets",
-    title: "Top Booked Assets",
+    title: "Equipamentos Mais Reservados",
     description:
       "Identify your most frequently booked assets and their utilization patterns.",
     category: "bookings",
     icon: "TrendingUp",
     enabled: true, // R3
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: true,
     exportable: true,
   },
   {
     id: "top-booked-kits",
-    title: "Top Booked Kits",
+    title: "Kits Mais Reservados",
     description:
       "Identify your most frequently booked kits and their utilization patterns.",
     category: "bookings",
     icon: "Boxes",
     enabled: true,
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: false,
     exportable: true,
   },
   {
     id: "monthly-booking-trends",
-    title: "Monthly Booking Trends",
+    title: "Tendências Mensais de Reservas",
     description:
       "Visualize booking volume trends over time with month-over-month comparisons.",
     category: "bookings",
     icon: "BarChart3",
     enabled: true, // R9
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: true,
     exportable: true, // Monthly breakdown table can be exported
   },
   {
     id: "overdue-items",
-    title: "Overdue Items",
+    title: "Itens Atrasados",
     description:
       "Live view of all currently overdue bookings requiring immediate attention.",
     category: "bookings",
     icon: "AlertTriangle",
     enabled: true, // R6
     filters: [
-      { type: "team_member", label: "Custodian", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "team_member", label: "Responsável", multi: false },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: false,
     exportable: true,
@@ -110,15 +110,15 @@ export const REPORTS: ReportDefinition[] = [
   // -------------------------------------------------------------------------
   {
     id: "asset-inventory",
-    title: "Asset Inventory",
+    title: "Inventário de Equipamentos",
     description:
       "Complete snapshot of your asset inventory with filtering and export capabilities.",
     category: "assets",
     icon: "Package",
     enabled: true, // R1
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: true },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: true },
       { type: "status", label: "Status", multi: true },
     ],
     hasChart: false,
@@ -133,45 +133,45 @@ export const REPORTS: ReportDefinition[] = [
     icon: "Activity",
     enabled: true, // R7
     filters: [
-      { type: "asset", label: "Asset", multi: false },
-      { type: "category", label: "Category", multi: true },
+      { type: "asset", label: "Equipamento", multi: false },
+      { type: "category", label: "Categoria", multi: true },
     ],
     hasChart: true,
     exportable: true,
   },
   {
     id: "asset-utilization",
-    title: "Asset Utilization",
+    title: "Utilização de Equipamentos",
     description:
       "Measure how effectively assets are being used based on booking and custody time.",
     category: "assets",
     icon: "PieChart",
     enabled: true, // R8
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: true,
     exportable: true,
   },
   {
     id: "idle-assets",
-    title: "Idle Assets",
+    title: "Equipamentos Ociosos",
     description:
       "Find assets that haven't been booked or checked out recently.",
     category: "assets",
     icon: "Clock",
     enabled: true, // R4
     filters: [
-      { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "category", label: "Categoria", multi: true },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: false,
     exportable: true,
   },
   {
     id: "distribution",
-    title: "Asset Distribution",
+    title: "Distribuição de Equipamentos",
     description:
       "Breakdown of assets by category, location, and status for inventory planning.",
     category: "assets",
@@ -187,7 +187,7 @@ export const REPORTS: ReportDefinition[] = [
   // -------------------------------------------------------------------------
   {
     id: "custody-snapshot",
-    title: "Custody Snapshot",
+    title: "Instantâneo de Guarda",
     description:
       "Live view of all assets currently in custody and their assigned team members.",
     category: "custody",
@@ -195,7 +195,7 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R5
     filters: [
       { type: "team_member", label: "Team Member", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Local", multi: false },
     ],
     hasChart: false,
     exportable: true,
@@ -246,23 +246,23 @@ export const REPORT_CATEGORIES: Record<
   { label: string; description: string }
 > = {
   overview: {
-    label: "Overview",
+    label: "Visão geral",
     description: "High-level snapshots and distributions",
   },
   bookings: {
-    label: "Bookings",
+    label: "Reservas",
     description: "Booking lifecycle and compliance tracking",
   },
   assets: {
-    label: "Assets",
+    label: "Equipamentos",
     description: "Asset activity, utilization, and inventory",
   },
   custody: {
-    label: "Custody",
+    label: "Guarda",
     description: "Custody assignments and history",
   },
   audits: {
-    label: "Audits",
+    label: "Auditorias",
     description: "Audit completion and compliance",
   },
 };

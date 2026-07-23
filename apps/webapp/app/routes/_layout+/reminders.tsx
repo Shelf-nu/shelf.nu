@@ -2,7 +2,7 @@ import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export const meta = () => [{ title: appendToMetaTitle("Reminders") }];
+export const meta = () => [{ title: appendToMetaTitle("Lembretes") }];
 
 export function loader() {
   return null;

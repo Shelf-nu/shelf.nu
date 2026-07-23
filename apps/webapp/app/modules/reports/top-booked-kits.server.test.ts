@@ -34,7 +34,7 @@ import type { ResolvedTimeframe } from "./types";
 
 const TIMEFRAME: ResolvedTimeframe = {
   preset: "last_30d",
-  label: "Last 30 days",
+  label: "Últimos 30 dias",
   from: new Date("2026-04-01T00:00:00Z"),
   to: new Date("2026-04-30T23:59:59Z"),
 };

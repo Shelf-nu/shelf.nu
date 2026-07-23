@@ -40,7 +40,7 @@ export function ComplianceDonut({
 
   const chartData = [
     { status: "On-time", count: onTime, color: "#22c55e" }, // green-500
-    { status: "Late", count: late, color: "#f97316" }, // orange-500
+    { status: "Atrasado", count: late, color: "#f97316" }, // orange-500
   ];
 
   // Filter out zero values to avoid empty segments

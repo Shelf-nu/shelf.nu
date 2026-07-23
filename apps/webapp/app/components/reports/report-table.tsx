@@ -471,8 +471,8 @@ export function CurrencyCell({
  */
 export function BooleanCell({
   value,
-  trueLabel = "Yes",
-  falseLabel = "No",
+  trueLabel = "Sim",
+  falseLabel = "Não",
 }: {
   value: boolean;
   trueLabel?: string;

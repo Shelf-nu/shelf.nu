@@ -42,7 +42,7 @@ export function resolveTimeframe(
         preset,
         from,
         to: now,
-        label: "Last 7 days",
+        label: "Últimos 7 dias",
       };
     }
 
@@ -54,7 +54,7 @@ export function resolveTimeframe(
         preset,
         from,
         to: now,
-        label: "Last 30 days",
+        label: "Últimos 30 dias",
       };
     }
 
@@ -66,7 +66,7 @@ export function resolveTimeframe(
         preset,
         from,
         to: now,
-        label: "Last 90 days",
+        label: "Últimos 90 dias",
       };
     }
 

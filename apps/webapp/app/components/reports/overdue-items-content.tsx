@@ -32,7 +32,7 @@ import { ReportTable, CurrencyCell, DateCell } from "./report-table";
 const OVERDUE_ITEMS_COLUMNS: ColumnDef<OverdueItemRow>[] = [
   {
     accessorKey: "bookingName",
-    header: "Booking",
+    header: "Reserva",
     cell: ({ row }) => (
       <span className="font-medium">{row.original.bookingName}</span>
     ),
@@ -45,7 +45,7 @@ const OVERDUE_ITEMS_COLUMNS: ColumnDef<OverdueItemRow>[] = [
   },
   {
     accessorKey: "uncheckedCount",
-    header: "Assets",
+    header: "Equipamentos",
     cell: ({ row }) => {
       const { uncheckedCount, assetCount, checkedInCount } = row.original;
       const hasPartialReturns = checkedInCount > 0;
@@ -162,7 +162,7 @@ export function OverdueItemsContent({
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-medium text-gray-700">
-                {assetsAtRisk === 1 ? "Asset" : "Assets"} Outstanding
+                {assetsAtRisk === 1 ? "Equipamento" : "Equipamentos"} Outstanding
               </span>
               {totalOverdue > 0 ? (
                 <span className="text-xs text-gray-500">

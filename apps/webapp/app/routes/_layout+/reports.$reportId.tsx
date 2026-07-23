@@ -65,7 +65,7 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data?.report?.title || "Report") },
+  { title: appendToMetaTitle(data?.report?.title || "Relatório") },
 ];
 
 /**
@@ -75,7 +75,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
  */
 export const handle = {
   breadcrumb: (match: { data?: { report?: { title?: string } } }) =>
-    match?.data?.report?.title || "Report",
+    match?.data?.report?.title || "Relatório",
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -87,7 +87,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw new ShelfError({
       cause: null,
       message: "Report ID is required",
-      label: "Report",
+      label: "Relatório",
     });
   }
 
@@ -97,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw new ShelfError({
       cause: null,
       message: `Report "${reportId}" not found`,
-      label: "Report",
+      label: "Relatório",
       status: 404,
     });
   }
@@ -106,7 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw new ShelfError({
       cause: null,
       message: `Report "${reportDef.title}" is not yet available`,
-      label: "Report",
+      label: "Relatório",
       status: 403,
     });
   }
@@ -267,7 +267,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: `Report "${reportId}" is not implemented`,
-        label: "Report",
+        label: "Relatório",
         status: 500,
       });
   }

@@ -36,7 +36,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
       });
 
-    const header: HeaderData = { title: "Reminders" };
+    const header: HeaderData = { title: "Lembretes" };
     const modelName = {
       singular: "reminder",
       plural: "reminders",

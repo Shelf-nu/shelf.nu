@@ -68,7 +68,7 @@ const TOP_BOOKED_KITS_COLUMNS: ColumnDef<TopBookedKitRow>[] = [
   },
   {
     accessorKey: "bookingCount",
-    header: "Bookings",
+    header: "Reservas",
     cell: ({ row }) => (
       <Link
         to={`/kits/${row.original.kitId}/bookings`}
@@ -127,13 +127,13 @@ const TOP_BOOKED_KITS_COLUMNS: ColumnDef<TopBookedKitRow>[] = [
   },
   {
     accessorKey: "category",
-    header: "Category",
+    header: "Categoria",
     cell: ({ row }) =>
       row.original.category || <span className="text-gray-400">—</span>,
   },
   {
     accessorKey: "location",
-    header: "Location",
+    header: "Local",
     cell: ({ row }) =>
       row.original.location || <span className="text-gray-400">—</span>,
   },

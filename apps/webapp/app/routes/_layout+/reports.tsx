@@ -12,7 +12,7 @@ import { ErrorContent } from "~/components/errors";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const meta: MetaFunction = () => [
-  { title: appendToMetaTitle("Reports") },
+  { title: appendToMetaTitle("Relatórios") },
 ];
 
 export const handle = {

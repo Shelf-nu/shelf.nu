@@ -31,7 +31,7 @@ import { ReportTable, StatusCell, DateCell, NumberCell } from "./report-table";
 const BOOKING_COMPLIANCE_COLUMNS: ColumnDef<BookingComplianceRow>[] = [
   {
     accessorKey: "bookingName",
-    header: "Booking",
+    header: "Reserva",
     cell: ({ row }) => (
       <span className="font-medium">{row.original.bookingName}</span>
     ),
@@ -53,7 +53,7 @@ const BOOKING_COMPLIANCE_COLUMNS: ColumnDef<BookingComplianceRow>[] = [
   },
   {
     accessorKey: "assetCount",
-    header: "Assets",
+    header: "Equipamentos",
     cell: ({ row }) => <NumberCell value={row.original.assetCount} />,
   },
   {
@@ -67,7 +67,7 @@ const BOOKING_COMPLIANCE_COLUMNS: ColumnDef<BookingComplianceRow>[] = [
     cell: ({ row }) => {
       const { isOnTime, latenessMs } = row.original;
       if (isOnTime) {
-        return <StatusCell status="On time" variant="success" />;
+        return <StatusCell status="No prazo" variant="success" />;
       }
       const lateness = formatLateness(latenessMs);
       return (
@@ -212,7 +212,7 @@ function formatStatus(status: string): string {
     DRAFT: "Draft",
     RESERVED: "Reserved",
     ONGOING: "Ongoing",
-    OVERDUE: "Overdue",
+    OVERDUE: "Atrasado",
     COMPLETE: "Complete",
     CANCELLED: "Cancelled",
     ARCHIVED: "Archived",
