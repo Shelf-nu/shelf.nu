@@ -65,8 +65,8 @@ const INITIAL_FEEDBACK_STATE: FeedbackState = {
 };
 
 const TYPE_OPTIONS = [
-  { value: "issue", label: "Issue", Icon: TriangleAlertIcon },
-  { value: "idea", label: "Idea", Icon: LightbulbIcon },
+  { value: "issue", label: "Problema", Icon: TriangleAlertIcon },
+  { value: "idea", label: "Ideia", Icon: LightbulbIcon },
 ] as const;
 
 /** Issue/Idea selector rendered as two toggle buttons */
@@ -516,7 +516,7 @@ export default function FeedbackModal({
               </button>
 
               <Button type="submit" disabled={disabled}>
-                {disabled ? "Sending..." : "Send feedback"}
+                {disabled ? "Sending..." : "Enviar feedback"}
               </Button>
             </div>
           </fetcher.Form>

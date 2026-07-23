@@ -40,7 +40,7 @@ export function UpdateForm({
   return (
     <Form method="post" className="flex flex-col gap-6">
       <Input
-        label="Title"
+        label="Título"
         name="title"
         defaultValue={title}
         placeholder="Enter update title"
@@ -191,7 +191,7 @@ export function UpdateForm({
 
       <div className="flex gap-3">
         <Button type="submit" variant="primary" disabled={disabled}>
-          {isEdit ? "Update" : "Create Update"}
+          {isEdit ? "Atualização" : "Criar atualização"}
         </Button>
         <Button to=".." variant="secondary" disabled={disabled}>
           Cancel

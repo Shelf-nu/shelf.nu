@@ -22,7 +22,7 @@ export default function FeedbackNavItem() {
     <SidebarMenuItem>
       <SidebarMenuButton
         className="font-semibold"
-        tooltip="Questions/Feedback"
+        tooltip="Dúvidas/Feedback"
         onClick={handleOpen}
       >
         <MessageCircleIcon className="size-4 text-gray-600" />

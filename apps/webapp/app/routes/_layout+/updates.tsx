@@ -15,7 +15,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Updates") }];
+export const meta = () => [{ title: appendToMetaTitle("Atualizações") }];
 
 export function shouldRevalidate({
   formAction,
@@ -69,7 +69,7 @@ export default function UpdatesPage() {
       <div className="mb-16 text-center">
         <img
           src="/static/images/new.gif"
-          alt="Updates"
+          alt="Atualizações"
           className="mx-auto mb-6"
         />
         <h1 className="text-5xl font-bold tracking-tight text-gray-900">

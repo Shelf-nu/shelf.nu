@@ -57,9 +57,9 @@ describe("FeedbackModal", () => {
     // Exact names: the dialog backdrop has role="button" and its accessible
     // name concatenates all dialog text, so regex queries would be ambiguous
     expect(
-      screen.getByRole("button", { name: "Issue" }).closest("div.hidden")
+      screen.getByRole("button", { name: "Problema" }).closest("div.hidden")
     ).toBeNull();
-    expect(screen.getByRole("button", { name: "Idea" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ideia" })).toBeTruthy();
     expect(
       screen.queryByText(/attached to your report automatically/i)
     ).toBeNull();
@@ -79,7 +79,7 @@ describe("FeedbackModal", () => {
     expect(screen.getByText("Report this issue")).toBeTruthy();
     // The toggle is hidden: an error report is always an issue
     expect(
-      screen.getByRole("button", { name: "Issue" }).closest("div.hidden")
+      screen.getByRole("button", { name: "Problema" }).closest("div.hidden")
     ).toBeTruthy();
     // The user is told the technical details travel along
     expect(

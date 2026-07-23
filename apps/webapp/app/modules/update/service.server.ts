@@ -355,7 +355,7 @@ export async function createUpdate({
       cause,
       message: "Failed to create update",
       additionalData: { title, url, createdById },
-      label: "Update",
+      label: "Atualização",
     });
   }
 }
@@ -400,7 +400,7 @@ export async function updateUpdate({
       cause,
       message: "Failed to update update",
       additionalData: { id },
-      label: "Update",
+      label: "Atualização",
     });
   }
 }
@@ -418,7 +418,7 @@ export async function deleteUpdate({ id }: { id: string }): Promise<void> {
       cause,
       message: "Failed to delete update",
       additionalData: { id },
-      label: "Update",
+      label: "Atualização",
     });
   }
 }
