@@ -125,12 +125,17 @@ export function DateRangePicker({
   if (max) disabledMatchers.push({ after: max });
 
   // Trigger summary: empty → placeholder; start-only → "<from> – …"; complete
-  // → "<from> – <to>". Formatted via the user's dateFormat pref.
+  // → "<from> – <to>". Formatted via the user's dateFormat pref. `from`/`to` are
+  // NAIVE calendar days, so format the bare `YYYY-MM-DD` wire (never the Date):
+  // passing the Date would tz-convert it through prefs.timeZone and land a day
+  // off whenever the browser timezone differs from the pref timezone.
   let triggerLabel: string;
   if (from && to) {
-    triggerLabel = `${formatDate(from)} – ${formatDate(to)}`;
+    triggerLabel = `${formatDate(dateToWire(from))} – ${formatDate(
+      dateToWire(to)
+    )}`;
   } else if (from) {
-    triggerLabel = `${formatDate(from)} – …`;
+    triggerLabel = `${formatDate(dateToWire(from))} – …`;
   } else {
     triggerLabel = placeholder;
   }

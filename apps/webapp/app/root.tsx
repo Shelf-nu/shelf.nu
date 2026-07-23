@@ -6,6 +6,7 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
+  ShouldRevalidateFunction,
 } from "react-router";
 import {
   Links,
@@ -85,8 +86,9 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   // via requestInfo.formatPrefs — the single seam every date surface reads.
   // Session is optional: context.getSession() throws on auth/onboarding pages
   // (no user), so we tolerate that exactly like the admin lookup above and let
-  // browser hints govern (today's behavior). shouldRevalidate=false means this
-  // is snapshotted once per full navigation.
+  // browser hints govern (today's behavior). `shouldRevalidate` (below)
+  // snapshots this once per full navigation, and additionally re-runs right
+  // after the user saves new format prefs so the snapshot never goes stale.
   let formatPrefs: ResolvedFormatPrefs;
   try {
     const { userId } = context.getSession();
@@ -127,7 +129,26 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   });
 };
 
-export const shouldRevalidate = () => false;
+/**
+ * Root loader revalidation gate.
+ *
+ * The root loader snapshots the acting user's formatting prefs ONCE per full
+ * navigation (every date surface reads `requestInfo.formatPrefs` from here), so
+ * we normally opt OUT of per-navigation revalidation to avoid re-querying the
+ * user on every client transition.
+ *
+ * The one exception: when the user SAVES new formatting preferences (the
+ * `updateFormatPrefs` intent on the account-details.general action), the
+ * snapshot would otherwise stay stale app-wide until a hard reload. For that
+ * single mutation we opt back IN so the freshly-saved prefs propagate to every
+ * date surface immediately.
+ *
+ * @param args.formData - The submitted form data (present for form
+ *   submissions); `undefined` for plain GET navigations.
+ * @returns `true` only after the format-prefs save, `false` otherwise.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({ formData }) =>
+  formData?.get("intent") === "updateFormatPrefs";
 
 /**
  * Subscribe/snapshot helpers for reading `navigator.cookieEnabled` via

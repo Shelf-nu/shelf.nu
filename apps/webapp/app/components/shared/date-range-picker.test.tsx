@@ -11,30 +11,47 @@
  * @see {@link file://./date-range-picker.tsx}
  */
 import { render, screen } from "@testing-library/react";
-import { format } from "date-fns";
 import { describe, it, expect, vi } from "vitest";
+
+import type {
+  DateFormatOptions,
+  ResolvedFormatPrefs,
+} from "~/utils/date-format";
 
 import { DateRangePicker } from "./date-range-picker";
 
 // why: useDateFormatter reads useRequestInfo(), which needs the root loader's
-// RequestInfo context (unavailable in a unit test). Stub the hook with a
-// month-name formatter so the trigger summary is deterministic and independent
-// of the machine's locale/timezone.
-vi.mock("~/hooks/use-date-formatter", () => ({
-  useDateFormatter: () => ({
-    prefs: {
-      dateFormat: "MMM_DD_YYYY",
-      timeFormat: "H12",
-      weekStartsOn: 0,
-      timeZone: "UTC",
-    },
-    // Mirrors a month-name pref: "Jul 20, 2026".
-    formatDate: (value: string | Date) =>
-      value instanceof Date ? format(value, "MMM d, yyyy") : value,
-    formatTime: (v: string | Date) => String(v),
-    formatDateTime: (v: string | Date) => String(v),
-  }),
-}));
+// RequestInfo context (unavailable in a unit test). Stub the hook but back it
+// with the REAL formatDate bound to MMM_DD_YYYY + UTC prefs, so the trigger
+// summary genuinely exercises the formatter — in particular the bare-date
+// no-shift path (the label formats the "YYYY-MM-DD" wire, never the Date, so it
+// can't tz-shift). Cast avoids an inline import() type (consistent-type-imports).
+vi.mock("~/hooks/use-date-formatter", async () => {
+  const actual = (await vi.importActual("~/utils/date-format")) as {
+    formatDate: (
+      value: string | Date,
+      prefs: ResolvedFormatPrefs,
+      opts?: DateFormatOptions
+    ) => string;
+  };
+  const prefs: ResolvedFormatPrefs = {
+    dateFormat: "MMM_DD_YYYY",
+    timeFormat: "H12",
+    weekStartsOn: 0,
+    timeZone: "UTC",
+  };
+  return {
+    useDateFormatter: () => ({
+      prefs,
+      formatDate: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, opts),
+      formatTime: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, { ...opts, onlyTime: true }),
+      formatDateTime: (value: string | Date, opts?: DateFormatOptions) =>
+        actual.formatDate(value, prefs, { ...opts, includeTime: true }),
+    }),
+  };
+});
 
 describe("DateRangePicker", () => {
   it("renders the placeholder when no range is selected", () => {

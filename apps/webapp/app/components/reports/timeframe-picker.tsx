@@ -28,7 +28,10 @@ import { DateRangePicker } from "~/components/shared/date-range-picker";
 import type { DateRangeValue } from "~/components/shared/date-range-picker";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { resolveTimeframe } from "~/modules/reports/timeframe";
+import {
+  resolveTimeframe,
+  toZonedBoundaryISO,
+} from "~/modules/reports/timeframe";
 import type {
   TimeframePreset,
   ResolvedTimeframe,
@@ -65,35 +68,23 @@ const PRESETS: { id: TimeframePreset; label: string; shortLabel: string }[] = [
 const EMPTY_EXCLUDE_PRESETS: TimeframePreset[] = [];
 
 /**
- * Convert a calendar day (naive wall-clock `Date`) to the UTC instant at the
- * given boundary of that day in `timeZone`, serialized as an ISO 8601 string.
+ * Project a pref-tz boundary INSTANT back to the naive calendar `Date` the
+ * {@link DateRangePicker} expects (date-only, wall-clock).
  *
- * The {@link DateRangePicker} deals in calendar dates (date-only, browser-local
- * midnight), and the report loaders parse the URL `from`/`to` params with
- * `new Date(...)`. Anchoring the boundary in the user's pref timezone — not the
- * browser's — keeps the queried range aligned with how the dates are displayed,
- * fixing the prior `.toISOString()` browser-tz off-by-one.
+ * The active timeframe carries `from`/`to` as start-of-day / end-of-day instants
+ * in the user's pref timezone (see {@link resolveTimeframe}'s custom case). The
+ * picker deals in naive calendar days, so when seeding it from an existing custom
+ * range we read the Y/M/D off the instant IN the pref timezone and rebuild a
+ * browser-local `Date` for that day. Without this the highlighted day would be
+ * off-by-one whenever the browser timezone differs from the pref timezone.
  *
- * @param date - the selected calendar day (wall-clock parts read locally)
+ * @param instant - a pref-tz boundary instant from the active timeframe
  * @param timeZone - the user's pref IANA timezone (e.g. "Asia/Tokyo")
- * @param boundary - "start" → 00:00:00.000, "end" → 23:59:59.999 of the day
- * @returns an ISO 8601 UTC instant string parseable by `new Date(...)`
+ * @returns a naive calendar `Date` for the same day the user picked
  */
-function toZonedBoundaryISO(
-  date: Date,
-  timeZone: string,
-  boundary: "start" | "end"
-): string {
-  const day = DateTime.fromObject(
-    {
-      year: date.getFullYear(),
-      month: date.getMonth() + 1,
-      day: date.getDate(),
-    },
-    { zone: timeZone }
-  );
-  const bounded = boundary === "start" ? day.startOf("day") : day.endOf("day");
-  return bounded.toJSDate().toISOString();
+function toNaiveCalendarDate(instant: Date, timeZone: string): Date {
+  const zoned = DateTime.fromJSDate(instant).setZone(timeZone);
+  return new Date(zoned.year, zoned.month - 1, zoned.day);
 }
 
 /**
@@ -120,10 +111,19 @@ export function TimeframePicker({
 
   // Controlled custom-range selection. Seeded from the active timeframe when it
   // is already a custom range so re-opening the picker shows the current dates.
-  const [customRange, setCustomRange] = useState<DateRangeValue>({
-    from: value.preset === "custom" ? value.from : undefined,
-    to: value.preset === "custom" ? value.to : undefined,
-  });
+  // The active timeframe's from/to are pref-tz boundary INSTANTS; convert each
+  // back to the picker's naive calendar day so the correct day is highlighted
+  // even when the browser timezone differs from the pref timezone.
+  const [customRange, setCustomRange] = useState<DateRangeValue>(() => ({
+    from:
+      value.preset === "custom"
+        ? toNaiveCalendarDate(value.from, prefs.timeZone)
+        : undefined,
+    to:
+      value.preset === "custom"
+        ? toNaiveCalendarDate(value.to, prefs.timeZone)
+        : undefined,
+  }));
 
   const handlePresetClick = useCallback(
     (preset: TimeframePreset) => {
@@ -177,7 +177,7 @@ export function TimeframePicker({
   );
 
   return (
-    <div className={tw("flex items-center gap-3", className)}>
+    <div className={tw("flex flex-wrap items-center gap-3", className)}>
       {/* Preset buttons */}
       <div className="flex items-center gap-1 rounded border border-gray-200 bg-white p-1">
         {visiblePresets.map((preset) => (
@@ -209,7 +209,7 @@ export function TimeframePicker({
         onChange={handleCustomChange}
         disabled={disabled}
         placeholder="Custom range"
-        className="w-[260px] shrink-0 text-sm"
+        className="w-full min-w-0 text-sm sm:w-[260px]"
       />
     </div>
   );

@@ -146,6 +146,13 @@ export function resolveTimeframe(
         // Return a default if custom dates not provided
         return resolveTimeframe("last_30d");
       }
+      // Pass the boundaries through unchanged. The naive-calendar-day →
+      // pref-tz start/end-of-day conversion happens ONCE, at the picker's URL
+      // serialization (see toZonedBoundaryISO). resolveTimeframe is called both
+      // with those already-anchored instants (loader, from the URL) AND with the
+      // picker's raw calendar dates (client onChange), so it must NOT re-transform
+      // — doing so double-shifts the range for users whose browser timezone
+      // differs from their pref timezone.
       return {
         preset,
         from: customFrom,
@@ -183,17 +190,58 @@ function formatMonthLabel(date: Date, prefs: ResolvedFormatPrefs): string {
 /**
  * Format the custom-range indicator's date label in the user's own format.
  *
+ * The caller passes a Luxon `DateTime` already projected into the user's pref
+ * timezone (`.setZone(prefs.timeZone)`). The label reads the calendar Y/M/D off
+ * that zoned value and renders it as a bare, absolute date — so the label names
+ * the pref-tz day even when the server machine runs a different timezone
+ * (avoids the `localeOnly` machine-tz off-by-one).
+ *
  * No `month`/`day`/`year` shape options are passed, so the pref alone decides
  * the rendering (numeric-vs-name, order, separator) — e.g. "06/07/2026" for a
- * DD_MM_YYYY user. `localeOnly` keeps the given wall-clock date absolute (no
- * timezone conversion), matching how the custom range is entered.
+ * DD_MM_YYYY user.
  *
- * @param date - The date to label (interpreted as a local wall-clock date)
+ * @param zoned - The date to label, already projected into the pref timezone
  * @param prefs - Resolved user format prefs
  * @returns the assembled custom-range date label
  */
 function formatDateShort(date: Date, prefs: ResolvedFormatPrefs): string {
-  return formatDate(date, prefs, { localeOnly: true });
+  // Read the calendar Y/M/D off the instant IN the pref timezone, build a naive
+  // wall-clock Date for that day, then format with `localeOnly` (no further
+  // conversion) so the label names that exact pref-tz day.
+  const zoned = DateTime.fromJSDate(date).setZone(prefs.timeZone);
+  const localDate = new Date(zoned.year, zoned.month - 1, zoned.day);
+  return formatDate(localDate, prefs, { localeOnly: true });
+}
+
+/**
+ * Convert a naive calendar `Date` (the day the user picked in the range picker,
+ * read via its local Y/M/D) to the UTC instant at the given boundary of that day
+ * in `timeZone`, as an ISO 8601 string. This is the SINGLE place the picker's
+ * date-only selection becomes a pref-tz-anchored instant for the URL/query — so
+ * a `to` end-of-day covers the whole last day and the window never shifts with
+ * the browser timezone. Uses the calendar components (Y/M/D), never the instant,
+ * so it is correct regardless of the browser's timezone.
+ *
+ * @param date - the selected calendar day (Y/M/D read locally)
+ * @param timeZone - the user's pref IANA timezone (e.g. "Asia/Tokyo")
+ * @param boundary - "start" → 00:00:00.000, "end" → 23:59:59.999 of that day
+ * @returns an ISO 8601 UTC instant string
+ */
+export function toZonedBoundaryISO(
+  date: Date,
+  timeZone: string,
+  boundary: "start" | "end"
+): string {
+  const day = DateTime.fromObject(
+    {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+    },
+    { zone: timeZone }
+  );
+  const bounded = boundary === "start" ? day.startOf("day") : day.endOf("day");
+  return bounded.toJSDate().toISOString();
 }
 
 /**
