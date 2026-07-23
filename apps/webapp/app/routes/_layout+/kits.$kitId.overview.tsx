@@ -82,7 +82,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Overview",
+  breadcrumb: () => "Visão geral",
 };
 
 export default function KitOverview() {

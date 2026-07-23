@@ -201,7 +201,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             message:
               "Something went wrong while fetching team members. Please try again or contact support.",
             additionalData: { userId, organizationId },
-            label: "Assets",
+            label: "Equipamentos",
           });
         }),
       db.teamMember.count({ where: { deletedAt: null, organizationId } }),

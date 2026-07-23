@@ -1867,7 +1867,7 @@ export async function releaseCustody({
       message:
         "Something went wrong while releasing the custody. Please try again or contact support.",
       additionalData: { kitId },
-      label: "Custody",
+      label: "Guarda",
     });
   }
 }
@@ -2913,7 +2913,7 @@ export async function getAvailableKitAssetForBooking(
       message:
         cause?.message ||
         "Something went wrong while getting available assets.",
-      label: "Assets",
+      label: "Equipamentos",
     });
   }
 }

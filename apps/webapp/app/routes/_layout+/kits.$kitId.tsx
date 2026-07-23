@@ -544,9 +544,9 @@ export default function KitDetails() {
   );
 
   const items = [
-    { to: "assets", content: "Assets" },
-    { to: "overview", content: "Overview" },
-    { to: "bookings", content: "Bookings" },
+    { to: "assets", content: "Equipamentos" },
+    { to: "overview", content: "Visão geral" },
+    { to: "bookings", content: "Reservas" },
   ];
 
   const matches = useMatches();

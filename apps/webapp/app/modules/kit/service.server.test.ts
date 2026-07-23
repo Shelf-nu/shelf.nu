@@ -1140,7 +1140,7 @@ describe("bulkRemoveAssetsFromKits", () => {
             kitCustodyId: "kit-custody-1",
             custodian: {
               id: "tm-1",
-              name: "Custodian",
+              name: "Responsável",
               user: { id: "user-2", firstName: "C", lastName: "U" },
             },
           },
