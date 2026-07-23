@@ -951,6 +951,7 @@ model Organization {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   customFields       CustomField[]
+  customFieldGroups  CustomFieldGroup[]
   images             Image[]              @relation("owner")
   bookings           Booking[]
   kits               Kit[]
@@ -1162,6 +1163,10 @@ model CustomField {
 
   categories Category[]
 
+  groupId  String?
+  group    CustomFieldGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  position Int               @default(0)
+
   // Datetime
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
@@ -1173,6 +1178,21 @@ model CustomField {
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, deletedAt])
+  @@index([groupId])
+}
+
+model CustomFieldGroup {
+  id             String        @id @default(cuid())
+  name           String
+  position       Int           @default(0)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customFields   CustomField[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 enum CustomFieldType {

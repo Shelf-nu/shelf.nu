@@ -36,6 +36,8 @@ export async function createCustomField({
   userId,
   options = [],
   categories = [],
+  groupId,
+  position = 0,
 }: CustomFieldDraftPayload) {
   try {
     const [customField, assetIndexSettingsEntries] = await Promise.all([
@@ -47,6 +49,8 @@ export async function createCustomField({
           required,
           active,
           options,
+          group: groupId ? { connect: { id: groupId } } : undefined,
+          position: position || 0,
           organization: {
             connect: {
               id: organizationId,
@@ -276,6 +280,8 @@ export async function updateCustomField(payload: {
   options?: CustomField["options"];
   categories?: string[];
   organizationId: CustomField["organizationId"];
+  groupId?: CustomField["groupId"];
+  position?: CustomField["position"];
 }) {
   const {
     id,
@@ -286,6 +292,8 @@ export async function updateCustomField(payload: {
     options,
     categories,
     organizationId,
+    groupId,
+    position,
   } = payload;
 
   try {
@@ -298,6 +306,13 @@ export async function updateCustomField(payload: {
       required,
       active,
       options,
+      group:
+        groupId === undefined
+          ? undefined
+          : groupId
+          ? { connect: { id: groupId } }
+          : { disconnect: true },
+      position,
     } satisfies Prisma.CustomFieldUpdateInput;
     const hasCategories = categories && categories.length > 0;
 
@@ -618,6 +633,14 @@ export async function getActiveCustomFields({
             }
           : { categories: { none: {} } }), // Only uncategorized fields
       },
+      include: {
+        group: true,
+      },
+      orderBy: [
+        { group: { position: "asc" } },
+        { position: "asc" },
+        { name: "asc" },
+      ],
     });
   } catch (cause) {
     throw new ShelfError({
@@ -722,6 +745,149 @@ export async function bulkActivateOrDeactivateCustomFields({
       cause,
       message: "Something went wrong while bulk activating custom fields.",
       additionalData: { customFields, organizationId, userId },
+      label,
+    });
+  }
+}
+
+export async function createCustomFieldGroup({
+  name,
+  organizationId,
+  position = 0,
+}: {
+  name: string;
+  organizationId: string;
+  position?: number;
+}) {
+  try {
+    return await db.customFieldGroup.create({
+      data: {
+        name,
+        organizationId,
+        position,
+      },
+    });
+  } catch (cause) {
+    throw maybeUniqueConstraintViolation(cause, "Custom field group", {
+      additionalData: { name, organizationId },
+    });
+  }
+}
+
+export async function updateCustomFieldGroup({
+  id,
+  name,
+  position,
+  organizationId,
+}: {
+  id: string;
+  name?: string;
+  position?: number;
+  organizationId: string;
+}) {
+  try {
+    return await db.customFieldGroup.update({
+      where: { id, organizationId },
+      data: {
+        name,
+        position,
+      },
+    });
+  } catch (cause) {
+    throw maybeUniqueConstraintViolation(cause, "Custom field group", {
+      additionalData: { id, name, organizationId },
+    });
+  }
+}
+
+export async function deleteCustomFieldGroup({
+  id,
+  organizationId,
+}: {
+  id: string;
+  organizationId: string;
+}) {
+  try {
+    return await db.customFieldGroup.delete({
+      where: { id, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete custom field group.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+export async function getCustomFieldGroups({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    return await db.customFieldGroup.findMany({
+      where: { organizationId },
+      orderBy: { position: "asc" },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch custom field groups.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+export async function reorderCustomFieldGroups({
+  organizationId,
+  groupIds,
+}: {
+  organizationId: string;
+  groupIds: string[];
+}) {
+  try {
+    await db.$transaction(
+      groupIds.map((id, index) =>
+        db.customFieldGroup.update({
+          where: { id, organizationId },
+          data: { position: index },
+        })
+      )
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to reorder custom field groups.",
+      additionalData: { organizationId, groupIds },
+      label,
+    });
+  }
+}
+
+export async function reorderCustomFields({
+  organizationId,
+  fieldIds,
+}: {
+  organizationId: string;
+  fieldIds: string[];
+}) {
+  try {
+    await db.$transaction(
+      fieldIds.map((id, index) =>
+        db.customField.update({
+          where: { id, organizationId },
+          data: { position: index },
+        })
+      )
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to reorder custom fields.",
+      additionalData: { organizationId, fieldIds },
       label,
     });
   }

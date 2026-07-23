@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { useAtom } from "jotai";
-import { Link, useActionData, useNavigation } from "react-router";
+import {
+  Link,
+  useActionData,
+  useNavigation,
+  useLoaderData,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -51,6 +56,14 @@ export const NewCustomFieldFormSchema = z.object({
     .array(z.string().min(1, "Please select a category"))
     .optional()
     .default([]),
+  groupId: z
+    .string()
+    .optional()
+    .transform((val) => (val === "none" || !val ? null : val)),
+  position: z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : 0)),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -63,6 +76,8 @@ interface Props {
   options?: CustomField["options"];
   isEdit?: boolean;
   categories?: string[];
+  groupId?: string | null;
+  position?: number;
 }
 
 /**
@@ -94,6 +109,8 @@ export const CustomFieldForm = ({
   active,
   isEdit = false,
   categories = EMPTY_CATEGORIES,
+  groupId,
+  position = 0,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -106,6 +123,12 @@ export const CustomFieldForm = ({
   const [useCategories, setUseCategories] = useState(categories.length > 0);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+
+  const loaderData = useLoaderData<any>() || {};
+  const groups = (loaderData?.groups || []) as Array<{
+    id: string;
+    name: string;
+  }>;
 
   // Focus the Name field on mount — the form is the entry point for both
   // create and edit pages, so initial focus belongs on the first field.
@@ -329,6 +352,47 @@ export const CustomFieldForm = ({
             />
           </FormRow>
         </div>
+
+        <FormRow rowLabel="Group" className="border-b-0 pb-[10px] pt-[6px]">
+          <Select
+            name="groupId"
+            defaultValue={groupId || "none"}
+            disabled={disabled}
+          >
+            <SelectTrigger className="px-3.5 py-3">
+              <SelectValue placeholder="Choose a group (optional)" />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              className="w-full min-w-[300px]"
+              align="start"
+            >
+              <SelectItem value="none">
+                <span className="text-[14px] text-gray-700">
+                  None (No Group)
+                </span>
+              </SelectItem>
+              {groups.map((g) => (
+                <SelectItem value={g.id} key={g.id}>
+                  <span className="text-[14px] text-gray-700">{g.name}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRow>
+
+        <FormRow rowLabel="Position" className="border-b-0 pb-[10px] pt-[6px]">
+          <Input
+            type="number"
+            label="Position"
+            hideLabel
+            name="position"
+            disabled={disabled}
+            defaultValue={position !== undefined ? String(position) : "0"}
+            placeholder="0"
+            className="w-full"
+          />
+        </FormRow>
 
         {/* hidden field organization Id to get the organization Id on each form submission to link custom fields and its value is loaded using useOrganizationId hook */}
         <input
