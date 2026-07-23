@@ -22,13 +22,13 @@ export function NameField({
   const inputRef = useAutoFocus<HTMLInputElement>();
   return (
     <FormRow
-      rowLabel={"Name"}
+      rowLabel={"Nome"}
       className="mobile-styling-only border-b-0 p-0"
       required
     >
       <Input
         ref={inputRef}
-        label="Name"
+        label="Nome"
         hideLabel
         name={fieldName}
         disabled={disabled}
@@ -36,7 +36,7 @@ export function NameField({
         onChange={onChange}
         className="mobile-styling-only w-full p-0"
         defaultValue={name}
-        placeholder="Booking"
+        placeholder="Reserva"
         required
       />
     </FormRow>

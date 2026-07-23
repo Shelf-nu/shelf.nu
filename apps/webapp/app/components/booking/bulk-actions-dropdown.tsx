@@ -165,7 +165,7 @@ function ConditionalDropdown() {
             >
               <BulkUpdateDialogTrigger
                 type="cancel"
-                label="Cancel"
+                label="Cancelar"
                 onClick={closeMenu}
                 disabled={
                   cancelIsDisabled
@@ -207,7 +207,7 @@ function ConditionalDropdown() {
             >
               <BulkUpdateDialogTrigger
                 type="trash"
-                label="Delete"
+                label="Excluir"
                 onClick={closeMenu}
                 disabled={
                   deleteDisabled

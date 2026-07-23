@@ -186,7 +186,7 @@ export function NotificationRecipientsField({
 
   return (
     <FormRow
-      rowLabel="Notifications"
+      rowLabel="Notificações"
       className="mobile-styling-only border-b-0 p-0"
     >
       <div className="w-full">

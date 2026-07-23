@@ -78,7 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message: "You are not authorized to view this booking",
         status: 403,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -155,7 +155,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         cause: null,
         message: "Booking not found or access denied",
         additionalData: { userId, bookingId, organizationId },
-        label: "Booking",
+        label: "Reserva",
         status: 404,
         shouldBeCaptured: false,
       });
@@ -173,7 +173,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         cause: null,
         message: "You are not authorized to modify notes on this booking",
         additionalData: { userId, bookingId, organizationId },
-        label: "Booking",
+        label: "Reserva",
         status: 403,
         shouldBeCaptured: false,
       });
@@ -256,7 +256,7 @@ export default function BookingActivity() {
     <div className="w-full">
       {canReadBookingNotes ? (
         <>
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+          <TextualDivider text="Notas" className="mb-8 lg:hidden" />
           <BookingNotes />
         </>
       ) : (

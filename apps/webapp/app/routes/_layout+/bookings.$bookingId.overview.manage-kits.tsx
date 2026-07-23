@@ -185,7 +185,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        label: "Booking",
+        label: "Reserva",
         message: isSelfServiceOrBase
           ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of kits is not allowed for current status of booking.",
@@ -351,7 +351,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          label: "Booking",
+          label: "Reserva",
           message:
             "Booking not found. Are you sure it exists in current workspace?",
         });
@@ -371,7 +371,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        label: "Booking",
+        label: "Reserva",
         message: isSelfServiceOrBase
           ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of kits is not allowed for current status of booking.",

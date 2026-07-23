@@ -341,7 +341,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (cantManageAssetsAsBaseOrSelfService || isNotAllowedStatus) {
       throw new ShelfError({
         cause: null,
-        label: "Booking",
+        label: "Reserva",
         message: isNotAllowedStatus
           ? "Changing of assets is not allowed for current status of booking."
           : isSelfServiceOrBase
@@ -500,7 +500,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             status: 400,
-            label: "Booking",
+            label: "Reserva",
             message:
               "Invalid quantities payload — each quantity must be a positive integer.",
             additionalData: { issues: result.error.issues },
@@ -513,7 +513,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         throw new ShelfError({
           cause,
           status: 400,
-          label: "Booking",
+          label: "Reserva",
           message: "Invalid quantities JSON — could not parse.",
           shouldBeCaptured: false,
         });
@@ -597,7 +597,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          label: "Booking",
+          label: "Reserva",
           message:
             "Booking not found. Are you sure it exists in the current workspace.",
         });
@@ -617,7 +617,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        label: "Booking",
+        label: "Reserva",
         message: isSelfServiceOrBase
           ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
@@ -659,7 +659,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ) {
       throw new ShelfError({
         cause: null,
-        label: "Booking",
+        label: "Reserva",
         title: "Not allowed. Assets already checked out",
         message: `The following assets are already checked out and cannot be added to the booking: ${checkedOutAssets
           .map((asset) => asset.title)
@@ -844,7 +844,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: null,
             status: 400,
-            label: "Booking",
+            label: "Reserva",
             message: `Cannot reduce booked quantity for "${title}" below ${logged} — ${logged} unit${
               logged === 1 ? " has" : "s have"
             } already been dispositioned on this booking.`,

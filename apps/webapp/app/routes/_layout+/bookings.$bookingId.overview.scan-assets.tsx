@@ -80,7 +80,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message:
           "You are not allowed to add assets for this booking at the moment.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -158,7 +158,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             e instanceof Error ? e.message : "parse error"
           }`,
           status: 400,
-          label: "Booking",
+          label: "Reserva",
           additionalData: { userId, bookingId },
         });
       }
@@ -197,7 +197,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             e instanceof Error ? e.message : "parse error"
           }`,
           status: 400,
-          label: "Booking",
+          label: "Reserva",
           additionalData: { userId, bookingId },
         });
       }
@@ -274,7 +274,7 @@ export default function ScanAssetsForBookings() {
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Booking"
+          backButtonText="Reserva"
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}

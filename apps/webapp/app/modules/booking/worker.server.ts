@@ -41,7 +41,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         cause,
         message: "Booking not found",
         additionalData: { data, work: data.eventType },
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: !isNotFoundError(cause),
       });
     });
@@ -110,7 +110,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         cause,
         message: "Booking not found",
         additionalData: { data, work: data.eventType },
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: !isNotFoundError(cause),
       });
     });
@@ -156,7 +156,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         cause,
         message: "Booking update failed",
         additionalData: { data, work: data.eventType },
-        label: "Booking",
+        label: "Reserva",
       });
     });
 
@@ -311,7 +311,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         cause,
         message: "Failed to auto-archive booking",
         additionalData: { bookingId: data.id },
-        label: "Booking",
+        label: "Reserva",
       })
     );
   }
@@ -465,7 +465,7 @@ const autoArchiveExpiredHandler = async ({
           message:
             "Failed to record BOOKING_ARCHIVED event for an auto-archived expired reservation",
           additionalData: { bookingId: booking.id },
-          label: "Booking",
+          label: "Reserva",
         })
       );
     }
@@ -477,7 +477,7 @@ const autoArchiveExpiredHandler = async ({
         cause,
         message: "Failed to auto-archive expired reservation",
         additionalData: { bookingId: data.id },
-        label: "Booking",
+        label: "Reserva",
       })
     );
   }
@@ -506,7 +506,7 @@ export const registerBookingWorkers = async () => {
           cause: null,
           message: "Wrong event type received for the scheduled worker",
           additionalData: { job },
-          label: "Booking",
+          label: "Reserva",
         })
       );
       return;
@@ -519,7 +519,7 @@ export const registerBookingWorkers = async () => {
           cause,
           message: "Something went wrong while executing scheduled work.",
           additionalData: { data: job.data, work: job.data.eventType },
-          label: "Booking",
+          label: "Reserva",
         })
       );
     }

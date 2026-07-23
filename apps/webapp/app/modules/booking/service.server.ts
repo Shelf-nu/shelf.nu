@@ -134,7 +134,7 @@ import { createNotes } from "../note/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getUserByID } from "../user/service.server";
 
-const label: ErrorLabel = "Booking";
+const label: ErrorLabel = "Reserva";
 
 /**
  * Sends a booking email to all resolved notification recipients.
@@ -7188,8 +7188,8 @@ export async function partialCheckoutBooking({
         const statusNote = bookingStatusChanged
           ? ` and checked out the booking (status changed to ${
               bookingFound.to && isBookingExpired({ to: bookingFound.to })
-                ? "Overdue"
-                : "Ongoing"
+                ? "Atrasado"
+                : "Em andamento"
             })`
           : "";
 
@@ -8639,7 +8639,7 @@ export async function getBookingsFilterData({
         title: "Team member not found",
         message:
           "You are not part of a team in this organization. Please contact your organization admin to resolve this",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -11694,7 +11694,7 @@ export async function getExistingBookingDetails(
         cause: null,
         message: "Booking not found.",
         status: 404,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -11716,7 +11716,7 @@ export async function getExistingBookingDetails(
         message:
           "Items can only be added to Draft, Reserved, Ongoing or Overdue bookings.",
         status: 400,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -11729,7 +11729,7 @@ export async function getExistingBookingDetails(
         cause?.message ||
         "Something went wrong while getting existing booking details.",
       additionalData: { bookingId },
-      label: "Booking",
+      label: "Reserva",
     });
   }
 }
@@ -11769,7 +11769,7 @@ export async function getAvailableAssetsIdsForBooking(
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
-        label: "Booking",
+        label: "Reserva",
       });
     }
 
@@ -11780,7 +11780,7 @@ export async function getAvailableAssetsIdsForBooking(
       message: cause?.message
         ? cause.message
         : "Something went wrong while getting available assets.",
-      label: "Assets",
+      label: "Equipamentos",
     });
   }
 }
@@ -11832,7 +11832,7 @@ export async function processBooking(
         cause: null,
         message: "No assets available.",
         status: 400,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -11880,7 +11880,7 @@ export async function processBooking(
             .join(", ")}`,
           additionalData: { checkedOutAssets, bookingId },
           status: 400,
-          label: "Booking",
+          label: "Reserva",
           shouldBeCaptured: false,
         });
       }
@@ -11899,7 +11899,7 @@ export async function processBooking(
     throw new ShelfError({
       cause: cause,
       message,
-      label: "Booking",
+      label: "Reserva",
     });
   }
 }
@@ -12048,7 +12048,7 @@ export async function loadBookingsData({
 
   // Set up header and model name
   const header: HeaderData = {
-    title: "Bookings",
+    title: "Reservas",
   };
 
   const modelName = {

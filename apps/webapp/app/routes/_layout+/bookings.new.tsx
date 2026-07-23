@@ -76,7 +76,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         title: "Not allowed",
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
+        label: "Reserva",
         status: 403,
         shouldBeCaptured: false,
       });
@@ -160,7 +160,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         title: "Not allowed",
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
+        label: "Reserva",
         status: 403,
         shouldBeCaptured: false,
       });
@@ -213,7 +213,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         title: "Team member not found",
         message: "The selected team member could not be found.",
         additionalData: { userId, custodian },
-        label: "Booking",
+        label: "Reserva",
         status: 404,
       });
     });
@@ -226,7 +226,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
-        label: "Booking",
+        label: "Reserva",
       });
     }
 
@@ -288,7 +288,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           title: "Kit not found",
           message:
             "The selected kit could not be resolved. Please reload and try again.",
-          label: "Booking",
+          label: "Reserva",
           status: 409,
           shouldBeCaptured: false,
         });

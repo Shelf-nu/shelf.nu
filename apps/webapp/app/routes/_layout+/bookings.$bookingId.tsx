@@ -124,13 +124,13 @@ export default function AssetDetailsPage() {
   const { roles } = useUserRoleHelper();
 
   const items = [
-    { to: "overview", content: "Overview" },
+    { to: "overview", content: "Visão geral" },
     ...(userHasPermission({
       roles,
       entity: PermissionEntity.bookingNote,
       action: PermissionAction.read,
     })
-      ? [{ to: "activity", content: "Activity" }]
+      ? [{ to: "activity", content: "Atividade" }]
       : []),
   ];
   const matches = useMatches();

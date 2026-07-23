@@ -104,7 +104,7 @@ async function assertUserCanCheckoutBooking({
       cause: null,
       message:
         "You cannot check out assets for this booking at the moment. The booking may not be reservable/ongoing or you may not have permission to manage its assets.",
-      label: "Booking",
+      label: "Reserva",
       shouldBeCaptured: false,
     });
   }
@@ -462,7 +462,7 @@ export default function CheckoutAssetsFromBooking() {
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Booking"
+          backButtonText="Reserva"
           // backButtonUrl={`/bookings/${booking.id}?state=${AssetStatus.CHECKED_OUT}`}
           allowNonShelfCodes
           paused={false}

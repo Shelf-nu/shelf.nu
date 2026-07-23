@@ -55,7 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message: "You are not authorized to view this booking",
         additionalData: { userId, bookingId, organizationId },
-        label: "Booking",
+        label: "Reserva",
         status: 403,
         shouldBeCaptured: false,
       });

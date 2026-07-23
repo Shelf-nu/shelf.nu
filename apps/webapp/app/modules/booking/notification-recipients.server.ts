@@ -230,7 +230,7 @@ export async function getBookingNotificationRecipients({
         message:
           "Failed to resolve booking notification recipients. Returning empty list to avoid blocking the booking flow.",
         additionalData: { organizationId, eventType },
-        label: "Booking",
+        label: "Reserva",
       })
     );
     return [];

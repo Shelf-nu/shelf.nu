@@ -4,7 +4,7 @@ import { ErrorContent } from "~/components/errors";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
 
-export const meta = () => [{ title: appendToMetaTitle("Bookings") }];
+export const meta = () => [{ title: appendToMetaTitle("Reservas") }];
 
 export function loader() {
   return null;

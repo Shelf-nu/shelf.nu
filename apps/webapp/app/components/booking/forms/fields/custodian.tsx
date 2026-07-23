@@ -25,7 +25,7 @@ export function CustodianField({
 }) {
   return (
     <FormRow
-      rowLabel="Description"
+      rowLabel="Descrição"
       className="mobile-styling-only border-b-0 p-0"
     >
       <label

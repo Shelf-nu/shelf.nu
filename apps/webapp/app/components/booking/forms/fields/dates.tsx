@@ -46,13 +46,13 @@ export function DatesFields({
   return (
     <>
       <FormRow
-        rowLabel="Start Date"
+        rowLabel="Data de início"
         className="mobile-styling-only border-b-0 pb-[10px] pt-0"
         required
       >
         <Input
           key="start-date-input"
-          label="Start Date"
+          label="Data de início"
           type="datetime-local"
           hideLabel
           name={startDateName}
@@ -66,7 +66,7 @@ export function DatesFields({
           // keep showing the previously-rendered booking's start date until a
           // full page refresh. A controlled `value` reflects the update.
           value={startDate}
-          placeholder="Booking"
+          placeholder="Reserva"
           required
           onChange={(event) => {
             // Update start date state to persist user's selection
@@ -109,20 +109,20 @@ export function DatesFields({
         />
       </FormRow>
       <FormRow
-        rowLabel="End Date"
+        rowLabel="Data de fim"
         className="mobile-styling-only mb-2.5 border-b-0 p-0"
         required
       >
         <Input
           key={"end-date-input"}
-          label="End Date"
+          label="Data de fim"
           type="datetime-local"
           hideLabel
           name={endDateName}
           disabled={workingHoursDisabled}
           error={endDateError}
           className="w-full"
-          placeholder="Booking"
+          placeholder="Reserva"
           required
           value={endDate}
           onChange={(event) => {

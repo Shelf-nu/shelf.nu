@@ -68,7 +68,7 @@ import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ bookingId: z.string() });
 
-export const meta = () => [{ title: appendToMetaTitle("Duplicate booking") }];
+export const meta = () => [{ title: appendToMetaTitle("Duplicar reserva") }];
 
 /**
  * Loads the source booking (for the modal heading and the duplicate copy) plus

@@ -276,7 +276,7 @@ export async function fetchAllPdfRelatedData(
       cause,
       message: "Error fetching booking data for PDF",
       status: 500,
-      label: "Booking",
+      label: "Reserva",
     });
   }
 }

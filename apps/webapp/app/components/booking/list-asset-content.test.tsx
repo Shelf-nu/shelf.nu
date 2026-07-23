@@ -458,7 +458,7 @@ describe("ListAssetContent", () => {
         expect.objectContaining({ status: "AVAILABLE" })
       );
       // No amber "Checked out" availability badge for QT rows.
-      expect(screen.queryByText("Checked out")).not.toBeInTheDocument();
+      expect(screen.queryByText("Emprestado")).not.toBeInTheDocument();
       // No blue "Partial custody" badge exists for QT in this surface.
       expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
       // And no "Insufficient stock" since the loader didn't ship availability.
@@ -497,7 +497,7 @@ describe("ListAssetContent", () => {
         expect.objectContaining({ status: "AVAILABLE" })
       );
       expect(screen.queryByText("In custody")).not.toBeInTheDocument();
-      expect(screen.queryByText("Checked out")).not.toBeInTheDocument();
+      expect(screen.queryByText("Emprestado")).not.toBeInTheDocument();
     });
 
     it("renders the red InsufficientStockBadge when bookedQuantity exceeds availableUnitsByAsset on an ONGOING booking", async () => {
@@ -551,7 +551,7 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/only 3/);
     });
 
-    it("still renders the amber 'Checked out' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
+    it("still renders the amber 'Emprestado' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
       // (d) — Regression guard: the QT short-circuits MUST NOT affect the
       // INDIVIDUAL path. An INDIVIDUAL asset with global CHECKED_OUT status
       // still surfaces the amber "Checked out" availability badge on a DRAFT
@@ -581,7 +581,7 @@ describe("ListAssetContent", () => {
         </table>
       );
 
-      const badge = screen.getByText("Checked out");
+      const badge = screen.getByText("Emprestado");
       expect(badge).toBeInTheDocument();
       // Amber default variant — `bg-warning-50` is the warning-amber background
       // applied by `AvailabilityBadge` when `variant` is omitted / "warning".

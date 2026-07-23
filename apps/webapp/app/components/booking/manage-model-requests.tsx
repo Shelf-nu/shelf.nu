@@ -431,7 +431,7 @@ function ExistingRequestRow({
               disabled={disabled || !isDirty || !isValid}
               aria-label={`Update reservation for ${request.assetModelName}`}
             >
-              {isUpdating ? "Saving..." : "Update"}
+              {isUpdating ? "Saving..." : "Atualizar"}
             </Button>
           </updateFetcher.Form>
 

@@ -36,7 +36,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       throw new ShelfError({
         cause: null,
         message: "No bookings selected",
-        label: "Booking",
+        label: "Reserva",
       });
     }
 

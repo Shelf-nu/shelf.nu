@@ -5,7 +5,7 @@ import { shapeBookingAssets } from "./shape-booking-assets";
 const asset = (over: Partial<any> = {}): any => ({
   id: "a1",
   kitId: null,
-  title: "Asset",
+  title: "Equipamento",
   status: "AVAILABLE",
   category: null,
   location: null,

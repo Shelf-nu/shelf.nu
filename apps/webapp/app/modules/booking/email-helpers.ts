@@ -412,7 +412,7 @@ export async function sendBookingUpdatedEmail({
         cause,
         message: "Failed to send booking updated email",
         additionalData: { bookingId },
-        label: "Booking",
+        label: "Reserva",
       })
     );
   }

@@ -110,9 +110,9 @@ export default function AvailabilityCalendar({
 
           <ViewButtonGroup
             views={[
-              { label: "Month", value: "resourceTimelineMonth" },
-              { label: "Week", value: "resourceTimelineWeek" },
-              { label: "Day", value: "resourceTimelineDay" },
+              { label: "Mês", value: "resourceTimelineMonth" },
+              { label: "Semana", value: "resourceTimelineWeek" },
+              { label: "Dia", value: "resourceTimelineDay" },
             ]}
             currentView={calendarView}
             onViewChange={handleViewChange}

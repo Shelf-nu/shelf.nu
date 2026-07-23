@@ -91,7 +91,7 @@ describe("CalendarFeedControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop sharing" }));
 
     expect(screen.getByRole("button", { name: "Yes, stop" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeTruthy();
     // The "Stop sharing" trigger button itself is gone once confirming.
     expect(screen.queryByRole("button", { name: "Stop sharing" })).toBeNull();
   });

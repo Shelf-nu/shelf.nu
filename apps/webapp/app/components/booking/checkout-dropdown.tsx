@@ -102,7 +102,7 @@ export default function CheckoutDropdown({
     : "checkOut";
   const quickCheckoutLabel = canCheckOutRemaining
     ? "Check out remaining"
-    : "Check out";
+    : "Emprestar";
 
   // The full check-out (RESERVED) must validate the WHOLE booking up front, so
   // it carries the strict precondition reasons (in custody, already booked,

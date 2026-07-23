@@ -120,7 +120,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         title: "Not allowed",
         message:
           "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -309,9 +309,9 @@ export default function Calendar() {
             {isMd ? (
               <ViewButtonGroup
                 views={[
-                  { label: "Month", value: "dayGridMonth" },
-                  { label: "Week", value: "timeGridWeek" },
-                  { label: "Day", value: "timeGridDay" },
+                  { label: "Mês", value: "dayGridMonth" },
+                  { label: "Semana", value: "timeGridWeek" },
+                  { label: "Dia", value: "timeGridDay" },
                 ]}
                 currentView={calendarView}
                 onViewChange={handleViewChange}

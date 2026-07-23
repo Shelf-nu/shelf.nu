@@ -256,7 +256,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message: "You are not authorized to view this booking",
         status: 403,
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -1395,7 +1395,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             message:
               "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
             status: 403,
-            label: "Booking",
+            label: "Reserva",
           });
         }
       }
@@ -1638,7 +1638,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             message:
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
-            label: "Booking",
+            label: "Reserva",
             shouldBeCaptured: false,
           });
         }
@@ -1652,7 +1652,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             message:
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
-            label: "Booking",
+            label: "Reserva",
             shouldBeCaptured: false,
           });
         }
@@ -1958,7 +1958,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             cause: null,
             message:
               "You do not have permission to manage notification recipients.",
-            label: "Booking",
+            label: "Reserva",
             shouldBeCaptured: false,
             status: 403,
           });

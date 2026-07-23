@@ -14,11 +14,11 @@ export function DescriptionField({
 }) {
   return (
     <FormRow
-      rowLabel="Description"
+      rowLabel="Descrição"
       className="mobile-styling-only h-full border-b-0 p-0"
     >
       <Input
-        label="Description"
+        label="Descrição"
         inputType="textarea"
         hideLabel
         name={fieldName}

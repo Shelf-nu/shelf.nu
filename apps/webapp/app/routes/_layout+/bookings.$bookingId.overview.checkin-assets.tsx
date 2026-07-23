@@ -90,7 +90,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message:
           "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -473,7 +473,7 @@ export default function CheckinAssetsFromBooking() {
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Booking"
+          backButtonText="Reserva"
           // backButtonUrl={`/bookings/${booking.id}?state=${AssetStatus.CHECKED_OUT}`}
           allowNonShelfCodes
           paused={false}

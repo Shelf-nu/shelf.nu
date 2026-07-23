@@ -115,7 +115,7 @@ export default function ExtendBookingDialog({
               <Input
                 key={currentEndDate}
                 defaultValue={currentEndDate}
-                label="End Date"
+                label="Data de fim"
                 type="datetime-local"
                 hideLabel
                 name={zo.fields.endDate()}
@@ -125,7 +125,7 @@ export default function ExtendBookingDialog({
                   zo.errors.endDate()?.message
                 }
                 className="mb-4 w-full"
-                placeholder="Booking"
+                placeholder="Reserva"
               />
 
               <When truthy={!!fetcher?.data?.error}>

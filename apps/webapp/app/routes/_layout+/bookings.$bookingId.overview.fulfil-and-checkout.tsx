@@ -156,7 +156,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         cause: null,
         message:
           "You are not allowed to add assets for this booking at the moment.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -383,7 +383,7 @@ export default function FulfilAndCheckoutForBooking() {
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Booking"
+          backButtonText="Reserva"
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}

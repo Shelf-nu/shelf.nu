@@ -28,12 +28,12 @@ export default function TagField({
 
   return (
     <FormRow
-      rowLabel="Tags"
+      rowLabel="Etiquetas"
       className={tw("mobile-styling-only border-b-0 p-0", className)}
     >
       <MultiSelect
         className="w-full"
-        label="Tags"
+        label="Etiquetas"
         items={tagsSuggestions}
         defaultSelected={existingTags.map((tag) => ({
           label: tag.name,

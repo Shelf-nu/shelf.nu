@@ -100,7 +100,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         title: "Not allowed",
         message:
           "You cannot use bookings in a personal workspaces. Please create a Team workspace to create bookings.",
-        label: "Booking",
+        label: "Reserva",
         shouldBeCaptured: false,
       });
     }
@@ -319,7 +319,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     const header: HeaderData = {
-      title: "Bookings",
+      title: "Reservas",
     };
     const modelName = {
       singular: "booking",

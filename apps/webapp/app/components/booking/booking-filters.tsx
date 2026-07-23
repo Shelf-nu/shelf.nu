@@ -16,7 +16,7 @@ import When from "../when/when";
 const BOOKING_SORTING_OPTIONS = {
   from: "From Date",
   to: "To Date",
-  name: "Name",
+  name: "Nome",
 } as const;
 
 type BookingFiltersProps = {

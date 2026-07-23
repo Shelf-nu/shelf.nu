@@ -45,7 +45,7 @@ export default function CheckinDialog({
   booking,
   portalContainer,
   formId,
-  label = "Check-in",
+  label = "Devolução",
   variant = "default",
   specificAssetIds,
   fullWidth = false,

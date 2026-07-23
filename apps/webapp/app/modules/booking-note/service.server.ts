@@ -2,7 +2,7 @@ import type { Booking, BookingNote, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
-const label = "Booking";
+const label = "Reserva";
 
 /**
  * Minimal Prisma surface the booking-note CREATE helpers need when run inside a
