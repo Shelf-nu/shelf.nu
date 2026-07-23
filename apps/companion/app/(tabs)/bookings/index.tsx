@@ -351,6 +351,15 @@ function BookingsListContent() {
               />
               <Text style={styles.metaText}>
                 {item.assetCount} {item.assetCount === 1 ? "asset" : "assets"}
+                {/* A booking can hold reserved units with no concrete asset
+                    behind them yet, and `assetCount` only counts concrete
+                    rows. Without this the card reads "0 assets" while the
+                    action hint below says "Assign assets to check out" — and
+                    the reserved units are genuinely held, unavailable to
+                    everyone else. Same signal, every surface. */}
+                {(item.outstandingModelUnitCount ?? 0) > 0
+                  ? ` · ${item.outstandingModelUnitCount} reserved`
+                  : ""}
               </Text>
             </View>
 
