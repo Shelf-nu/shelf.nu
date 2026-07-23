@@ -28,10 +28,15 @@ export async function scheduleAssetReminder({
   when: Date;
 }) {
   try {
+    // why: bounded retry recovers transient failures (e.g. a momentary DB
+    // blip); a small limit + the reminder handler's non-idempotent
+    // email/note sends mean we cap duplicate exposure (paired with the
+    // query-level DB retry from the sibling task, most failures are already
+    // handled before the job throws).
     const reference = await scheduler.sendAfter(
       QueueNames.assetsQueue,
       data,
-      {},
+      { retryLimit: 2, retryDelay: 60 },
       when
     );
 
