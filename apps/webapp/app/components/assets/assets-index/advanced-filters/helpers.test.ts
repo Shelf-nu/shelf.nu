@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Column } from "~/modules/asset-index-settings/helpers";
 
@@ -35,6 +35,20 @@ function expectedTodayInTz(timeZone: string): string {
 }
 
 describe("getDefaultValueForFieldType — date defaults use the user's timezone", () => {
+  // why: getTodayInUserTimezone (production) and expectedTodayInTz (assertion)
+  // each read the system clock independently. Without a frozen instant the two
+  // reads can straddle midnight in the tested timezone and flake. Pinning a
+  // fixed UTC instant makes both sides derive the same calendar day regardless
+  // of the machine's local timezone, keeping the test deterministic.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("seeds a built-in date column with today's calendar day in a non-UTC timezone", () => {
     const createdAtColumn = {
       name: "createdAt",

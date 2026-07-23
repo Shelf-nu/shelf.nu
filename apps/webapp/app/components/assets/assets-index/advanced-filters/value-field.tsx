@@ -2257,18 +2257,18 @@ export function DateField({
       to: parseWireToParts(localValue[1]).date,
     };
     return (
-      <div className="space-y-2">
-        <DateRangePicker
-          value={rangeValue}
-          onChange={handleRangeChange}
-          startName={`${name}_start`}
-          endName={`${name}_end`}
-          className="text-sm"
-        />
-        {combinedError && localValue[0] !== "" && localValue[1] !== "" && (
-          <div className="!mt-0 text-[12px] text-red-500">{combinedError}</div>
-        )}
-      </div>
+      // Route validation through the shared picker's `error` prop so the
+      // message is aria-describedby-linked to the trigger (and shows the error
+      // border), instead of an orphaned <div> that was also hidden until both
+      // ends were filled.
+      <DateRangePicker
+        value={rangeValue}
+        onChange={handleRangeChange}
+        startName={`${name}_start`}
+        endName={`${name}_end`}
+        error={combinedError}
+        className="text-sm"
+      />
     );
   } else if (filter.operator === "inDates") {
     return (
@@ -2377,6 +2377,10 @@ function MultiDateInput({
                 target: { value: next },
               } as ChangeEvent<HTMLInputElement>)
             }
+            // Route the error through the shared picker so it renders its
+            // aria-describedby-linked error text (and error border) instead of
+            // an orphaned <div> not associated with any input.
+            error={error}
             className="flex-1 [&_input]:text-sm"
             name={`${name}_${index}`}
           />
@@ -2391,7 +2395,6 @@ function MultiDateInput({
           )}
         </div>
       ))}
-      {error && <div className="!mt-0 text-[12px] text-red-500">{error}</div>}
       <Button
         type="button"
         variant="block-link"
