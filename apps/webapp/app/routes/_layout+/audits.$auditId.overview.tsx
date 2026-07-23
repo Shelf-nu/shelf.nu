@@ -64,7 +64,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Overview",
+  breadcrumb: () => "Visão geral",
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -312,25 +312,25 @@ export default function AuditOverview() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <StatCard
-              label="Expected"
+              label="Esperado"
               value={expectedCount}
               filterType="EXPECTED"
               isActive={currentFilter === "EXPECTED"}
             />
             <StatCard
-              label="Found"
+              label="Encontrado"
               value={foundCount}
               filterType="FOUND"
               isActive={currentFilter === "FOUND"}
             />
             <StatCard
-              label="Missing"
+              label="Ausente"
               value={missingCount}
               filterType="MISSING"
               isActive={currentFilter === "MISSING"}
             />
             <StatCard
-              label="Unexpected"
+              label="Inesperado"
               value={unexpectedCount}
               filterType="UNEXPECTED"
               isActive={currentFilter === "UNEXPECTED"}

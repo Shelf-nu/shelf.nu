@@ -88,7 +88,7 @@ export function DuplicateAuditDialog() {
             className="w-full"
             disabled={disabled || allAssetsGone}
           >
-            {disabled ? "Duplicating..." : "Confirm"}
+            {disabled ? "Duplicating..." : "Confirmar"}
           </Button>
         </Form>
       </div>

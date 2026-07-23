@@ -218,7 +218,7 @@ export function StartAuditFromContextDialog({
 
                 <Input
                   name={zo.fields.description()}
-                  label="Description"
+                  label="Descrição"
                   placeholder="Add context that will help auditors (optional)."
                   inputType="textarea"
                   rows={5}
@@ -237,7 +237,7 @@ export function StartAuditFromContextDialog({
 
                 <Input
                   name={zo.fields.dueDate()}
-                  label="Due date"
+                  label="Data de vencimento"
                   type="datetime-local"
                   error={zo.errors.dueDate()?.message}
                   disabled={isSubmitting}
@@ -290,7 +290,7 @@ export function StartAuditFromContextDialog({
                 Cancel
               </Button>
               <Button type="submit" variant="primary" disabled={isSubmitting}>
-                {isSubmitting ? "Creating..." : "Create audit"}
+                {isSubmitting ? "Creating..." : "Criar auditoria"}
               </Button>
             </div>
           </fetcher.Form>

@@ -61,7 +61,7 @@ function UploadedImageBox({
 }: UploadedImageBoxProps) {
   return (
     <div className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-gray-200">
-      <img src={previewUrl} alt="Audit" className="size-full object-cover" />
+      <img src={previewUrl} alt="Auditoria" className="size-full object-cover" />
       {!disabled && (
         <button
           type="button"

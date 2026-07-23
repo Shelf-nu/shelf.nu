@@ -9,13 +9,13 @@ interface AuditAssetStatusBadgeProps {
 
 const auditStatusColorMap = (status: AuditStatusLabel): BadgeColorScheme => {
   switch (status) {
-    case "Expected":
+    case "Esperado":
       return BADGE_COLORS.gray;
-    case "Found":
+    case "Encontrado":
       return BADGE_COLORS.green;
-    case "Missing":
+    case "Ausente":
       return BADGE_COLORS.amber;
-    case "Unexpected":
+    case "Inesperado":
       return BADGE_COLORS.red;
   }
 };

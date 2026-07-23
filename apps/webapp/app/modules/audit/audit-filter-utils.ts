@@ -67,7 +67,7 @@ export function getAuditFilterMetadata(
   return FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
 }
 
-export type AuditStatusLabel = "Expected" | "Found" | "Missing" | "Unexpected";
+export type AuditStatusLabel = "Esperado" | "Encontrado" | "Ausente" | "Inesperado";
 
 /**
  * Determine the audit status label for an asset based on its audit data.
@@ -84,30 +84,30 @@ export function getAuditStatusLabel(
   auditData: { expected: boolean; auditStatus: AuditAssetStatus } | null,
   isAuditCompleted: boolean = false
 ): AuditStatusLabel {
-  if (!auditData) return isAuditCompleted ? "Missing" : "Expected";
+  if (!auditData) return isAuditCompleted ? "Ausente" : "Esperado";
 
   // Found: Expected asset that was scanned
   if (auditData.expected && auditData.auditStatus === "FOUND") {
-    return "Found";
+    return "Encontrado";
   }
 
   // Missing: Expected asset that wasn't scanned (always shows as Missing)
   if (auditData.expected && auditData.auditStatus === "MISSING") {
-    return "Missing";
+    return "Ausente";
   }
 
   // Unexpected: Asset that was scanned but not expected
   if (!auditData.expected && auditData.auditStatus === "UNEXPECTED") {
-    return "Unexpected";
+    return "Inesperado";
   }
 
   // Expected assets with PENDING status:
   // - On completed audit: Show as "Missing" (they weren't scanned)
   // - On active/pending audit: Show as "Expected" (still waiting to be scanned)
   if (auditData.expected && auditData.auditStatus === "PENDING") {
-    return isAuditCompleted ? "Missing" : "Expected";
+    return isAuditCompleted ? "Ausente" : "Esperado";
   }
 
   // Default fallback
-  return isAuditCompleted ? "Missing" : "Expected";
+  return isAuditCompleted ? "Ausente" : "Esperado";
 }

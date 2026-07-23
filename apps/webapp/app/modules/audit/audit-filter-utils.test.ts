@@ -99,7 +99,7 @@ describe("audit filter utils", () => {
     describe("on active/pending audit (isAuditCompleted = false)", () => {
       it("returns Expected when audit data is null", () => {
         const status = getAuditStatusLabel(null);
-        expect(status).toBe("Expected");
+        expect(status).toBe("Esperado");
       });
 
       it("returns Found for expected asset that was scanned", () => {
@@ -107,7 +107,7 @@ describe("audit filter utils", () => {
           expected: true,
           auditStatus: "FOUND",
         });
-        expect(status).toBe("Found");
+        expect(status).toBe("Encontrado");
       });
 
       it("returns Missing for expected asset that wasn't scanned", () => {
@@ -115,7 +115,7 @@ describe("audit filter utils", () => {
           expected: true,
           auditStatus: "MISSING",
         });
-        expect(status).toBe("Missing");
+        expect(status).toBe("Ausente");
       });
 
       it("returns Unexpected for non-expected asset that was scanned", () => {
@@ -123,7 +123,7 @@ describe("audit filter utils", () => {
           expected: false,
           auditStatus: "UNEXPECTED",
         });
-        expect(status).toBe("Unexpected");
+        expect(status).toBe("Inesperado");
       });
 
       it("returns Expected for expected asset with PENDING status", () => {
@@ -131,7 +131,7 @@ describe("audit filter utils", () => {
           expected: true,
           auditStatus: "PENDING",
         });
-        expect(status).toBe("Expected");
+        expect(status).toBe("Esperado");
       });
 
       it("returns Expected for edge case of non-expected FOUND", () => {
@@ -141,7 +141,7 @@ describe("audit filter utils", () => {
           expected: false,
           auditStatus: "FOUND",
         });
-        expect(status).toBe("Expected");
+        expect(status).toBe("Esperado");
       });
 
       it("returns Expected for edge case of non-expected MISSING", () => {
@@ -151,14 +151,14 @@ describe("audit filter utils", () => {
           expected: false,
           auditStatus: "MISSING",
         });
-        expect(status).toBe("Expected");
+        expect(status).toBe("Esperado");
       });
     });
 
     describe("on completed audit (isAuditCompleted = true)", () => {
       it("returns Missing when audit data is null", () => {
         const status = getAuditStatusLabel(null, true);
-        expect(status).toBe("Missing");
+        expect(status).toBe("Ausente");
       });
 
       it("returns Found for expected asset that was scanned", () => {
@@ -169,7 +169,7 @@ describe("audit filter utils", () => {
           },
           true
         );
-        expect(status).toBe("Found");
+        expect(status).toBe("Encontrado");
       });
 
       it("returns Missing for expected asset with PENDING status", () => {
@@ -181,7 +181,7 @@ describe("audit filter utils", () => {
           },
           true
         );
-        expect(status).toBe("Missing");
+        expect(status).toBe("Ausente");
       });
 
       it("returns Missing for expected asset with MISSING status", () => {
@@ -192,7 +192,7 @@ describe("audit filter utils", () => {
           },
           true
         );
-        expect(status).toBe("Missing");
+        expect(status).toBe("Ausente");
       });
 
       it("returns Unexpected for non-expected asset that was scanned", () => {
@@ -203,7 +203,7 @@ describe("audit filter utils", () => {
           },
           true
         );
-        expect(status).toBe("Unexpected");
+        expect(status).toBe("Inesperado");
       });
     });
   });

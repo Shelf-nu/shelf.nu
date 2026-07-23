@@ -412,7 +412,7 @@ export function AuditDrawer({
         const availabilityConfigs = [
           {
             condition: isExpected,
-            badgeText: "Expected",
+            badgeText: "Esperado",
             tooltipTitle: "Expected asset",
             tooltipContent:
               "This asset belongs to this audit according to records.",
@@ -421,7 +421,7 @@ export function AuditDrawer({
           },
           {
             condition: isUnexpected,
-            badgeText: "Unexpected",
+            badgeText: "Inesperado",
             tooltipTitle: "Unexpected asset",
             tooltipContent:
               "This asset was not expected in this audit context.",
@@ -436,7 +436,7 @@ export function AuditDrawer({
           <div className="flex items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={data.thumbnailImage || data.mainImage}
-              alt={data.title || "Asset"}
+              alt={data.title || "Equipamento"}
               className="size-[54px] rounded-[2px]"
             />
             <div className="flex flex-col gap-1">
@@ -466,7 +466,7 @@ export function AuditDrawer({
                     auditAssetId={data.auditAssetId || ""}
                     auditSessionId={auditSession.id}
                     assetName={
-                      ("title" in data ? data.title : data.name) || "Asset"
+                      ("title" in data ? data.title : data.name) || "Equipamento"
                     }
                     isPending={false}
                     notesCount={notesCount}
@@ -491,7 +491,7 @@ export function AuditDrawer({
           <div className="flex items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.name || "Asset"}
+              alt={asset.name || "Equipamento"}
               className="size-[54px] rounded-[2px]"
             />
 
@@ -514,7 +514,7 @@ export function AuditDrawer({
               <div className="flex flex-wrap items-center gap-1">
                 <span className={assetTypeBadgeClass}>asset</span>
                 <AvailabilityBadge
-                  badgeText="Pending"
+                  badgeText="Pendente"
                   tooltipTitle="Pending scan"
                   tooltipContent="This asset is expected but has not been scanned yet."
                   className="border-gray-200 bg-gray-50 text-gray-600"

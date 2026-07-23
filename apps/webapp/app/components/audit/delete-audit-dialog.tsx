@@ -124,7 +124,7 @@ export function DeleteAuditDialog({
                 type="submit"
                 disabled={disabled || !confirmationMatches}
               >
-                {disabled ? "Deleting..." : "Delete"}
+                {disabled ? "Deleting..." : "Excluir"}
               </Button>
             </div>
           </AlertDialogFooter>

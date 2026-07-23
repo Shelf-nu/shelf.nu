@@ -27,7 +27,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Activity",
+  breadcrumb: () => "Atividade",
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -92,7 +92,7 @@ export default function AuditActivity() {
     <div className="w-full">
       {canReadAuditNotes ? (
         <>
-          <TextualDivider text="Activity" className="mb-8 lg:hidden" />
+          <TextualDivider text="Atividade" className="mb-8 lg:hidden" />
           <AuditNotes />
         </>
       ) : (

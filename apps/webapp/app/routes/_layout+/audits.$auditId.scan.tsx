@@ -496,7 +496,7 @@ export default function AuditSessionRoute() {
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Audit"
+          backButtonText="Auditoria"
           allowNonShelfCodes
           paused={!auditSession}
           setPaused={() => {}}

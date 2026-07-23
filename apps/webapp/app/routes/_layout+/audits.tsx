@@ -33,7 +33,7 @@ import {
 } from "~/utils/stripe.server";
 import { canUseAudits } from "~/utils/subscription.server";
 
-export const meta = () => [{ title: appendToMetaTitle("Audits") }];
+export const meta = () => [{ title: appendToMetaTitle("Auditorias") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

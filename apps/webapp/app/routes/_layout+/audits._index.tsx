@@ -38,9 +38,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 const AUDIT_SORTING_OPTIONS = {
-  name: "Name",
+  name: "Nome",
   createdAt: "Creation Date",
-  dueDate: "Due date",
+  dueDate: "Data de vencimento",
 } as const;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -87,7 +87,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAudits / perPage);
 
     const header: HeaderData = {
-      title: "Audits",
+      title: "Auditorias",
     };
 
     const modelName = {

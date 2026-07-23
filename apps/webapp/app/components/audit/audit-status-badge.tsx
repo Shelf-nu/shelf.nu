@@ -11,11 +11,11 @@ const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
 };
 
 const auditStatusLabels: Record<AuditStatus, string> = {
-  PENDING: "Pending",
-  ACTIVE: "Active",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  ARCHIVED: "Archived",
+  PENDING: "Pendente",
+  ACTIVE: "Ativa",
+  COMPLETED: "Concluída",
+  CANCELLED: "Cancelada",
+  ARCHIVED: "Arquivada",
 };
 
 /**

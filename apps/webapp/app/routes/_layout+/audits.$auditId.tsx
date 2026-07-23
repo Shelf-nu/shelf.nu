@@ -236,7 +236,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   {
-    title: data ? appendToMetaTitle(data.session.name) : "Audit",
+    title: data ? appendToMetaTitle(data.session.name) : "Auditoria",
   },
 ];
 
@@ -358,8 +358,8 @@ export default function AuditDetailsPage() {
   const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
 
   const items = [
-    { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    { to: "overview", content: "Visão geral" },
+    { to: "activity", content: "Atividade" },
   ];
 
   const matches = useMatches();

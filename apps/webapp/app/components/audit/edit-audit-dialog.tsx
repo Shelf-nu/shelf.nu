@@ -130,7 +130,7 @@ export function EditAuditDialog({
 
               <Input
                 name={descriptionField}
-                label="Description"
+                label="Descrição"
                 placeholder="Add context that will help auditors (optional)."
                 inputType="textarea"
                 rows={5}
@@ -142,7 +142,7 @@ export function EditAuditDialog({
 
               <Input
                 name={dueDateField}
-                label="Due date"
+                label="Data de vencimento"
                 type="datetime-local"
                 defaultValue={defaultDueDate}
                 error={dueDateError}

@@ -38,7 +38,7 @@ const paramsSchema = z.object({ auditId: z.string() });
  *
  * @returns React Router meta descriptor with the page title.
  */
-export const meta = () => [{ title: appendToMetaTitle("Duplicate audit") }];
+export const meta = () => [{ title: appendToMetaTitle("Duplicar auditoria") }];
 
 /**
  * Loader for the duplicate-audit route.

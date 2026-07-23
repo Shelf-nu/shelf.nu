@@ -215,7 +215,7 @@ function ConditionalDropdown() {
             >
               <BulkUpdateDialogTrigger
                 type="delete-audit"
-                label="Delete"
+                label="Excluir"
                 onClick={closeMenu}
                 disabled={
                   !canDeleteAudit
