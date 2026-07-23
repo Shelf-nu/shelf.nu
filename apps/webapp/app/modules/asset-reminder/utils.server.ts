@@ -2,7 +2,7 @@ import type { AssetReminder } from "@prisma/client";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import { z } from "zod";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -33,23 +33,24 @@ export async function resolveRemindersActions({
 
   switch (intent) {
     case "edit-reminder": {
+      // Resolve the acting user's RESOLVED timezone preference BEFORE validating
+      // so the schema's "must be in the future" check runs in the SAME zone the
+      // value is stored in (below) and the SAME zone the client validated in.
+      // Validating with the default server-zone schema first, then storing in
+      // the pref zone, lets the two disagree for a wall-clock time near "now".
+      // Locale still comes from hints; only the timezone source changes.
+      const { timeZone } = await resolveUserFormatPrefsById(
+        userId,
+        getClientHint(request)
+      );
+
       const { redirectTo, ...payload } = parseData(
         formData,
-        setReminderSchema.extend({ id: z.string() }),
+        createSetReminderSchema({ timeZone }).extend({ id: z.string() }),
         // Expected user-input validation (e.g. "Please select a date in the
         // future") — a 400, not a server error. The create path already opts
         // out; mirror it here (was noise: SHELF-WEBAPP-1ME).
         { shouldBeCaptured: false }
-      );
-
-      // Parse the submitted wall-clock time in the acting user's RESOLVED
-      // timezone preference — the SAME zone the UI displays dates in — not the
-      // browser hint. When the two differ (e.g. pref Europe/London, browser
-      // UTC+3), using the browser zone would offset the stored UTC instant
-      // wrong. Locale still comes from hints; only the timezone source changes.
-      const { timeZone } = await resolveUserFormatPrefsById(
-        userId,
-        getClientHint(request)
       );
 
       const alertDateTime = DateTime.fromFormat(

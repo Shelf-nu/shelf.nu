@@ -1,6 +1,12 @@
 import { useState, useRef, useMemo } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
+// Named-timezone support for FullCalendar. v6 only understands "local"/"UTC"
+// out of the box; a named IANA `timeZone` (e.g. "Asia/Tokyo") silently falls
+// back to UTC — rendering every non-UTC user's events at the wrong local time —
+// UNLESS this Luxon connector is registered in the plugins array below. luxon
+// is already a project dependency, so this connector is lightweight.
+import luxonPlugin from "@fullcalendar/luxon3";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { type BookingStatus, type Tag } from "@prisma/client";
@@ -342,7 +348,10 @@ export default function Calendar() {
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
+              // luxonPlugin registers named-IANA-timezone resolution so
+              // `timeZone={prefs.timeZone}` below renders events in the user's
+              // chosen zone instead of falling back to UTC (see import note).
+              plugins={[dayGridPlugin, listPlugin, timeGridPlugin, luxonPlugin]}
               initialView={calendarView}
               initialDate={initialDate}
               expandRows={true}

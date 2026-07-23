@@ -11,6 +11,7 @@
  *
  * @see {@link file://./date-time-picker.tsx}
  */
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
@@ -207,6 +208,43 @@ describe("DateTimePicker", () => {
     // An internal error is surfaced, rendered like the external `error` prop.
     expect(screen.getByText("Please enter a valid date")).toBeTruthy();
     // The stale prior wire is cleared — the form won't submit the old value.
+    expect(hidden()?.value).toBe("");
+  });
+
+  it("preserves the inline error and invalid text on invalid blur in CONTROLLED mode", () => {
+    // why: the booking Start/End date fields are CONTROLLED (value={state} +
+    // onChange={setState}). On invalid blur the picker commits "" so
+    // required/zod fails instead of submitting the stale prior value; the parent
+    // reflects that back as value="". Without the lastEmittedRef echo-guard, the
+    // controlled sync effect would then treat that echo as an external change
+    // and wipe BOTH the invalid text and the "Please enter a valid date"
+    // message — leaving the user at an empty field with no explanation. This
+    // asserts they survive the parent round-trip.
+    function ControlledWrapper() {
+      // Mirrors dates.tsx: parent owns the wire and reflects onChange back.
+      const [v, setV] = useState("2026-06-22");
+      return (
+        <DateTimePicker name="typed" mode="date" value={v} onChange={setV} />
+      );
+    }
+    render(<ControlledWrapper />);
+    const text = document.querySelector<HTMLInputElement>('input[type="text"]');
+    const hidden = () =>
+      document.querySelector<HTMLInputElement>(
+        'input[type="hidden"][name="typed"]'
+      );
+
+    // The seeded valid wire is present before the invalid edit.
+    expect(hidden()?.value).toBe("2026-06-22");
+
+    fireEvent.change(text!, { target: { value: "invalid" } });
+    fireEvent.blur(text!);
+
+    // Invalid text survives the value="" echo (was wiped before the fix).
+    expect(text?.value).toBe("invalid");
+    // Inline error survives the controlled round-trip.
+    expect(screen.getByText("Please enter a valid date")).toBeTruthy();
+    // Submitted wire is empty so the form rejects the stale prior value.
     expect(hidden()?.value).toBe("");
   });
 

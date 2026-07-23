@@ -8,7 +8,7 @@ import type {
 } from "react-router";
 import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -349,20 +349,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "set-reminder": {
-        const { redirectTo, ...payload } = parseData(
-          formData,
-          setReminderSchema,
-          { shouldBeCaptured: false }
-        );
-        // Parse the submitted wall-clock time in the acting user's RESOLVED
-        // timezone preference — the SAME zone the UI displays dates in — not
-        // the browser hint. When the two differ the browser zone would offset
-        // the stored UTC instant wrong. Only the timezone source changes here.
+        // Resolve the acting user's timezone BEFORE validating so the schema's
+        // "must be in the future" check runs in the SAME zone the value is later
+        // stored in (below) and the SAME zone the client validated in. Validating
+        // with the default server-zone schema first, then storing in the pref
+        // zone, lets the two disagree for a wall-clock time near "now".
         const { timeZone } = await resolveUserFormatPrefsById(
           userId,
           getClientHint(request)
         );
 
+        const { redirectTo, ...payload } = parseData(
+          formData,
+          createSetReminderSchema({ timeZone }),
+          { shouldBeCaptured: false }
+        );
+
+        // Parse the submitted wall-clock time in that same resolved timezone —
+        // not the browser hint. When the two differ the browser zone would
+        // offset the stored UTC instant wrong.
         const alertDateTime = DateTime.fromFormat(
           formData.get("alertDateTime")!.toString()!,
           DATE_TIME_FORMAT,

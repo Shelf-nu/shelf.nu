@@ -8,10 +8,12 @@
  * write in `recordMobileActivity`. New users are written concretely at creation
  * (Phase 4) and never reach this path.
  *
- * The write is null-guarded in BOTH directions: only null fields are placed in
- * `data` (a user's explicit choice is never overwritten), and the `updateMany`
- * WHERE clause repeats the null predicate so concurrent requests re-check the
- * committed row under Postgres row locking.
+ * Each still-null column is written by its OWN null-guarded `updateMany`: a
+ * user's explicit choice is never overwritten because the per-field WHERE
+ * re-checks that specific column under Postgres row locking, so a value made
+ * concrete by a concurrent request (after our read, before our write) matches
+ * zero rows and is left untouched. (A single combined write was racy — see the
+ * inline note in {@link detectAndPersistFormatPrefs}.)
  *
  * @see {@link file://../api/mobile-usage.server.ts} recordMobileActivity — the pattern this mirrors
  * @see {@link file://../../root.tsx} — root loader calls this on null-bearing users
@@ -53,40 +55,62 @@ export function detectAndPersistFormatPrefs(
 
   const detected = detectFormatPrefsFromHints(hints);
 
-  // Only write the columns that are still null — never clobber a user's choice.
-  const data: Prisma.UserUpdateManyMutationInput = {};
-  if (currentPrefs.dateFormat === null) data.dateFormat = detected.dateFormat;
-  if (currentPrefs.timeFormat === null) data.timeFormat = detected.timeFormat;
-  if (currentPrefs.weekStart === null) data.weekStart = detected.weekStart;
-  if (currentPrefs.timeZone === null) data.timeZone = detected.timeZone;
+  // Backfill each still-null column with its OWN null-guarded updateMany rather
+  // than one write covering every read-time-null column. The single-write form
+  // was racy: its `data` snapshot is built from a possibly-stale read, while a
+  // combined WHERE only required *any* column to be null — so a preference the
+  // user explicitly set on a concurrent request (after our read, before our
+  // write) would be overwritten by the stale detected value as long as some
+  // OTHER column was still null. Per-field writes close that gap: each WHERE
+  // re-checks its own column under Postgres row locking, so a column made
+  // concrete since our read matches zero rows and is left untouched. Only the
+  // columns that were null at read time are even attempted (the outer guards).
+  const writes: Prisma.PrismaPromise<Prisma.BatchPayload>[] = [];
+  if (currentPrefs.dateFormat === null) {
+    writes.push(
+      db.user.updateMany({
+        where: { id: userId, dateFormat: null },
+        data: { dateFormat: detected.dateFormat },
+      })
+    );
+  }
+  if (currentPrefs.timeFormat === null) {
+    writes.push(
+      db.user.updateMany({
+        where: { id: userId, timeFormat: null },
+        data: { timeFormat: detected.timeFormat },
+      })
+    );
+  }
+  if (currentPrefs.weekStart === null) {
+    writes.push(
+      db.user.updateMany({
+        where: { id: userId, weekStart: null },
+        data: { weekStart: detected.weekStart },
+      })
+    );
+  }
+  if (currentPrefs.timeZone === null) {
+    writes.push(
+      db.user.updateMany({
+        where: { id: userId, timeZone: null },
+        data: { timeZone: detected.timeZone },
+      })
+    );
+  }
 
   // Fire-and-forget: this must never slow down or break the request it rides on.
-  // updateMany (not update) lets us repeat the null-guard in the WHERE clause so
-  // Postgres enforces "only the first backfill within a window wins" atomically.
-  void db.user
-    .updateMany({
-      where: {
-        id: userId,
-        OR: [
-          { dateFormat: null },
-          { timeFormat: null },
-          { weekStart: null },
-          { timeZone: null },
-        ],
-      },
-      data,
-    })
-    .catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Failed to backfill user format preferences",
-          additionalData: { userId },
-          label: "User",
-          // Best-effort backfill — a failed write must never add Sentry noise;
-          // the user simply resolves from live hints until the next load retries.
-          shouldBeCaptured: false,
-        })
-      );
-    });
+  void Promise.all(writes).catch((cause) => {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to backfill user format preferences",
+        additionalData: { userId },
+        label: "User",
+        // Best-effort backfill — a failed write must never add Sentry noise;
+        // the user simply resolves from live hints until the next load retries.
+        shouldBeCaptured: false,
+      })
+    );
+  });
 }

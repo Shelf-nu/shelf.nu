@@ -90,14 +90,16 @@ export function createSetReminderSchema(
 }
 
 /**
- * Default reminder schema instance for server-side parsing where no request
- * timezone is threaded through the schema (e.g. `setReminderSchema.extend(...)`
- * in the edit action, or `parseData(formData, setReminderSchema)` in the create
- * action). Built via {@link createSetReminderSchema} so it inherits the
- * per-validation future-date cutoff. The server actions re-parse the wall-clock
- * in the user's resolved timezone with Luxon for persistence; client code
- * should prefer `createSetReminderSchema(timeZone)` so its future-date check is
- * timezone-accurate too.
+ * Timezone-agnostic reminder schema instance, kept for the shared `typeof`
+ * anchor used by `getValidationErrors<typeof setReminderSchema>` and any caller
+ * without request context. Built via {@link createSetReminderSchema} so it
+ * inherits the per-validation future-date cutoff.
+ *
+ * NOTE: both server actions (create in `assets.$assetId.tsx`, edit in
+ * `asset-reminder/utils.server.ts`) now resolve the acting user's timezone and
+ * validate with `createSetReminderSchema({ timeZone })` so the "future" cutoff
+ * is judged against the SAME instant that persistence stores — do not route
+ * request-backed parsing through this timezone-less instance.
  */
 export const setReminderSchema = createSetReminderSchema();
 

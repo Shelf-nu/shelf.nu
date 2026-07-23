@@ -46,7 +46,7 @@ describe("detectAndPersistFormatPrefs", () => {
     expect(updateManyMock).not.toHaveBeenCalled();
   });
 
-  it("backfills only the still-null fields, guarded by a null-only where clause", () => {
+  it("backfills each still-null field with its OWN null-guarded write, never the set field", () => {
     detectAndPersistFormatPrefs(
       "user-1",
       {
@@ -58,23 +58,28 @@ describe("detectAndPersistFormatPrefs", () => {
       hints
     );
 
+    // One updateMany PER still-null field (3 here), not a single combined write.
+    // Each WHERE guards its OWN column so a concurrent explicit set of that
+    // column makes the write match zero rows instead of clobbering it with a
+    // stale detected value — the core race fix.
+    expect(updateManyMock).toHaveBeenCalledTimes(3);
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: {
-        id: "user-1",
-        OR: [
-          { dateFormat: null },
-          { timeFormat: null },
-          { weekStart: null },
-          { timeZone: null },
-        ],
-      },
-      // Only the null fields are written; dateFormat is left untouched.
-      data: {
-        timeFormat: "H24",
-        weekStart: "MONDAY",
-        timeZone: "Europe/London",
-      },
+      where: { id: "user-1", timeFormat: null },
+      data: { timeFormat: "H24" },
     });
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: "user-1", weekStart: null },
+      data: { weekStart: "MONDAY" },
+    });
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: "user-1", timeZone: null },
+      data: { timeZone: "Europe/London" },
+    });
+    // The already-set field is never written (no call carries a dateFormat).
+    const wroteDateFormat = updateManyMock.mock.calls.some(
+      ([arg]) => arg?.data && "dateFormat" in arg.data
+    );
+    expect(wroteDateFormat).toBe(false);
   });
 
   it("does not throw when the write rejects (fire-and-forget)", async () => {

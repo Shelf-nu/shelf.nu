@@ -175,12 +175,15 @@ export async function sendAuditAssignedEmail({
 }) {
   const creatorName = resolveUserDisplayName(audit.createdBy);
   const assetCount = audit._count.assets;
-  // Recipient-specific prefs. Only a userId is available here (no assignee row
-  // is passed to this singular sender), so a single fetch is acceptable — one
-  // email, one lookup. hints is the null-field fallback.
-  const prefs = await resolveUserFormatPrefsById(assigneeUserId, hints);
 
   try {
+    // Recipient-specific prefs. Only a userId is available here (no assignee row
+    // is passed to this singular sender), so a single fetch is acceptable — one
+    // email, one lookup. hints is the null-field fallback. Resolved INSIDE the
+    // try so a DB rejection is caught and logged here rather than surfacing as
+    // an unhandled rejection in the fire-and-forget caller.
+    const prefs = await resolveUserFormatPrefsById(assigneeUserId, hints);
+
     const html = await auditUpdatesTemplateString({
       audit,
       heading: `🔍 You've been assigned to audit: "${audit.name}"`,

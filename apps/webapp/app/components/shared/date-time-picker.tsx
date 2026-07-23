@@ -233,6 +233,12 @@ export function DateTimePicker({
   // ref a pointer-down / focus on the input reads as "interact outside" and
   // dismisses the popover the same tick it opened. We use it to veto that.
   const fieldRef = useRef<HTMLDivElement>(null);
+  // The last wire string this component emitted via `commit`/onChange. A
+  // controlled parent round-trips it back through `value`; the sync effect below
+  // uses this to tell its OWN echo (preserve local typing state) from a genuine
+  // external change (normalize + clear error). See the effect and the
+  // invalid-blur note in handleTypedBlur.
+  const lastEmittedRef = useRef<string | null>(null);
   const [internalWire, setInternalWire] = useState<string>(
     () => value ?? defaultValue ?? ""
   );
@@ -254,14 +260,23 @@ export function DateTimePicker({
   // `value` changes (uncontrolled typing never reaches here), so it can't
   // overwrite a half-typed value.
   useEffect(() => {
-    if (isControlled) {
-      const nextWire = value ?? "";
-      setInternalWire(nextWire);
-      const { date } = parseWireToParts(nextWire);
-      setTypedText(date ? format(date, tokens) : "");
-      // The external value is authoritative — drop any stale internal error.
-      setTypedError(null);
-    }
+    if (!isControlled) return;
+    const nextWire = value ?? "";
+    // Always reflect the controlled value into the submitted/internal wire.
+    setInternalWire(nextWire);
+    // Echo of our OWN emit: the parent reflected back exactly what we just sent
+    // through onChange. Local typed text + validity are authoritative here (an
+    // invalid value the user is still correcting, or in-progress typing), so do
+    // NOT normalize the text or clear the error. Without this guard, an invalid
+    // blur — which commits "" so required/zod fails instead of submitting the
+    // stale prior value — would bounce back as value="" and erase both the
+    // invalid text and its inline "Please enter a valid date" message.
+    if (nextWire === lastEmittedRef.current) return;
+    // Genuine EXTERNAL change (navigating to a different booking, or a sibling
+    // field auto-adjusting this one): normalize the text, drop any stale error.
+    const { date } = parseWireToParts(nextWire);
+    setTypedText(date ? format(date, tokens) : "");
+    setTypedError(null);
   }, [isControlled, value, tokens]);
 
   const wire = internalWire;
@@ -281,6 +296,9 @@ export function DateTimePicker({
 
   /** Commit a new wire string: update internal state + notify parent. */
   const commit = (nextWire: string) => {
+    // Record what we emit so the controlled sync effect can recognize the
+    // parent's echo of this exact value and preserve local typing state.
+    lastEmittedRef.current = nextWire;
     setInternalWire(nextWire);
     onChange?.(nextWire);
   };
