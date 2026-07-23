@@ -243,6 +243,11 @@ export function DateTimePicker({
     const { date } = parseWireToParts(value ?? defaultValue ?? "");
     return date ? format(date, tokens) : "";
   });
+  // Internal validation message for a NON-EMPTY typed value that does not
+  // resolve to a valid, in-range date. Set on blur (never mid-typing) so a
+  // stale prior wire is not silently submitted; rendered exactly like the
+  // external `error` prop. `null` when the typed value is empty or valid.
+  const [typedError, setTypedError] = useState<string | null>(null);
 
   // In controlled mode, reflect the external value into internal state AND
   // re-normalize the text to canonical format. This only fires on external
@@ -254,6 +259,8 @@ export function DateTimePicker({
       setInternalWire(nextWire);
       const { date } = parseWireToParts(nextWire);
       setTypedText(date ? format(date, tokens) : "");
+      // The external value is authoritative — drop any stale internal error.
+      setTypedError(null);
     }
   }, [isControlled, value, tokens]);
 
@@ -279,23 +286,41 @@ export function DateTimePicker({
   };
 
   /**
+   * Parse typed text in the workspace format and return the Date only when it
+   * is valid AND within the min/max bounds (day granularity). Returns `null`
+   * for empty, unparseable, or out-of-range input. Shared by the change (commit
+   * gating) and blur (validity surfacing) handlers so both agree on validity.
+   *
+   * @param text - the raw typed text
+   * @returns the parsed in-range Date, or `null` when invalid/out-of-range
+   */
+  const parseTypedText = (text: string): Date | null => {
+    if (text.trim() === "") return null;
+    const parsed = parse(text, tokens, new Date());
+    if (!isValid(parsed)) return null;
+    if (min && compareDay(parsed, min) < 0) return null;
+    if (max && compareDay(parsed, max) > 0) return null;
+    return parsed;
+  };
+
+  /**
    * Handle typing in the date text input. Always mirrors the raw text; commits
    * the wire only when the text parses to a valid date within min/max (day
    * granularity). Empty text commits "". Invalid/partial text leaves the wire
-   * unchanged (mid-typing) — reverted to canonical on blur.
+   * unchanged (mid-typing) — validated on blur. Clears any prior "invalid date"
+   * message as soon as the user edits (it re-surfaces on blur if still invalid).
    */
   const handleTypedChange = (text: string) => {
     setTypedText(text);
+    setTypedError(null);
 
     if (text.trim() === "") {
       commit("");
       return;
     }
 
-    const parsed = parse(text, tokens, new Date());
-    if (!isValid(parsed)) return;
-    if (min && compareDay(parsed, min) < 0) return;
-    if (max && compareDay(parsed, max) > 0) return;
+    const parsed = parseTypedText(text);
+    if (!parsed) return;
 
     // Preserve the current time in datetime mode; a fresh pick falls back to the
     // partsToWire default ("00:00") for consistency across the picker.
@@ -303,9 +328,35 @@ export function DateTimePicker({
     commit(partsToWire(parsed, nextTime, mode));
   };
 
-  /** Normalize the text back to the committed date's canonical format on blur. */
+  /**
+   * Validate the typed value on blur. Empty text keeps the empty state. A valid
+   * in-range value is normalized to the canonical workspace format. A NON-EMPTY
+   * value that does not resolve to a valid, in-range date is NOT silently
+   * reverted to the prior value: the typed text is kept, an internal error is
+   * surfaced, and the wire is cleared so downstream `required`/zod validation
+   * fails rather than the form silently submitting the stale prior wire.
+   */
   const handleTypedBlur = () => {
-    setTypedText(dateToText(selectedDate));
+    if (typedText.trim() === "") {
+      // Cleared field — keep the empty state (already committed "" on change).
+      setTypedError(null);
+      setTypedText("");
+      return;
+    }
+
+    const parsed = parseTypedText(typedText);
+    if (parsed) {
+      // Valid in-range date: normalize the text, drop any error.
+      setTypedError(null);
+      setTypedText(dateToText(parsed));
+      return;
+    }
+
+    // Invalid, non-empty text: surface an error and clear the stale wire so the
+    // prior value can't be submitted. The invalid text stays visible for the
+    // user to correct.
+    setTypedError("Please enter a valid date");
+    commit("");
   };
 
   const handleDaySelect = (day: Date | undefined) => {
@@ -313,6 +364,7 @@ export function DateTimePicker({
     // partsToWire default ("00:00") for consistency across the picker.
     const nextTime = mode === "datetime" ? time : "";
     setTypedText(dateToText(day));
+    setTypedError(null);
     commit(partsToWire(day, nextTime, mode));
     setOpen(false);
   };
@@ -327,12 +379,18 @@ export function DateTimePicker({
 
   const handleClear = () => {
     setTypedText("");
+    setTypedError(null);
     commit("");
     setOpen(false);
   };
 
   // Stable id linking the field to its error message via aria-describedby.
   const errorId = `${name}-error`;
+
+  // External (server/validation) error takes precedence; otherwise fall back to
+  // the internal typed-validity error. Drives the red border, aria-invalid, and
+  // the error message below the field — one rendering path for both sources.
+  const displayError = error || typedError;
 
   // Placeholder: a caller-supplied override wins. Otherwise — because this is a
   // TYPEABLE input — show a concrete EXAMPLE date in the user's own format
@@ -376,7 +434,7 @@ export function DateTimePicker({
               className={tw(
                 "flex min-w-0 flex-1 items-center rounded-[4px] border shadow transition-colors",
                 "focus-within:border-primary-300",
-                error
+                displayError
                   ? "border-error-300"
                   : "border-gray-300 hover:border-gray-400",
                 disabled && "cursor-not-allowed opacity-50"
@@ -396,8 +454,8 @@ export function DateTimePicker({
                 disabled={disabled}
                 required={required}
                 aria-label={label ?? "Date"}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? errorId : undefined}
+                aria-invalid={displayError ? true : undefined}
+                aria-describedby={displayError ? errorId : undefined}
                 className={tw(
                   // border-0: kill the browser's default input border (dark inner
                   // box). outline-none + focus:ring-[0]: the app sets a global
@@ -432,11 +490,11 @@ export function DateTimePicker({
               onChange={(e) => handleNativeTimeChange(e.target.value)}
               disabled={disabled}
               aria-label="Select time"
-              aria-invalid={error ? true : undefined}
+              aria-invalid={displayError ? true : undefined}
               className={tw(
                 "shrink-0 rounded-[4px] border px-3 py-2 text-gray-900 shadow transition-colors",
                 "outline-none focus:border-primary-300 focus:ring-[0]",
-                error
+                displayError
                   ? "border-error-300"
                   : "border-gray-300 hover:border-gray-400",
                 "disabled:cursor-not-allowed disabled:opacity-50"
@@ -510,9 +568,9 @@ export function DateTimePicker({
         </Popover.Portal>
       </Popover.Root>
 
-      {error ? (
+      {displayError ? (
         <div id={errorId} className="mt-1 text-sm text-error-500">
-          {error}
+          {displayError}
         </div>
       ) : null}
     </div>

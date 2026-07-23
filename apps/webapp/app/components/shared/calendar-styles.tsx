@@ -49,8 +49,9 @@ export const RDP_STYLE = `
     margin: 0 auto;
     border: none;
     border-radius: 6px;
-    /* Kill v9's default accent ring + the app's global focus ring so the dark
-       fill is the ONLY selected indicator (no blue outline). */
+    /* Kill v9's default accent ring + the app's global blue focus ring in the
+       resting/mouse states. Keyboard focus gets its own distinct primary ring
+       via :focus-visible below (WCAG 2.4.7 visible focus). */
     box-shadow: none !important;
     outline: none !important;
     font-size: 14px;
@@ -59,11 +60,23 @@ export const RDP_STYLE = `
     transition: background-color 0.15s ease;
   }
   .rdp-day_button:hover:not([disabled]) { background-color: #F2F4F7; }
-  .rdp-day_button:focus,
-  .rdp-day_button:focus-visible {
+  /* Mouse / programmatic focus: gray fill only, no ring (matches hover). */
+  .rdp-day_button:focus {
     background-color: #F2F4F7;
     outline: none !important;
     box-shadow: none !important;
+  }
+  /* Keyboard focus: a distinct 2px primary (#EF6820) ring wrapped in a white
+     halo so it stays >=3:1 against the day fill on BOTH normal (light) and
+     selected (dark pill) days. z-index lifts the halo above adjacent cells in
+     the gap-less grid. This is the visible keyboard-focus indicator; the dark
+     pill remains the SELECTION indicator. */
+  .rdp-day_button:focus-visible,
+  .rdp-selected .rdp-day_button:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: none !important;
+    box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #EF6820 !important;
   }
   .rdp-today:not(.rdp-selected) .rdp-day_button {
     background-color: #F2F4F7;

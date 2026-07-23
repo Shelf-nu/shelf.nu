@@ -181,6 +181,35 @@ describe("DateTimePicker", () => {
     expect(hidden?.value).toBe("");
   });
 
+  it("surfaces an error and clears the wire when an invalid date is typed then blurred", () => {
+    // why: a stale prior value must never be silently submitted. Seed a valid
+    // wire, replace it with unparseable text, then blur — the field must show
+    // an error and the hidden input (what the form submits) must be empty so
+    // downstream required/zod validation fails instead of accepting the old
+    // value. Fixed wire strings + DD_MM_YYYY prefs keep this tz-independent.
+    render(
+      <DateTimePicker name="typed" mode="date" defaultValue="2026-06-22" />
+    );
+    const text = document.querySelector<HTMLInputElement>('input[type="text"]');
+    const hidden = () =>
+      document.querySelector<HTMLInputElement>(
+        'input[type="hidden"][name="typed"]'
+      );
+
+    // The seeded valid wire is present before the invalid edit.
+    expect(hidden()?.value).toBe("2026-06-22");
+
+    fireEvent.change(text!, { target: { value: "invalid" } });
+    fireEvent.blur(text!);
+
+    // The invalid text stays visible for the user to correct (not reverted).
+    expect(text?.value).toBe("invalid");
+    // An internal error is surfaced, rendered like the external `error` prop.
+    expect(screen.getByText("Please enter a valid date")).toBeTruthy();
+    // The stale prior wire is cleared — the form won't submit the old value.
+    expect(hidden()?.value).toBe("");
+  });
+
   it("renders a separate native time input reflecting the wire in datetime mode", () => {
     render(
       <DateTimePicker
