@@ -2557,6 +2557,32 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
 `;
 
 /**
+ * Direct `a.*` sort-key columns for the slim phase, keyed by the SELECT alias
+ * each one emits. The heavy lateral re-selects all of these for the output,
+ * so in the slim phase they exist purely as `ORDER BY` inputs —
+ * {@link buildAdvancedAssetsQuery} emits only the ones the active sort
+ * references. `a.id AS "assetId"` is not listed: it is always selected (it is
+ * the lateral join key and the sort tiebreaker).
+ */
+const DIRECT_SORT_KEY_SELECTS: ReadonlyArray<
+  [alias: string, select: Prisma.Sql]
+> = [
+  ["assetCreatedAt", Prisma.sql`a."createdAt" AS "assetCreatedAt"`],
+  ["assetUpdatedAt", Prisma.sql`a."updatedAt" AS "assetUpdatedAt"`],
+  ["assetValue", Prisma.sql`a.value AS "assetValue"`],
+  ["assetQuantity", Prisma.sql`a.quantity AS "assetQuantity"`],
+  ["assetTitle", Prisma.sql`a.title AS "assetTitle"`],
+  ["assetSequentialId", Prisma.sql`a."sequentialId" AS "assetSequentialId"`],
+  ["assetStatus", Prisma.sql`a.status AS "assetStatus"`],
+  ["assetType", Prisma.sql`a.type AS "assetType"`],
+  ["assetDescription", Prisma.sql`a.description AS "assetDescription"`],
+  [
+    "assetAvailableToBook",
+    Prisma.sql`a."availableToBook" AS "assetAvailableToBook"`,
+  ],
+];
+
+/**
  * Detects which sort-only subquery selects the cheap phase must emit so that
  * every alias the `ORDER BY` references also exists in the slim SELECT. Missing
  * an active sort's alias is a `column does not exist` 500, so over-inclusion is
@@ -2638,7 +2664,10 @@ export type BuildAdvancedAssetsQueryParams = {
  *    NO `GROUP BY` (the tag search/filter is EXISTS-ified in
  *    {@link generateWhereClause}, so no fanning tag join remains).
  * 2. `sorted_asset_query` — `ROW_NUMBER()` freezes the sort into an integer
- *    `__sortRank`, then `LIMIT/OFFSET` slices the page.
+ *    `__sortRank`, then `LIMIT/OFFSET` slices the page. On the default path
+ *    (no search, no custom-field sort) the order is inverted: `ORDER BY` +
+ *    `LIMIT/OFFSET` run on the slim rows first (a top-N sort bounded by the
+ *    page) and the window ranks only the page.
  * 3. `count_query` — `COUNT(*)` over the slim set (full filtered total).
  * The final SELECT runs the ENTIRE heavy projection once per page row via
  * `LEFT JOIN LATERAL`, and `json_agg` orders by the integer `__sortRank` — the
@@ -2704,6 +2733,24 @@ export function buildAdvancedAssetsQuery({
       l.name AS "locationName"`
     : Prisma.empty;
 
+  // Slim-phase direct `a.*` columns are sort keys only (the heavy lateral
+  // re-selects everything the output needs), so emit just the ones the active
+  // ORDER BY references. parseSortingOptions always double-quotes these
+  // aliases, so the quoted-substring check is exact — and it sees the default
+  // sort's `"assetCreatedAt"` fallback, which `sortBy` alone cannot reveal.
+  // Same contract as detectActiveSortKeys: over-inclusion is safe.
+  const activeDirectSorts = DIRECT_SORT_KEY_SELECTS.filter(([alias]) =>
+    orderByInner.includes(`"${alias}"`)
+  );
+  const directSortKeySelects =
+    activeDirectSorts.length > 0
+      ? Prisma.sql`,
+          ${Prisma.join(
+            activeDirectSorts.map(([, select]) => select),
+            ",\n          "
+          )}`
+      : Prisma.empty;
+
   const qrIdSortSelect = qrIdSort
     ? Prisma.sql`,
       ${QR_ID_SUBQUERY} AS "qrId"`
@@ -2737,29 +2784,31 @@ export function buildAdvancedAssetsQuery({
   // bundle (tsc/vitest were fine, but the production build lost it).
   const rankOrderBy = Prisma.sql`saq."__sortRank"`;
 
-  return Prisma.sql`
-      WITH asset_query AS (
-        -- SLIM cheap phase: id + sort keys, one row per matching asset, no
-        -- GROUP BY. Cost is O(N) rows of LIGHT columns, not the heavy
-        -- projection — that runs once per page row in the lateral below.
-        SELECT
-          a.id AS "assetId",
-          a."createdAt" AS "assetCreatedAt",
-          a."updatedAt" AS "assetUpdatedAt",
-          a.value AS "assetValue",
-          a.quantity AS "assetQuantity",
-          a.title AS "assetTitle",
-          a."sequentialId" AS "assetSequentialId",
-          a.status AS "assetStatus",
-          a.type AS "assetType",
-          a.description AS "assetDescription",
-          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
-        ${baseJoins}
-        ${custodyJoins}
-        ${whereClause}
-      ),
+  // Default path (no search, no custom-field sort): ORDER BY + LIMIT/OFFSET
+  // run on the slim rows FIRST, so Postgres top-N sorts to the page bound
+  // instead of full-sorting N rows to feed ROW_NUMBER; the window then ranks
+  // only the page (the rank restarts per page — only its relative order is
+  // consumed by the json_agg). The page slice is identical either way:
+  // parseSortingOptions always appends an "assetId" tiebreaker, so the order
+  // is total. Non-default paths keep the rank-then-slice shape unchanged.
+  const sortedAssetQuery =
+    !hasSearch && customFieldSortings.length === 0
+      ? Prisma.sql`
       sorted_asset_query AS (
-        -- Freeze the sort into a stable integer rank, then slice the page.
+        SELECT
+          "assetId",
+          ROW_NUMBER() OVER (ORDER BY ${Prisma.raw(
+            orderByInner
+          )}) AS "__sortRank"
+        FROM (
+          SELECT *
+          FROM asset_query
+          ORDER BY ${Prisma.raw(orderByInner)}
+          ${paginationClause}
+        ) page
+      )`
+      : Prisma.sql`
+      sorted_asset_query AS (
         SELECT
           "assetId",
           ROW_NUMBER() OVER (ORDER BY ${Prisma.raw(
@@ -2768,7 +2817,22 @@ export function buildAdvancedAssetsQuery({
         FROM asset_query
         ORDER BY "__sortRank"
         ${paginationClause}
+      )`;
+
+  return Prisma.sql`
+      WITH asset_query AS (
+        -- SLIM cheap phase: id + sort keys, one row per matching asset, no
+        -- GROUP BY. Cost is O(N) rows of LIGHT columns, not the heavy
+        -- projection — that runs once per page row in the lateral below.
+        SELECT
+          a.id AS "assetId"${directSortKeySelects}${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
+        ${baseJoins}
+        ${custodyJoins}
+        ${whereClause}
       ),
+      -- Freeze the sort into a stable integer rank and slice the page (the
+      -- default path pages first, then ranks — see sortedAssetQuery above).
+      ${sortedAssetQuery},
       count_query AS (
         -- Full filtered total (pagination-independent) over the slim CTE.
         SELECT COUNT(*)::integer AS total_count

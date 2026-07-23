@@ -5,6 +5,17 @@
  * booking (kits + individual assets) along with qty-progress indicators
  * for partial check-ins.
  *
+ * Data source is dual-mode:
+ * - **Eager** — callers whose loader ships `booking.bookingAssets`
+ *   inline (the child bookings pages: `assets.$assetId.bookings`,
+ *   `me.bookings`, ...) render it directly, exactly as before.
+ * - **Lazy** — the bookings INDEX ships only `_count.bookingAssets`
+ *   (perf: the pivots were ~99% dead payload for users who never
+ *   expand a row). On open, the sheet fetches the full payload — same
+ *   `BOOKINGS_LIST_ASSETS_INCLUDE` shape — plus the qty-progress maps
+ *   from `/api/bookings/:bookingId/assets-sidebar` via a fetcher
+ *   (mirrors the on-open fetch in `booking-overview-pdf.tsx`).
+ *
  * Renders an "Unassigned model reservations" section (Book-by-Model)
  * above the asset list whenever the booking has outstanding
  * `BookingModelRequest` rows (quantity > 0). The `booking.modelRequests`
@@ -12,14 +23,15 @@
  * Prisma shape (see `_layout+/bookings._index.tsx`) keep working — the
  * section just renders nothing when the field is absent.
  *
- * @see {@link file://./../../modules/booking/constants.ts} BOOKING_WITH_ASSETS_INCLUDE
+ * @see {@link file://./../../modules/booking/constants.ts} BOOKINGS_LIST_ASSETS_INCLUDE
+ * @see {@link file://./../../routes/api+/bookings.$bookingId.assets-sidebar.ts}
  * @see {@link file://./../../modules/booking-model-request/service.server.ts}
  */
 import React, { useState } from "react";
 import type { ReactNode } from "react";
-import type { BookingStatus, Prisma } from "@prisma/client";
+import type { BookingStatus, ConsumptionType, Prisma } from "@prisma/client";
 import { ChevronDownIcon, PackageIcon } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   Sheet,
@@ -28,6 +40,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/shared/sheet";
+import { Spinner } from "~/components/shared/spinner";
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +50,7 @@ import {
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import type { loader as assetsSidebarLoader } from "~/routes/api+/bookings.$bookingId.assets-sidebar";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
 import { InsufficientStockBadge } from "./availability-label";
@@ -62,7 +76,6 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             id: true;
             title: true;
             type: true;
-            consumptionType: true;
             availableToBook: true;
             custody: true;
             status: true;
@@ -116,6 +129,14 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 }>;
 
 /**
+ * The `bookingAssets` rows this sidebar renders — the structural
+ * counterpart of `BOOKINGS_LIST_ASSETS_INCLUDE`. Exported so the
+ * bookings index route can type its (optional, child-pages-only) eager
+ * payload without re-declaring the field list.
+ */
+export type SidebarBookingAssets = BookingWithAssets["bookingAssets"];
+
+/**
  * Shape of a single `BookingModelRequest` row as consumed by this
  * sidebar. Matches the `BOOKING_WITH_ASSETS_INCLUDE` model-requests
  * selector but is declared structurally so callers that load bookings
@@ -148,52 +169,25 @@ export type DispositionBreakdown = {
 
 interface BookingAssetsSidebarProps {
   /**
-   * Booking object to render. Typed as `BookingWithAssets` plus an
-   * optional `modelRequests` array so callers using the narrower inline
-   * include (`bookings._index.tsx`) can pass their object without a
-   * widening cast. When `modelRequests` is missing or empty, the
-   * "Unassigned model reservations" section is not rendered.
+   * Booking object to render.
+   *
+   * `bookingAssets` is optional: the child bookings pages still ship it
+   * eagerly and are rendered as-is, while the bookings INDEX omits it
+   * (shipping `_count.bookingAssets` for the trigger label instead) and
+   * the sheet fetches the full payload — plus the qty-progress maps —
+   * from `/api/bookings/:bookingId/assets-sidebar` on open.
+   *
+   * `modelRequests` stays optional so callers using a narrower inline
+   * include can pass their object without a widening cast. When it is
+   * missing or empty, the "Unassigned model reservations" section is
+   * not rendered.
    */
-  booking: BookingWithAssets & {
+  booking: Pick<BookingWithAssets, "id" | "name" | "status"> & {
+    bookingAssets?: SidebarBookingAssets;
+    _count?: { bookingAssets: number } | null;
     modelRequests?: SidebarModelRequest[] | null;
   };
   trigger?: ReactNode;
-  /**
-   * Optional map of `assetId → dispositionedQuantity` for this booking,
-   * i.e. sum of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows.
-   * When provided, the sidebar renders the qty column as `N / M`
-   * progress with an explanatory tooltip and swaps the status badge
-   * to "Partially checked in" for qty-tracked assets that have some
-   * units dispositioned but a non-zero remaining. When undefined, the
-   * sidebar falls back to the plain `× N` booked-quantity display —
-   * which keeps older call sites working without changes.
-   */
-  dispositionedByAsset?: Record<string, number>;
-  /**
-   * Optional map of `assetId → per-category split`. Lets the tooltip
-   * show Returned / Consumed / Lost / Damaged separately instead of
-   * conflating them into a single "Checked in" total — lost and
-   * damaged units shouldn't read the same as units back in the pool.
-   * When undefined, the tooltip falls back to the single-total layout.
-   */
-  dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
-  /**
-   * Optional map of `assetId → checkedOutQuantity` for this booking
-   * (sum of progressive PartialBookingCheckout slices across every row
-   * of that asset). Drives the new
-   * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "partially
-   * checked out, no returns yet") badge: an asset with
-   * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an active
-   * booking gets the amber badge, mirroring the per-row treatment on
-   * the booking overview. Aggregated at the asset level (not per-row)
-   * because the sidebar renders one row per asset.
-   *
-   * Multi-slice tie-break: if a multi-slice asset has one slice partly
-   * IN (any disposition) and another slice still fully OUT, the
-   * check-IN signal wins at this aggregate level — consistent with the
-   * existing `PARTIALLY_CHECKED_OUT_QTY` precedence in this component.
-   */
-  checkedOutByAsset?: Record<string, number>;
   /**
    * Optional map of `assetId → units available across the workspace pool`
    * (after subtracting operator custody + other-booking reservations +
@@ -215,7 +209,16 @@ interface BookingAssetsSidebarProps {
  * AssetKit pivot. An asset has at most one kit (enforced by
  * `@@unique([assetId])` on AssetKit), so `kit`/`kitId` are scalars.
  */
-type SidebarAssetBase = BookingWithAssets["bookingAssets"][number]["asset"];
+type SidebarAssetBase = BookingWithAssets["bookingAssets"][number]["asset"] & {
+  /**
+   * Not selected by either sidebar data path today (`getBookings`'
+   * `BOOKINGS_LIST_ASSETS_INCLUDE` and the assets-sidebar resource
+   * route both omit it), so the `ConsumptionTypeBadge` slot renders
+   * nothing. Kept optional so a caller whose payload does carry it
+   * keeps compiling — and rendering the badge.
+   */
+  consumptionType?: ConsumptionType | null;
+};
 type SidebarAsset = SidebarAssetBase & {
   bookedQuantity: number;
   kit: NonNullable<SidebarAssetBase["assetKits"][number]["kit"]> | null;
@@ -658,15 +661,54 @@ function UnassignedModelRequestsSection({
 export function BookingAssetsSidebar({
   booking,
   trigger,
-  dispositionedByAsset,
-  dispositionBreakdownByAsset,
-  checkedOutByAsset,
   availableUnitsByAsset,
 }: BookingAssetsSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
 
-  const paginatedItems = groupAssets(booking.bookingAssets);
+  /**
+   * Lazy data path (bookings index): the loader ships no pivots, so the
+   * sheet fetches the full payload + qty-progress maps on open. Eager
+   * callers (child bookings pages) never trigger the fetch — their
+   * inline `booking.bookingAssets` wins below and the maps stay
+   * undefined, exactly as before this component went dual-mode.
+   */
+  const fetcher = useFetcher<typeof assetsSidebarLoader>();
+  const fetchedData =
+    fetcher.data && !fetcher.data.error ? fetcher.data : undefined;
+  const bookingAssets = booking.bookingAssets ?? fetchedData?.bookingAssets;
+  const dispositionedByAsset = fetchedData?.dispositionedByAsset;
+  const dispositionBreakdownByAsset = fetchedData?.dispositionBreakdownByAsset;
+  const checkedOutByAsset = fetchedData?.checkedOutByAsset;
+  /**
+   * A settled error payload must surface instead of the spinner: the
+   * fetch is only retried on user action, so without this branch a
+   * failed load (booking deleted/permission lost after page load)
+   * would spin forever.
+   */
+  const fetchError =
+    !booking.bookingAssets && fetcher.state === "idle" && fetcher.data?.error
+      ? fetcher.data.error
+      : undefined;
+  /** Only the lazy path ever shows the spinner — eager data is instant. */
+  const isLoadingAssets = !bookingAssets && !fetchError;
+
+  const loadSidebarAssets = () => {
+    // Eager callers already ship the payload; and don't stack a second
+    // request while one is in flight. Re-fetches on each re-open so the
+    // drawer reflects check-in/out activity since the last open —
+    // `fetcher.data` persists meanwhile, so reopening renders the
+    // previous payload (no spinner flash) until the fresh one lands.
+    if (booking.bookingAssets || fetcher.state !== "idle") return;
+    void fetcher.load(`/api/bookings/${booking.id}/assets-sidebar`);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (open) loadSidebarAssets();
+  };
+
+  const paginatedItems = groupAssets(bookingAssets ?? []);
 
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev) => ({
@@ -682,21 +724,29 @@ export function BookingAssetsSidebar({
   const outstandingModelRequestCount = (booking.modelRequests ?? []).filter(
     (req) => req.fulfilledAt === null
   ).length;
-  const hasItems =
-    booking.bookingAssets.length > 0 || outstandingModelRequestCount > 0;
+  /**
+   * Eager rows are canonical. On the lazy path the loader's
+   * `_count.bookingAssets` wins over a previously fetched payload:
+   * the count revalidates with every navigation while `fetcher.data`
+   * can be stale from an earlier open.
+   */
+  const assetCount = booking.bookingAssets
+    ? booking.bookingAssets.length
+    : booking._count?.bookingAssets ?? fetchedData?.bookingAssets.length ?? 0;
+  const hasItems = assetCount > 0 || outstandingModelRequestCount > 0;
   const defaultTrigger = (
     <Button
       type="button"
       variant="link-gray"
-      onClick={hasItems ? () => setIsOpen(true) : undefined}
+      onClick={hasItems ? () => handleOpenChange(true) : undefined}
       className={!hasItems ? "hover:text-gray cursor-default no-underline" : ""}
     >
-      {booking.bookingAssets.length} assets
+      {assetCount} assets
     </Button>
   );
 
   return (
-    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+    <Sheet open={isOpen} onOpenChange={handleOpenChange}>
       {trigger || defaultTrigger}
 
       <SheetContent className="w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]">
@@ -706,8 +756,7 @@ export function BookingAssetsSidebar({
               Assets in "{booking.name}"
             </SheetTitle>
             <SheetDescription className="text-left">
-              {booking.bookingAssets.length}{" "}
-              {booking.bookingAssets.length === 1 ? "asset" : "assets"} in this
+              {assetCount} {assetCount === 1 ? "asset" : "assets"} in this
               booking
             </SheetDescription>
           </SheetHeader>
@@ -720,213 +769,247 @@ export function BookingAssetsSidebar({
                 modelRequests={booking.modelRequests}
               />
             ) : null}
-            <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
-              <h5 className="text-left capitalize">Assets & kits</h5>
-              <p>
-                <span>{paginatedItems.length} items</span>
-              </p>
-            </div>
+            {fetchError ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+                <p className="text-sm text-gray-600">
+                  Failed to load the booking's assets.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    void fetcher.load(
+                      `/api/bookings/${booking.id}/assets-sidebar`
+                    )
+                  }
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : isLoadingAssets ? (
+              /* Lazy path only: the payload is being fetched on open.
+                 Mirrors the centered-spinner treatment of the on-open
+                 fetch in `booking-overview-pdf.tsx`. */
+              <div className="flex flex-1 items-center justify-center">
+                <Spinner />
+              </div>
+            ) : (
+              <>
+                <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
+                  <h5 className="text-left capitalize">Assets & kits</h5>
+                  <p>
+                    <span>{paginatedItems.length} items</span>
+                  </p>
+                </div>
 
-            <div className="flex-1 overflow-auto border border-b-0 border-gray-200 bg-white md:mx-0">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-200 text-left ">
-                    <th className="px-6 py-3 font-normal text-gray-600">
-                      Name
-                    </th>
-                    <th className="px-6 py-3"> </th>
-                    <th className="px-6 py-3 font-normal text-gray-600">
-                      Category
-                    </th>
-                    <th className="px-6 py-3"> </th>
-                  </tr>
-                </thead>
-                <tbody className="">
-                  {paginatedItems.map((item) => {
-                    if (item.type === "kit") {
-                      const kit = item.kit;
-                      const isExpanded = expandedKits[item.id] ?? false;
+                <div className="flex-1 overflow-auto border border-b-0 border-gray-200 bg-white md:mx-0">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left ">
+                        <th className="px-6 py-3 font-normal text-gray-600">
+                          Name
+                        </th>
+                        <th className="px-6 py-3"> </th>
+                        <th className="px-6 py-3 font-normal text-gray-600">
+                          Category
+                        </th>
+                        <th className="px-6 py-3"> </th>
+                      </tr>
+                    </thead>
+                    <tbody className="">
+                      {paginatedItems.map((item) => {
+                        if (item.type === "kit") {
+                          const kit = item.kit;
+                          const isExpanded = expandedKits[item.id] ?? false;
 
-                      if (!kit) {
-                        return null;
-                      }
+                          if (!kit) {
+                            return null;
+                          }
 
-                      return (
-                        <React.Fragment key={`kit-${item.id}`}>
-                          {/* Kit Row */}
-                          <tr className="relative border-b border-gray-200 bg-gray-50">
-                            <td className="w-full whitespace-normal p-0 md:p-0">
-                              <div className="flex items-center gap-3 px-6 py-4 md:justify-normal md:pr-6">
-                                <KitImage
-                                  kit={{
-                                    image: kit.image,
-                                    imageExpiration: kit.imageExpiration,
-                                    alt: kit.name,
-                                    kitId: kit.id,
-                                  }}
-                                  className="size-12 rounded-[4px] border object-cover"
-                                />
-                                <div>
-                                  <Button
-                                    to={`/kits/${kit.id}`}
-                                    variant="link"
-                                    className="text-gray-900 hover:text-gray-700"
-                                    target="_blank"
-                                    onlyNewTabIconOnHover={true}
-                                    aria-label="Go to kit"
-                                  >
-                                    <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
-                                      {kit.name}
+                          return (
+                            <React.Fragment key={`kit-${item.id}`}>
+                              {/* Kit Row */}
+                              <tr className="relative border-b border-gray-200 bg-gray-50">
+                                <td className="w-full whitespace-normal p-0 md:p-0">
+                                  <div className="flex items-center gap-3 px-6 py-4 md:justify-normal md:pr-6">
+                                    <KitImage
+                                      kit={{
+                                        image: kit.image,
+                                        imageExpiration: kit.imageExpiration,
+                                        alt: kit.name,
+                                        kitId: kit.id,
+                                      }}
+                                      className="size-12 rounded-[4px] border object-cover"
+                                    />
+                                    <div>
+                                      <Button
+                                        to={`/kits/${kit.id}`}
+                                        variant="link"
+                                        className="text-gray-900 hover:text-gray-700"
+                                        target="_blank"
+                                        onlyNewTabIconOnHover={true}
+                                        aria-label="Go to kit"
+                                      >
+                                        <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
+                                          {kit.name}
+                                        </div>
+                                      </Button>
+                                      <p className="text-sm text-gray-600">
+                                        {item.assets.length} assets
+                                      </p>
                                     </div>
-                                  </Button>
-                                  <p className="text-sm text-gray-600">
-                                    {item.assets.length} assets
-                                  </p>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4"> </td>
+                                <td className="px-6 py-4">
+                                  <CategoryBadge
+                                    category={kit.category}
+                                    className="whitespace-nowrap"
+                                  />
+                                </td>
+                                <td className="px-6 py-4 pr-4 text-right align-middle">
+                                  <div className="flex items-center justify-end gap-5">
+                                    <Button
+                                      type="button"
+                                      onClick={() => toggleKitExpansion(kit.id)}
+                                      variant="link"
+                                      className="text-center font-bold text-gray-600 hover:text-gray-900"
+                                      aria-label="Toggle kit expand"
+                                    >
+                                      <ChevronDownIcon
+                                        className={tw(
+                                          `size-6 ${
+                                            !isExpanded ? "rotate-180" : ""
+                                          }`
+                                        )}
+                                      />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+
+                              {/* Kit Assets (when expanded) */}
+                              {isExpanded &&
+                                item.assets.map((asset) => (
+                                  <tr
+                                    key={`kit-asset-${asset.id}`}
+                                    className="relative border-b border-gray-200"
+                                  >
+                                    <td className="w-full whitespace-normal p-0 md:p-0">
+                                      <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
+                                      <div className="flex justify-between gap-3 bg-gray-50/50 px-6 py-4 md:justify-normal md:pr-6">
+                                        <div className="flex items-center gap-3">
+                                          <div className="relative flex size-12 shrink-0 items-center justify-center">
+                                            <AssetImage
+                                              asset={{
+                                                id: asset.id,
+                                                mainImage: asset.mainImage,
+                                                thumbnailImage:
+                                                  asset.thumbnailImage,
+                                                mainImageExpiration:
+                                                  asset.mainImageExpiration,
+                                              }}
+                                              alt={`Image of ${asset.title}`}
+                                              className="size-full rounded-[4px] border border-gray-300 object-cover"
+                                              withPreview
+                                            />
+                                          </div>
+                                          <AssetTitleAndStatus
+                                            asset={asset}
+                                            bookingStatus={booking.status}
+                                            dispositionedByAsset={
+                                              dispositionedByAsset
+                                            }
+                                            dispositionBreakdownByAsset={
+                                              dispositionBreakdownByAsset
+                                            }
+                                            checkedOutByAsset={
+                                              checkedOutByAsset
+                                            }
+                                            availableUnitsByAsset={
+                                              availableUnitsByAsset
+                                            }
+                                          />
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="bg-gray-50/50 px-6 py-4">
+                                      {" "}
+                                    </td>
+                                    <td className="bg-gray-50/50 px-6 py-4">
+                                      <CategoryBadge
+                                        category={asset.category}
+                                        className="whitespace-nowrap"
+                                      />
+                                    </td>
+                                    <td className="bg-gray-50/50 px-6 py-4 pr-4 text-right">
+                                      {" "}
+                                    </td>
+                                  </tr>
+                                ))}
+
+                              <tr className="kit-separator h-1 bg-gray-100">
+                                <td colSpan={4} className="h-1 p-0"></td>
+                              </tr>
+                            </React.Fragment>
+                          );
+                        }
+
+                        // Individual asset
+                        const asset = item.assets[0];
+                        return (
+                          <tr
+                            key={`asset-${asset.id}`}
+                            className="border-b border-gray-200"
+                          >
+                            <td className="w-full whitespace-normal p-0 md:p-0">
+                              <div className="flex justify-between gap-3 px-6 py-4 md:justify-normal md:pr-6">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative flex size-12 shrink-0 items-center justify-center">
+                                    <AssetImage
+                                      asset={{
+                                        id: asset.id,
+                                        mainImage: asset.mainImage,
+                                        thumbnailImage: asset.thumbnailImage,
+                                        mainImageExpiration:
+                                          asset.mainImageExpiration,
+                                      }}
+                                      alt={`Image of ${asset.title}`}
+                                      className="size-full rounded-[4px] border object-cover"
+                                      withPreview
+                                    />
+                                  </div>
+                                  <AssetTitleAndStatus
+                                    asset={asset}
+                                    bookingStatus={booking.status}
+                                    dispositionedByAsset={dispositionedByAsset}
+                                    dispositionBreakdownByAsset={
+                                      dispositionBreakdownByAsset
+                                    }
+                                    checkedOutByAsset={checkedOutByAsset}
+                                    availableUnitsByAsset={
+                                      availableUnitsByAsset
+                                    }
+                                  />
                                 </div>
                               </div>
                             </td>
                             <td className="px-6 py-4"> </td>
                             <td className="px-6 py-4">
                               <CategoryBadge
-                                category={kit.category}
+                                category={asset.category}
                                 className="whitespace-nowrap"
                               />
                             </td>
-                            <td className="px-6 py-4 pr-4 text-right align-middle">
-                              <div className="flex items-center justify-end gap-5">
-                                <Button
-                                  type="button"
-                                  onClick={() => toggleKitExpansion(kit.id)}
-                                  variant="link"
-                                  className="text-center font-bold text-gray-600 hover:text-gray-900"
-                                  aria-label="Toggle kit expand"
-                                >
-                                  <ChevronDownIcon
-                                    className={tw(
-                                      `size-6 ${
-                                        !isExpanded ? "rotate-180" : ""
-                                      }`
-                                    )}
-                                  />
-                                </Button>
-                              </div>
-                            </td>
+                            <td className="px-6 py-4 pr-4 text-right"> </td>
                           </tr>
-
-                          {/* Kit Assets (when expanded) */}
-                          {isExpanded &&
-                            item.assets.map((asset) => (
-                              <tr
-                                key={`kit-asset-${asset.id}`}
-                                className="relative border-b border-gray-200"
-                              >
-                                <td className="w-full whitespace-normal p-0 md:p-0">
-                                  <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
-                                  <div className="flex justify-between gap-3 bg-gray-50/50 px-6 py-4 md:justify-normal md:pr-6">
-                                    <div className="flex items-center gap-3">
-                                      <div className="relative flex size-12 shrink-0 items-center justify-center">
-                                        <AssetImage
-                                          asset={{
-                                            id: asset.id,
-                                            mainImage: asset.mainImage,
-                                            thumbnailImage:
-                                              asset.thumbnailImage,
-                                            mainImageExpiration:
-                                              asset.mainImageExpiration,
-                                          }}
-                                          alt={`Image of ${asset.title}`}
-                                          className="size-full rounded-[4px] border border-gray-300 object-cover"
-                                          withPreview
-                                        />
-                                      </div>
-                                      <AssetTitleAndStatus
-                                        asset={asset}
-                                        bookingStatus={booking.status}
-                                        dispositionedByAsset={
-                                          dispositionedByAsset
-                                        }
-                                        dispositionBreakdownByAsset={
-                                          dispositionBreakdownByAsset
-                                        }
-                                        checkedOutByAsset={checkedOutByAsset}
-                                        availableUnitsByAsset={
-                                          availableUnitsByAsset
-                                        }
-                                      />
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="bg-gray-50/50 px-6 py-4"> </td>
-                                <td className="bg-gray-50/50 px-6 py-4">
-                                  <CategoryBadge
-                                    category={asset.category}
-                                    className="whitespace-nowrap"
-                                  />
-                                </td>
-                                <td className="bg-gray-50/50 px-6 py-4 pr-4 text-right">
-                                  {" "}
-                                </td>
-                              </tr>
-                            ))}
-
-                          <tr className="kit-separator h-1 bg-gray-100">
-                            <td colSpan={4} className="h-1 p-0"></td>
-                          </tr>
-                        </React.Fragment>
-                      );
-                    }
-
-                    // Individual asset
-                    const asset = item.assets[0];
-                    return (
-                      <tr
-                        key={`asset-${asset.id}`}
-                        className="border-b border-gray-200"
-                      >
-                        <td className="w-full whitespace-normal p-0 md:p-0">
-                          <div className="flex justify-between gap-3 px-6 py-4 md:justify-normal md:pr-6">
-                            <div className="flex items-center gap-3">
-                              <div className="relative flex size-12 shrink-0 items-center justify-center">
-                                <AssetImage
-                                  asset={{
-                                    id: asset.id,
-                                    mainImage: asset.mainImage,
-                                    thumbnailImage: asset.thumbnailImage,
-                                    mainImageExpiration:
-                                      asset.mainImageExpiration,
-                                  }}
-                                  alt={`Image of ${asset.title}`}
-                                  className="size-full rounded-[4px] border object-cover"
-                                  withPreview
-                                />
-                              </div>
-                              <AssetTitleAndStatus
-                                asset={asset}
-                                bookingStatus={booking.status}
-                                dispositionedByAsset={dispositionedByAsset}
-                                dispositionBreakdownByAsset={
-                                  dispositionBreakdownByAsset
-                                }
-                                checkedOutByAsset={checkedOutByAsset}
-                                availableUnitsByAsset={availableUnitsByAsset}
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4"> </td>
-                        <td className="px-6 py-4">
-                          <CategoryBadge
-                            category={asset.category}
-                            className="whitespace-nowrap"
-                          />
-                        </td>
-                        <td className="px-6 py-4 pr-4 text-right"> </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </SheetContent>

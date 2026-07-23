@@ -92,6 +92,7 @@ import {
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
+  BOOKINGS_LIST_ASSETS_INCLUDE,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
 import type {
@@ -8834,6 +8835,19 @@ export async function getBookings(params: {
    * `false`, so paginated callers are unaffected.
    */
   skipCount?: boolean;
+  /**
+   * Include the `bookingAssets` payload — by far the heaviest part of the
+   * query. Callers that render no asset data (the calendar/home widgets)
+   * pass `false`, which omits the key from the Prisma include entirely.
+   * Defaults to `true`, so existing callers are unaffected.
+   */
+  includeAssets?: boolean;
+  /**
+   * Hard cap on rows fetched, bypassing the `perPage` ≤ 100 clamp. For
+   * callers that fetch one bounded window in a single query (the calendar).
+   * Unlike `takeAll` the query stays bounded. Ignored when `takeAll` is set.
+   */
+  takeCap?: number;
 }) {
   const {
     organizationId,
@@ -8855,6 +8869,8 @@ export async function getBookings(params: {
     kitId,
     tags,
     skipCount = false,
+    includeAssets = true,
+    takeCap,
   } = params;
 
   try {
@@ -9027,86 +9043,21 @@ export async function getBookings(params: {
       db.booking.findMany({
         ...(!takeAll && {
           skip,
-          take,
+          take: takeCap ?? take,
         }),
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          bookingAssets: {
-            // Explicit `select` (instead of `include`) so the inferred
-            // type surfaces `assetKitId` on each row — the bookings list
-            // sidebar (`BookingAssetsSidebar`) groups by it. Without an
-            // explicit select, Prisma's type inference for
-            // `include + nested include` doesn't expose the parent
-            // scalars in a form the local component types accept.
-            select: {
-              id: true,
-              quantity: true,
-              assetKitId: true,
-              asset: {
-                select: {
-                  title: true,
-                  id: true,
-                  type: true,
-                  quantity: true,
-                  custody: true,
-                  availableToBook: true,
-                  status: true,
-                  mainImage: true,
-                  thumbnailImage: true,
-                  mainImageExpiration: true,
-                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
-                  // Surfaced by the BookingAssetsSidebar so the chip matches the
-                  // simple-mode booking overview list and every other code-bearing
-                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
-                  sequentialId: true,
-                  preferredBarcodeId: true,
-                  qrCodes: { take: 1, select: { id: true } },
-                  barcodes: { select: { id: true, type: true, value: true } },
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  // NOTE: deliberately NO `bookingAssets` here. A previous
-                  // version selected each asset's entire lifetime
-                  // `bookingAssets: { bookingId }` pivot history, which grows
-                  // without bound and had zero consumers (every reader of
-                  // `asset.bookingAssets` needs `ba.booking.{id,status}` from
-                  // asset-centric queries, which this shape cannot provide).
-                  // If a surface ever needs conflict info here, scope it with
-                  // a `where` on active statuses + date overlap like
-                  // getBookingFlags does.
-                  assetKits: {
-                    select: {
-                      // See the comment in `bookings.$bookingId.overview.tsx`
-                      // for why both `id` (the AssetKit row id) and `kitId`
-                      // are needed for kit-source grouping.
-                      id: true,
-                      kitId: true,
-                      kit: {
-                        select: {
-                          id: true,
-                          name: true,
-                          image: true,
-                          imageExpiration: true,
-                          category: {
-                            select: {
-                              id: true,
-                              name: true,
-                              color: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          // NOTE: deliberately NO `bookingAssets` when `includeAssets` is
+          // false — the calendar/home render no asset data. The cast keeps
+          // the inferred row type stable for default-true callers; opt-out
+          // callers must not read `bookingAssets` (same runtime/static
+          // divergence as `extraInclude`, see getBookingsForICalFeed).
+          // The include itself lives in `./constants` so the
+          // assets-sidebar resource route serves the exact same shape.
+          ...((includeAssets
+            ? BOOKINGS_LIST_ASSETS_INCLUDE
+            : {}) as typeof BOOKINGS_LIST_ASSETS_INCLUDE),
           creator: {
             select: {
               id: true,
@@ -10022,7 +9973,6 @@ export async function getBookingsForCalendar(params: {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
-      perPage: 1000,
       search,
       userId,
       ...(status && {
@@ -10034,9 +9984,25 @@ export async function getBookingsForCalendar(params: {
       custodianTeamMemberIds: teamMemberIds,
       ...selfServiceData,
       tags,
+      // The events mapped below carry no asset data, so skip the heavy
+      // `bookingAssets` include entirely.
+      includeAssets: false,
+      // Only `bookings` is read here; skip the COUNT companion query.
+      skipCount: true,
       extraInclude: {
-        custodianTeamMember: true,
-        custodianUser: true,
+        // Slim selects: the events mapping below reads only the
+        // display-name fields + profile picture off the custodian/creator
+        // users, and `name` off the team member.
+        custodianTeamMember: { select: { id: true, name: true } },
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
         creator: {
           select: {
             id: true,
@@ -10048,8 +10014,23 @@ export async function getBookingsForCalendar(params: {
         },
         tags: TAG_WITH_COLOR_SELECT,
       },
-      takeAll: true,
+      // Hard cap instead of `takeAll`: the window is a calendar view (~a
+      // month), so the fetch stays bounded even for runaway workspaces.
+      // Default `from asc` + `id asc` ordering keeps the capped set
+      // deterministic.
+      takeCap: 1000,
     });
+
+    if (bookings.length >= 1000) {
+      // At the cap the latest-starting bookings in the window are
+      // silently dropped from the calendar — surface it so the cap can
+      // be revisited if a real workspace ever hits it.
+      Logger.warn({
+        message: "Calendar booking fetch hit the 1000-row cap",
+        additionalData: { organizationId, startDate, endDate },
+        label: "Booking",
+      });
+    }
 
     const events = bookings
       .filter((booking) => booking.from && booking.to)
