@@ -203,10 +203,12 @@ async function findScimResourceOrThrow(organizationId: string, scimId: string) {
  * previously deactivated user (`active: true`). Roles are otherwise reconciled
  * from the IdP's group mappings on the user's next SSO login.
  *
- * The team member is reused when one is already linked (see
- * {@link revokeScimMembership}, which keeps the link across a soft deactivate).
- * Creating a second one would duplicate the person in the org's team list and
- * strand their custody/booking history on the old row.
+ * If a linked team member already exists it is reused (an idempotency guard
+ * against duplicating the person in the org's team list). Note this does NOT
+ * cover reactivation after a SCIM deactivation: deactivation disconnects the
+ * team member (see {@link revokeScimMembership}), so no linked row remains to
+ * reuse and a fresh one is created — the accepted trade tracked for the SCIM
+ * lifecycle-state work.
  */
 async function grantScimMembership(
   userId: string,
@@ -659,8 +661,8 @@ export async function replaceScimUser(
     [firstName, lastName].filter(Boolean).join(" ") || effectiveEmail;
 
   // Reconcile membership with the desired active state (state, not deletion):
-  // deactivate → drop membership, keeping the mapping AND the team member link;
-  // reactivate → re-grant.
+  // deactivate → revoke access (keeps the mapping so the resource stays
+  // resolvable and reactivatable); reactivate → re-grant.
   const isCurrentlyActive = user.userOrganizations.length > 0;
   const shouldBeActive = input.active !== false;
 
@@ -778,8 +780,8 @@ export async function patchScimUser(
     effectiveEmail;
 
   // Reconcile membership with the desired active state (state, not deletion):
-  // deactivate → drop membership, keeping the mapping AND the team member link;
-  // reactivate → re-grant.
+  // deactivate → revoke access (keeps the mapping so the resource stays
+  // resolvable and reactivatable); reactivate → re-grant.
   const isCurrentlyActive = user.userOrganizations.length > 0;
   if (activeIntent === false && isCurrentlyActive) {
     await revokeScimMembership(user.id, organizationId);
@@ -812,14 +814,13 @@ export async function deactivateScimUser(
   organizationId: string,
   scimId: string
 ): Promise<void> {
-  // Unlike PATCH `active: false` (soft — keeps the mapping and the team member
-  // link so the resource can be reactivated), DELETE is a full per-org
-  // deprovision: revoke access AND remove the SCIM mapping so the id no longer
-  // resolves (later GET → 404).
+  // Access removal here is identical to PATCH `active: false` — both revoke
+  // membership and disconnect the team member. The ONE difference is the
+  // mapping: `active: false` keeps it (so the resource still resolves as
+  // inactive and can be reactivated), whereas DELETE removes it below, so the
+  // id stops resolving (later GET → 404) — a full per-org deprovision.
   const user = await findScimResourceOrThrow(organizationId, scimId);
 
-  // Access removal is identical to `active: false` — what makes DELETE a full
-  // deprovision is dropping the mapping below, so the id stops resolving.
   if (user.userOrganizations.length > 0) {
     await revokeScimMembership(user.id, organizationId);
   }
