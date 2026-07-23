@@ -29,8 +29,10 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
+import { getClientHint } from "~/utils/client-hints";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -4926,13 +4928,21 @@ export async function bulkRemoveAssetsFromKits({
       lastName: user?.lastName,
     });
 
-    // Resolve IDs (works for both simple and advanced mode)
+    // Resolve IDs (works for both simple and advanced mode).
+    // Acting user's timezone: when "select all" is active the affected set is
+    // resolved from the current date filters, which must truncate the day in
+    // the user's tz (avoids an off-by-one for non-UTC users).
     const searchParams = getCurrentSearchParams(request);
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const resolvedIds = await resolveAssetIdsForBulkOperation({
       assetIds,
       organizationId,
       currentSearchParams: searchParams.toString(),
       settings,
+      timeZone,
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through

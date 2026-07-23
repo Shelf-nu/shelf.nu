@@ -160,11 +160,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         role,
       });
 
+      // Acting user's timezone: the select-all set is resolved from the current
+      // date filters, which must truncate the day in the user's tz (avoids an
+      // off-by-one for non-UTC users).
+      const { timeZone } = await resolveUserFormatPrefsById(userId, hints);
+
       assetIds = await resolveAssetIdsForBulkOperation({
         assetIds: directAssetIds,
         organizationId,
         currentSearchParams,
         settings,
+        timeZone,
       });
     } else {
       // Resolve asset IDs from either direct input or context

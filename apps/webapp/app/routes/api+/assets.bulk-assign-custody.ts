@@ -4,6 +4,8 @@ import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   isLikeShelfError,
@@ -81,6 +83,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * `bulkCheckOutAssets` itself (centralised so web + mobile share
      * one source of truth). We just pass `role` through.
      */
+    // Acting user's timezone: when "select all" is active the affected set is
+    // resolved from the current date filters, which must truncate the day in
+    // the user's tz (avoids an off-by-one for non-UTC users).
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
       role,
@@ -90,6 +100,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     const skippedNote =
