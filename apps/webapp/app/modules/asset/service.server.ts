@@ -95,6 +95,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -3516,6 +3517,16 @@ export async function replaceAssetPlacements({
 
     return { ok: true as const };
   } catch (cause) {
+    // Backstop: the sum-within-total pre-check above (step 5) rejects most
+    // over-submissions with a friendly 400, but a concurrent placement / qty
+    // edit can still trip the DEFERRED `AssetLocation ... exceeds
+    // Asset.quantity` trigger at COMMIT. Translate that race to the same
+    // friendly 400 instead of a generic 500. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { assetId, userId, organizationId },
+    });
+
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
@@ -8265,6 +8276,22 @@ export async function placeUnplacedUnits(
       moveCorrelationId,
     };
   } catch (cause) {
+    // Backstop: the `quantity > unplaced` pre-check above rejects most
+    // over-submissions with a friendly 400, but two concurrent place-units
+    // requests can each pass their own check and still trip the DEFERRED
+    // `AssetLocation ... exceeds Asset.quantity` trigger at COMMIT. Translate
+    // that race to the same friendly 400. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        toLocationId,
+        quantity,
+      },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }

@@ -337,6 +337,102 @@ export function isPrismaTransientError(cause: unknown): boolean {
 }
 
 /**
+ * Substring shared by BOTH quantity over-allocation trigger exceptions.
+ *
+ * Two DB triggers enforce `sum(pivot.quantity) <= Asset.quantity` for
+ * QUANTITY_TRACKED assets and raise (via `RAISE EXCEPTION`) when the invariant
+ * is violated:
+ *
+ *   - `AssetKit total % exceeds Asset.quantity % for asset %`
+ *     ({@link file://./../../../../packages/database/prisma/migrations/20260514100000_drop_asset_kit_unique_add_triggers/migration.sql})
+ *   - `AssetLocation total % exceeds Asset.quantity % for asset %`
+ *     ({@link file://./../../../../packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql})
+ *
+ * Both surface at runtime as a `PrismaClientUnknownRequestError` whose message
+ * contains this substring. It is intentionally NARROW — it appears only in
+ * these two trigger messages, so matching on it never swallows unrelated
+ * `PrismaClientUnknownRequestError`s.
+ */
+export const ASSET_QUANTITY_OVER_ALLOCATION_MARKER = "exceeds Asset.quantity";
+
+/**
+ * Detects the "assigning more of a QUANTITY_TRACKED asset than `Asset.quantity`
+ * allows" DB-trigger violation anywhere in an error's `cause` chain.
+ *
+ * The raw trigger error is a `PrismaClientUnknownRequestError`, but a
+ * service-layer `try/catch` may already have re-wrapped it inside a
+ * `ShelfError` (with the original as `.cause`) by the time we inspect it — so
+ * we walk the chain, mirroring {@link hasTransientCause} / {@link hasNotFoundCause}.
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @returns `true` when the over-allocation trigger message is present in the
+ * error or any nested `cause`; otherwise `false`.
+ */
+export function isAssetQuantityOverAllocationError(cause: unknown): boolean {
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "message" in cause &&
+    typeof (cause as { message: unknown }).message === "string" &&
+    (cause as { message: string }).message.includes(
+      ASSET_QUANTITY_OVER_ALLOCATION_MARKER
+    )
+  ) {
+    return true;
+  }
+  // Walk the cause chain — the trigger error is frequently nested inside a
+  // service-layer ShelfError wrapper.
+  if (typeof cause === "object" && cause !== null && "cause" in cause) {
+    return isAssetQuantityOverAllocationError(
+      (cause as { cause: unknown }).cause
+    );
+  }
+  return false;
+}
+
+/**
+ * Translates the quantity over-allocation DB-trigger violation into a
+ * user-facing `ShelfError` and throws it. No-ops (returns) for every other
+ * error so the caller's existing error wrapping runs unchanged.
+ *
+ * This is a user-input validation failure (the user asked to assign more units
+ * than exist), so the thrown error is a **400** with `shouldBeCaptured: false`:
+ * per repo convention (see {@link isHandledClientError}) these are recorded as
+ * low-severity Sentry LOGS, not paged as Sentry ISSUES.
+ *
+ * Wire this in as the FIRST line of a `catch (cause)` block at any service path
+ * that writes `AssetKit` / `AssetLocation` rows and can trip the triggers.
+ *
+ * @param cause - The caught error to inspect.
+ * @param options.label - The `ShelfError` label for the throwing surface
+ * (e.g. `"Kit"`, `"Location"`, `"Assets"`).
+ * @param options.additionalData - Debugging context (asset/kit/location ids)
+ * preserved on the thrown error.
+ * @throws {ShelfError} A 400, non-captured error when `cause` is the
+ * over-allocation trigger violation.
+ */
+export function throwIfAssetQuantityOverAllocation(
+  cause: unknown,
+  {
+    label,
+    additionalData,
+  }: { label: ErrorLabel; additionalData?: AdditionalData }
+): void {
+  if (!isAssetQuantityOverAllocationError(cause)) {
+    return;
+  }
+  throw new ShelfError({
+    cause,
+    label,
+    message:
+      "You're trying to assign more of this asset than are available. Lower the quantity and try again.",
+    status: 400,
+    shouldBeCaptured: false,
+    additionalData,
+  });
+}
+
+/**
  * Walks the cause chain of an error to detect if a transient
  * Prisma error is buried inside ShelfError wrappers.
  */
