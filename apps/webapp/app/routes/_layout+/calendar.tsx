@@ -211,6 +211,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function Calendar() {
   const { isMd } = useViewportHeight();
   const { prefs } = useDateFormatter();
+  // Drive FullCalendar's clock (12h vs 24h) from the user's time-format pref.
+  const hour12 = prefs.timeFormat === "H12";
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(
     new Date(),
     prefs
@@ -345,8 +347,10 @@ export default function Calendar() {
               initialDate={initialDate}
               expandRows={true}
               height="auto"
-              firstDay={1}
-              timeZone="local"
+              // Week start, display timezone, and 12/24h clock all follow the
+              // acting user's resolved formatting prefs (see useDateFormatter).
+              firstDay={prefs.weekStartsOn}
+              timeZone={prefs.timeZone}
               nowIndicator
               headerToolbar={false}
               events={events}
@@ -363,6 +367,15 @@ export default function Calendar() {
                 hour: "numeric",
                 minute: "2-digit",
                 meridiem: "short",
+                hour12,
+              }}
+              // Slot labels (timeGrid Week/Day axis) also honor the 12/24h pref.
+              slotLabelFormat={{
+                hour: "numeric",
+                minute: "2-digit",
+                omitZeroMinute: true,
+                meridiem: "short",
+                hour12,
               }}
               viewDidMount={(args) => {
                 const calendarContainer = args.el;
