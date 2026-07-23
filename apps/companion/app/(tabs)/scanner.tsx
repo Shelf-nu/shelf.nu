@@ -430,6 +430,28 @@ function ScannerContent() {
     lastScanRef.current = "";
   }, [dismissResultBase, lastScanRef]);
 
+  /**
+   * Drop everything scanned when the scan CONTEXT changes.
+   *
+   * The scanner is a single tab screen reused across every flow, so entering it
+   * from a different booking (or the same booking in a different mode) only
+   * changes the route params — the component is never remounted and the scan
+   * list survives. That let items scanned for booking A show up in booking B's
+   * drawer, and in fulfil mode the carried-over rows sat under a progress
+   * banner they had nothing to do with.
+   *
+   * `handleActionChange` already clears the list, but ONLY for the in-scanner
+   * action picker; navigating in by route param never reaches it. Keyed on the
+   * params rather than on `action` so it fires exactly when the context the
+   * scans were collected for is no longer the context on screen.
+   */
+  useEffect(() => {
+    setScannedItems([]);
+    setBookingCheckinItems([]);
+    setScanResult(null);
+    lastScanRef.current = "";
+  }, [bookingId, bookingAction, setScanResult, lastScanRef]);
+
   // Animation for scan line (shared hook)
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
 
