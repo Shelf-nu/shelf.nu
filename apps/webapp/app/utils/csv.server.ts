@@ -763,9 +763,15 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
 };
 
 /**
- * Formats a custom field value specifically for CSV export
+ * Formats a custom field value to a plain display string.
+ *
+ * Name retained as `formatCustomFieldForCsv` for in-repo grep-stability;
+ * the helper is in fact format-agnostic (returns a bare string, no
+ * CSV-specific quoting). Now consumed by the PDF export as well as CSV —
+ * see `app/routes/_layout+/assets.export.$fileName[.pdf].tsx` for the
+ * PDF call site.
  */
-const formatCustomFieldForCsv = (
+export const formatCustomFieldForCsv = (
   fieldValue: ShelfAssetCustomFieldValueType["value"],
   cfType: CustomFieldType | undefined,
   currentOrganization: Pick<Organization, "id" | "barcodesEnabled" | "currency">
