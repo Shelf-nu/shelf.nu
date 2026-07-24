@@ -306,7 +306,7 @@ export async function syncBookingReminders(
   let fetched: Awaited<ReturnType<typeof api.booking>>["data"] = null;
   let authoritativelyGone = false;
   try {
-    const { data, error, status } = await api.booking(bookingId, orgId);
+    const { data, status } = await api.booking(bookingId, orgId);
     if (data) {
       fetched = data;
     } else if (status === 404 || status === 403) {

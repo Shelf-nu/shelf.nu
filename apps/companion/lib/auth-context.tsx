@@ -40,9 +40,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hadSessionRef = useRef(false);
 
   useEffect(() => {
+    // Listener FIRST, then the initial read: registering after getSession()
+    // leaves a window where a sign-out/refresh event lands before the stale
+    // initial session resolves and overwrites it (and the signed-out
+    // transition — and its reminder cleanup — would be missed). Supabase
+    // also emits INITIAL_SESSION on subscribe, which this ordering catches.
+    let receivedAuthEvent = false;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      receivedAuthEvent = true;
+      if (hadSessionRef.current && session === null) {
+        void clearAllBookingReminders();
+      }
+      hadSessionRef.current = session !== null;
+      setSession(session);
+      setIsLoading(false);
+    });
+
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
+        // An auth event is always fresher than this snapshot — never let a
+        // stale restored session clobber it.
+        if (receivedAuthEvent) return;
         hadSessionRef.current = session !== null;
         setSession(session);
       })
@@ -52,16 +73,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => {
         setIsLoading(false);
       });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (hadSessionRef.current && session === null) {
-        void clearAllBookingReminders();
-      }
-      hadSessionRef.current = session !== null;
-      setSession(session);
-    });
 
     return () => subscription.unsubscribe();
   }, []);
