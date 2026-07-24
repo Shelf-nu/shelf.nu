@@ -76,6 +76,7 @@
       ],
       "expo-font",
       "expo-web-browser",
+      "expo-notifications",
       "expo-quick-actions",
       "./plugins/swift-concurrency-fix",
       "@sentry/react-native"

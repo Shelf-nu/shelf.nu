@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import { cancelBookingReminders, syncBookingReminders } from "@/lib/reminders";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -1642,6 +1643,13 @@ function ScannerContent() {
               return;
             }
 
+            // Booking is now ONGOING — schedule its due-back reminders.
+            // Interactive: this is a direct user action, so the OS
+            // permission prompt may show here (first checkout only).
+            void syncBookingReminders(bookingId, currentOrg.id, {
+              interactive: true,
+            });
+
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
             Alert.alert(
@@ -1753,6 +1761,12 @@ function ScannerContent() {
                   }
                 : prev
             );
+            // Fully returned → the booking left ONGOING; drop its due-back
+            // reminders immediately (no fetch — we know it closed here).
+            // Partial check-ins keep them: gear is still out.
+            if (result?.isComplete) {
+              void cancelBookingReminders(bookingId);
+            }
             const msg = result?.isComplete
               ? `All assets checked in! "${
                   bookingName || "Booking"

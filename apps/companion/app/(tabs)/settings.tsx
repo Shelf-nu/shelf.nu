@@ -4,6 +4,7 @@ import {
   Text,
   TouchableOpacity,
   Alert,
+  Linking,
   ScrollView,
   Switch,
 } from "react-native";
@@ -28,6 +29,7 @@ import {
   setScanSoundEnabled,
   playScanSound,
 } from "@/lib/scan-sound";
+import { loadRemindersPreference, setRemindersEnabled } from "@/lib/reminders";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -52,11 +54,13 @@ export default function SettingsScreen() {
 
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
+  const [remindersOn, setRemindersOn] = useState(true);
 
-  // Load persisted start page and scan sound preference on mount
+  // Load persisted start page, scan sound, and reminders preferences on mount
   useEffect(() => {
     getStartPage().then(setStartPageState);
     loadScanSoundPreference().then(setScanSoundOn);
+    loadRemindersPreference().then(setRemindersOn);
   }, []);
 
   const handleStartPageChange = (page: StartPage) => {
@@ -295,6 +299,60 @@ export default function SettingsScreen() {
               }}
               thumbColor={scanSoundOn ? colors.primary : colors.mutedLight}
               accessibilityLabel="Toggle scan sound"
+              accessibilityRole="switch"
+            />
+          </View>
+        </View>
+      </View>
+
+      {/* Booking reminders toggle */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Reminders</Text>
+        <View style={styles.card}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="notifications-outline"
+                size={20}
+                color={colors.foreground}
+              />
+              <View>
+                <Text style={styles.settingLabel}>Booking reminders</Text>
+                <Text style={styles.settingHint}>
+                  Notify when checked-out gear is due back
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={remindersOn}
+              onValueChange={async (value) => {
+                Haptics.selectionAsync();
+                setRemindersOn(value);
+                // Persists the choice, cancels/reschedules accordingly, and
+                // reports whether the OS-level permission is granted.
+                const granted = await setRemindersEnabled(value);
+                if (value && !granted) {
+                  Alert.alert(
+                    "Notifications are off",
+                    "Shelf can't show reminders until notifications are allowed in your device settings.",
+                    [
+                      { text: "Not now", style: "cancel" },
+                      {
+                        text: "Open Settings",
+                        onPress: () => {
+                          void Linking.openSettings();
+                        },
+                      },
+                    ]
+                  );
+                }
+              }}
+              trackColor={{
+                false: colors.borderLight,
+                true: colors.primary + "60",
+              }}
+              thumbColor={remindersOn ? colors.primary : colors.mutedLight}
+              accessibilityLabel="Toggle booking reminders"
               accessibilityRole="switch"
             />
           </View>

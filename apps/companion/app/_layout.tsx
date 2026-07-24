@@ -11,6 +11,7 @@ import { OfflineBanner } from "@/components/offline-banner";
 import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
+import { useBookingReminders } from "@/lib/reminders";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
 import { initSentry } from "@/lib/sentry";
@@ -56,6 +57,10 @@ function RootLayoutNav() {
 
   // Register 3D Touch / long-press quick actions (home screen shortcuts)
   useQuickActions();
+
+  // Booking due-back reminders: init presentation, reconcile on foreground,
+  // deep-link reminder taps to their booking.
+  useBookingReminders();
 
   // Redirect after splash finishes and auth state is known.
   useEffect(() => {
