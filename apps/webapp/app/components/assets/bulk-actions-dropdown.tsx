@@ -245,7 +245,7 @@ function ConditionalDropdown() {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <Icon icon="download" /> Download QR Codes
+                  <Icon icon="download" /> Export QR labels
                 </span>
               </Button>
             </DropdownMenuItem>
