@@ -953,6 +953,18 @@ export default function AssetOverview() {
               ) : null}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  Has ID Assigned
+                </span>
+                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                  {asset.qrLabelAppliedAt ? (
+                    <DateS date={asset.qrLabelAppliedAt} includeTime />
+                  ) : (
+                    "No"
+                  )}
+                </div>
+              </li>
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
                 </span>
                 <div className="mt-1 w-3/5 text-gray-600 md:mt-0">

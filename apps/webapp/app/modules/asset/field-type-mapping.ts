@@ -48,6 +48,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
     case "quantity":
       return "number";
     case "availableToBook":
+    case "qrLabelApplied":
       return "boolean";
     case "createdAt":
     case "updatedAt":

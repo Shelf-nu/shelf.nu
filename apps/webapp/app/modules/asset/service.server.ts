@@ -1365,6 +1365,8 @@ export async function createAsset({
   const maxAttempts = 3;
 
   while (attempts < maxAttempts) {
+    let qrToLink = false;
+
     try {
       // Generate sequential ID
       const sequentialId = await getNextSequentialId(organizationId);
@@ -1392,12 +1394,15 @@ export async function createAsset({
        */
 
       const qr = qrId ? await getQr({ id: qrId }) : null;
-      const qrCodes =
+      qrToLink = Boolean(
         qr &&
-        (qr.organizationId === organizationId || !qr.organizationId) &&
-        qr.assetId === null &&
-        qr.kitId === null
-          ? { connect: { id: qrId } }
+          (qr.organizationId === organizationId || !qr.organizationId) &&
+          qr.assetId === null &&
+          qr.kitId === null
+      );
+      const qrCodes =
+        qrToLink && qr
+          ? { connect: { id: qr.id } }
           : {
               create: [
                 {
@@ -1418,6 +1423,7 @@ export async function createAsset({
         sequentialId, // Add the generated sequential ID
         user,
         qrCodes,
+        qrLabelAppliedAt: qrToLink ? new Date() : undefined,
         valuation,
         organization,
         availableToBook,
@@ -1580,80 +1586,163 @@ export async function createAsset({
         }
       }
 
-      // Use transaction to ensure asset creation and activity event are atomic
-      const asset = await db.$transaction(async (tx) => {
-        // SECURITY (cross-org IDOR): prove every form-supplied custom-field id
-        // belongs to this org before the nested create connects them. Run inside
-        // the tx so the ownership check shares the write's transaction (no-op
-        // when there are no custom-field ids).
-        await assertCustomFieldsBelongToOrg(
-          { customFieldIds: customFieldIdsToValidate, organizationId },
-          tx
-        );
+      // Existing QRs are revalidated and claimed in the same serializable
+      // transaction as the asset connection. New QR creation has no shared row
+      // to race over, so it keeps the default transaction isolation level.
+      const asset = await db.$transaction(
+        async (tx) => {
+          if (qrToLink && qr) {
+            const currentQr = await tx.qr.findUnique({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: unclaimed QRs have no organization to scope by; this transaction revalidates ownership before claiming and linking the row
+              where: { id: qr.id },
+              select: {
+                id: true,
+                organizationId: true,
+                assetId: true,
+                kitId: true,
+              },
+            });
 
-        // SECURITY (cross-org IDOR): the kitId comes from form/CSV input and is
-        // connected by the assetKits nested create above with no org scoping of
-        // its own. Prove it belongs to this org before the write (same pattern
-        // as the assetModel / custom-field guards).
-        if (hasKit) {
-          await assertKitsBelongToOrg({ kitIds: [kitId!], organizationId }, tx);
-        }
+            if (!currentQr) {
+              throw new ShelfError({
+                cause: null,
+                title: "QR code not found",
+                message: "This code doesn't exist.",
+                label: "QR",
+                status: 404,
+                shouldBeCaptured: false,
+              });
+            }
 
-        const created = await tx.asset.create({
-          data,
-          include: {
-            assetLocations: { include: { location: true } },
-            user: true,
-            custody: true,
-          },
-        });
+            if (
+              (currentQr.organizationId &&
+                currentQr.organizationId !== organizationId) ||
+              currentQr.assetId !== null ||
+              currentQr.kitId !== null
+            ) {
+              throw new ShelfError({
+                cause: null,
+                title: "QR assignment changed",
+                message:
+                  "This QR code was assigned while the asset was being created. Please try again.",
+                label: "QR",
+                status: 409,
+                shouldBeCaptured: false,
+              });
+            }
 
-        // Create the AssetLocation pivot row now that we have the assetId.
-        // Quantity is type-aware to match the sum-within-total trigger
-        // semantics: qty-tracked = full pool, INDIVIDUAL = 1.
-        if (locationId) {
-          await tx.assetLocation.create({
-            data: {
-              assetId: created.id,
-              locationId,
-              organizationId,
-              quantity:
-                type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
+            if (!currentQr.organizationId) {
+              await tx.qr.update({
+                // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the QR was re-read as unclaimed inside this transaction and is receiving its first organization before it is linked
+                where: { id: currentQr.id },
+                data: { organizationId, userId },
+              });
+            }
+          }
+
+          // SECURITY (cross-org IDOR): prove every form-supplied custom-field id
+          // belongs to this org before the nested create connects them. Run inside
+          // the tx so the ownership check shares the write's transaction (no-op
+          // when there are no custom-field ids).
+          await assertCustomFieldsBelongToOrg(
+            { customFieldIds: customFieldIdsToValidate, organizationId },
+            tx
+          );
+
+          // SECURITY (cross-org IDOR): the kitId comes from form/CSV input and is
+          // connected by the assetKits nested create above with no org scoping of
+          // its own. Prove it belongs to this org before the write (same pattern
+          // as the assetModel / custom-field guards).
+          if (hasKit) {
+            await assertKitsBelongToOrg(
+              { kitIds: [kitId!], organizationId },
+              tx
+            );
+          }
+
+          const created = await tx.asset.create({
+            data,
+            include: {
+              assetLocations: { include: { location: true } },
+              user: true,
+              custody: true,
             },
           });
-        }
 
-        // Activity event must be inside transaction for atomicity
-        await recordEvent(
-          {
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_CREATED",
-            entityType: "ASSET",
-            entityId: created.id,
-            assetId: created.id,
-          },
-          tx
-        );
-
-        // Re-read so the returned shape has the pivot we just created
-        // (the initial create's include came back empty for it).
-        return locationId
-          ? tx.asset.findUniqueOrThrow({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row
-              where: { id: created.id },
-              include: {
-                assetLocations: { include: { location: true } },
-                user: true,
-                custody: true,
+          // Create the AssetLocation pivot row now that we have the assetId.
+          // Quantity is type-aware to match the sum-within-total trigger
+          // semantics: qty-tracked = full pool, INDIVIDUAL = 1.
+          if (locationId) {
+            await tx.assetLocation.create({
+              data: {
+                assetId: created.id,
+                locationId,
+                organizationId,
+                quantity:
+                  type === AssetType.QUANTITY_TRACKED && quantity
+                    ? quantity
+                    : 1,
               },
-            })
-          : created;
-      });
+            });
+          }
+
+          // Activity event must be inside transaction for atomicity
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_CREATED",
+              entityType: "ASSET",
+              entityId: created.id,
+              assetId: created.id,
+            },
+            tx
+          );
+
+          // Re-read so the returned shape has the pivot we just created
+          // (the initial create's include came back empty for it).
+          return locationId
+            ? tx.asset.findUniqueOrThrow({
+                // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row
+                where: { id: created.id },
+                include: {
+                  assetLocations: { include: { location: true } },
+                  user: true,
+                  custody: true,
+                },
+              })
+            : created;
+        },
+        qrToLink
+          ? { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          : undefined
+      );
 
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
+      if (
+        qrToLink &&
+        cause instanceof Error &&
+        "code" in cause &&
+        cause.code === "P2034"
+      ) {
+        if (attempts < maxAttempts - 1) {
+          attempts++;
+          continue;
+        }
+
+        throw new ShelfError({
+          cause,
+          title: "Asset creation conflict",
+          message:
+            "The asset or QR code changed while it was being created. Please try again.",
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
       // Check for sequential ID unique constraint violation and retry
       if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
         const prismaError = cause as any;
@@ -5462,55 +5551,151 @@ export async function refreshExpiredAssetImages<
   });
 }
 
+const QR_ASSIGNMENT_MAX_ATTEMPTS = 3;
+
+function isSerializationConflict(cause: unknown) {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "P2034"
+  );
+}
+
+async function runQrAssignmentTransaction<T>(operation: () => Promise<T>) {
+  for (let attempt = 1; attempt <= QR_ASSIGNMENT_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (cause) {
+      if (!isSerializationConflict(cause)) throw cause;
+      if (attempt < QR_ASSIGNMENT_MAX_ATTEMPTS) continue;
+
+      throw new ShelfError({
+        cause,
+        title: "QR assignment changed",
+        message:
+          "Another QR assignment was saved at the same time. Please try again.",
+        label: "QR",
+        status: 409,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
+  throw new Error("QR assignment retry loop exited unexpectedly");
+}
+
 export async function updateAssetQrCode({
   assetId,
   newQrId,
   organizationId,
+  userId,
 }: {
-  organizationId: string;
-  assetId: string;
-  newQrId: string;
+  organizationId: Organization["id"];
+  assetId: Asset["id"];
+  newQrId: Qr["id"];
+  userId: User["id"];
 }) {
-  // Disconnect all existing QR codes
   try {
-    // Disconnect all existing QR codes
-    await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            set: [],
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't disconnect existing codes",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
+    return await runQrAssignmentTransaction(() =>
+      db.$transaction(
+        async (tx) => {
+          const [asset, qr] = await Promise.all([
+            tx.asset.findFirst({
+              where: { id: assetId, organizationId },
+              select: { id: true },
+            }),
+            tx.qr.findUnique({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: unclaimed QRs have no organization to scope by; ownership is checked below before either row is mutated
+              where: { id: newQrId },
+            }),
+          ]);
 
-    // Connect the new QR code
-    return await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            connect: { id: newQrId },
-          },
+          if (!asset) {
+            throw new ShelfError({
+              cause: null,
+              title: "Asset not found",
+              message:
+                "This asset doesn't exist or it doesn't belong to your current organization.",
+              label,
+              status: 404,
+              shouldBeCaptured: false,
+            });
+          }
+
+          if (!qr) {
+            throw new ShelfError({
+              cause: null,
+              title: "QR code not found",
+              message: "This code doesn't exist.",
+              label: "QR",
+              status: 404,
+              shouldBeCaptured: false,
+            });
+          }
+
+          if (qr.organizationId && qr.organizationId !== organizationId) {
+            throw new ShelfError({
+              cause: null,
+              title: "QR not valid.",
+              message: "This QR code does not belong to your organization",
+              label: "QR",
+              status: 403,
+              shouldBeCaptured: false,
+            });
+          }
+
+          if (qr.kitId) {
+            throw new ShelfError({
+              cause: null,
+              title: "QR already linked.",
+              message:
+                "You cannot link to this code because it is already linked to another kit.",
+              label: "QR",
+              status: 409,
+              shouldBeCaptured: false,
+            });
+          }
+
+          if (qr.assetId && qr.assetId !== assetId) {
+            throw new ShelfError({
+              cause: null,
+              title: "QR already linked.",
+              message:
+                "You cannot link to this code because it is already linked to another asset.",
+              label: "QR",
+              status: 409,
+              shouldBeCaptured: false,
+            });
+          }
+
+          if (!qr.organizationId) {
+            await tx.qr.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the QR was read as unclaimed in this serializable transaction and is receiving its first organization
+              where: { id: qr.id },
+              data: { organizationId, userId },
+            });
+          }
+
+          return tx.asset.update({
+            where: { id: assetId, organizationId },
+            data: {
+              qrLabelAppliedAt: new Date(),
+              qrCodes: {
+                set: [],
+                connect: { id: newQrId },
+              },
+            },
+          });
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't connect the new QR code",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      )
+    );
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while updating asset QR code",
@@ -6724,87 +6909,124 @@ export async function relinkAssetQrCode({
   assetId: Asset["id"];
   organizationId: Organization["id"];
 }) {
-  const [qr, user, asset] = await Promise.all([
-    getQr({ id: qrId }),
-    getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      } satisfies Prisma.UserSelect,
-    }),
-    db.asset.findFirst({
-      where: { id: assetId, organizationId },
-      select: { qrCodes: { select: { id: true } } },
-    }),
-  ]);
+  const user = await getUserByID(userId, {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+    } satisfies Prisma.UserSelect,
+  });
 
-  /** User cannot link qr code of other organization */
-  if (qr.organizationId && qr.organizationId !== organizationId) {
-    throw new ShelfError({
-      cause: null,
-      title: "QR not valid.",
-      message: "This QR code does not belong to your organization",
-      label: "QR",
-      status: 403,
-      shouldBeCaptured: false,
-    });
-  }
+  return runQrAssignmentTransaction(() =>
+    db.$transaction(
+      async (tx) => {
+        const [qr, asset] = await Promise.all([
+          tx.qr.findUnique({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: unclaimed QRs have no organization to scope by; ownership is checked below before either row is mutated
+            where: { id: qrId },
+          }),
+          tx.asset.findFirst({
+            where: { id: assetId, organizationId },
+            select: { qrCodes: { select: { id: true } } },
+          }),
+        ]);
 
-  if (qr.kitId) {
-    throw new ShelfError({
-      cause: null,
-      title: "QR already linked.",
-      message:
-        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
-      label: "QR",
-      shouldBeCaptured: false,
-    });
-  }
+        if (!qr) {
+          throw new ShelfError({
+            cause: null,
+            title: "QR code not found",
+            message: "This code doesn't exist.",
+            label: "QR",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
 
-  if (qr.assetId && qr.assetId !== assetId) {
-    throw new ShelfError({
-      cause: null,
-      title: "QR already linked.",
-      message:
-        "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
-      label: "QR",
-      shouldBeCaptured: false,
-    });
-  }
+        if (!asset) {
+          throw new ShelfError({
+            cause: null,
+            title: "Asset not found",
+            message:
+              "This asset doesn't exist or it doesn't belong to your current organization.",
+            label,
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
 
-  const oldQrCode = asset?.qrCodes[0];
+        if (qr.organizationId && qr.organizationId !== organizationId) {
+          throw new ShelfError({
+            cause: null,
+            title: "QR not valid.",
+            message: "This QR code does not belong to your organization",
+            label: "QR",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        qrCodes: {
-          set: [],
-          connect: { id: qr.id },
-        },
+        if (qr.kitId) {
+          throw new ShelfError({
+            cause: null,
+            title: "QR already linked.",
+            message:
+              "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+            label: "QR",
+            status: 409,
+            shouldBeCaptured: false,
+          });
+        }
+
+        if (qr.assetId && qr.assetId !== assetId) {
+          throw new ShelfError({
+            cause: null,
+            title: "QR already linked.",
+            message:
+              "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+            label: "QR",
+            status: 409,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const oldQrCode = asset.qrCodes[0];
+
+        await tx.qr.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ownership was checked in this serializable transaction; null means the QR is being claimed here
+          where: { id: qr.id },
+          data: { organizationId, userId },
+        });
+        const updatedAsset = await tx.asset.update({
+          where: { id: assetId, organizationId },
+          data: {
+            qrLabelAppliedAt: new Date(),
+            qrCodes: {
+              set: [],
+              connect: { id: qr.id },
+            },
+          },
+        });
+        await tx.note.create({
+          data: {
+            asset: { connect: { id: assetId } },
+            user: { connect: { id: userId } },
+            type: "UPDATE",
+            content: `${wrapUserLinkForNote({
+              id: userId,
+              firstName: user.firstName,
+              lastName: user.lastName,
+            })} changed QR code ${
+              oldQrCode ? `from **${oldQrCode.id}**` : ""
+            } to **${qrId}**.`,
+          },
+        });
+
+        return updatedAsset;
       },
-    }),
-    createNote({
-      assetId,
-      userId,
-      organizationId,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      })} changed QR code ${
-        oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**.`,
-    }),
-  ]);
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    )
+  );
 }
 
 export async function getUserAssetsTabLoaderData({
