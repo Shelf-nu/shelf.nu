@@ -143,6 +143,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
               modelRequests: { where: { fulfilledAt: null } },
             },
           },
+          // The outstanding rows themselves, so the card can report UNITS
+          // reserved rather than how many model rows hold them. `_count` above
+          // answers "is anything outstanding?"; this answers "how much?", which
+          // is what the fulfil banner already shows ("Tablecloth x2") and what
+          // the operator is actually going to carry. Two scalars per row, and
+          // most bookings have none.
+          modelRequests: {
+            where: { fulfilledAt: null },
+            select: { quantity: true, fulfilledQuantity: true },
+          },
         },
         orderBy: [{ [sortBy]: sortOrder }],
         skip: (page - 1) * perPage,
@@ -170,6 +180,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // Outstanding book-by-model reservations still to assign. > 0 means the
         // booking holds reserved units with no concrete assets behind them yet.
         outstandingModelCount: b._count.modelRequests,
+        // Units still to assign across those reservations. Mirrors
+        // `outstandingModelUnitCount` on the booking detail endpoint so both
+        // surfaces name and count the same thing.
+        outstandingModelUnitCount: b.modelRequests.reduce(
+          (sum, mr) => sum + Math.max(0, mr.quantity - mr.fulfilledQuantity),
+          0
+        ),
       })),
       page,
       perPage,

@@ -325,7 +325,10 @@ function ScannerContent() {
   } | null>(null);
 
   // Also called from the scan paths when a code arrives before the first
-  // fetch lands (or after it failed) — a scan-while-loading retries it.
+  // fetch lands (or after it failed) — a scan-while-loading retries it. A
+  // cross-booking stale response can't land here because the whole component
+  // remounts on a booking change (see the keyed default export), so this
+  // closure and its state setter belong to a single booking's mount.
   const fetchBookingCtx = useCallback(() => {
     if (!isBookingMode || !bookingId || !currentOrg) return;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
@@ -429,6 +432,11 @@ function ScannerContent() {
     dismissResultBase();
     lastScanRef.current = "";
   }, [dismissResultBase, lastScanRef]);
+
+  // The scan list and booking context are reset by remounting the whole
+  // ScannerContent on any scan-context change — the default export keys it on
+  // `bookingId` + `bookingAction`. No reset-in-effect is needed here (and
+  // react-doctor forbids that pattern anyway).
 
   // Animation for scan line (shared hook)
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
@@ -1698,6 +1706,24 @@ function ScannerContent() {
     [bookingCheckinItems, bookingCtx]
   );
 
+  /**
+   * Scanned ASSETS that don't fulfil any reservation. They ride along on submit
+   * (the service adds them to the booking and checks them out, same as web), so
+   * the CTA names them separately rather than folding them into the assigned
+   * total.
+   *
+   * Counted from asset rows only. A scanned KIT is forwarded via `kitIds` and
+   * `fulfilModelRequestsAndCheckout` merely flips its status to CHECKED_OUT — it
+   * does NOT add the kit's members as booking assets — so a kit contributes no
+   * "added" unit and must not inflate this count. `matched` is always assets, so
+   * subtracting it from the asset-row count never goes negative.
+   */
+  const fulfilExtras = Math.max(
+    0,
+    bookingCheckinItems.filter((i) => i.type === "asset").length -
+      fulfilMatch.matched
+  );
+
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
@@ -2188,13 +2214,18 @@ function ScannerContent() {
               submitLabel={
                 isBookingFulfilMode
                   ? fulfilMatch.isComplete
-                    ? // Count every scanned item, not just the matched ones:
-                      // the submit sends the whole list and the service adds
-                      // unmatched assets directly and checks them out too, so
-                      // labelling only `matched` would understate the action.
-                      `Assign & check out ${bookingCheckinItems.length} unit${
-                        bookingCheckinItems.length === 1 ? "" : "s"
-                      }`
+                    ? // Name the two halves separately. The submit sends the
+                      // WHOLE list: matched units fulfil the reservation, and
+                      // anything else is added to the booking and checked out
+                      // alongside (deliberate, mirrors web). A single total
+                      // hid that, so "check out 3 units" could appear against
+                      // a 2-unit reservation with no hint that the third was
+                      // never reserved.
+                      fulfilExtras > 0
+                      ? `Assign ${fulfilMatch.required} · add ${fulfilExtras} · check out`
+                      : `Assign & check out ${fulfilMatch.required} unit${
+                          fulfilMatch.required === 1 ? "" : "s"
+                        }`
                     : `${
                         fulfilMatch.required - fulfilMatch.matched
                       } more to assign`
@@ -2254,8 +2285,28 @@ function ScannerContent() {
 // ── Default export wraps with error boundary ─────────────
 
 export default function ScannerScreen() {
+  // The scanner is one reused tab screen: navigating from a different booking,
+  // or the same booking in a different mode, only updates the route params —
+  // expo-router keeps the component mounted, so its scanned-items list and
+  // cached booking context would survive across contexts they don't belong to.
+  // Keying on the scan context remounts on any such change, so React resets ALL
+  // of that state cleanly (no reset-in-effect, and no window where a scan
+  // matches the previous booking's reservations).
+  //
+  // The key sits on the error boundary, not on ScannerContent: the boundary
+  // holds its own `hasError` state, so keying only the child would leave a
+  // caught error's fallback up when the operator navigates to a new booking.
+  // Remounting the boundary clears `hasError` and remounts ScannerContent with
+  // it.
+  const { bookingId, bookingAction } = useLocalSearchParams<{
+    bookingId?: string;
+    bookingAction?: string;
+  }>();
   return (
-    <ScannerErrorBoundary label="Scanner">
+    <ScannerErrorBoundary
+      key={`${bookingId ?? ""}:${bookingAction ?? ""}`}
+      label="Scanner"
+    >
       <ScannerContent />
     </ScannerErrorBoundary>
   );

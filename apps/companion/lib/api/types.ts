@@ -479,6 +479,14 @@ export type BookingListItem = {
    * for back-compat with an older server response.
    */
   outstandingModelCount?: number;
+  /**
+   * How many UNITS those reservations still need, summed across them. The
+   * count above answers "is anything outstanding?"; this answers "how much?",
+   * which is what the card shows next to the asset count so a booking holding
+   * reserved units never reads as empty. Optional for back-compat: installs
+   * running against an older server fall back to showing nothing extra.
+   */
+  outstandingModelUnitCount?: number;
 };
 
 export type BookingsResponse = {
