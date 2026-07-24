@@ -20,7 +20,9 @@ import {
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
+import { detectFormatPrefsFromHints } from "~/utils/date-format";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -92,9 +94,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (!userExists) {
           try {
             const username = await generateUniqueUsername(authSession.email);
+            // Detect the caller's date/time/week/timezone prefs from browser
+            // hints (accept-language + CH-time-zone cookie) and stamp them on
+            // the new row. First-request timeZone may fall back to "UTC" before
+            // the hint cookie round-trips — the lazy backfill corrects it later.
+            const formatPrefs = detectFormatPrefsFromHints(
+              getClientHint(request)
+            );
             await createUser({
               ...authSession,
               username,
+              formatPrefs,
             });
           } catch (createError) {
             // Handle race condition: if a concurrent request already

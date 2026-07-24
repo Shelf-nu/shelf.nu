@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
+import { resolveFormatPrefs } from "~/utils/date-format";
 import { isNotFoundError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -63,18 +64,22 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
       const subject = `🔔 Checkout reminder (${booking.name}) - shelf.nu`;
 
-      const text = checkoutReminderEmailContent({
-        bookingName: booking.name,
-        assetsCount: booking._count.bookingAssets,
-        custodian,
-        from: booking.from,
-        to: booking.to,
-        bookingId: booking.id,
-        hints: data.hints,
-        customEmailFooter: booking.organization.customEmailFooter,
-      });
-
       for (const recipient of recipients) {
+        // Pure resolve from the loaded recipient row; hints as null-field
+        // fallback only. No per-recipient DB fetch (avoids an N+1).
+        const recipientPrefs = resolveFormatPrefs(recipient, data.hints);
+
+        const text = checkoutReminderEmailContent({
+          bookingName: booking.name,
+          assetsCount: booking._count.bookingAssets,
+          custodian,
+          from: booking.from,
+          to: booking.to,
+          bookingId: booking.id,
+          prefs: recipientPrefs,
+          customEmailFooter: booking.organization.customEmailFooter,
+        });
+
         const html = await bookingUpdatesTemplateString({
           booking,
           heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
@@ -82,7 +87,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
             new Date()
           )}.`,
           assetCount: booking._count.bookingAssets,
-          hints: data.hints,
+          prefs: recipientPrefs,
           recipientReason: recipient.reason,
           recipientEmail: recipient.email,
         });
@@ -200,23 +205,27 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
     const subject = `⚠️ Overdue booking (${booking.name}) - shelf.nu`;
 
-    const text = overdueBookingEmailContent({
-      bookingName: booking.name,
-      assetsCount: booking._count.bookingAssets,
-      custodian,
-      from: booking.from as Date,
-      to: booking.to as Date,
-      bookingId: booking.id,
-      hints: data.hints,
-      customEmailFooter: booking.organization.customEmailFooter,
-    });
-
     for (const recipient of recipients) {
+      // Pure resolve from the loaded recipient row; hints as null-field
+      // fallback only. No per-recipient DB fetch (avoids an N+1).
+      const recipientPrefs = resolveFormatPrefs(recipient, data.hints);
+
+      const text = overdueBookingEmailContent({
+        bookingName: booking.name,
+        assetsCount: booking._count.bookingAssets,
+        custodian,
+        from: booking.from as Date,
+        to: booking.to as Date,
+        bookingId: booking.id,
+        prefs: recipientPrefs,
+        customEmailFooter: booking.organization.customEmailFooter,
+      });
+
       const html = await bookingUpdatesTemplateString({
         booking,
         heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
         assetCount: booking._count.bookingAssets,
-        hints: data.hints,
+        prefs: recipientPrefs,
         recipientReason: recipient.reason,
         recipientEmail: recipient.email,
       });

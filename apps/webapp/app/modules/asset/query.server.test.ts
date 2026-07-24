@@ -698,6 +698,79 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
+describe("generateWhereClause - built-in date filter timezone", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * Built-in `timestamptz` columns (createdAt, updatedAt, …) must be truncated
+   * to a calendar day in the acting user's timezone, otherwise a non-UTC user
+   * filtering "on the day a row shows" hits an off-by-one. The tz is bound as a
+   * SQL parameter (`AT TIME ZONE $n`), so it surfaces in `values`, not the
+   * `strings` array that `getSqlString` reconstructs.
+   */
+  it("wraps the column in AT TIME ZONE using the supplied user timezone", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    expect(getSqlString(result)).toContain("AT TIME ZONE");
+    // Bound as a parameter (injection-safe), so it lands in `values`.
+    expect(result.values).toContain("Asia/Tokyo");
+  });
+
+  it("defaults the built-in date filter timezone to UTC when unspecified", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(getSqlString(result)).toContain("AT TIME ZONE");
+    expect(result.values).toContain("UTC");
+  });
+
+  /**
+   * Custom-field DATE values are stored date-only (no timezone), so their
+   * filter must NOT be wrapped in AT TIME ZONE — doing so would be a no-op at
+   * best and a cast error at worst. Regression guard for the deliberate carve-out.
+   */
+  it("does NOT apply AT TIME ZONE to a custom-field DATE filter", () => {
+    const filter = {
+      name: "cf_PurchaseDate",
+      type: "customField",
+      fieldType: "DATE",
+      operator: "is",
+      value: "2026-07-20",
+    } as Filter;
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    expect(getSqlString(result)).not.toContain("AT TIME ZONE");
+  });
+});
+
 describe("assetQueryFragment", () => {
   /**
    * Helper to extract SQL string from Prisma.Sql for testing.

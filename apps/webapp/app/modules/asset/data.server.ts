@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
@@ -486,6 +487,15 @@ export async function advancedModeLoader({
     parsedFilters
   );
 
+  // Off-by-one fix: date filters on built-in timestamptz columns
+  // (createdAt/updatedAt) must compare the calendar DAY in the acting user's
+  // resolved timezone preference — the same zone the list is displayed in — not
+  // the DB session zone (UTC). Resolve it once and thread it into the fetch.
+  const { timeZone: prefTimeZone } = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
@@ -531,6 +541,7 @@ export async function advancedModeLoader({
     getAdvancedPaginatedAndFilterableAssets({
       request,
       organizationId,
+      timeZone: prefTimeZone,
       filters,
       settings,
       getBookings: view === "availability",

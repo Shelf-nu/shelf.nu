@@ -18,6 +18,7 @@ import type {
   BookingStatus,
 } from "@prisma/client";
 import { Prisma } from "@prisma/client";
+import { DateTime } from "luxon";
 
 import { db } from "~/database/db.server";
 import {
@@ -101,6 +102,17 @@ interface BookingComplianceArgs {
   sortBy?: BookingComplianceSortColumn;
   /** Sort direction */
   sortOrder?: "asc" | "desc";
+  /**
+   * IANA timezone of the acting user (from their resolved format prefs).
+   *
+   * The compliance-trend chart's day/week axis buckets are anchored to
+   * `timeframe.from`, which is itself midnight in this same zone. The axis tick
+   * labels must therefore read each bucket's day IN THIS ZONE — reading them in
+   * UTC renders them off-by-one for east-of-UTC users (a Tokyo "Fri 17" bucket
+   * labels as "Thu 16"). Defaults to `"UTC"` when the caller has no resolved
+   * prefs, preserving the historical behavior.
+   */
+  timeZone?: string;
 }
 
 /**
@@ -129,6 +141,9 @@ export async function bookingComplianceReport(
     pageSize = 50,
     sortBy = "scheduledEnd",
     sortOrder = "desc",
+    // Pref timezone drives the trend axis day/week labels; UTC keeps parity
+    // with the pre-prefs behavior when the caller doesn't resolve prefs.
+    timeZone = "UTC",
   } = args;
 
   const startTime = performance.now();
@@ -193,7 +208,7 @@ export async function bookingComplianceReport(
       // Compliance rate calculation with prior period comparison
       computeComplianceRate(organizationId, timeframe),
       // Weekly compliance trend
-      computeComplianceTrend(organizationId, timeframe),
+      computeComplianceTrend(organizationId, timeframe, timeZone),
       // Custodian performance breakdown
       computeCustodianPerformance(organizationId, timeframe),
     ]);
@@ -664,20 +679,49 @@ function getPriorPeriodLabel(preset: string): string {
  *
  * Breaks the timeframe into weeks and calculates compliance rate for each.
  * This enables the trend visualization showing improvement/decline over time.
+ *
+ * @param organizationId - Organization whose bookings are measured
+ * @param timeframe - Resolved timeframe; its `from` is midnight in `timeZone`
+ * @param timeZone - IANA timezone of the acting user. Each bucket start instant
+ *   is derived from `timeframe.from` (pref-tz midnight), so the axis labels are
+ *   resolved in this same zone to avoid an off-by-one day for east-of-UTC
+ *   users. Defaults to `"UTC"`.
  */
 async function computeComplianceTrend(
   organizationId: string,
-  timeframe: ResolvedTimeframe
+  timeframe: ResolvedTimeframe,
+  timeZone: string = "UTC"
 ): Promise<ComplianceTrendPoint[]> {
   const periodMs = timeframe.to.getTime() - timeframe.from.getTime();
   const msPerDay = 24 * 60 * 60 * 1000;
-  const msPerWeek = 7 * msPerDay;
   const periodDays = periodMs / msPerDay;
 
-  // Adaptive granularity: daily for short periods, weekly for longer
+  // Adaptive granularity: daily for short periods, weekly for longer. A ±1h DST
+  // drift never flips this threshold, so an ms-based day count is fine HERE.
   const useDailyGranularity = periodDays <= 14;
-  const bucketMs = useDailyGranularity ? msPerDay : msPerWeek;
-  const numBuckets = Math.max(1, Math.ceil(periodMs / bucketMs));
+
+  // Bucket boundaries are stepped by CALENDAR days/weeks in the acting user's
+  // timezone (via Luxon), NOT fixed 24h/7d millisecond intervals. On a DST
+  // transition a calendar day is 23h or 25h long; fixed-ms stepping would drift
+  // every subsequent boundary off pref-tz midnight (to 23:00 / 01:00) and
+  // misclassify due dates near a boundary. Calendar stepping keeps every bucket
+  // anchored to pref-tz midnight regardless of DST.
+  const fromZoned = DateTime.fromJSDate(timeframe.from).setZone(timeZone);
+  const toZoned = DateTime.fromJSDate(timeframe.to).setZone(timeZone);
+  /** Start of bucket `n` as a zoned DateTime, calendar-stepped from `from`. */
+  const bucketStartAt = (n: number): DateTime =>
+    useDailyGranularity
+      ? fromZoned.plus({ days: n })
+      : fromZoned.plus({ weeks: n });
+  // Calendar-aware span → bucket count (DST-correct, unlike periodMs / bucketMs).
+  const numBuckets = Math.max(
+    1,
+    Math.ceil(
+      useDailyGranularity
+        ? toZoned.diff(fromZoned, "days").days
+        : toZoned.diff(fromZoned, "weeks").weeks
+    )
+  );
 
   // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
@@ -712,9 +756,13 @@ async function computeComplianceTrend(
   const trend: ComplianceTrendPoint[] = [];
 
   for (let i = 0; i < numBuckets; i++) {
-    const bucketStart = new Date(timeframe.from.getTime() + i * bucketMs);
+    // Calendar-stepped boundaries (see bucketStartAt): bucket i spans
+    // [from + i units, from + (i+1) units) in the pref tz, so DST-transition
+    // days don't shift the boundary off midnight. End = the instant just before
+    // the next bucket start, clamped to the timeframe end.
+    const bucketStart = bucketStartAt(i).toJSDate();
     const bucketEnd = new Date(
-      Math.min(bucketStart.getTime() + bucketMs - 1, timeframe.to.getTime())
+      Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
     // Filter bookings with due date in this bucket
@@ -748,12 +796,13 @@ async function computeComplianceTrend(
     // null rate for empty buckets (no data, not 0% compliance)
     const rate = total > 0 ? Math.round((onTime / total) * 100) : null;
 
-    // Format label based on granularity
+    // Format label based on granularity. The bucket instants are anchored to
+    // the pref-tz `timeframe.from`, so the labels are derived in `timeZone`.
     const label = useDailyGranularity
-      ? formatDayLabel(bucketStart)
+      ? formatDayLabel(bucketStart, timeZone)
       : numBuckets <= 4
       ? `Week ${i + 1}`
-      : formatWeekLabel(bucketStart, bucketEnd);
+      : formatWeekLabel(bucketStart, bucketEnd, timeZone);
 
     trend.push({
       label,
@@ -770,24 +819,60 @@ async function computeComplianceTrend(
 
 /**
  * Format day as "Mon 21" style label.
+ *
+ * The bucket instant is midnight in the acting user's timezone, so both the
+ * weekday name and the day number are resolved in that same `timeZone`. Reading
+ * them in UTC would render the tick off-by-one for east-of-UTC users (a Tokyo
+ * "Fri 17" bucket labeling as "Thu 16"). Only the ZONE used to pick the day
+ * changes — the weekday NAME stays English by design.
+ *
+ * @param date - The bucket start instant
+ * @param timeZone - IANA timezone the bucket day is read in
+ * @returns the assembled day label (e.g. "Fri 17")
  */
-function formatDayLabel(date: Date): string {
-  const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
-  const dayNum = date.getDate();
+function formatDayLabel(date: Date, timeZone: string): string {
+  // why: weekday NAME kept English on purpose — chart-axis labels read
+  // consistently regardless of the viewer's locale or date-format preference;
+  // not user-facing prose. Only the zone used to resolve the day is prefs-tz.
+  const dayName = date.toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone,
+  });
+  const dayNum = DateTime.fromJSDate(date).setZone(timeZone).day;
   return `${dayName} ${dayNum}`;
 }
 
 /**
  * Format week range as "Mar 3-9" style label.
+ *
+ * The bucket boundary instants are midnight in the acting user's timezone, so
+ * month names and day numbers are resolved in that same `timeZone` to keep the
+ * tick from rendering off-by-one for east-of-UTC users. The month NAMES stay
+ * English by design.
+ *
+ * @param start - The bucket start instant
+ * @param end - The bucket end instant
+ * @param timeZone - IANA timezone the bucket days/months are read in
+ * @returns the assembled week-range label (e.g. "Mar 3-9" or "Mar 28-Apr 3")
  */
-function formatWeekLabel(start: Date, end: Date): string {
-  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
+function formatWeekLabel(start: Date, end: Date, timeZone: string): string {
+  // why: month NAMES kept English on purpose — chart-axis labels read
+  // consistently for consistent report visuals; not affected by the user's
+  // display date-format preference. Only the zone used to resolve the day is
+  // prefs-tz.
+  const startMonth = start.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
+  const startDay = DateTime.fromJSDate(start).setZone(timeZone).day;
+  const endDay = DateTime.fromJSDate(end).setZone(timeZone).day;
 
   // If same month, show "Mar 3-9"
   // If different months, show "Mar 28-Apr 3"
-  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  const endMonth = end.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
   if (startMonth === endMonth) {
     return `${startMonth} ${startDay}-${endDay}`;
   }
@@ -3327,6 +3412,9 @@ export async function monthlyBookingTrendsReport(
 
         return {
           id: key,
+          // why: kept ISO/English on purpose — chart-axis month label stays
+          // in English for consistent report visuals; not driven by the
+          // user's display date-format preference.
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",

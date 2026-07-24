@@ -206,6 +206,9 @@ importers:
       '@fullcalendar/list':
         specifier: ^6.1.20
         version: 6.1.20(@fullcalendar/core@6.1.20)
+      '@fullcalendar/luxon3':
+        specifier: 6.1.20
+        version: 6.1.20(@fullcalendar/core@6.1.20)(luxon@3.7.2)
       '@fullcalendar/react':
         specifier: ^6.1.20
         version: 6.1.20(@fullcalendar/core@6.1.20)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -449,6 +452,9 @@ importers:
       react:
         specifier: 19.2.1
         version: 19.2.1
+      react-day-picker:
+        specifier: 9.14.0
+        version: 9.14.0(react@19.2.1)
       react-dom:
         specifier: 19.2.1
         version: 19.2.1(react@19.2.1)
@@ -2216,6 +2222,12 @@ packages:
     resolution: {integrity: sha512-7Hzkbb7uuSqrXwTyD0Ld/7SwWNxPD6SlU548vtkIpH55rZ4qquwtwYdMPgorHos5OynHA4OUrZNcH51CjrCf2g==}
     peerDependencies:
       '@fullcalendar/core': ~6.1.20
+
+  '@fullcalendar/luxon3@6.1.20':
+    resolution: {integrity: sha512-lHebDK1lLQ25ilDO68KoLSVZaS9/mSjDGjWedPrpbgJNwSSIME7NCD3kRoskWOqayk4j0mFylEGO8TNrW3gzOQ==}
+    peerDependencies:
+      '@fullcalendar/core': ~6.1.20
+      luxon: ^3.0.0
 
   '@fullcalendar/premium-common@6.1.20':
     resolution: {integrity: sha512-rT+AitNnRyZuFEtYvsB1OJ2g1Bq2jmTR6qdn/dEU6LwkIj/4L499goLtMOena/JyJ31VBztdHrccX//36QrY3w==}
@@ -12655,6 +12667,11 @@ snapshots:
   '@fullcalendar/list@6.1.20(@fullcalendar/core@6.1.20)':
     dependencies:
       '@fullcalendar/core': 6.1.20
+
+  '@fullcalendar/luxon3@6.1.20(@fullcalendar/core@6.1.20)(luxon@3.7.2)':
+    dependencies:
+      '@fullcalendar/core': 6.1.20
+      luxon: 3.7.2
 
   '@fullcalendar/premium-common@6.1.20(@fullcalendar/core@6.1.20)':
     dependencies:

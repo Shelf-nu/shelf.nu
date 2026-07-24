@@ -7,6 +7,8 @@
 
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
+import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { DateFormatOptions } from "~/utils/date-format";
 import { tw } from "~/utils/tw";
 
 export interface ComplianceHeroProps {
@@ -33,18 +35,25 @@ export interface ComplianceHeroProps {
 }
 
 /**
- * Format the prior period label, showing dates for custom ranges.
+ * Format the prior-period label, showing dates for custom ranges.
+ *
+ * @param periodLabel - Base label (e.g. "prior period")
+ * @param formatDate - The user-prefs formatter from useDateFormatter()
+ * @param fromDate - Custom range start (optional)
+ * @param toDate - Custom range end (optional)
+ * @returns the formatted prior-period label
  */
 function formatPriorPeriodLabel(
   periodLabel: string,
+  formatDate: (value: string | Date, opts?: DateFormatOptions) => string,
   fromDate?: Date,
   toDate?: Date
 ): string {
-  // For custom ranges, show the actual dates
+  // For custom ranges, show the actual dates in the user's resolved format
+  // prefs (no shape options — the pref decides numeric-vs-name and order).
   if (periodLabel === "prior period" && fromDate && toDate) {
-    const formatDate = (d: Date) =>
-      d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    return `${formatDate(fromDate)} – ${formatDate(toDate)}`;
+    const fmt = (d: Date) => formatDate(d);
+    return `${fmt(fromDate)} – ${fmt(toDate)}`;
   }
   return periodLabel;
 }
@@ -60,10 +69,12 @@ export function ComplianceHero({
   timeframeLabel,
   className,
 }: ComplianceHeroProps) {
+  const { formatDate } = useDateFormatter();
   const total = onTime + late;
   const priorLabel = priorPeriod
     ? formatPriorPeriodLabel(
         priorPeriod.periodLabel,
+        formatDate,
         priorPeriod.fromDate,
         priorPeriod.toDate
       )

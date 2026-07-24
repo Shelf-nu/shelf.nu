@@ -10,9 +10,9 @@ import {
 } from "@radix-ui/react-popover";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
@@ -23,6 +23,7 @@ import { Switch } from "../forms/switch";
 import { CheckIcon, SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
+import { DateTimePicker } from "../shared/date-time-picker";
 
 export default function AssetCustomFields({
   currency,
@@ -50,12 +51,12 @@ export default function AssetCustomFields({
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const hints = useHints();
+  const { prefs } = useDateFormatter();
 
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
+    return value ? (getCustomFieldDisplayValue(value, prefs) as string) : "";
   };
 
   // Get field errors from the plain object passed from parent
@@ -89,23 +90,28 @@ export default function AssetCustomFields({
     ),
     DATE: (field) => (
       <div className="flex w-full items-end">
-        <Input
-          className="w-full placeholder:text-gray-500"
+        <DateTimePicker
+          mode="date"
+          className="w-full"
           label={field.name}
           hideLabel
-          type="date"
           name={`cf-${field.id}`}
           value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
-          onChange={(e) => {
-            let selectedDate = new Date(e.target.value);
+          clearable
+          onChange={(next) => {
+            if (!next) {
+              // Clear affordance emits an empty wire.
+              setDateObj({ ...dateObj, [field.id]: null });
+              return;
+            }
+
+            let selectedDate = new Date(next);
 
             /**
-             * While typing, user can enter invalid date
-             * so we have to make sure that we are saving a valid date
-             * to avoid any errors
-             * */
-            const isDateInvalid = isNaN(selectedDate.valueOf());
-            if (isDateInvalid) {
+             * Guard against an unparseable value so we never store an invalid
+             * Date (mirrors the previous native-input behaviour).
+             */
+            if (isNaN(selectedDate.valueOf())) {
               selectedDate = new Date();
             }
 
@@ -114,17 +120,6 @@ export default function AssetCustomFields({
           error={getFieldError(field.id)}
           disabled={disabled}
         />
-        {dateObj[field.id] ? (
-          <Button
-            className="ml-2 h-[42px] sm:h-full"
-            icon="x"
-            variant="secondary"
-            type="button"
-            onClick={() => {
-              setDateObj({ ...dateObj, [field.id]: null });
-            }}
-          />
-        ) : null}
       </div>
     ),
     OPTION: (field) => (

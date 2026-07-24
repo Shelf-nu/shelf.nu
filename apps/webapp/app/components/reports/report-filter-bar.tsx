@@ -48,23 +48,6 @@ type Props = {
 export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const handleTimeframeChange = useCallback(
-    (newTimeframe: ResolvedTimeframe) => {
-      const params = new URLSearchParams(searchParams);
-      params.set("timeframe", newTimeframe.preset);
-      if (newTimeframe.preset === "custom") {
-        params.set("from", newTimeframe.from.toISOString());
-        params.set("to", newTimeframe.to.toISOString());
-      } else {
-        params.delete("from");
-        params.delete("to");
-      }
-      params.delete("page"); // Reset to page 1 when filter changes
-      setSearchParams(params, { replace: true });
-    },
-    [searchParams, setSearchParams]
-  );
-
   const handleIdleThresholdChange = useCallback(
     (days: number) => {
       const params = new URLSearchParams(searchParams);
@@ -79,10 +62,12 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
     return (
       <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
         <div className="flex items-center gap-4">
+          {/* Let the picker own URL serialization (syncToUrl defaults true): its
+              toZonedBoundaryISO path anchors the custom range at pref-tz
+              start/end-of-day. A caller that serialized the resolved instants
+              itself would double-shift the window for non-UTC users. */}
           <TimeframePicker
             value={timeframe}
-            onChange={handleTimeframeChange}
-            syncToUrl={false}
             excludePresets={getExcludedPresets(reportId)}
             disabled={isLoading}
           />

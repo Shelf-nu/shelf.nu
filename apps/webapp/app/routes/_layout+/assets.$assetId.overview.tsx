@@ -35,6 +35,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
@@ -47,6 +48,7 @@ import {
 } from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -854,7 +856,6 @@ export default function AssetOverview() {
   const {
     asset,
     locale,
-    timeZone,
     qrObj,
     lastScan,
     currentOrganization,
@@ -864,6 +865,7 @@ export default function AssetOverview() {
     moveDestinations,
     unplacedQuantity,
   } = useLoaderData<typeof loader>();
+  const { prefs } = useDateFormatter();
 
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
@@ -1368,10 +1370,7 @@ export default function AssetOverview() {
                         ? String(fieldValue.raw)
                         : "";
                     const customFieldDisplayValue = hasValue
-                      ? getCustomFieldDisplayValue(fieldValue!, {
-                          locale,
-                          timeZone,
-                        })
+                      ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
                     /* Hide "Not set" rows from view-only users */
@@ -1453,10 +1452,10 @@ export default function AssetOverview() {
                               );
                             case CustomFieldType.DATE:
                               return (
-                                <Input
+                                <DateTimePicker
+                                  mode="date"
                                   label={def.name}
                                   hideLabel
-                                  type="date"
                                   name="fieldValue"
                                   defaultValue={rawValue}
                                   className="w-full"

@@ -1,6 +1,10 @@
 import type { CustomField } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { buildCustomFieldValue } from "./custom-fields";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
+import {
+  buildCustomFieldValue,
+  getCustomFieldDisplayValue,
+} from "./custom-fields";
 
 /**
  * Tests for DATE custom-field coercion in {@link buildCustomFieldValue}.
@@ -64,5 +68,26 @@ describe("buildCustomFieldValue — DATE", () => {
       raw: "2026-04-03",
       valueDate: "2026-04-03T00:00:00.000Z",
     });
+  });
+});
+
+describe("getCustomFieldDisplayValue — DATE with prefs", () => {
+  const prefs: ResolvedFormatPrefs = {
+    dateFormat: "DD_MM_YYYY",
+    timeFormat: "H24",
+    weekStartsOn: 1,
+    timeZone: "UTC",
+  };
+
+  it("renders a DATE value in the user's configured order when prefs are given", () => {
+    const value = { raw: "2026-04-03", valueDate: "2026-04-03T00:00:00.000Z" };
+    expect(getCustomFieldDisplayValue(value as never, prefs)).toMatch(
+      /^0?3\D+0?4\D+2026$/
+    );
+  });
+
+  it("falls back to PPP when no prefs are supplied", () => {
+    const value = { raw: "2026-04-03", valueDate: "2026-04-03T00:00:00.000Z" };
+    expect(getCustomFieldDisplayValue(value as never)).toBe("April 3rd, 2026");
   });
 });

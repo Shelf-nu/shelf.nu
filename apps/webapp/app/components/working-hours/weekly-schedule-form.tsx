@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useFetcher } from "react-router";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   DAY_NAMES,
@@ -33,6 +34,7 @@ export const WeeklyScheduleForm = ({
 }: WeeklyScheduleFormProps) => {
   const fetcher = useFetcher({ key: "weeklySchedule" });
   const disabled = useDisabled(fetcher);
+  const { prefs } = useDateFormatter();
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
@@ -218,6 +220,7 @@ export const WeeklyScheduleForm = ({
                           placeholder="Select opening time"
                           aria-label={`${dayName} opening time`}
                           required={dayState.isOpen}
+                          timeFormat={prefs.timeFormat}
                         />
                         <div> - </div>
                         <TimeSelect
@@ -230,6 +233,7 @@ export const WeeklyScheduleForm = ({
                           placeholder="Select closing time"
                           aria-label={`${dayName} closing time`}
                           required={dayState.isOpen}
+                          timeFormat={prefs.timeFormat}
                         />
                       </div>
                       {validationErrors[`${dayNumber}`] && (

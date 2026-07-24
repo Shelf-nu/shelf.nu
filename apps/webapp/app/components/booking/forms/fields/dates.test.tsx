@@ -22,6 +22,23 @@ vi.mock("~/hooks/use-booking-settings", () => ({
   useBookingSettings: () => ({ maxBookingLength: null, bufferStartTime: 0 }),
 }));
 
+// why: the swapped-in DateTimePicker reads the user's format prefs via this
+// hook, which reaches the root route loader (useRequestInfo → useRouteLoaderData).
+// There's no router in a unit test, so stub it with concrete prefs.
+vi.mock("~/hooks/use-date-formatter", () => ({
+  useDateFormatter: () => ({
+    prefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+    formatDate: (value: string | Date) => String(value),
+    formatTime: (value: string | Date) => String(value),
+    formatDateTime: (value: string | Date) => String(value),
+  }),
+}));
+
 /** Minimal props for DatesFields; per-test overrides applied on top. */
 function baseProps() {
   return {

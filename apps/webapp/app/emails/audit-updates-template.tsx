@@ -6,8 +6,7 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
-import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
@@ -45,7 +44,8 @@ interface Props {
   heading: string;
   audit: AuditForEmail;
   assetCount: number;
-  hints: ClientHint;
+  /** Resolved formatting prefs of the email RECIPIENT (locale/timezone). */
+  prefs: ResolvedFormatPrefs;
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   completedAt?: Date;
@@ -59,7 +59,7 @@ interface Props {
 export function AuditUpdatesEmailTemplate({
   audit,
   heading,
-  hints,
+  prefs,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
@@ -69,10 +69,7 @@ export function AuditUpdatesEmailTemplate({
   const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
 
   const dueDateFormatted = audit.dueDate
-    ? getDateTimeFormatFromHints(hints, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(audit.dueDate as Date)
+    ? formatDate(audit.dueDate as Date, prefs, { includeTime: true })
     : null;
   // Receipt link is only relevant for completion emails.
   const receiptUrl = completedAt
@@ -125,10 +122,7 @@ export function AuditUpdatesEmailTemplate({
               <span style={{ color: "#101828", fontWeight: "600" }}>
                 Completed on:
               </span>{" "}
-              {getDateTimeFormatFromHints(hints, {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(completedAt)}
+              {formatDate(completedAt, prefs, { includeTime: true })}
               {wasOverdue && (
                 <span style={{ color: "#D92D20", marginLeft: "8px" }}>⚠️</span>
               )}
@@ -245,7 +239,7 @@ export function AuditUpdatesEmailTemplate({
 export const auditUpdatesTemplateString = ({
   audit,
   heading,
-  hints,
+  prefs,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
@@ -256,7 +250,7 @@ export const auditUpdatesTemplateString = ({
     <AuditUpdatesEmailTemplate
       audit={audit}
       heading={heading}
-      hints={hints}
+      prefs={prefs}
       assetCount={assetCount}
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}

@@ -22,6 +22,7 @@ import { useNavigate } from "react-router";
 import AuditTeamMemberSelector from "~/components/audit/audit-team-member-selector";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
 
@@ -155,10 +156,10 @@ export function StartAuditDialogContent({
             {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
           </div>
 
-          <Input
+          <DateTimePicker
+            mode="datetime"
             name={dueDateField}
             label="Due date"
-            type="datetime-local"
             error={dueDateError}
             disabled={formDisabled}
             className="mt-4"

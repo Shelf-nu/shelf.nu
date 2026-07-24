@@ -52,11 +52,7 @@ export default function UpcomingReminders() {
                         {reminder.asset.title}
                       </span>
                       {" · "}
-                      <DateS
-                        date={reminder.alertDateTime}
-                        options={{ month: "short", day: "numeric" }}
-                        includeTime
-                      />
+                      <DateS date={reminder.alertDateTime} includeTime />
                     </span>
                   </div>
                 </Td>

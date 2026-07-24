@@ -1,8 +1,31 @@
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@prisma/client";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
 
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+
+/**
+ * Shared null format-preference fields. The recipient sources now carry the
+ * four raw date/time-format columns (widened selects) so the fan-out can
+ * resolve prefs from the loaded row; the resolver under test ignores these
+ * values, so every fixture user gets nulls (resolves to hints/defaults).
+ */
+const nullFormatPrefs: {
+  dateFormat: DateFormatPreference | null;
+  timeFormat: TimeFormatPreference | null;
+  weekStart: WeekStartPreference | null;
+  timeZone: string | null;
+} = {
+  dateFormat: null,
+  timeFormat: null,
+  weekStart: null,
+  timeZone: null,
+};
 
 // @vitest-environment node
 // see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -88,6 +111,10 @@ function defaultSettings() {
         firstName: string | null;
         lastName: string | null;
         profilePicture: string | null;
+        dateFormat: DateFormatPreference | null;
+        timeFormat: TimeFormatPreference | null;
+        weekStart: WeekStartPreference | null;
+        timeZone: string | null;
       };
     }>,
   };
@@ -162,12 +189,14 @@ describe("getBookingNotificationRecipients", () => {
         email: "admin1@example.com",
         firstName: "Admin",
         lastName: "One",
+        ...nullFormatPrefs,
       },
       {
         id: "admin-2",
         email: "admin2@example.com",
         firstName: "Admin",
         lastName: "Two",
+        ...nullFormatPrefs,
       },
     ]);
     const booking = buildMockBooking();
@@ -197,6 +226,7 @@ describe("getBookingNotificationRecipients", () => {
         email: "admin@example.com",
         firstName: "Admin",
         lastName: "User",
+        ...nullFormatPrefs,
       },
     ]);
     const booking = buildMockBooking();
@@ -244,6 +274,7 @@ describe("getBookingNotificationRecipients", () => {
             firstName: "Always",
             lastName: "One",
             profilePicture: null,
+            ...nullFormatPrefs,
           },
         },
         {
@@ -255,6 +286,7 @@ describe("getBookingNotificationRecipients", () => {
             firstName: "Always",
             lastName: "Two",
             profilePicture: null,
+            ...nullFormatPrefs,
           },
         },
       ],
@@ -287,6 +319,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "booking-notif@example.com",
             firstName: "Notif",
             lastName: "User",
+            ...nullFormatPrefs,
           },
         },
       ],
@@ -318,6 +351,7 @@ describe("getBookingNotificationRecipients", () => {
             firstName: "Duplicate",
             lastName: "User",
             profilePicture: null,
+            ...nullFormatPrefs,
           },
         },
       ],
@@ -352,6 +386,7 @@ describe("getBookingNotificationRecipients", () => {
             firstName: "Editor",
             lastName: "User",
             profilePicture: null,
+            ...nullFormatPrefs,
           },
         },
       ],
@@ -401,6 +436,7 @@ describe("getBookingNotificationRecipients", () => {
             firstName: "No",
             lastName: "Email",
             profilePicture: null,
+            ...nullFormatPrefs,
           },
         },
       ],

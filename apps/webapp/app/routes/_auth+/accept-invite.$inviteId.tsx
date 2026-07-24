@@ -20,7 +20,9 @@ import {
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
+import { detectFormatPrefsFromHints } from "~/utils/date-format";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
@@ -112,10 +114,14 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       id: string;
     };
     const password = generateRandomCode(10);
+    // Detect the accepter's prefs from browser hints so their brand-new user
+    // row is stamped at creation (lazy backfill corrects any UTC fallback).
+    const formatPrefs = detectFormatPrefsFromHints(getClientHint(request));
     const updatedInvite = await updateInviteStatus({
       id: decodedInvite.id,
       status: InviteStatuses.ACCEPTED,
       password,
+      formatPrefs,
     });
 
     if (updatedInvite.status !== InviteStatuses.ACCEPTED) {

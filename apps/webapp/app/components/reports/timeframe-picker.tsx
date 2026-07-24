@@ -7,42 +7,36 @@
  *
  * Features:
  * - Preset buttons (Today, Last 7d, Last 30d, etc.)
- * - Custom range picker with calendar
+ * - Custom range via the shared {@link DateRangePicker}
  * - URL state synchronization
  * - Keyboard accessible
  *
+ * The custom range deals in **calendar dates**; before serializing to the URL
+ * `from`/`to` params it converts each end to the start-of-day / end-of-day
+ * instant in the user's pref timezone (see {@link toZonedBoundaryISO}). This
+ * keeps the queried range aligned with how dates are displayed and fixes the
+ * prior `.toISOString()` browser-tz off-by-one.
+ *
+ * @see {@link file://../shared/date-range-picker.tsx} the shared range picker
  * @see {@link file://../../modules/reports/types.ts}
  */
 
-import type React from "react";
 import { useCallback, useState } from "react";
-import * as Popover from "@radix-ui/react-popover";
-import { CalendarIcon, ChevronDown } from "lucide-react";
-import { DayPicker } from "react-day-picker";
-import "react-day-picker/style.css";
+import { DateTime } from "luxon";
 
+import { DateRangePicker } from "~/components/shared/date-range-picker";
+import type { DateRangeValue } from "~/components/shared/date-range-picker";
 import { useSearchParams } from "~/hooks/search-params";
-import { resolveTimeframe } from "~/modules/reports/timeframe";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
+import {
+  resolveTimeframe,
+  toZonedBoundaryISO,
+} from "~/modules/reports/timeframe";
 import type {
   TimeframePreset,
   ResolvedTimeframe,
 } from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
-
-/** CSS custom properties to theme react-day-picker with Shelf's primary color and compact sizing */
-const dayPickerStyles = {
-  "--rdp-accent-color": "#F97316",
-  "--rdp-accent-background-color": "#FFF7ED",
-  "--rdp-day-width": "32px",
-  "--rdp-day-height": "32px",
-  "--rdp-day_button-width": "32px",
-  "--rdp-day_button-height": "32px",
-  "--rdp-months-gap": "16px",
-  "--rdp-selected-font-weight": "400",
-  "--rdp-range_middle-font-weight": "400",
-  fontSize: "13px",
-  fontWeight: 400,
-} as React.CSSProperties;
 
 export interface TimeframePickerProps {
   /** Currently selected timeframe */
@@ -74,10 +68,32 @@ const PRESETS: { id: TimeframePreset; label: string; shortLabel: string }[] = [
 const EMPTY_EXCLUDE_PRESETS: TimeframePreset[] = [];
 
 /**
+ * Project a pref-tz boundary INSTANT back to the naive calendar `Date` the
+ * {@link DateRangePicker} expects (date-only, wall-clock).
+ *
+ * The active timeframe carries `from`/`to` as start-of-day / end-of-day instants
+ * in the user's pref timezone (see {@link resolveTimeframe}'s custom case). The
+ * picker deals in naive calendar days, so when seeding it from an existing custom
+ * range we read the Y/M/D off the instant IN the pref timezone and rebuild a
+ * browser-local `Date` for that day. Without this the highlighted day would be
+ * off-by-one whenever the browser timezone differs from the pref timezone.
+ *
+ * @param instant - a pref-tz boundary instant from the active timeframe
+ * @param timeZone - the user's pref IANA timezone (e.g. "Asia/Tokyo")
+ * @returns a naive calendar `Date` for the same day the user picked
+ */
+function toNaiveCalendarDate(instant: Date, timeZone: string): Date {
+  const zoned = DateTime.fromJSDate(instant).setZone(timeZone);
+  return new Date(zoned.year, zoned.month - 1, zoned.day);
+}
+
+/**
  * Timeframe picker with preset buttons and custom date range.
  *
- * Compact design: preset pills on left, custom range button on right.
- * Selected preset is highlighted. Custom range opens a calendar popover.
+ * Compact design: preset pills on left, custom range picker on right.
+ * Selected preset is highlighted. The custom range uses the shared
+ * {@link DateRangePicker}, committing to the URL (and `onChange`) once both ends
+ * of the range are selected.
  */
 export function TimeframePicker({
   value,
@@ -88,21 +104,30 @@ export function TimeframePicker({
   className,
 }: TimeframePickerProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { prefs } = useDateFormatter();
 
   // Filter out excluded presets
   const visiblePresets = PRESETS.filter((p) => !excludePresets.includes(p.id));
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customRange, setCustomRange] = useState<{
-    from: Date | undefined;
-    to: Date | undefined;
-  }>({
-    from: value.preset === "custom" ? value.from : undefined,
-    to: value.preset === "custom" ? value.to : undefined,
-  });
+
+  // Controlled custom-range selection. Seeded from the active timeframe when it
+  // is already a custom range so re-opening the picker shows the current dates.
+  // The active timeframe's from/to are pref-tz boundary INSTANTS; convert each
+  // back to the picker's naive calendar day so the correct day is highlighted
+  // even when the browser timezone differs from the pref timezone.
+  const [customRange, setCustomRange] = useState<DateRangeValue>(() => ({
+    from:
+      value.preset === "custom"
+        ? toNaiveCalendarDate(value.from, prefs.timeZone)
+        : undefined,
+    to:
+      value.preset === "custom"
+        ? toNaiveCalendarDate(value.to, prefs.timeZone)
+        : undefined,
+  }));
 
   const handlePresetClick = useCallback(
     (preset: TimeframePreset) => {
-      const resolved = resolveTimeframe(preset);
+      const resolved = resolveTimeframe(preset, undefined, undefined, prefs);
 
       if (syncToUrl) {
         const params = new URLSearchParams(searchParams);
@@ -115,42 +140,44 @@ export function TimeframePicker({
 
       onChange?.(resolved);
     },
-    [searchParams, setSearchParams, syncToUrl, onChange]
+    [searchParams, setSearchParams, syncToUrl, onChange, prefs]
   );
 
-  const handleCustomApply = useCallback(() => {
-    if (!customRange.from || !customRange.to) return;
+  /**
+   * Handle a calendar-range change from the shared picker. Tracks partial
+   * selections locally, and once BOTH ends are set resolves the timeframe and
+   * syncs it to the URL — converting each end to a start-of-day / end-of-day
+   * instant in the user's pref timezone before serializing.
+   */
+  const handleCustomChange = useCallback(
+    (range: DateRangeValue) => {
+      setCustomRange({ from: range.from, to: range.to });
 
-    const resolved = resolveTimeframe(
-      "custom",
-      customRange.from,
-      customRange.to
-    );
+      // Only commit a complete range; wait for the user to pick both ends.
+      if (!range.from || !range.to) return;
 
-    if (syncToUrl) {
-      const params = new URLSearchParams(searchParams);
-      params.set("timeframe", "custom");
-      params.set("from", customRange.from.toISOString());
-      params.set("to", customRange.to.toISOString());
-      params.delete("page"); // Reset to page 1 when filter changes
-      setSearchParams(params, { replace: true });
-    }
+      const resolved = resolveTimeframe("custom", range.from, range.to, prefs);
 
-    onChange?.(resolved);
-    setCustomOpen(false);
-  }, [customRange, searchParams, setSearchParams, syncToUrl, onChange]);
+      if (syncToUrl) {
+        const params = new URLSearchParams(searchParams);
+        params.set("timeframe", "custom");
+        // Anchor boundaries in the user's pref timezone (not the browser's).
+        params.set(
+          "from",
+          toZonedBoundaryISO(range.from, prefs.timeZone, "start")
+        );
+        params.set("to", toZonedBoundaryISO(range.to, prefs.timeZone, "end"));
+        params.delete("page"); // Reset to page 1 when filter changes
+        setSearchParams(params, { replace: true });
+      }
 
-  /** Clears custom selection and reverts to default preset (Last 30 days) */
-  const handleClear = useCallback(() => {
-    setCustomRange({ from: undefined, to: undefined });
-    handlePresetClick("last_30d");
-    setCustomOpen(false);
-  }, [handlePresetClick]);
-
-  const isCustomActive = value.preset === "custom";
+      onChange?.(resolved);
+    },
+    [searchParams, setSearchParams, syncToUrl, onChange, prefs]
+  );
 
   return (
-    <div className={tw("flex items-center gap-3", className)}>
+    <div className={tw("flex flex-wrap items-center gap-3", className)}>
       {/* Preset buttons */}
       <div className="flex items-center gap-1 rounded border border-gray-200 bg-white p-1">
         {visiblePresets.map((preset) => (
@@ -175,142 +202,17 @@ export function TimeframePicker({
         ))}
       </div>
 
-      {/* Custom range picker */}
-      <Popover.Root open={customOpen} onOpenChange={setCustomOpen}>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            className={tw(
-              "flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm font-medium transition-colors",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-              isCustomActive
-                ? "border-primary-600 bg-primary-600 text-white"
-                : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 disabled:hover:border-gray-200 disabled:hover:bg-white"
-            )}
-            aria-expanded={customOpen}
-          >
-            <CalendarIcon className="size-3.5" />
-            <span>{isCustomActive ? value.label : "Custom"}</span>
-            <ChevronDown
-              className={tw(
-                "size-3 transition-transform",
-                customOpen && "rotate-180"
-              )}
-            />
-          </button>
-        </Popover.Trigger>
-
-        <Popover.Portal>
-          <Popover.Content
-            className={tw(
-              "z-50 rounded border border-gray-200 bg-white p-4 shadow-lg",
-              "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-            )}
-            sideOffset={8}
-            align="end"
-          >
-            <div className="space-y-4">
-              <div className="text-sm font-medium text-gray-900">
-                Select date range
-              </div>
-
-              <div>
-                <style>{`
-                  .rdp-day button,
-                  .rdp-day_button,
-                  .rdp-selected .rdp-day_button,
-                  .rdp-range_middle .rdp-day_button,
-                  .rdp-range_start .rdp-day_button,
-                  .rdp-range_end .rdp-day_button {
-                    font-weight: 400 !important;
-                  }
-                `}</style>
-                <DayPicker
-                  mode="range"
-                  selected={{
-                    from: customRange.from,
-                    to: customRange.to,
-                  }}
-                  onSelect={(range) => {
-                    setCustomRange({
-                      from: range?.from,
-                      to: range?.to,
-                    });
-                  }}
-                  numberOfMonths={2}
-                  showOutsideDays
-                  weekStartsOn={0}
-                  style={dayPickerStyles}
-                />
-              </div>
-
-              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
-                <div className="flex items-center gap-3">
-                  {/* Clear button - only show when there's a selection or custom is active */}
-                  {(customRange.from || isCustomActive) && (
-                    <button
-                      type="button"
-                      onClick={handleClear}
-                      className={tw(
-                        "text-xs font-medium text-gray-500",
-                        "hover:text-gray-700 focus:outline-none focus-visible:text-gray-700"
-                      )}
-                    >
-                      Clear
-                    </button>
-                  )}
-                  <div className="text-xs text-gray-500">
-                    {customRange.from && customRange.to && (
-                      <>
-                        {formatDate(customRange.from)} –{" "}
-                        {formatDate(customRange.to)}
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCustomOpen(false)}
-                    className={tw(
-                      "rounded-md px-3 py-1.5 text-xs font-medium text-gray-600",
-                      "hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-                    )}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCustomApply}
-                    disabled={!customRange.from || !customRange.to}
-                    className={tw(
-                      "rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-white",
-                      "hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500",
-                      "disabled:cursor-not-allowed disabled:opacity-50"
-                    )}
-                  >
-                    Apply
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <Popover.Arrow className="fill-white" />
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+      {/* Custom range picker — shared DateRangePicker; commits once both ends
+          are selected (see handleCustomChange). */}
+      <DateRangePicker
+        value={customRange}
+        onChange={handleCustomChange}
+        disabled={disabled}
+        placeholder="Custom range"
+        className="w-full min-w-0 text-sm sm:w-[260px]"
+      />
     </div>
   );
-}
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 export default TimeframePicker;

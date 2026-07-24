@@ -44,6 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const csv = await exportLocationNotesToCsv({
       request,
+      userId,
       locationId,
       organizationId,
     });

@@ -6,18 +6,40 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
   custodianUser: true,
   // Include creator details so the notification resolver can add the
-  // booking creator as a recipient when the org setting is enabled
+  // booking creator as a recipient when the org setting is enabled.
+  // The four format-preference columns are carried so the email fan-out can
+  // resolve this recipient's date/time formatting from the loaded row
+  // (see NotificationRecipient) without a per-recipient DB fetch.
   creator: {
-    select: { id: true, email: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
+    },
   },
   // Include per-booking notification recipients (team members explicitly
-  // added to this booking) for the recipient resolver's step 6
+  // added to this booking) for the recipient resolver's step 6. Format-pref
+  // columns carried for recipient-specific email formatting (see `creator`).
   notificationRecipients: {
     select: {
       id: true,
       name: true,
       user: {
-        select: { id: true, email: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          dateFormat: true,
+          timeFormat: true,
+          weekStart: true,
+          timeZone: true,
+        },
       },
     },
   },

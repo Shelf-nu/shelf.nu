@@ -6,6 +6,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -62,6 +63,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const disabled = useDisabled(fetcher);
   const hints = useHints();
+  // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
+  // timezone preference (the same one display uses), not the browser hint, so
+  // it agrees with the server parse. Locale still comes from `hints`.
+  const prefs = useFormatPrefs();
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours();
@@ -84,7 +89,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints,
+      hints: { ...hints, timeZone: prefs.timeZone },
       action: "new",
       workingHours: workingHours,
       bookingSettings,

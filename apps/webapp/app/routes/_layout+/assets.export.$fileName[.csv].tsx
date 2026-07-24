@@ -75,6 +75,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     } else if (mode === AssetIndexMode.ADVANCED) {
       csvString = await exportAssetsFromIndexToCsv({
         request,
+        userId,
         assetIds,
         settings,
         currentOrganization,

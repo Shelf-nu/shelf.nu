@@ -2,8 +2,8 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
-import { parseISO } from "date-fns";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
 
@@ -189,8 +189,20 @@ export function getLocale(request: Request) {
   return locales[0] ?? "en-US";
 }
 
-export function formatDateBasedOnLocaleOnly(value: string, locale: string) {
-  return parseISO(value).toLocaleDateString(locale);
+/**
+ * Render a date-only string as an absolute (working-hours) date using the
+ * caller's resolved format prefs — no timezone conversion. This is the spine
+ * behind custom-field DATE display and calendar labels.
+ *
+ * @param value - ISO date-only or date-time string
+ * @param prefs - Fully-resolved user format prefs
+ * @returns Numeric date string in the user's configured order
+ */
+export function formatDateBasedOnLocaleOnly(
+  value: string,
+  prefs: ResolvedFormatPrefs
+) {
+  return formatDate(value, prefs, { localeOnly: true });
 }
 
 /**

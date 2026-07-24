@@ -41,17 +41,19 @@ import {
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import {
-  getClientHint,
-  getDateTimeFormatFromHints,
-  type ClientHint,
-} from "~/utils/client-hints";
+import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   getFiltersFromRequest,
   updateCookieWithPerPage,
 } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
+import {
+  formatDate,
+  resolveFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -149,28 +151,37 @@ const label: ErrorLabel = "Booking";
  * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
  * blocking the booking flow on slow SMTP delivery.
  *
+ * Each recipient's date/time formatting is resolved from their already-loaded
+ * row (the four raw pref fields on `NotificationRecipient`) via the pure
+ * `resolveFormatPrefs` — no per-recipient DB fetch (avoids an N+1). The
+ * `buildText`/`buildHeading` callbacks receive those resolved prefs so the
+ * plain-text body and heading dates honor each recipient.
+ *
  * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
  * @param booking - The booking data used to render the email template
  * @param subject - Email subject line
- * @param textContent - Plain-text fallback content
- * @param heading - Primary heading rendered in the HTML template
- * @param hints - Client hints for date/time formatting
+ * @param buildText - Builds the plain-text body from a recipient's resolved prefs
+ * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
+ * @param hints - Acting user's hints — only the null-field fallback for recipients
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
   recipients,
   booking,
   subject,
-  textContent,
-  heading,
+  buildText,
+  buildHeading,
   hints,
   templateProps,
 }: {
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
   subject: string;
-  textContent: string;
-  heading: string;
+  /** Built per recipient with their resolved prefs. */
+  buildText: (prefs: ResolvedFormatPrefs) => string;
+  /** Built per recipient with their resolved prefs. */
+  buildHeading: (prefs: ResolvedFormatPrefs) => string;
+  /** Acting user's hints — only the null-field fallback for recipients. */
   hints: ClientHint;
   templateProps?: {
     hideViewButton?: boolean;
@@ -181,11 +192,16 @@ async function sendBookingEmailToAllRecipients({
   };
 }) {
   for (const recipient of recipients) {
+    // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
+    // NotificationRecipient); hints is the null-field fallback only. Pure —
+    // no per-recipient DB fetch (avoids an N+1 in the fan-out).
+    const recipientPrefs = resolveFormatPrefs(recipient, hints);
+
     const html = await bookingUpdatesTemplateString({
       booking,
-      heading,
+      heading: buildHeading(recipientPrefs),
       assetCount: booking._count.bookingAssets,
-      hints,
+      prefs: recipientPrefs,
       recipientReason: recipient.reason,
       recipientEmail: recipient.email,
       ...templateProps,
@@ -194,7 +210,7 @@ async function sendBookingEmailToAllRecipients({
     sendEmail({
       to: recipient.email,
       subject,
-      text: textContent,
+      text: buildText(recipientPrefs),
       html,
     });
   }
@@ -1195,16 +1211,17 @@ export async function updateBasicBooking({
     // Collect plain-text change descriptions for the email
     const changes: string[] = [];
 
+    // Acting-user compromise: the embedded change list uses the editor's
+    // resolved prefs (rebuilding the diff per recipient is disproportionate).
+    const actingPrefs = userId
+      ? await resolveUserFormatPrefsById(userId, hints ?? null)
+      : null;
+
     // Helper to format dates for email change descriptions
-    const formatDateForEmail = (date: Date) => {
-      if (hints) {
-        return getDateTimeFormatFromHints(hints, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(date);
-      }
-      return date.toISOString();
-    };
+    const formatDateForEmail = (date: Date) =>
+      actingPrefs
+        ? formatDate(date, actingPrefs, { includeTime: true })
+        : date.toISOString();
 
     // Check and log name changes
     if (name && name !== booking.name) {
@@ -1758,24 +1775,23 @@ export async function reserveBooking({
           modelName: req.assetModel.name,
         }));
 
-      const text = assetReservedEmailContent({
-        bookingName: bookingFound.name,
-        assetsCount: bookingFound._count.bookingAssets,
-        custodian,
-        from,
-        to,
-        hints,
-        bookingId: bookingFound.id,
-        customEmailFooter: bookingFound.organization.customEmailFooter,
-        modelRequests: outstandingModelRequests,
-      });
-
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: bookingFound,
         subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Booking reservation for ${custodian}`,
+        buildText: (prefs) =>
+          assetReservedEmailContent({
+            bookingName: bookingFound.name,
+            assetsCount: bookingFound._count.bookingAssets,
+            custodian,
+            from,
+            to,
+            prefs,
+            bookingId: bookingFound.id,
+            customEmailFooter: bookingFound.organization.customEmailFooter,
+            modelRequests: outstandingModelRequests,
+          }),
+        buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
         templateProps: {
           assets: bookingFound.bookingAssets,
@@ -4780,23 +4796,23 @@ export async function checkinBooking({
         updatedBooking.custodianTeamMember?.name ||
         "";
 
-      const text = completedBookingEmailContent({
-        bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.bookingAssets,
-        custodian,
-        from: updatedBooking.from!,
-        to: updatedBooking.to!,
-        bookingId: updatedBooking.id,
-        hints,
-        customEmailFooter: updatedBooking.organization.customEmailFooter,
-      });
-
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been completed: "${updatedBooking.name}"`,
+        buildText: (prefs) =>
+          completedBookingEmailContent({
+            bookingName: updatedBooking.name,
+            assetsCount: updatedBooking._count.bookingAssets,
+            custodian,
+            from: updatedBooking.from!,
+            to: updatedBooking.to!,
+            bookingId: updatedBooking.id,
+            prefs,
+            customEmailFooter: updatedBooking.organization.customEmailFooter,
+          }),
+        buildHeading: () =>
+          `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
       });
     }
@@ -8103,24 +8119,24 @@ export async function cancelBooking({
         ? resolveUserDisplayName(booking.custodianUser)
         : booking.custodianTeamMember?.name ?? "";
 
-      const text = cancelledBookingEmailContent({
-        bookingName: booking.name,
-        assetsCount: booking._count.bookingAssets,
-        custodian,
-        from: booking.from!,
-        to: booking.to!,
-        bookingId: booking.id,
-        hints,
-        customEmailFooter: booking.organization.customEmailFooter,
-        cancellationReason: cancellationReason || undefined,
-      });
-
       await sendBookingEmailToAllRecipients({
         recipients,
         booking,
         subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been cancelled: "${booking.name}"`,
+        buildText: (prefs) =>
+          cancelledBookingEmailContent({
+            bookingName: booking.name,
+            assetsCount: booking._count.bookingAssets,
+            custodian,
+            from: booking.from!,
+            to: booking.to!,
+            bookingId: booking.id,
+            prefs,
+            customEmailFooter: booking.organization.customEmailFooter,
+            cancellationReason: cancellationReason || undefined,
+          }),
+        buildHeading: () =>
+          `Your booking has been cancelled: "${booking.name}"`,
         hints,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
@@ -8456,31 +8472,26 @@ export async function extendBooking({
         ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
 
-      const text = extendBookingEmailContent({
-        bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.bookingAssets,
-        custodian,
-        from: updatedBooking.from!,
-        to: updatedBooking.to!,
-        hints,
-        bookingId: updatedBooking.id,
-        oldToDate: booking.to,
-        customEmailFooter: updatedBooking.organization.customEmailFooter,
-      });
-
-      const { format } = getDateTimeFormatFromHints(hints, {
-        dateStyle: "short",
-        timeStyle: "short",
-      });
-
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Booking extended from ${format(booking.to)} to ${format(
-          newEndDate
-        )}`,
+        buildText: (prefs) =>
+          extendBookingEmailContent({
+            bookingName: updatedBooking.name,
+            assetsCount: updatedBooking._count.bookingAssets,
+            custodian,
+            from: updatedBooking.from!,
+            to: updatedBooking.to!,
+            prefs,
+            bookingId: updatedBooking.id,
+            oldToDate: booking.to,
+            customEmailFooter: updatedBooking.organization.customEmailFooter,
+          }),
+        buildHeading: (prefs) =>
+          `Booking extended from ${formatDate(booking.to, prefs, {
+            includeTime: true,
+          })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
       });
     }
@@ -9701,23 +9712,22 @@ export async function deleteBooking(
         ? resolveUserDisplayName(b.custodianUser)
         : b.custodianTeamMember?.name ?? "";
 
-      const text = deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b._count.bookingAssets,
-        custodian,
-        from: b.from as Date,
-        to: b.to as Date,
-        bookingId: b.id,
-        hints,
-        customEmailFooter: b.organization.customEmailFooter,
-      });
-
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: b,
         subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been deleted: "${b.name}"`,
+        buildText: (prefs) =>
+          deletedBookingEmailContent({
+            bookingName: b.name,
+            assetsCount: b._count.bookingAssets,
+            custodian,
+            from: b.from as Date,
+            to: b.to as Date,
+            bookingId: b.id,
+            prefs,
+            customEmailFooter: b.organization.customEmailFooter,
+          }),
+        buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
         templateProps: {
           hideViewButton: true,
@@ -10525,22 +10535,21 @@ export async function bulkDeleteBookings({
           b.custodianTeamMember?.name ||
           "";
 
-        const text = deletedBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b.bookingAssets.length,
-          custodian,
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-        });
-
         await sendBookingEmailToAllRecipients({
           recipients,
           booking: b,
           subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-          textContent: text,
-          heading: `Your booking has been deleted: "${b.name}"`,
+          buildText: (prefs) =>
+            deletedBookingEmailContent({
+              bookingName: b.name,
+              assetsCount: b.bookingAssets.length,
+              custodian,
+              from: b.from as Date,
+              to: b.to as Date,
+              bookingId: b.id,
+              prefs,
+            }),
+          buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
           templateProps: {
             hideViewButton: true,
@@ -10946,23 +10955,22 @@ export async function bulkCancelBookings({
           b.custodianTeamMember?.name ||
           "";
 
-        const text = cancelledBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b._count.bookingAssets,
-          custodian,
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-          customEmailFooter: b.organization.customEmailFooter,
-        });
-
         await sendBookingEmailToAllRecipients({
           recipients,
           booking: b,
           subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
-          textContent: text,
-          heading: `Your booking has been cancelled: "${b.name}"`,
+          buildText: (prefs) =>
+            cancelledBookingEmailContent({
+              bookingName: b.name,
+              assetsCount: b._count.bookingAssets,
+              custodian,
+              from: b.from as Date,
+              to: b.to as Date,
+              bookingId: b.id,
+              prefs,
+              customEmailFooter: b.organization.customEmailFooter,
+            }),
+          buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
         });
       }

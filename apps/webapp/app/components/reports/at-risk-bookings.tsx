@@ -188,15 +188,10 @@ function RiskGroup({
                   <span>
                     {" "}
                     · Due{" "}
-                    <DateS
-                      date={booking.scheduledEnd}
-                      options={{
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      }}
-                    />
+                    {/* Due date + time in the user's resolved format prefs.
+                        `includeTime` shows the scheduled-end time, which is
+                        meaningful for a booking that ends later today. */}
+                    <DateS date={booking.scheduledEnd} includeTime />
                   </span>
                 </p>
               </div>

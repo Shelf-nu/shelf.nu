@@ -27,7 +27,9 @@ import type {
   AssetInventoryPdfMeta,
   CustodySnapshotPdfMeta,
 } from "~/modules/reports/types";
-import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
+import { getClientHint, getLocale } from "~/utils/client-hints";
+import { formatDate } from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -101,6 +103,13 @@ export const loader = async ({
       action: PermissionAction.read,
     });
 
+    // Acting user's resolved prefs drive both the timeframe label ordering and
+    // the PDF table date formatter below (resolved once, reused twice).
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     // Validate report exists
     const reportDef = getReportById(reportId);
     if (!reportDef) {
@@ -122,7 +131,8 @@ export const loader = async ({
     const timeframe = resolveTimeframe(
       timeframePreset,
       customFrom ? new Date(customFrom) : undefined,
-      customTo ? new Date(customTo) : undefined
+      customTo ? new Date(customTo) : undefined,
+      prefs
     );
 
     // Get organization info. `currency` is required so PDF monetary values
@@ -155,14 +165,17 @@ export const loader = async ({
       locale,
     };
 
-    // Date formatter - use explicit options to avoid conflict with dateStyle
-    // (the utility adds default year/month/day when timeStyle is missing,
-    // which is incompatible with dateStyle)
-    const dateFormat = getDateTimeFormat(request, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    // Report tables use a date-only label (year + short month + day). formatDate
+    // reassembles per the acting user's date-order preference (reuses the prefs
+    // resolved once above — do not resolve again).
+    const dateFormat = {
+      format: (date: Date) =>
+        formatDate(date, prefs, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
+    };
 
     // Generate report data based on type
     let pdfMeta: ReportPdfMeta;
@@ -172,6 +185,8 @@ export const loader = async ({
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
+          // Anchor trend-chart axis labels in the acting user's timezone (D2).
+          timeZone: prefs.timeZone,
           page: 1,
           pageSize: 10000, // PDF can handle large tables
         });

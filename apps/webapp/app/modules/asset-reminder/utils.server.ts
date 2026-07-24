@@ -2,10 +2,11 @@ import type { AssetReminder } from "@prisma/client";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import { z } from "zod";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { payload, parseData, safeRedirect } from "~/utils/http.server";
 import { deleteAssetReminder, editAssetReminder } from "./service.server";
@@ -32,21 +33,30 @@ export async function resolveRemindersActions({
 
   switch (intent) {
     case "edit-reminder": {
+      // Resolve the acting user's RESOLVED timezone preference BEFORE validating
+      // so the schema's "must be in the future" check runs in the SAME zone the
+      // value is stored in (below) and the SAME zone the client validated in.
+      // Validating with the default server-zone schema first, then storing in
+      // the pref zone, lets the two disagree for a wall-clock time near "now".
+      // Locale still comes from hints; only the timezone source changes.
+      const { timeZone } = await resolveUserFormatPrefsById(
+        userId,
+        getClientHint(request)
+      );
+
       const { redirectTo, ...payload } = parseData(
         formData,
-        setReminderSchema.extend({ id: z.string() }),
+        createSetReminderSchema({ timeZone }).extend({ id: z.string() }),
         // Expected user-input validation (e.g. "Please select a date in the
         // future") — a 400, not a server error. The create path already opts
         // out; mirror it here (was noise: SHELF-WEBAPP-1ME).
         { shouldBeCaptured: false }
       );
 
-      const hints = getHints(request);
-
       const alertDateTime = DateTime.fromFormat(
         formData.get("alertDateTime")!.toString()!,
         DATE_TIME_FORMAT,
-        { zone: hints.timeZone }
+        { zone: timeZone }
       ).toJSDate();
 
       await editAssetReminder({

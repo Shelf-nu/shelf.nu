@@ -8,6 +8,7 @@ import {
   Text,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -20,6 +21,8 @@ interface BarcodeTrialEndsTomorrowProps {
   email: string;
   hasPaymentMethod: boolean;
   trialEndDate: Date;
+  /** Resolved formatting prefs of the billed (recipient) user. */
+  prefs: ResolvedFormatPrefs;
 }
 
 export const sendBarcodeTrialEndsTomorrowEmail = async ({
@@ -27,6 +30,7 @@ export const sendBarcodeTrialEndsTomorrowEmail = async ({
   email,
   hasPaymentMethod,
   trialEndDate,
+  prefs,
 }: BarcodeTrialEndsTomorrowProps) => {
   try {
     const subject = hasPaymentMethod
@@ -36,11 +40,13 @@ export const sendBarcodeTrialEndsTomorrowEmail = async ({
       firstName,
       hasPaymentMethod,
       trialEndDate,
+      prefs,
     });
     const text = barcodeTrialEndsTomorrowEmailText({
       firstName,
       hasPaymentMethod,
       trialEndDate,
+      prefs,
     });
 
     void sendEmail({
@@ -66,12 +72,14 @@ export const barcodeTrialEndsTomorrowEmailText = ({
   firstName,
   hasPaymentMethod,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) => {
-  const dateStr = trialEndDate.toLocaleDateString("en-US", {
+  const dateStr = formatDate(trialEndDate, prefs, {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -108,14 +116,16 @@ function BarcodeTrialEndsTomorrowEmailTemplate({
   firstName,
   hasPaymentMethod,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) {
   const { emailPrimaryColor } = config;
 
-  const dateStr = trialEndDate.toLocaleDateString("en-US", {
+  const dateStr = formatDate(trialEndDate, prefs, {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -229,15 +239,18 @@ export const barcodeTrialEndsTomorrowEmailHtml = ({
   firstName,
   hasPaymentMethod,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) =>
   render(
     <BarcodeTrialEndsTomorrowEmailTemplate
       firstName={firstName}
       hasPaymentMethod={hasPaymentMethod}
       trialEndDate={trialEndDate}
+      prefs={prefs}
     />
   );

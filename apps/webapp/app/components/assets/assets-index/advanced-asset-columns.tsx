@@ -36,6 +36,7 @@ import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
@@ -82,8 +83,8 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization, timeZone } =
-    useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -106,10 +107,10 @@ export function AdvancedIndexColumn({
       );
     }
 
-    const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
-      locale,
-      timeZone,
-    });
+    const customFieldDisplayValue = getCustomFieldDisplayValue(
+      fieldValue,
+      prefs
+    );
 
     return (
       <Td>

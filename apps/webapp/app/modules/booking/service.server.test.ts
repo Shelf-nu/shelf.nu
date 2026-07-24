@@ -162,6 +162,11 @@ vitest.mock("~/database/db.server", () => ({
         firstName: "Test",
         lastName: "User",
       }),
+      // why: updateBasicBooking now resolves the acting user's format prefs via
+      // resolveUserFormatPrefsById (db.user.findFirst). Returning null makes the
+      // resolver fall back to hints/defaults — no test asserts the formatted
+      // date string, so null is sufficient to keep the flow from crashing.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     bookingNote: {
       create: vitest.fn().mockResolvedValue({}),

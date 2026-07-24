@@ -19,6 +19,7 @@ import { db } from "~/database/db.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
+  createUser,
   createUserAccountForTesting,
   createUserOrAttachOrg,
   defaultUserCategories,
@@ -445,5 +446,52 @@ describe(createUserOrAttachOrg.name, () => {
     expect(result.id).toBe(USER_ID);
     expect(db.userOrganization.upsert).toHaveBeenCalled();
     expect(db.user.create).not.toHaveBeenCalled();
+  });
+});
+
+describe(createUser.name, () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // @ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue(newUserMock);
+    // @ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback: any) => callback(db));
+  });
+
+  it("persists detected format prefs onto the new user row", async () => {
+    // why: DetectedFormatPrefs is the exact shape each entry action passes down
+    const formatPrefs = {
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Europe/Amsterdam",
+    } as const;
+
+    await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      formatPrefs,
+    });
+
+    expect(db.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dateFormat: "DD_MM_YYYY",
+          timeFormat: "H24",
+          weekStart: "MONDAY",
+          timeZone: "Europe/Amsterdam",
+        }),
+      })
+    );
+  });
+
+  it("omits the pref columns when no formatPrefs passed (resolver backfills at read)", async () => {
+    await createUser({ email: USER_EMAIL, userId: USER_ID, username });
+
+    // @ts-expect-error missing vitest type
+    const createArg = db.user.create.mock.calls[0][0];
+    expect(createArg.data.dateFormat).toBeUndefined();
+    expect(createArg.data.timeZone).toBeUndefined();
   });
 });

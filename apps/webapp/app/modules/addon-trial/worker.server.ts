@@ -1,6 +1,7 @@
 import type PgBoss from "pg-boss";
 import { sendAuditTrialEndsTomorrowEmail } from "~/emails/stripe/audit-trial-ends-tomorrow";
 import { sendBarcodeTrialEndsTomorrowEmail } from "~/emails/stripe/barcode-trial-ends-tomorrow";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -46,12 +47,16 @@ async function handleAddonTrialJob(
 
   const trialEndDateObj = new Date(trialEndDate);
 
+  // Format the trial-end date with the billed (recipient) user's resolved prefs.
+  const prefs = await resolveUserFormatPrefsById(userId, null);
+
   if (addonType === "audits") {
     await sendAuditTrialEndsTomorrowEmail({
       firstName,
       email,
       hasPaymentMethod,
       trialEndDate: trialEndDateObj,
+      prefs,
     });
   } else {
     await sendBarcodeTrialEndsTomorrowEmail({
@@ -59,6 +64,7 @@ async function handleAddonTrialJob(
       email,
       hasPaymentMethod,
       trialEndDate: trialEndDateObj,
+      prefs,
     });
   }
 }

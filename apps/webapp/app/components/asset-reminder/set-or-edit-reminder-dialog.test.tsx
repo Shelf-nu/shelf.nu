@@ -16,9 +16,11 @@
 import type { ComponentProps, ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
+import SetOrEditReminderDialog, {
+  createSetReminderSchema,
+} from "./set-or-edit-reminder-dialog";
 
 // why: TeamMembersSelector pulls in `useApiQuery` (a real network call) and is
 // unrelated to the success-effect under test; stub it so the dialog can
@@ -35,6 +37,22 @@ vi.mock("../layout/dialog", () => ({
   DialogPortal: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
+}));
+
+// why: the dialog reads `useFormatPrefs()` and its embedded `DateTimePicker`
+// reads `useDateFormatter()`; both funnel through `useRequestInfo().formatPrefs`,
+// which needs the root data-router loader (absent under MemoryRouter). Stub the
+// resolved prefs so the dialog renders — the success-effect under test is
+// prefs-agnostic.
+vi.mock("~/utils/request-info", () => ({
+  useRequestInfo: () => ({
+    formatPrefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+  }),
 }));
 
 /** Total times any `onClose` instance handed to the dialog was invoked. */
@@ -205,5 +223,100 @@ describe("SetOrEditReminderDialog success-handling effect", () => {
 
     expect(onCloseCallCount).toBe(2);
     expect(setSearchParamsCallCount).toBe(2);
+  });
+});
+
+/**
+ * Regression tests for the reminder future-date validation:
+ *
+ * - The cutoff must be evaluated PER validation (fresh `now`), not captured
+ *   once when the schema is built — otherwise a long-lived process drifts and
+ *   validates against a stale moment.
+ * - The cutoff must interpret the submitted wall-clock in the acting user's
+ *   timezone (matching persistence), so the SAME wall-clock string is judged
+ *   future-or-past correctly regardless of the runtime/browser zone.
+ *
+ * All assertions pin `now` to a fixed UTC instant via fake timers, so they are
+ * independent of the machine timezone the suite runs on.
+ */
+describe("createSetReminderSchema future-date validation", () => {
+  /** Fixed reference instant: 2026-07-23T12:00:00Z. */
+  const NOW_UTC = new Date("2026-07-23T12:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_UTC);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Parses only the `alertDateTime` field so we don't have to satisfy the
+   * other required fields for a validity check on the date alone.
+   */
+  function validateAlertDateTime(
+    wallClock: string,
+    options?: { timeZone?: string }
+  ) {
+    return createSetReminderSchema(options).shape.alertDateTime.safeParse(
+      wallClock
+    );
+  }
+
+  it("re-evaluates the cutoff against the CURRENT moment on every validation, not the moment the schema was built", () => {
+    // Build the schema ONCE while `now` is 12:00Z.
+    const schema = createSetReminderSchema({ timeZone: "UTC" });
+
+    // 12:30 UTC is in the future relative to 12:00Z → valid.
+    expect(
+      schema.shape.alertDateTime.safeParse("2026-07-23T12:30").success
+    ).toBe(true);
+
+    // Advance the clock past that instant WITHOUT rebuilding the schema.
+    vi.setSystemTime(new Date("2026-07-23T13:00:00.000Z"));
+
+    // The very same schema + input is now in the PAST → invalid. A cutoff
+    // frozen at build time (the original `.min(new Date())` bug) would still
+    // report it as valid here.
+    expect(
+      schema.shape.alertDateTime.safeParse("2026-07-23T12:30").success
+    ).toBe(false);
+  });
+
+  it("interprets the submitted wall-clock in the user's timezone so the same string is judged relative to persistence", () => {
+    // now = 2026-07-23T12:00:00Z. Same wall-clock, opposite verdicts by zone:
+    // - America/New_York (UTC-4 in July): 13:00 EDT = 17:00Z → future → valid.
+    // - Europe/Berlin (UTC+2 in July): 13:00 CEST = 11:00Z → past → invalid.
+    const wallClock = "2026-07-23T13:00";
+
+    expect(
+      validateAlertDateTime(wallClock, { timeZone: "America/New_York" }).success
+    ).toBe(true);
+
+    expect(
+      validateAlertDateTime(wallClock, { timeZone: "Europe/Berlin" }).success
+    ).toBe(false);
+  });
+
+  it("rejects a wall-clock that is in the past in the user's timezone", () => {
+    // 09:00 UTC is before now (12:00Z) → past → invalid, with the same
+    // user-facing message.
+    const result = validateAlertDateTime("2026-07-23T09:00", {
+      timeZone: "UTC",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe(
+        "Please select a date in the future"
+      );
+    }
+  });
+
+  it("surfaces the standard invalid-date error for an empty value (unchanged UX)", () => {
+    const result = validateAlertDateTime("", { timeZone: "UTC" });
+    expect(result.success).toBe(false);
   });
 });

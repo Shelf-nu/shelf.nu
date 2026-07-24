@@ -5,6 +5,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { TimeRangeDisplay } from "~/components/shared/time-display";
 import { useDisabled } from "~/hooks/use-disabled";
+import { getOverrideDateKey } from "~/modules/working-hours/utils";
 import { tw } from "~/utils/tw";
 
 interface OverridePreviewProps {
@@ -37,7 +38,13 @@ export function OverridePreview({ override }: OverridePreviewProps) {
         <div className="flex items-center gap-3">
           <span className="font-semibold text-gray-900">
             <DateS
-              date={override.date}
+              // Overrides are absolute real-world calendar dates that must never
+              // shift with the viewer's timezone. The stored value can be a
+              // UTC-midnight instant; passing it straight to DateS reads its
+              // browser-local components and lands a day west of UTC. Collapse it
+              // to a bare "YYYY-MM-DD" first so formatDate takes its no-shift path
+              // and renders the calendar date exactly.
+              date={getOverrideDateKey(override.date)}
               localeOnly
               options={{
                 weekday: "long",
