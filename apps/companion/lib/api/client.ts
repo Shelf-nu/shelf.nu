@@ -78,12 +78,16 @@ export type ApiFetchOptions = RequestInit & { retry?: boolean };
  * - Returns structured { data, error } -- never throws.
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
+ * - `status` carries the HTTP status when a response was received at all,
+ *   letting callers tell an authoritative 404/403 ("gone") apart from a
+ *   network/timeout failure (`status` undefined). Additive — existing
+ *   `{ data, error }` destructuring is unaffected.
  */
 export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {},
   _retryCount = 0
-): Promise<{ data: T | null; error: string | null }> {
+): Promise<{ data: T | null; error: string | null; status?: number }> {
   // Declared outside try so catch block can read it
   let timedOut = false;
 
@@ -134,9 +138,17 @@ export async function apiFetch<T>(
       json = text ? JSON.parse(text) : null;
     } catch {
       if (!response.ok) {
-        return { data: null, error: `Server error (${response.status})` };
+        return {
+          data: null,
+          error: `Server error (${response.status})`,
+          status: response.status,
+        };
       }
-      return { data: null, error: "Invalid response from server" };
+      return {
+        data: null,
+        error: "Invalid response from server",
+        status: response.status,
+      };
     }
 
     if (!response.ok) {
@@ -146,6 +158,7 @@ export async function apiFetch<T>(
         return {
           data: null,
           error: "Session expired. Please sign in again.",
+          status: response.status,
         };
       }
       // 403 = forbidden → user lacks permission, but session is valid
@@ -155,15 +168,17 @@ export async function apiFetch<T>(
           error:
             json?.error?.message ||
             "You don't have permission to perform this action.",
+          status: response.status,
         };
       }
       return {
         data: null,
         error: json?.error?.message || `Request failed (${response.status})`,
+        status: response.status,
       };
     }
 
-    return { data: json as T, error: null };
+    return { data: json as T, error: null, status: response.status };
   } catch (err) {
     // Navigation/cleanup abort — silently return null (not an error)
     if (err instanceof Error && err.name === "AbortError" && !timedOut) {

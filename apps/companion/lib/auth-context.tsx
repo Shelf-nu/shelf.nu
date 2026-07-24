@@ -8,6 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+// why: deep import — the ./reminders barrel pulls in the org-context-using
+// hook, and org-context imports this file; going straight to the service
+// (which only touches the api client) avoids a require cycle.
+import { clearAllBookingReminders } from "./reminders/service";
 import { supabase } from "./supabase";
 
 type AuthState = {
@@ -58,6 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Scheduled booking reminders belong to this account's session. After
+    // sign-out every reconcile fetch would 401 forever, so the tracked
+    // records could never heal — cancel and forget them all up front.
+    await clearAllBookingReminders();
     await supabase.auth.signOut();
   }, []);
 

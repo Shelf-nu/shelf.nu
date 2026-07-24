@@ -30,6 +30,7 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { cancelBookingReminders, syncBookingReminders } from "@/lib/reminders";
 import {
   fontSize,
   spacing,
@@ -244,6 +245,11 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
+            // Now ONGOING — schedule due-back reminders (interactive: a
+            // direct user action, so the OS permission prompt may show).
+            void syncBookingReminders(booking.id, currentOrg.id, {
+              interactive: true,
+            });
             Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
               { text: "OK", onPress: () => fetchBooking() },
             ]);
@@ -277,6 +283,8 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
+            // Fully returned — drop the due-back reminders immediately.
+            void cancelBookingReminders(booking.id);
             Alert.alert("Complete", `"${booking.name}" is now complete.`, [
               {
                 text: "OK",
@@ -317,6 +325,11 @@ export default function BookingDetailScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     // Mutation changed this booking — force the list to refetch.
     markBookingsListDirty();
+    // Fully returned → drop reminders now; partial → gear is still out, and
+    // if the due time is unchanged the reminders remain correct as-is.
+    if (data?.isComplete) {
+      void cancelBookingReminders(booking.id);
+    }
     const msg = data?.isComplete
       ? `All assets checked in. "${booking.name}" is now complete.`
       : `${data?.checkedInCount ?? "Some"} checked in, ${
@@ -395,6 +408,12 @@ export default function BookingDetailScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     // Mutation changed this booking — force the list to refetch.
     markBookingsListDirty();
+    // The first partial checkout flips RESERVED → ONGOING; sync re-fetches
+    // and only schedules when the booking is genuinely out, so calling it
+    // on every partial success is safe and idempotent.
+    void syncBookingReminders(booking.id, currentOrg.id, {
+      interactive: true,
+    });
     const msg = data?.isComplete
       ? `All assets are now checked out for "${booking.name}".`
       : `${data?.checkedOutCount ?? "Some"} checked out, ${
@@ -546,6 +565,8 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
+            // Cancelled bookings have nothing due back.
+            void cancelBookingReminders(booking.id);
             fetchBooking();
           },
         },
@@ -576,6 +597,8 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
+            // Archived = administratively closed; stop reminding.
+            void cancelBookingReminders(booking.id);
             fetchBooking();
           },
         },
@@ -607,6 +630,9 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
+            // Gone from the server — reminders must go with it (this is why
+            // cancel is fetch-free: a sync would 404 here).
+            void cancelBookingReminders(booking.id);
             // The booking no longer exists — leave the detail screen.
             router.back();
           },
