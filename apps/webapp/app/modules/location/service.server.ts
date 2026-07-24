@@ -21,6 +21,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -2379,6 +2380,15 @@ export async function updateLocationAssets({
       assetQuantities,
     });
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400 (user tried to place more units across
+    // locations than the asset has). No-ops for every other error. See
+    // SHELF-WEBAPP-21N.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }

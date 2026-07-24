@@ -95,6 +95,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -3051,6 +3052,17 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400. updateAsset writes AssetLocation pivot rows
+    // in its transaction; a submitted quantity can pass the pre-check yet trip
+    // the DEFERRED trigger at COMMIT if a concurrent request lowered
+    // Asset.quantity in between. No-ops for every other error. See
+    // SHELF-WEBAPP-219 / 21N (race backstop, matching replaceAssetPlacements).
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { userId, id, organizationId },
+    });
+
     // If it's already a ShelfError (kit guard, qty validator, org-scope
     // guard, etc.), re-throw as-is so the upstream status / title /
     // message survive. `isLikeShelfError` includes a duck-type fallback
@@ -3516,6 +3528,16 @@ export async function replaceAssetPlacements({
 
     return { ok: true as const };
   } catch (cause) {
+    // Backstop: the sum-within-total pre-check above (step 5) rejects most
+    // over-submissions with a friendly 400, but a concurrent placement / qty
+    // edit can still trip the DEFERRED `AssetLocation ... exceeds
+    // Asset.quantity` trigger at COMMIT. Translate that race to the same
+    // friendly 400 instead of a generic 500. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { assetId, userId, organizationId },
+    });
+
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
@@ -8265,6 +8287,22 @@ export async function placeUnplacedUnits(
       moveCorrelationId,
     };
   } catch (cause) {
+    // Backstop: the `quantity > unplaced` pre-check above rejects most
+    // over-submissions with a friendly 400, but two concurrent place-units
+    // requests can each pass their own check and still trip the DEFERRED
+    // `AssetLocation ... exceeds Asset.quantity` trigger at COMMIT. Translate
+    // that race to the same friendly 400. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        toLocationId,
+        quantity,
+      },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }
