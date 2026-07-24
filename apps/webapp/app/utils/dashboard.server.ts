@@ -241,59 +241,53 @@ export function getCustodiansOrderedByTotalCustodies({
 // checklistOptions
 // ---------------------------------------------------------------------------
 
+/**
+ * Computes the count-backed onboarding checklist booleans.
+ *
+ * `hasAssets` and `hasCustodies` are composed at the call site (home loader)
+ * from queries it already runs, so they are not re-counted here.
+ *
+ * @param args - The organization to compute the checklist for
+ * @returns Checklist booleans keyed by onboarding step
+ * @throws {ShelfError} If a count query fails
+ */
 export async function checklistOptions({
-  hasAssets,
   organizationId,
 }: {
-  hasAssets: boolean;
   organizationId: string;
 }) {
   try {
-    const [
-      categoriesCount,
-      tagsCount,
-      teamMembersCount,
-      custodiesCount,
-      customFieldsCount,
-    ] = await Promise.all([
-      db.category.count({
-        where: {
-          organizationId,
-          name: {
-            notIn: defaultUserCategories.map((uc) => uc.name),
+    const [categoriesCount, tagsCount, teamMembersCount, customFieldsCount] =
+      await Promise.all([
+        db.category.count({
+          where: {
+            organizationId,
+            name: {
+              notIn: defaultUserCategories.map((uc) => uc.name),
+            },
           },
-        },
-      }),
+        }),
 
-      db.tag.count({
-        where: { organizationId },
-      }),
+        db.tag.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: { organizationId },
-      }),
+        db.teamMember.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: {
-          organizationId,
-          custodies: { some: {} },
-        },
-      }),
-
-      db.customField.count({
-        where: {
-          organizationId,
-          deletedAt: null,
-        },
-      }),
-    ]);
+        db.customField.count({
+          where: {
+            organizationId,
+            deletedAt: null,
+          },
+        }),
+      ]);
 
     return {
-      hasAssets,
       hasCategories: categoriesCount > 0,
       hasTags: tagsCount > 0,
       hasTeamMembers: teamMembersCount > 0,
-      hasCustodies: custodiesCount > 0,
       hasCustomFields: customFieldsCount > 0,
     };
   } catch (cause) {

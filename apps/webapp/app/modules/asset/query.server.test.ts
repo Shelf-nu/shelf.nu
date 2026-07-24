@@ -1110,12 +1110,34 @@ describe("buildAdvancedAssetsQuery", () => {
     expect(sql).toContain('ORDER BY saq."__sortRank"');
   });
 
-  it("keeps the slim cheap phase to id + light sort keys (no heavy projection)", () => {
-    const sql = getQuerySqlString(build());
+  it("gates direct sort-key columns in the cheap phase on the active sort", () => {
+    // The heavy lateral also emits `assetValue`/`assetQuantity` aliases, so a
+    // full-SQL assertion can't catch a cheap-phase regression — slice the
+    // CHEAP phase (everything before `sorted_asset_query`) like the name-sort
+    // test below.
+    const cheap = (overrides?: Parameters<typeof build>[0]) => {
+      const sql = getQuerySqlString(build(overrides));
+      return sql.slice(0, sql.indexOf("sorted_asset_query"));
+    };
 
-    // Base sort keys are always selected directly off the scan.
-    expect(sql).toContain('a.value AS "assetValue"');
-    expect(sql).toContain('a.quantity AS "assetQuantity"');
+    // Default sort materializes only its own keys — value/quantity stay out.
+    const def = cheap({ sortBy: [] });
+    expect(def).toContain('a."createdAt" AS "assetCreatedAt"');
+    expect(def).not.toContain('a.value AS "assetValue"');
+    expect(def).not.toContain('a.quantity AS "assetQuantity"');
+
+    // Sorting by valuation orders by TOTAL value (assetValue *
+    // assetQuantity), so both keys legitimately enter the slim SELECT —
+    // but unrelated keys must stay out (catches all-or-nothing gating).
+    const valuationSort = cheap({ sortBy: ["valuation:asc"] });
+    expect(valuationSort).toContain('a.value AS "assetValue"');
+    expect(valuationSort).toContain('a.quantity AS "assetQuantity"');
+    expect(valuationSort).not.toContain('a.title AS "assetTitle"');
+
+    // A single-key sort pulls exactly its key back in, nothing else.
+    const quantitySort = cheap({ sortBy: ["quantity:asc"] });
+    expect(quantitySort).toContain('a.quantity AS "assetQuantity"');
+    expect(quantitySort).not.toContain('a.value AS "assetValue"');
   });
 
   it("gates a name-sort column in the cheap phase on the active sort", () => {
