@@ -5,6 +5,7 @@ import { isRouteErrorResponse, useLocation, useRouteError } from "react-router";
 
 import { useUserData } from "~/hooks/use-user-data";
 import { isRouteError } from "~/utils/http";
+import { isExpectedErrorBoundaryStatus } from "~/utils/sentry-filters";
 import { tw } from "~/utils/tw";
 import Error404Handler from "./error-404-handler";
 import { parse404ErrorData } from "./utils";
@@ -240,6 +241,13 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
    * the benign workspace-switcher case is excluded entirely (expected
    * cross-org UX, not a bug).
    *
+   * EXPECTED terminal states (403 permission-denied / expired claim, 404
+   * not-found — see `EXPECTED_ERROR_BOUNDARY_STATUSES`) are also excluded:
+   * they are normal UX, not bugs, so they must not open a Sentry issue. All
+   * other 4xx (400/409/422/429, …) stay captured. `beforeSend` re-checks the
+   * `status` tag as defense-in-depth, but this is the primary skip — the
+   * intent is clearest where the status is a number in hand.
+   *
    * Gated on `isRouteErrorResponse` (see `isNotFound` above for why) so
    * router-generated 4xx responses (e.g. an unmatched-route 404) are
    * captured too, even though they carry no Shelf payload.
@@ -249,7 +257,8 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     !error404.isError404 &&
     statusCode !== undefined &&
     statusCode >= 400 &&
-    statusCode < 500;
+    statusCode < 500 &&
+    !isExpectedErrorBoundaryStatus(statusCode);
 
   /**
    * Body copy for the not-found screen. A Shelf-thrown 404 carries its own

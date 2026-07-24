@@ -40,6 +40,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
   ShelfError,
+  throwIfAssetQuantityOverAllocation,
   VALIDATION_ERROR,
 } from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
@@ -4887,6 +4888,14 @@ export async function updateKitAssets({
 
     return kit;
   } catch (cause) {
+    // Translate the DB `AssetKit total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400 (user tried to put more units in kits
+    // than the asset has). No-ops for every other error. See SHELF-WEBAPP-219.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: { kitId, assetIds },
+    });
+
     const isShelfError = isLikeShelfError(cause);
 
     throw new ShelfError({
