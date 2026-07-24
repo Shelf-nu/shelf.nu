@@ -538,6 +538,32 @@ describe(isAssetQuantityOverAllocationError.name, () => {
       false
     );
   });
+
+  it("returns false (does not stack-overflow) on a self-referential cause cycle", () => {
+    // why: a malformed error whose `.cause` points at itself must terminate the
+    // walk instead of recursing forever — the visited-set guards against it.
+    const cyclic: { message: string; cause?: unknown } = { message: "boom" };
+    cyclic.cause = cyclic;
+    expect(isAssetQuantityOverAllocationError(cyclic)).toBe(false);
+  });
+
+  it("returns false on a two-object cause cycle", () => {
+    const a: { message: string; cause?: unknown } = { message: "a" };
+    const b: { message: string; cause?: unknown } = { message: "b", cause: a };
+    a.cause = b; // a -> b -> a
+    expect(isAssetQuantityOverAllocationError(a)).toBe(false);
+  });
+
+  it("still detects the marker even when the cause graph is cyclic", () => {
+    // The marker on an outer node is found before the cycle is revisited.
+    const inner: { message: string; cause?: unknown } = { message: "inner" };
+    const outer: { message: string; cause?: unknown } = {
+      message: "AssetKit total 6 exceeds Asset.quantity 3 for asset abc123",
+      cause: inner,
+    };
+    inner.cause = outer; // cycle, but the marker is on `outer`
+    expect(isAssetQuantityOverAllocationError(outer)).toBe(true);
+  });
 });
 
 describe(throwIfAssetQuantityOverAllocation.name, () => {

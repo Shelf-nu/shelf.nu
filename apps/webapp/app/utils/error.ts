@@ -369,23 +369,25 @@ export const ASSET_QUANTITY_OVER_ALLOCATION_MARKER = "exceeds Asset.quantity";
  * error or any nested `cause`; otherwise `false`.
  */
 export function isAssetQuantityOverAllocationError(cause: unknown): boolean {
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof (cause as { message: unknown }).message === "string" &&
-    (cause as { message: string }).message.includes(
-      ASSET_QUANTITY_OVER_ALLOCATION_MARKER
-    )
-  ) {
-    return true;
-  }
-  // Walk the cause chain — the trigger error is frequently nested inside a
-  // service-layer ShelfError wrapper.
-  if (typeof cause === "object" && cause !== null && "cause" in cause) {
-    return isAssetQuantityOverAllocationError(
-      (cause as { cause: unknown }).cause
-    );
+  // Walk the cause chain iteratively — the trigger error is frequently nested
+  // inside a service-layer ShelfError wrapper. A `visited` set makes the walk
+  // cycle-safe: a self-referential or mutually-referential `.cause` graph
+  // terminates and returns false instead of recursing into a stack overflow.
+  const visited = new Set<object>();
+  let current = cause;
+  while (typeof current === "object" && current !== null) {
+    if (visited.has(current)) {
+      return false;
+    }
+    visited.add(current);
+    const error = current as { message?: unknown; cause?: unknown };
+    if (
+      typeof error.message === "string" &&
+      error.message.includes(ASSET_QUANTITY_OVER_ALLOCATION_MARKER)
+    ) {
+      return true;
+    }
+    current = error.cause;
   }
   return false;
 }

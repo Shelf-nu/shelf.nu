@@ -3052,6 +3052,17 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400. updateAsset writes AssetLocation pivot rows
+    // in its transaction; a submitted quantity can pass the pre-check yet trip
+    // the DEFERRED trigger at COMMIT if a concurrent request lowered
+    // Asset.quantity in between. No-ops for every other error. See
+    // SHELF-WEBAPP-219 / 21N (race backstop, matching replaceAssetPlacements).
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { userId, id, organizationId },
+    });
+
     // If it's already a ShelfError (kit guard, qty validator, org-scope
     // guard, etc.), re-throw as-is so the upstream status / title /
     // message survive. `isLikeShelfError` includes a duck-type fallback
