@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -30,11 +31,19 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Tracks whether we last saw an authenticated session, so ANY transition
+  // to signed-out (expiry, revocation, refresh failure — not only the
+  // explicit signOut button) clears the previous account's scheduled
+  // booking reminders. After such a transition every reconcile would 401
+  // forever, and a later user of the device must not receive the previous
+  // account's booking names.
+  const hadSessionRef = useRef(false);
 
   useEffect(() => {
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
+        hadSessionRef.current = session !== null;
         setSession(session);
       })
       .catch((err) => {
@@ -47,6 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (hadSessionRef.current && session === null) {
+        void clearAllBookingReminders();
+      }
+      hadSessionRef.current = session !== null;
       setSession(session);
     });
 

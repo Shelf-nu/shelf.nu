@@ -100,6 +100,24 @@ function enqueue(task: () => Promise<void>): Promise<void> {
   return run;
 }
 
+/**
+ * Staleness guard for in-flight syncs. A sync's fetch runs OUTSIDE the
+ * queue, so its snapshot can be overtaken by a cancellation: fetch reads
+ * ONGOING, the user checks in (cancel runs), then the stale sync's apply
+ * would re-create the record and reschedule reminders for returned gear.
+ * Cancellations bump these SYNCHRONOUSLY at call time; a sync captures the
+ * values before its fetch and its apply aborts if either moved.
+ */
+const bookingGenerations = new Map<string, number>();
+let globalGeneration = 0;
+
+function bumpBookingGeneration(bookingId: string): void {
+  bookingGenerations.set(
+    bookingId,
+    (bookingGenerations.get(bookingId) ?? 0) + 1
+  );
+}
+
 // ── Preference ────────────────────────────────────────────────────────────
 
 /**
@@ -278,6 +296,11 @@ export async function syncBookingReminders(
   orgId: string,
   opts?: { interactive?: boolean }
 ): Promise<void> {
+  // Capture the staleness guard BEFORE the fetch: if a cancellation lands
+  // while this sync is in flight, the apply below must not resurrect it.
+  const capturedGeneration = bookingGenerations.get(bookingId) ?? 0;
+  const capturedGlobal = globalGeneration;
+
   // Slow half — fetch + (possibly interactive) permission — OUTSIDE the
   // queue so cancels never wait behind network timeouts or an open dialog.
   let fetched: Awaited<ReturnType<typeof api.booking>>["data"] = null;
@@ -288,8 +311,10 @@ export async function syncBookingReminders(
       fetched = data;
     } else if (status === 404 || status === 403) {
       authoritativelyGone = true;
-    } else if (error || !data) {
-      return; // transient failure: leave existing reminders in place
+    } else {
+      // Transient failure (offline, timeout, 5xx, aborted): leave existing
+      // reminders in place for the next reconcile.
+      return;
     }
   } catch (e) {
     if (__DEV__) console.warn("[reminders] sync fetch failed:", e);
@@ -308,6 +333,15 @@ export async function syncBookingReminders(
   // Fast half — cancel/schedule/persist — serialized on the queue.
   return enqueue(async () => {
     try {
+      // A cancellation (check-in, sign-out, …) overtook this sync while its
+      // fetch was in flight — the snapshot is stale; applying it would
+      // resurrect reminders for gear that just came back. Drop it.
+      if (
+        (bookingGenerations.get(bookingId) ?? 0) !== capturedGeneration ||
+        globalGeneration !== capturedGlobal
+      ) {
+        return;
+      }
       const map = await readTracked();
       const previous = map[bookingId];
       if (previous) {
@@ -347,7 +381,9 @@ export async function syncBookingReminders(
       // the record is what lets a later enable or permission grant restore
       // reminders through reconcile, without re-checking anything out.
       const Notifications = getNotifications();
-      if (plan.length > 0 && canSchedule && Notifications) {
+      // `isEnabled` re-checked at apply time: the toggle may have flipped
+      // off while this sync's fetch was in flight.
+      if (plan.length > 0 && canSchedule && isEnabled && Notifications) {
         for (const item of plan) {
           try {
             const notificationId =
@@ -400,6 +436,9 @@ export async function syncBookingReminders(
  * @param bookingId - The booking whose reminders should disappear.
  */
 export function cancelBookingReminders(bookingId: string): Promise<void> {
+  // Synchronous bump so any sync already in flight for this booking aborts
+  // at apply time instead of resurrecting what we are about to cancel.
+  bumpBookingGeneration(bookingId);
   return enqueue(async () => {
     try {
       const map = await readTracked();
@@ -421,6 +460,9 @@ export function cancelBookingReminders(bookingId: string): Promise<void> {
  * account has no business hearing about.
  */
 export function clearAllBookingReminders(): Promise<void> {
+  // Synchronous global bump: every in-flight sync — for any booking — must
+  // abort rather than re-track anything after a sign-out wipe.
+  globalGeneration += 1;
   return enqueue(async () => {
     try {
       const map = await readTracked();

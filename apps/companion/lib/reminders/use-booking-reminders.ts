@@ -44,14 +44,20 @@ type ReminderTapData = { bookingId?: string; orgId?: string };
  * The tap that cold-started the app can ALSO be delivered to the warm
  * listener (platform-dependent). Remember handled response ids so one tap
  * never navigates twice (a double push means two back-taps to escape).
+ *
+ * A response is marked handled only AFTER navigation actually ran — marking
+ * on sight would eat a cold-start tap that arrived before the workspace
+ * list finished loading, and the retry (the effect re-running once orgs
+ * load) would then find it "already handled" and never open the booking.
  */
 const handledResponseIds = new Set<string>();
 
-function alreadyHandled(response: NotificationResponse): boolean {
-  const id = response.notification.request.identifier;
-  if (handledResponseIds.has(id)) return true;
-  handledResponseIds.add(id);
-  return false;
+function wasHandled(response: NotificationResponse): boolean {
+  return handledResponseIds.has(response.notification.request.identifier);
+}
+
+function markHandled(response: NotificationResponse): void {
+  handledResponseIds.add(response.notification.request.identifier);
 }
 
 /**
@@ -76,7 +82,12 @@ function tapDataFromResponse(
  * foreground, and routes reminder taps to their booking.
  */
 export function useBookingReminders(): void {
-  const { currentOrg, organizations, setCurrentOrg } = useOrg();
+  const {
+    currentOrg,
+    organizations,
+    setCurrentOrg,
+    isLoading: orgLoading,
+  } = useOrg();
 
   /**
    * Open the tapped booking, switching workspaces first when the reminder
@@ -123,9 +134,11 @@ export function useBookingReminders(): void {
 
   // Cold start: the app was launched by tapping a reminder. Mirrors the
   // quick-actions pattern — small delay so navigation mounts settle first.
-  // Re-runs when org context changes, which is safe: `alreadyHandled`
-  // guarantees the launch notification is processed at most once.
+  // Waits for the workspace list (a cross-org tap needs it to switch) and
+  // marks the response handled only after navigation ran, so an early run
+  // never eats the tap: the effect re-runs once orgs load and retries.
   useEffect(() => {
+    if (orgLoading) return;
     const Notifications = getNotifications();
     if (!Notifications) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -138,10 +151,13 @@ export function useBookingReminders(): void {
         // lazy guard that keeps pre-notifications builds alive. The async
         // getter still works and stays behind the guard.
         const last = await Notifications.getLastNotificationResponseAsync();
-        if (last && alreadyHandled(last)) return;
+        if (!last || wasHandled(last)) return;
         const tap = tapDataFromResponse(last);
         if (tap && !cancelled) {
-          timer = setTimeout(() => openBooking(tap), 300);
+          timer = setTimeout(() => {
+            openBooking(tap);
+            markHandled(last);
+          }, 300);
         }
       } catch {
         // Partial native availability — no-op.
@@ -151,20 +167,26 @@ export function useBookingReminders(): void {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [openBooking]);
+  }, [openBooking, orgLoading]);
 
   // Warm start: a reminder tapped while the app is running/backgrounded.
   // Re-registered when org context changes so the handler always sees the
-  // current workspace list (cheap: remove + add).
+  // current workspace list (cheap: remove + add). Taps arriving while the
+  // workspace list is still loading are left UNhandled — the cold-start
+  // effect re-reads the last response once loading finishes and picks
+  // them up.
   useEffect(() => {
     const Notifications = getNotifications();
     if (!Notifications) return;
     try {
       const sub = Notifications.addNotificationResponseReceivedListener(
         (response) => {
-          if (alreadyHandled(response)) return;
+          if (orgLoading || wasHandled(response)) return;
           const tap = tapDataFromResponse(response);
-          if (tap) openBooking(tap);
+          if (tap) {
+            openBooking(tap);
+            markHandled(response);
+          }
         }
       );
       return () => sub.remove();
@@ -172,5 +194,5 @@ export function useBookingReminders(): void {
       // Partial native availability — no listener, no cleanup needed.
       return undefined;
     }
-  }, [openBooking]);
+  }, [openBooking, orgLoading]);
 }
