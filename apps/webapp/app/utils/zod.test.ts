@@ -10,12 +10,14 @@ import {
  * Tests for the shared `passwordSchema` used by every password *setter* flow
  * (signup, onboarding, password reset) — SHELF-WEBAPP-21A.
  *
- * The 72-char cap mirrors Supabase/bcrypt so an over-long password is rejected
- * as a field-level validation error instead of a late, captured 500.
+ * The 72-**byte** cap mirrors Supabase/bcrypt so an over-long password is
+ * rejected as a field-level validation error instead of a late, captured 500.
+ * The bound is measured in UTF-8 bytes (not characters), so a short-looking
+ * multi-byte password can still exceed it.
  */
 describe("passwordSchema", () => {
-  it("rejects a password longer than 72 characters with the max message", () => {
-    const result = passwordSchema().safeParse("a".repeat(73));
+  it("rejects a password longer than 72 bytes with the max message", () => {
+    const result = passwordSchema().safeParse("a".repeat(73)); // 73 bytes
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -23,8 +25,33 @@ describe("passwordSchema", () => {
     }
   });
 
-  it("accepts a password exactly 72 characters long", () => {
-    const result = passwordSchema().safeParse("a".repeat(PASSWORD_MAX_LENGTH));
+  it("accepts a password exactly 72 bytes long", () => {
+    const value = "a".repeat(PASSWORD_MAX_LENGTH); // 72 ASCII bytes
+    const result = passwordSchema().safeParse(value);
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a multi-byte password over 72 bytes (37 × 'é' = 74 bytes) with the max message", () => {
+    // 37 two-byte characters = 74 UTF-8 bytes; only 37 chars, so a char-based
+    // `.max(72)` would wrongly accept it — the byte refinement rejects it.
+    const value = "é".repeat(37);
+    expect(new TextEncoder().encode(value).length).toBe(74);
+
+    const result = passwordSchema().safeParse(value);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe(PASSWORD_MAX_LENGTH_MESSAGE);
+    }
+  });
+
+  it("accepts a multi-byte password of exactly 72 bytes (36 × 'é')", () => {
+    // 36 two-byte characters = exactly 72 UTF-8 bytes — the byte boundary.
+    const value = "é".repeat(36);
+    expect(new TextEncoder().encode(value).length).toBe(PASSWORD_MAX_LENGTH);
+
+    const result = passwordSchema().safeParse(value);
 
     expect(result.success).toBe(true);
   });

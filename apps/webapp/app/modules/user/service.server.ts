@@ -855,9 +855,17 @@ export async function createUser(
      * stored email differs from the OTP email, so the route's email-keyed race
      * guard missed it. The `user.create` and ALL its side-effects (personal
      * org, org association, team member, asset index settings) run inside one
-     * `$transaction`, so the P2002 rolled the whole thing back — there is no
-     * partial state to reconcile. Return the pre-existing row (using the exact
-     * same select shape the create returns) instead of failing the signup.
+     * `$transaction`, so the P2002 rolled the whole thing back. Return the
+     * pre-existing row (using the exact same select shape the create returns)
+     * instead of failing the signup.
+     *
+     * ONE piece of state still needs reconciling: for invite/SSO callers
+     * (`organizationId` present), the rolled-back transaction never created the
+     * requested org association, so a concurrent P2002 race would otherwise
+     * return the existing user un-attached to the org they were invited to. We
+     * re-attach that association idempotently below (only when they aren't
+     * already a member). The personal-org / OTP self-signup case has no
+     * `organizationId`, so there is nothing to reconcile there.
      *
      * We deliberately do NOT re-fire the `signup_completed` analytics event on
      * this path: no new account was created. If the lookup unexpectedly finds
@@ -878,6 +886,23 @@ export async function createUser(
       });
 
       if (existingUser) {
+        // The rolled-back transaction never created the org association. For
+        // invite/SSO callers (organizationId present), a concurrent P2002 race
+        // would otherwise leave the existing user un-attached to the requested
+        // org. Reconcile idempotently — only attach when not already a member
+        // (the membership check avoids re-pushing roles via the upsert's
+        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        if (
+          organizationId &&
+          !existingUser.organizations.some((org) => org.id === organizationId)
+        ) {
+          await createUserOrgAssociation(db, {
+            userId,
+            organizationIds: [organizationId],
+            roles: roles ?? [],
+          });
+          existingUser.organizations.push({ id: organizationId });
+        }
         return existingUser;
       }
     }

@@ -37,12 +37,15 @@ export const stringToJSONSchema = z
   });
 
 /**
- * Maximum password length accepted by Supabase's auth provider.
+ * Maximum password length accepted by Supabase's auth provider, in **UTF-8
+ * bytes** (not characters).
  *
  * GoTrue hashes passwords with bcrypt, which only considers the first 72
  * bytes, so Supabase rejects anything longer with
- * `AuthApiError: Password cannot be longer than 72 characters`. Mirroring the
- * limit in our zod schemas turns that late, captured 500 into an early,
+ * `AuthApiError: Password cannot be longer than 72 characters`. Because bcrypt
+ * counts bytes, a password like `"é".repeat(40)` is only 40 characters but 80
+ * UTF-8 bytes — it must be rejected even though it looks short. Mirroring the
+ * byte limit in our zod schemas turns that late, captured 500 into an early,
  * field-level validation error (SHELF-WEBAPP-21A).
  */
 export const PASSWORD_MAX_LENGTH = 72;
@@ -53,13 +56,19 @@ export const PASSWORD_MAX_LENGTH_MESSAGE =
 
 /**
  * Shared validation schema for password *setter* flows (signup, onboarding,
- * password reset). Enforces both the 8-character minimum and the 72-character
+ * password reset). Enforces both the 8-character minimum and the 72-**byte**
  * bcrypt/Supabase maximum so every setter rejects out-of-range passwords the
  * same way, before they ever reach the auth provider.
  *
+ * The upper bound is checked as UTF-8 byte length rather than `.max()` (which
+ * counts UTF-16 code units) because bcrypt limits by bytes — a 40-character
+ * multi-byte password can be 80 bytes and must still be rejected
+ * (SHELF-WEBAPP-21A).
+ *
  * @param minMessage - Flow-specific "too short" copy so each form keeps its
  *   existing wording. Defaults to the signup message.
- * @returns A `z.ZodString` schema with `min(8)` and `max(72)` checks.
+ * @returns A `z.ZodString` schema with a `min(8)` check and a UTF-8 byte-length
+ *   refinement capped at {@link PASSWORD_MAX_LENGTH}.
  */
 export function passwordSchema(
   minMessage = "Your password is too short. Min 8 characters are required."
@@ -67,5 +76,8 @@ export function passwordSchema(
   return z
     .string()
     .min(8, minMessage)
-    .max(PASSWORD_MAX_LENGTH, PASSWORD_MAX_LENGTH_MESSAGE);
+    .refine(
+      (value) => new TextEncoder().encode(value).length <= PASSWORD_MAX_LENGTH,
+      { message: PASSWORD_MAX_LENGTH_MESSAGE }
+    );
 }

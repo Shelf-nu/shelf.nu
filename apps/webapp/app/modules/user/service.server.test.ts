@@ -506,6 +506,79 @@ describe(createUser.name, () => {
     expect(db.userOrganization.upsert).not.toHaveBeenCalled();
   });
 
+  it("reconciles the org association when an invite/SSO caller races a P2002 and the existing user is not yet a member", async () => {
+    // why: the create + org association run in one rolled-back transaction, so a
+    // concurrent P2002 race returns the existing user WITHOUT the requested org.
+    // The recovery path must re-attach it (SHELF-WEBAPP-1EA follow-up).
+    const NEW_ORG_ID = "org-the-user-is-not-in-yet";
+    // Fresh object per test: the recovery path mutates `organizations` via push.
+    const userMissingOrg = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      organizations: [] as { id: string }[],
+    };
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`id`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["id"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(userMissingOrg);
+
+    const result = await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      organizationId: NEW_ORG_ID,
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    // Re-attaches the existing user to the requested org idempotently
+    expect(db.userOrganization.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_organizationId: {
+            userId: USER_ID,
+            organizationId: NEW_ORG_ID,
+          },
+        },
+      })
+    );
+    // Still returns the pre-existing user, now carrying the reconciled org
+    expect(result).toBe(userMissingOrg);
+    expect(result.organizations).toContainEqual({ id: NEW_ORG_ID });
+  });
+
+  it("does NOT re-attach the org when the racing user is already a member", async () => {
+    // why: re-attaching an existing membership would re-push roles via the
+    // upsert's `push` update branch — the membership check must short-circuit.
+    const userAlreadyMember = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      organizations: [{ id: ORGANIZATION_ID }],
+    };
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`id`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["id"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(userAlreadyMember);
+
+    const result = await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(result).toBe(userAlreadyMember);
+    expect(db.userOrganization.upsert).not.toHaveBeenCalled();
+  });
+
   it("throws when P2002 has no matching row for this id (conflict on another unique field)", async () => {
     // why: a P2002 on e.g. `email` with no row for this id is a genuine conflict
     const p2002 = new PrismaClientKnownRequestError(

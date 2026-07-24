@@ -194,7 +194,11 @@ export default function Join() {
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.confirmPassword()?.message}
+            error={
+              getValidationErrors<typeof JoinFormSchema>(data?.error)
+                ?.confirmPassword?.message ||
+              zo.errors.confirmPassword()?.message
+            }
           />
 
           <input

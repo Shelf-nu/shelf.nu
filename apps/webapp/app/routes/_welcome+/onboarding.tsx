@@ -610,7 +610,11 @@ export default function Onboarding() {
               type="password"
               autoComplete="new-password"
               inputClassName="w-full"
-              error={zo.errors.password()?.message}
+              error={
+                getValidationErrors<typeof OnboardingFormSchema>(
+                  actionData?.error
+                )?.password?.message || zo.errors.password()?.message
+              }
             />
 
             <PasswordInput
@@ -621,7 +625,12 @@ export default function Onboarding() {
               name={zo.fields.confirmPassword()}
               type="password"
               autoComplete="new-password"
-              error={zo.errors.confirmPassword()?.message}
+              error={
+                getValidationErrors<typeof OnboardingFormSchema>(
+                  actionData?.error
+                )?.confirmPassword?.message ||
+                zo.errors.confirmPassword()?.message
+              }
             />
           </>
         )}
