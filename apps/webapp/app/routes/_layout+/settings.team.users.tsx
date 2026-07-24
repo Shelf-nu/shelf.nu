@@ -52,9 +52,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    /** Cannot manage users for PERSONAL organization */
+    /**
+     * Personal workspaces can't manage registered users. Send them to the Team
+     * page (which explains how to upgrade) instead of a contextless redirect.
+     */
     if (organization?.type === "PERSONAL") {
-      return redirect("/settings/general");
+      return redirect("/settings/team/nrm");
     }
 
     const searchParams = getCurrentSearchParams(request);
