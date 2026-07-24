@@ -173,22 +173,59 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     await db.$transaction(async (tx) => {
       await lockAssetForQuantityUpdate(tx, assetId);
 
-      const availability = await computeBookingAvailableQuantity(
-        assetId,
-        bookingId
-      );
+      /**
+       * Re-read the booked quantity now that the asset-level lock is held,
+       * rather than trusting the pre-transaction snapshot captured above —
+       * a concurrent adjuster of the same asset could have changed it
+       * between that read and this lock acquisition.
+       */
+      const current = await tx.bookingAsset.findUniqueOrThrow({
+        where: { id: bookingAsset.id },
+        select: { quantity: true },
+      });
 
-      if (quantity > availability.available) {
-        throw new ShelfError({
-          cause: null,
-          message: `Cannot reserve ${quantity} units of "${bookingAsset.asset.title}". Only ${availability.available} available.`,
-          label: "Booking",
-          status: 400,
-          shouldBeCaptured: false,
-        });
+      /**
+       * A reduction relative to the CURRENT booked quantity can never
+       * oversubscribe the pool: every other booking's reservation, the
+       * custody count, and the total stock are untouched by this
+       * booking's own delta, so lowering this booking's quantity can only
+       * shrink total demand. Only measure an INCREASE against remaining
+       * availability.
+       *
+       * Without this, once a pool is oversubscribed by OTHER bookings
+       * `available` goes negative and `quantity > available` rejects
+       * every submission, including a reduction all the way down to 1 —
+       * there is no number a user can enter to recover (#2725).
+       */
+      const isIncrease = quantity > current.quantity;
+
+      if (isIncrease) {
+        const availability = await computeBookingAvailableQuantity(
+          assetId,
+          bookingId
+        );
+
+        if (quantity > availability.available) {
+          const oversubscribedNote =
+            availability.available < 0
+              ? ` This asset's pool is already over-committed by ${-availability.available} unit(s) across other bookings — reduce or cancel one of them before increasing here.`
+              : "";
+          throw new ShelfError({
+            cause: null,
+            message: `Cannot reserve ${quantity} units of "${
+              bookingAsset.asset.title
+            }". Only ${Math.max(
+              0,
+              availability.available
+            )} available.${oversubscribedNote}`,
+            label: "Booking",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
       }
 
-      previousQuantity = bookingAsset.quantity;
+      previousQuantity = current.quantity;
 
       await tx.bookingAsset.update({
         where: { id: bookingAsset.id },

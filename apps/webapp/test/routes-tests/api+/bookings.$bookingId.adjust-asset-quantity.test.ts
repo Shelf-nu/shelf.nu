@@ -32,9 +32,19 @@ const createDataMock = vi.hoisted(() => {
 
 const dbMocks = vi.hoisted(() => ({
   bookingAssetFindFirst: vi.fn(),
+  // why: separate, clearable mocks (rather than inlining fresh vi.fn()s
+  // inside the $transaction factory below) so quantity-guard tests can
+  // configure the "current" quantity read under the lock and assert what
+  // was actually persisted, independently of the ownership-guard tests
+  // above which only assert $transaction call count.
+  bookingAssetFindUniqueOrThrow: vi.fn().mockResolvedValue({ quantity: 5 }),
+  bookingAssetUpdate: vi.fn().mockResolvedValue(undefined),
   $transaction: vi.fn(async (cb: any) =>
     cb({
-      bookingAsset: { update: vi.fn().mockResolvedValue(undefined) },
+      bookingAsset: {
+        findUniqueOrThrow: dbMocks.bookingAssetFindUniqueOrThrow,
+        update: dbMocks.bookingAssetUpdate,
+      },
     })
   ),
 }));
@@ -296,5 +306,121 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
 
     expect(response.status).toBe(200);
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Regression tests for #2725: once a QUANTITY_TRACKED asset's pool is
+ * over-reserved by OTHER bookings, `computeBookingAvailableQuantity`
+ * returns a negative `available`, and the pre-fix guard compared the
+ * submitted quantity against it unconditionally — rejecting every
+ * positive submission, including a reduction, with no way to recover.
+ * The fix only measures an INCREASE (relative to the current booked
+ * quantity, re-read under the asset lock) against availability.
+ */
+describe("api/bookings/:bookingId/adjust-asset-quantity — directional availability guard", () => {
+  beforeEach(() => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.OWNER,
+      isSelfServiceOrBase: false,
+    } as any);
+  });
+
+  it("reduces a booking's quantity even when the pool is oversubscribed (negative availability)", async () => {
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // The row currently reserves 17 units (an over-reserved pool: total=10,
+    // reserved elsewhere ~17 -> available = -7). The user reduces to 1.
+    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
+      total: 10,
+      inCustody: 0,
+      available: -7,
+    });
+
+    const response = (await action(
+      buildArgs(buildRequest(1))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    // A reduction never oversubscribes the pool, so the fix must not even
+    // consult availability for it.
+    expect(
+      consumptionMocks.computeBookingAvailableQuantity
+    ).not.toHaveBeenCalled();
+    expect(dbMocks.bookingAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "ba-1" },
+      data: { quantity: 1 },
+    });
+  });
+
+  it("still rejects an increase beyond remaining availability, with a clamped, explanatory message", async () => {
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
+      total: 10,
+      inCustody: 0,
+      available: -7,
+    });
+
+    const response = (await action(
+      buildArgs(buildRequest(20))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(400);
+    expect(consumptionMocks.computeBookingAvailableQuantity).toHaveBeenCalled();
+    expect(dbMocks.bookingAssetUpdate).not.toHaveBeenCalled();
+    const body = (await response.json()) as { error: { message: string } };
+    // Never a raw negative number in user-facing copy.
+    expect(body.error.message).toContain("Only 0 available");
+    expect(body.error.message).toContain("over-committed by 7 unit(s)");
+  });
+
+  it("allows an increase that fits within remaining availability", async () => {
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 5 });
+    consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
+      total: 10,
+      inCustody: 0,
+      available: 10,
+    });
+
+    const response = (await action(
+      buildArgs(buildRequest(8))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    expect(consumptionMocks.computeBookingAvailableQuantity).toHaveBeenCalled();
+    expect(dbMocks.bookingAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "ba-1" },
+      data: { quantity: 8 },
+    });
+  });
+
+  it("treats a resubmitted, unchanged quantity as a pass-through (no availability read)", async () => {
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
+      total: 10,
+      inCustody: 0,
+      available: -7,
+    });
+
+    const response = (await action(
+      buildArgs(buildRequest(17))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    expect(
+      consumptionMocks.computeBookingAvailableQuantity
+    ).not.toHaveBeenCalled();
   });
 });
