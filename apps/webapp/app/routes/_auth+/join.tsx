@@ -26,6 +26,7 @@ import {
   notAllowedMethod,
 } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
 import {
   payload,
   error,
@@ -34,6 +35,7 @@ import {
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import { validateNonSSOSignup } from "~/utils/sso.server";
+import { passwordSchema } from "~/utils/zod";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
@@ -71,12 +73,8 @@ const JoinFormSchema = z
       .refine(validEmail, () => ({
         message: "Please enter a valid email",
       })),
-    password: z
-      .string()
-      .min(8, "Your password is too short. Min 8 characters are required."),
-    confirmPassword: z
-      .string()
-      .min(8, "Your password is too short. Min 8 characters are required."),
+    password: passwordSchema(),
+    confirmPassword: passwordSchema(),
     redirectTo: z.string().optional(),
   })
   .superRefine(({ password, confirmPassword }, ctx) => {
@@ -182,7 +180,10 @@ export default function Join() {
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.password()?.message}
+            error={
+              getValidationErrors<typeof JoinFormSchema>(data?.error)?.password
+                ?.message || zo.errors.password()?.message
+            }
           />
           <PasswordInput
             label="Confirm Password"
@@ -193,7 +194,11 @@ export default function Join() {
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.confirmPassword()?.message}
+            error={
+              getValidationErrors<typeof JoinFormSchema>(data?.error)
+                ?.confirmPassword?.message ||
+              zo.errors.confirmPassword()?.message
+            }
           />
 
           <input
