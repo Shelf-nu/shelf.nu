@@ -490,16 +490,23 @@ describe("refreshExpiredAssetImages", () => {
 
     const result = await refreshExpiredAssetImages(assets);
 
+    // The return value carries the fresh URLs synchronously — re-signing stays
+    // awaited, only the DB persist is deferred.
     expect(result[0].mainImage).toBe("https://new-main-url.com");
     expect(result[0].thumbnailImage).toBe("https://new-thumbnail-url.com");
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImage: "https://new-main-url.com",
-          thumbnailImage: "https://new-thumbnail-url.com",
-        }),
-      })
+
+    // The persist now runs in a fire-and-forget background batch, so wait for
+    // the flush before asserting the write happened.
+    await vi.waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "asset-1", organizationId: "org-1" },
+          data: expect.objectContaining({
+            mainImage: "https://new-main-url.com",
+            thumbnailImage: "https://new-thumbnail-url.com",
+          }),
+        })
+      )
     );
   });
 
@@ -511,16 +518,20 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (no refresh)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Should bump expiration to prevent retry storm
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
-    );
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+
+    // The backoff bump is now persisted in the deferred background batch —
+    // wait for the flush before asserting the write.
+    await vi.waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "asset-1", organizationId: "org-1" },
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
+    );
   });
 
   it("logs error and applies backoff when createSignedUrl fails", async () => {
@@ -538,17 +549,25 @@ describe("refreshExpiredAssetImages", () => {
 
     // Asset should be returned unchanged
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Backoff update should have been called
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
+
+    // Backoff update is deferred to the background batch — wait for the flush.
+    await vi.waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
     );
   });
 
-  it("handles deleted asset (P2025) gracefully without logging error", async () => {
+  it("returns fresh URLs even when the background persist fails (P2025)", async () => {
+    // Regression guard for the deferred-write refactor: the DB persist runs
+    // fire-and-forget AFTER the response value is built. If the asset was
+    // deleted between the read and the write (P2025), the returned URLs must
+    // still be the freshly re-signed ones and the function must NOT throw — the
+    // next load simply re-signs (idempotent).
     const { Prisma: ActualPrisma } = await import("@prisma/client");
     mockUpdate.mockRejectedValue(
       new ActualPrisma.PrismaClientKnownRequestError(
@@ -558,10 +577,24 @@ describe("refreshExpiredAssetImages", () => {
     );
     const assets = [makeAsset()];
 
+    // Resolves (no throw) with the freshly re-signed URL.
     const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
 
-    // Should return original asset (refresh failed gracefully)
-    expect(result[0].mainImage).toBe("https://old-signed-url.com");
+    // The (failing) write was still attempted in the background.
+    await vi.waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+  });
+
+  it("returns fresh URLs even when the background persist fails unexpectedly", async () => {
+    // A non-P2025 write failure (e.g. a pool timeout) is swallowed + logged in
+    // the background and must not affect the returned URLs or throw.
+    mockUpdate.mockRejectedValue(new Error("connection pool timeout"));
+    const assets = [makeAsset()];
+
+    const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
+
+    await vi.waitFor(() => expect(mockUpdate).toHaveBeenCalled());
   });
 });
 
