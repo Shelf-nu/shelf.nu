@@ -50,7 +50,7 @@ export const BOOKING_SETTINGS_SELECT = {
  * Hoisted so the `upsert` in {@link getBookingNotificationSettingsForOrg} and
  * its `P2002` re-read return the exact same shape (single source of truth).
  */
-const BOOKING_NOTIFICATION_SETTINGS_SELECT = {
+export const BOOKING_NOTIFICATION_SETTINGS_SELECT = {
   notifyBookingCreator: true,
   notifyAdminsOnNewBooking: true,
   alwaysNotifyTeamMembers: {

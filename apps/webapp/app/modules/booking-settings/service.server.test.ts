@@ -2,6 +2,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
 import {
+  BOOKING_NOTIFICATION_SETTINGS_SELECT,
   BOOKING_SETTINGS_SELECT,
   getBookingNotificationSettingsForOrg,
   getBookingSettingsForOrganization,
@@ -852,9 +853,12 @@ describe("getBookingNotificationSettingsForOrg", () => {
     const result =
       await getBookingNotificationSettingsForOrg(mockOrganizationId);
 
-    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { organizationId: mockOrganizationId } })
-    );
+    // Exact-match the re-read args (where + select) so the "single source of
+    // truth" select can't drift between the upsert and the P2002 recovery.
+    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+    });
     expect(result).toEqual(mockNotificationSettings);
   });
 
