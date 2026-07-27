@@ -355,18 +355,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
  * contents, so the row is converted to a manual placement instead
  * (`assetKitId: null`).
  *
- * Two constraints make a blind conversion unsafe, so each row is handled
- * individually:
+ * **INDIVIDUAL members only** — see the body for why converting a
+ * QUANTITY_TRACKED slice would abort the whole detach. Those rows are left to
+ * the DB cascade, which restores the pre-cascade behaviour of the units simply
+ * becoming unplaced.
  *
- * - `AssetLocation_manual_unique (assetId, locationId) WHERE assetKitId IS NULL`
- *   — when a manual row already sits at the same location, the slice is merged
- *   into it and the kit-driven row deleted (mirrors
- *   {@link mergeStandaloneCollisionsForKitDetachment} for `BookingAsset`).
- * - `enforce_individual_asset_single_location` — an INDIVIDUAL asset can hold
- *   only one row, so if it already has a manual placement the kit-driven row is
- *   dropped and the manual one stands. INDIVIDUAL members get plain rows from
- *   {@link cascadeKitLocationToAssets} and so don't normally reach this branch;
- *   it covers kit-driven rows written before that behaviour.
+ * In practice INDIVIDUAL members hold plain rows from
+ * {@link cascadeKitLocationToAssets} and never have a kit-driven row at all;
+ * this covers rows written before that behaviour, and keeps the guarantee true
+ * if one is ever written again.
  *
  * Call BEFORE `tx.assetKit.delete*(...)`.
  *
@@ -386,48 +383,47 @@ export async function preserveKitDrivenPlacements(
 ): Promise<void> {
   if (assetKitIds.length === 0) return;
 
+  // INDIVIDUAL members only, deliberately. A QUANTITY_TRACKED asset's kit
+  // slice lives on the kit axis, which the location-axis cap ignores
+  // (`enforce_asset_location_sum_within_total` counts `assetKitId IS NULL`
+  // rows only). Converting such a row to manual moves those units INTO the
+  // capped axis, so a fully-placed asset would breach
+  // `sum(manual quantity) <= Asset.quantity` and abort the whole detach —
+  // taking asset removal, bulk removal, kit deletion and full-slice moves
+  // with it. Those rows are left to the `onDelete: Cascade` instead, so the
+  // units simply go back to being unplaced.
+  //
+  // INDIVIDUAL assets have `Asset.quantity = NULL`, so that cap doesn't apply
+  // to them at all and preserving the location is always safe.
   const kitDrivenRows = await tx.assetLocation.findMany({
-    where: { assetKitId: { in: assetKitIds } },
-    select: {
-      id: true,
-      assetId: true,
-      locationId: true,
-      quantity: true,
-      asset: { select: { type: true } },
+    where: {
+      assetKitId: { in: assetKitIds },
+      asset: { type: { not: AssetType.QUANTITY_TRACKED } },
     },
+    select: { id: true, assetId: true },
   });
   if (kitDrivenRows.length === 0) return;
 
-  const manualRows = await tx.assetLocation.findMany({
-    where: {
-      assetKitId: null,
-      assetId: { in: [...new Set(kitDrivenRows.map((row) => row.assetId))] },
-    },
-    select: { id: true, assetId: true, locationId: true, quantity: true },
-  });
-
-  const manualByPair = new Map(
-    manualRows.map((row) => [`${row.assetId}::${row.locationId}`, row])
+  const placedAssetIds = new Set(
+    (
+      await tx.assetLocation.findMany({
+        where: {
+          assetKitId: null,
+          assetId: {
+            in: [...new Set(kitDrivenRows.map((row) => row.assetId))],
+          },
+        },
+        select: { assetId: true },
+      })
+    ).map((row) => row.assetId)
   );
-  const assetsWithManualRow = new Set(manualRows.map((row) => row.assetId));
 
   for (const row of kitDrivenRows) {
-    if (
-      row.asset.type !== AssetType.QUANTITY_TRACKED &&
-      assetsWithManualRow.has(row.assetId)
-    ) {
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above; those ids are org-scoped per this helper's caller contract
-      await tx.assetLocation.delete({ where: { id: row.id } });
-      continue;
-    }
-
-    const collision = manualByPair.get(`${row.assetId}::${row.locationId}`);
-    if (collision) {
-      await tx.assetLocation.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: collision.id came from the manual-row read above, scoped to assets that own the org-scoped kit-driven rows
-        where: { id: collision.id },
-        data: { quantity: collision.quantity + row.quantity },
-      });
+    // `enforce_individual_asset_single_location` caps an INDIVIDUAL asset at
+    // one row. If it already holds a manual placement — or an earlier row in
+    // this loop was just converted into one — that placement wins and this
+    // kit-driven row is simply dropped.
+    if (placedAssetIds.has(row.assetId)) {
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above; those ids are org-scoped per this helper's caller contract
       await tx.assetLocation.delete({ where: { id: row.id } });
       continue;
@@ -438,15 +434,7 @@ export async function preserveKitDrivenPlacements(
       where: { id: row.id },
       data: { assetKitId: null },
     });
-    // Track the freshly-converted row so a second kit-driven slice for the
-    // same (asset, location) merges into it rather than colliding.
-    manualByPair.set(`${row.assetId}::${row.locationId}`, {
-      id: row.id,
-      assetId: row.assetId,
-      locationId: row.locationId,
-      quantity: row.quantity,
-    });
-    assetsWithManualRow.add(row.assetId);
+    placedAssetIds.add(row.assetId);
   }
 }
 
@@ -3058,83 +3046,6 @@ export async function getAvailableKitAssetForBooking(
 }
 
 /**
- * Trims a QUANTITY_TRACKED asset's MANUAL placements when the kit-driven
- * slices pushed `sum(AssetLocation.quantity)` past `Asset.quantity`.
- *
- * Moving a kit relocates only the kit's own slice, so the units it took with
- * it must stop being counted at whichever location(s) they used to sit at —
- * otherwise the DEFERRED `enforce_asset_location_sum_within_total` trigger
- * aborts the whole transaction at COMMIT.
- *
- * Only the overflow is reclaimed, largest manual row first, so deliberate
- * multi-location splits survive as far as the invariant allows. Rows that
- * reach zero are deleted rather than left as empty placements.
- *
- * @param assetIds QUANTITY_TRACKED assets whose placements may now overflow
- * @param tx Active transaction — must be the one that wrote the kit slices
- */
-async function trimManualPlacementOverflow(
-  assetIds: Array<Asset["id"]>,
-  tx: KitLocationTxClient
-): Promise<void> {
-  if (assetIds.length === 0) return;
-
-  const rows = await tx.assetLocation.findMany({
-    where: { assetId: { in: assetIds } },
-    select: {
-      id: true,
-      assetId: true,
-      quantity: true,
-      assetKitId: true,
-      asset: { select: { quantity: true } },
-    },
-  });
-
-  const byAsset = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const bucket = byAsset.get(row.assetId);
-    if (bucket) {
-      bucket.push(row);
-    } else {
-      byAsset.set(row.assetId, [row]);
-    }
-  }
-
-  for (const assetRows of byAsset.values()) {
-    // `Asset.quantity` is null for INDIVIDUAL assets — the single-row
-    // trigger governs those and this helper has nothing to enforce.
-    const total = assetRows[0]?.asset?.quantity;
-    if (total == null) continue;
-
-    let overflow =
-      assetRows.reduce((sum, row) => sum + row.quantity, 0) - total;
-    if (overflow <= 0) continue;
-
-    // Kit-driven rows are the placements we just wrote — reclaim from the
-    // manual ones only, biggest first so the fewest placements are touched.
-    const manualRows = assetRows
-      .filter((row) => row.assetKitId === null)
-      .sort((a, b) => b.quantity - a.quantity);
-
-    for (const row of manualRows) {
-      if (overflow <= 0) break;
-      const reclaimed = Math.min(row.quantity, overflow);
-      overflow -= reclaimed;
-      if (reclaimed === row.quantity) {
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetId IN assetIds` read above, and those asset ids come from AssetKit rows of kits the caller already org-scoped
-        await tx.assetLocation.delete({ where: { id: row.id } });
-      } else {
-        await tx.assetLocation.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetId IN assetIds` read above (org-scoped via the caller's kit query)
-          where: { id: row.id },
-          data: { quantity: row.quantity - reclaimed },
-        });
-      }
-    }
-  }
-}
-
-/**
  * Moves every member asset of the given kits to `newLocationId`, writing the
  * `AssetLocation` pivot rows that make the kit's placement visible on the
  * assets themselves.
@@ -3152,8 +3063,16 @@ async function trimManualPlacementOverflow(
  * - **QUANTITY_TRACKED** — may span several locations at distinct slices, so
  *   only the kit's own slice moves: a **kit-driven** (`assetKitId` set) row of
  *   `AssetKit.quantity` units. The discriminator is what lets a later kit move
- *   find and relocate that same slice. Manual rows are then trimmed by any
- *   resulting overflow (see {@link trimManualPlacementOverflow}).
+ *   find and relocate that same slice.
+ *
+ * The asset's MANUAL placements are never touched for QUANTITY_TRACKED members.
+ * The two axes are orthogonal and additive: since
+ * `20260602100000_assetlocation_sum_exclude_kit_driven`,
+ * `enforce_asset_location_sum_within_total` sums only rows with
+ * `assetKitId IS NULL`, and the kit axis is bounded separately by
+ * `enforce_asset_kit_sum_within_total`. So 100 manually-placed units plus a
+ * 50-unit kit slice is a valid state, and reclaiming from manual rows to "make
+ * room" would destroy real placement data.
  *
  * Callers MUST have proven `newLocationId` belongs to `organizationId` (via
  * `assertLocationBelongsToOrg`) first — this connects assets to it without
@@ -3241,6 +3160,9 @@ async function cascadeKitLocationToAssets(
   }
 
   if (qtyTracked.length > 0) {
+    // Additive, by design — the asset's manual placements are left alone.
+    // The location-axis sum counts only `assetKitId IS NULL` rows, so a
+    // kit slice can never push a manual placement over `Asset.quantity`.
     await tx.assetLocation.createMany({
       data: qtyTracked.map((ak) => ({
         assetId: ak.assetId,
@@ -3250,10 +3172,6 @@ async function cascadeKitLocationToAssets(
         assetKitId: ak.id,
       })),
     });
-    await trimManualPlacementOverflow(
-      [...new Set(qtyTracked.map((ak) => ak.assetId))],
-      tx
-    );
   }
 
   return new Set(assetKits.map((ak) => ak.assetId));
@@ -3398,8 +3316,11 @@ export async function updateKitLocation({
         }
       });
 
-      // Add notes to assets about location update via parent kit
-      const cascadedAssetsForNotes = kit.assets.filter((asset) =>
+      // Add notes to assets about location update via parent kit. Same filter
+      // as the events above — `cascadedAssetIds` includes members that were
+      // already at the target, and they must not get a "moved to X" note with
+      // no matching event.
+      const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
       if (userId && cascadedAssetsForNotes.length > 0) {
@@ -3734,10 +3655,12 @@ export async function bulkUpdateKitLocation({
         }
       });
 
-      // Create notes for affected assets.
+      // Create notes for affected assets. Same filter as the events above —
+      // `cascadedAssetIds` includes members already at the target, which must
+      // not get a "moved to X" note with no matching event.
       // (Kit-level system notes below are emitted per-kit and remain
       // unfiltered — they describe the kit-level movement, not asset rows.)
-      const cascadedAssetsForNotes = allAssets.filter((asset) =>
+      const cascadedAssetsForNotes = assetsWithLocationChange.filter((asset) =>
         cascadedAssetIds.has(asset.id)
       );
       if (cascadedAssetsForNotes.length > 0) {
@@ -4506,6 +4429,15 @@ export async function updateKitAssets({
             },
             data: { quantity: change.newQuantity },
           });
+          // Keep the kit-driven placement row in step with the slice it
+          // mirrors (1:1 via `AssetLocation_kit_unique`) — otherwise a kit
+          // resized from 20 to 30 keeps advertising 20 units at its location
+          // until someone moves it. No-op when the kit has no location, since
+          // then no kit-driven row exists.
+          await tx.assetLocation.updateMany({
+            where: { assetKit: { kitId: kit.id, assetId: change.id } },
+            data: { quantity: change.newQuantity },
+          });
         }
       }
 
@@ -4802,85 +4734,6 @@ export async function updateKitAssets({
     ];
     if (kitChangeEvents.length > 0) {
       await recordEvents(kitChangeEvents);
-    }
-
-    /**
-     * Post-tx side effects for the kit-driven AssetLocation rows
-     * created above:
-     *
-     *   - Activity events (one `ASSET_LOCATION_CHANGED` per new kit-
-     *     driven placement). `fromValue: null` — the kit-driven row is
-     *     an ADDITION, not a replacement; manual placements survive
-     *     untouched.
-     *   - System notes describing the kit-driven placement.
-     *
-     * Only runs when `kit.location` is set. With no kit location, no
-     * kit-driven row exists, so no event / note is needed — and
-     * crucially, the user's manual placements are NOT touched.
-     */
-    if (kit.location && newlyAddedAssets.length > 0) {
-      const kitLocationId = kit.location.id;
-      await recordEvents(
-        newlyAddedAssets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_LOCATION_CHANGED" as const,
-          entityType: "ASSET" as const,
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: kit.id,
-          locationId: kitLocationId,
-          field: "locationId",
-          fromValue: null,
-          toValue: kitLocationId,
-          // `meta.quantity` (qty-tracked only) = the per-row
-          // `AssetKit.quantity` written into the new kit-driven location row
-          // (matches the value passed to `assetLocation.createMany` above).
-          meta: {
-            viaKit: true,
-            ...assetQtyMeta(asset, addedAssetKitQuantity(asset)),
-          },
-        }))
-      );
-
-      // Create notes describing the new kit-driven placement. The
-      // existing helper renders as "moved to {kit.location}"; with
-      // `currentLocation: null` it reads as a fresh placement.
-      const noteUser = await getUserByID(userId, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      });
-      await Promise.all(
-        newlyAddedAssets.map((asset) =>
-          createNote({
-            content: getKitLocationUpdateNoteContent({
-              currentLocation: null,
-              newLocation: kit.location,
-              userId,
-              firstName: noteUser?.firstName ?? "",
-              lastName: noteUser?.lastName ?? "",
-              isRemoving: false,
-              // Qty-tracked cascade names the kit's per-row slice this
-              // asset now holds in the kit (= the value written to the
-              // kit-driven AssetLocation row).
-              type: asset.type,
-              unitOfMeasure: asset.unitOfMeasure,
-              quantity: addedAssetKitQuantity(asset),
-            }),
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-            // why: asset resolved scoped to organizationId for this kit —
-            // pass the org so the note is validated against the asset's
-            // true org.
-            organizationId,
-          })
-        )
-      );
     }
 
     /**
@@ -5728,7 +5581,9 @@ export async function moveAssetKitUnits(
         }),
         tx.kit.findFirst({
           where: { id: toKitId, organizationId },
-          select: { id: true, name: true },
+          // `locationId` drives the re-placement of the moved units at the
+          // destination kit's location (step 9b).
+          select: { id: true, name: true, locationId: true },
         }),
       ]);
 
@@ -5898,8 +5753,10 @@ export async function moveAssetKitUnits(
       const newSourceQty = source.quantity - quantity;
       const sourceRowDeleted = newSourceQty === 0;
       if (sourceRowDeleted) {
-        // Keep the units at the source kit's location rather than letting the
-        // AssetLocation cascade unplace them along with the emptied slice.
+        // INDIVIDUAL members keep their placement; a QUANTITY_TRACKED slice's
+        // row goes with the AssetKit via the DB cascade. Either way step 9b
+        // below re-places the units at the DESTINATION kit's location, so they
+        // don't linger at the kit they just left.
         await preserveKitDrivenPlacements(tx, [source.id]);
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset+kit-scoped findFirst above, inside this same tx
         await tx.assetKit.delete({ where: { id: source.id } });
@@ -5924,6 +5781,33 @@ export async function moveAssetKitUnits(
         update: { quantity: { increment: quantity } },
         select: { id: true, quantity: true },
       });
+
+      // 9b. Re-place the moved units at the DESTINATION kit's location.
+      //     Without this the units stay recorded wherever the source kit was
+      //     (or nowhere), even though they now belong to a kit that lives
+      //     somewhere else. Reuses the shared cascade so the placement stays
+      //     type-aware: a plain row for INDIVIDUAL, a kit-driven slice
+      //     carrying the destination's new `AssetKit.quantity` for
+      //     QUANTITY_TRACKED.
+      //
+      //     `toKit.locationId` is org-safe without a further check: `toKit`
+      //     was read scoped to `organizationId`, so its location belongs to
+      //     the caller's org by construction.
+      if (toKit.locationId) {
+        await cascadeKitLocationToAssets(
+          {
+            kitIds: [toKitId],
+            newLocationId: toKit.locationId,
+            organizationId,
+            assetIds: [assetId],
+          },
+          tx
+        );
+      } else {
+        // Destination kit is unplaced, so no kit-driven row may survive for
+        // it — the units revert to whatever manual placement they hold.
+        await tx.assetLocation.deleteMany({ where: { assetKitId: dest.id } });
+      }
 
       // 10. Cascade to active kit-driven BookingAsset rows on the DEST
       //     kit — keep them in sync with the new slice quantity (mirrors

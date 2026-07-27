@@ -3232,15 +3232,68 @@ describe("moveAssetKitUnits", () => {
     expect((err as ShelfError).message).toContain("destination kit");
   });
 
-  it("does not touch AssetLocation rows (orthogonal-axes invariant)", async () => {
+  it("leaves manual placements alone when the destination kit is unplaced", async () => {
+    expect.assertions(3);
+
+    // Default `mockKitFindFirst` returns kits with no `locationId`.
     await moveAssetKitUnits(baseArgs);
 
-    // The move acts on the kit axis only — manual AssetLocation rows
-    // must stay untouched. (Kit-driven AssetLocation rows are managed
-    // by the DB-level cascade and aren't this service's concern.)
+    // Nothing is placed anywhere — and crucially the only delete is scoped to
+    // the destination's kit-driven row, never to the asset's manual rows.
     expect(db.assetLocation.createMany).not.toHaveBeenCalled();
-    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
     expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetKitId: "ak-dst" },
+    });
+  });
+
+  it("re-places the moved units at the destination kit's location", async () => {
+    expect.assertions(2);
+
+    // why: destination kit lives somewhere; the moved units must follow it
+    // rather than staying recorded at the source kit's location.
+    mockKitFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          name: where.id,
+          locationId: where.id === "kit-to" ? "loc-dest" : "loc-source",
+        })
+    );
+    // why: the shared cascade re-reads the destination kit's AssetKit rows to
+    // build the placement write.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      {
+        id: "ak-dst",
+        assetId: "asset-1",
+        quantity: 10,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+
+    await moveAssetKitUnits(baseArgs);
+
+    // Kit-driven slice written at the DESTINATION kit's location, carrying the
+    // destination's post-move quantity.
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-1",
+          locationId: "loc-dest",
+          organizationId: "org-1",
+          quantity: 10,
+          assetKitId: "ak-dst",
+        },
+      ],
+    });
+    // The asset's manual placements are untouched — only kit-driven rows for
+    // the destination kit are cleared before the write.
+    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetKit: { kitId: { in: ["kit-to"] }, assetId: { in: ["asset-1"] } },
+      },
+    });
   });
 });
 
@@ -3474,8 +3527,8 @@ describe("updateKitLocation - cascade to member assets", () => {
     });
   });
 
-  it("trims a manual placement that would overflow the asset's total", async () => {
-    expect.assertions(2);
+  it("never touches a QUANTITY_TRACKED member's manual placements", async () => {
+    expect.assertions(3);
 
     mockKitWithAssets([
       {
@@ -3499,23 +3552,17 @@ describe("updateKitLocation - cascade to member assets", () => {
         asset: { type: AssetType.QUANTITY_TRACKED },
       },
     ]);
-    // why: post-write read by the overflow trim. 45 manual + 10 kit-driven
-    // = 55 against a 50-unit pool, so 5 units must come off the manual row
-    // or the deferred sum trigger aborts the tx at COMMIT.
+    // why: the asset is ALREADY fully placed manually (50 of 50). Since
+    // `20260602100000_assetlocation_sum_exclude_kit_driven`, the location-axis
+    // sum counts only `assetKitId IS NULL` rows, so a 10-unit kit slice on top
+    // is valid — the axes are orthogonal and additive.
     //@ts-expect-error missing vitest type
     db.assetLocation.findMany.mockResolvedValue([
       {
         id: "al-manual",
         assetId: "asset-qty",
-        quantity: 45,
+        quantity: 50,
         assetKitId: null,
-        asset: { quantity: 50 },
-      },
-      {
-        id: "al-kit",
-        assetId: "asset-qty",
-        quantity: 10,
-        assetKitId: "ak-qty",
         asset: { quantity: 50 },
       },
     ]);
@@ -3530,68 +3577,20 @@ describe("updateKitLocation - cascade to member assets", () => {
       userId: "user-1",
     });
 
-    expect(db.assetLocation.update).toHaveBeenCalledWith({
-      where: { id: "al-manual" },
-      data: { quantity: 40 },
-    });
-    // Only the overflow is reclaimed — the manual placement survives.
-    expect(db.assetLocation.delete).not.toHaveBeenCalled();
-  });
-
-  it("leaves manual placements alone when there is no overflow", async () => {
-    expect.assertions(2);
-
-    mockKitWithAssets([
-      {
-        quantity: 10,
-        asset: {
-          id: "asset-qty",
-          title: "Batch",
-          type: AssetType.QUANTITY_TRACKED,
-          quantity: 50,
-          unitOfMeasure: "kg",
-          assetLocations: [{ location: { id: "loc-old", name: "Old Loc" } }],
+    // The kit slice is added...
+    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "asset-qty",
+          locationId: "loc-new",
+          organizationId: "org-1",
+          quantity: 10,
+          assetKitId: "ak-qty",
         },
-      },
-    ]);
-    //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([
-      {
-        id: "ak-qty",
-        assetId: "asset-qty",
-        quantity: 10,
-        asset: { type: AssetType.QUANTITY_TRACKED },
-      },
-    ]);
-    // why: 20 manual + 10 kit-driven = 30 of a 50-unit pool — within total.
-    //@ts-expect-error missing vitest type
-    db.assetLocation.findMany.mockResolvedValue([
-      {
-        id: "al-manual",
-        assetId: "asset-qty",
-        quantity: 20,
-        assetKitId: null,
-        asset: { quantity: 50 },
-      },
-      {
-        id: "al-kit",
-        assetId: "asset-qty",
-        quantity: 10,
-        assetKitId: "ak-qty",
-        asset: { quantity: 50 },
-      },
-    ]);
-
-    const { updateKitLocation } = await import("./service.server");
-
-    await updateKitLocation({
-      id: "kit-1",
-      organizationId: "org-1",
-      currentLocationId: null,
-      newLocationId: "loc-new",
-      userId: "user-1",
+      ],
     });
-
+    // ...and the fully-placed manual row is left exactly as it was. Reclaiming
+    // from it to "make room" would destroy real placement data.
     expect(db.assetLocation.update).not.toHaveBeenCalled();
     expect(db.assetLocation.delete).not.toHaveBeenCalled();
   });
@@ -3809,9 +3808,9 @@ describe("bulkUpdateKitLocation - cascade to member assets", () => {
  */
 describe("preserveKitDrivenPlacements", () => {
   /**
-   * The helper reads placements twice — first the kit-driven rows about to be
-   * cascaded away, then the asset's existing manual rows — so the tests queue
-   * two sequential resolutions. Cast once here rather than sprinkling
+   * The helper reads placements twice — first the kit-driven rows it may
+   * convert, then the assets' existing manual rows — so the tests queue two
+   * sequential resolutions. Cast once here rather than sprinkling
    * `@ts-expect-error` across the chained calls.
    */
   const placementReads = () =>
@@ -3821,26 +3820,18 @@ describe("preserveKitDrivenPlacements", () => {
     vitest.clearAllMocks();
   });
 
-  it("converts a kit-driven placement into a manual one", async () => {
+  it("converts an INDIVIDUAL member's kit-driven placement into a manual one", async () => {
     expect.assertions(2);
 
     placementReads()
-      // kit-driven rows about to be cascaded away
-      .mockResolvedValueOnce([
-        {
-          id: "al-kit",
-          assetId: "asset-qty",
-          locationId: "loc-kit",
-          quantity: 10,
-          asset: { type: AssetType.QUANTITY_TRACKED },
-        },
-      ])
-      // the asset holds no manual rows, so there's nothing to collide with
+      // kit-driven rows the helper may convert
+      .mockResolvedValueOnce([{ id: "al-kit", assetId: "asset-ind" }])
+      // the asset holds no manual row, so the conversion is unobstructed
       .mockResolvedValueOnce([]);
 
     const { preserveKitDrivenPlacements } = await import("./service.server");
 
-    await preserveKitDrivenPlacements(db, ["ak-qty"]);
+    await preserveKitDrivenPlacements(db, ["ak-ind"]);
 
     expect(db.assetLocation.update).toHaveBeenCalledWith({
       where: { id: "al-kit" },
@@ -3849,67 +3840,15 @@ describe("preserveKitDrivenPlacements", () => {
     expect(db.assetLocation.delete).not.toHaveBeenCalled();
   });
 
-  it("merges into the manual row already sitting at that location", async () => {
-    expect.assertions(2);
-
-    placementReads()
-      .mockResolvedValueOnce([
-        {
-          id: "al-kit",
-          assetId: "asset-qty",
-          locationId: "loc-shared",
-          quantity: 10,
-          asset: { type: AssetType.QUANTITY_TRACKED },
-        },
-      ])
-      // why: a manual row at the SAME location — nulling `assetKitId` would
-      // breach `AssetLocation_manual_unique (assetId, locationId)`.
-      .mockResolvedValueOnce([
-        {
-          id: "al-manual",
-          assetId: "asset-qty",
-          locationId: "loc-shared",
-          quantity: 5,
-        },
-      ]);
-
-    const { preserveKitDrivenPlacements } = await import("./service.server");
-
-    await preserveKitDrivenPlacements(db, ["ak-qty"]);
-
-    expect(db.assetLocation.update).toHaveBeenCalledWith({
-      where: { id: "al-manual" },
-      data: { quantity: 15 },
-    });
-    expect(db.assetLocation.delete).toHaveBeenCalledWith({
-      where: { id: "al-kit" },
-    });
-  });
-
   it("drops the kit-driven row when an INDIVIDUAL asset is already placed", async () => {
     expect.assertions(2);
 
     placementReads()
-      .mockResolvedValueOnce([
-        {
-          id: "al-kit",
-          assetId: "asset-ind",
-          locationId: "loc-kit",
-          quantity: 1,
-          asset: { type: AssetType.INDIVIDUAL },
-        },
-      ])
+      .mockResolvedValueOnce([{ id: "al-kit", assetId: "asset-ind" }])
       // why: `enforce_individual_asset_single_location` caps an INDIVIDUAL
       // asset at one row, so the existing manual placement has to win even
       // though it sits at a different location.
-      .mockResolvedValueOnce([
-        {
-          id: "al-manual",
-          assetId: "asset-ind",
-          locationId: "loc-other",
-          quantity: 1,
-        },
-      ]);
+      .mockResolvedValueOnce([{ assetId: "asset-ind" }]);
 
     const { preserveKitDrivenPlacements } = await import("./service.server");
 
@@ -3919,5 +3858,30 @@ describe("preserveKitDrivenPlacements", () => {
       where: { id: "al-kit" },
     });
     expect(db.assetLocation.update).not.toHaveBeenCalled();
+  });
+
+  it("never converts a QUANTITY_TRACKED slice, which would breach the manual cap", async () => {
+    expect.assertions(3);
+
+    // why: the read is filtered to non-QUANTITY_TRACKED assets in SQL, so a
+    // kit holding only QT members comes back empty and the helper no-ops.
+    // Those rows are left to `onDelete: Cascade` — converting them would move
+    // units into the capped location axis and abort the whole detach for a
+    // fully-placed asset.
+    placementReads().mockResolvedValueOnce([]);
+
+    const { preserveKitDrivenPlacements } = await import("./service.server");
+
+    await preserveKitDrivenPlacements(db, ["ak-qty"]);
+
+    expect(placementReads()).toHaveBeenCalledWith({
+      where: {
+        assetKitId: { in: ["ak-qty"] },
+        asset: { type: { not: AssetType.QUANTITY_TRACKED } },
+      },
+      select: { id: true, assetId: true },
+    });
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.delete).not.toHaveBeenCalled();
   });
 });

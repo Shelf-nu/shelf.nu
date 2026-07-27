@@ -15,11 +15,25 @@ Placement is **type-aware** — reaching for one shape for both is the bug:
 | `INDIVIDUAL`       | **plain** (`assetKitId: null`), qty 1                        | `enforce_individual_asset_single_location` caps it at ONE row; a plain row also survives detach |
 | `QUANTITY_TRACKED` | **kit-driven** (`assetKitId` set), qty = `AssetKit.quantity` | only the kit's slice moves; the discriminator lets the next move find it                        |
 
-After writing QT slices, reclaim any overflow past `Asset.quantity` from manual
-rows — the DEFERRED `enforce_asset_location_sum_within_total` aborts the whole
-tx at COMMIT otherwise. Detach converts kit-driven rows to manual (merging on
-an `(assetId, locationId)` collision) — unpacking a kit must not unplace its
-contents.
+**The two axes are additive — never reclaim units from manual rows to "make
+room" for a kit slice.** Since
+`20260602100000_assetlocation_sum_exclude_kit_driven`,
+`enforce_asset_location_sum_within_total` sums only `assetKitId IS NULL` rows;
+the kit axis is bounded separately by `enforce_asset_kit_sum_within_total`. So
+100 manually-placed units plus a 50-unit kit slice is VALID, and trimming the
+manual row destroys real data.
+
+The inverse bites too, which is why **detach preserves the location for
+INDIVIDUAL members only**: converting a kit-driven row to manual moves those
+units _into_ the capped axis, so a fully-placed QT asset would breach the cap
+and abort the entire detach (removal, bulk removal, kit deletion, full-slice
+move). QT slices are left to `onDelete: Cascade` and simply become unplaced.
+`Asset.quantity` is NULL for INDIVIDUAL, so the cap never applies to them.
+
+Read the trigger you are relying on from the **latest** migration that touches
+it, not the one that created it. The original pivot migration summed both axes;
+a later one inverted that, and code written against the original silently
+deleted valid placements.
 
 ❌ Bad — the shipped bug: skip members that already have a placement.
 
