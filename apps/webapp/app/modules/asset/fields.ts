@@ -49,6 +49,11 @@ export const getAssetOverviewFields = (
     // driven placements so the UI can render the "via kit" badge
     // alongside the kit-driven rows.
     assetLocations: {
+      // Stable order so `getPrimaryLocation()` (which reads index 0) doesn't
+      // depend on heap order. Oldest row first keeps the asset's own manual
+      // placement primary in list views; kit-driven slices are surfaced with
+      // their "via kit" badge in the placements breakdown.
+      orderBy: { createdAt: "asc" as const },
       select: {
         quantity: true,
         assetKitId: true,
@@ -195,6 +200,11 @@ export const assetIndexFields = ({
     // driven placements so the UI can render the "via kit" badge
     // alongside the kit-driven rows.
     assetLocations: {
+      // Stable order so `getPrimaryLocation()` (which reads index 0) doesn't
+      // depend on heap order. Oldest row first keeps the asset's own manual
+      // placement primary in list views; kit-driven slices are surfaced with
+      // their "via kit" badge in the placements breakdown.
+      orderBy: { createdAt: "asc" as const },
       select: {
         quantity: true,
         assetKitId: true,
