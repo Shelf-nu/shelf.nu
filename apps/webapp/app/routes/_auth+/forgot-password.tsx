@@ -22,6 +22,7 @@ import {
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import {
   payload,
   error,
@@ -30,6 +31,7 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
+import { passwordSchema } from "~/utils/zod";
 
 const ForgotPasswordSchema = z.object({
   email: z
@@ -44,10 +46,10 @@ const OtpSchema = z
   .object({
     otp: z.string().min(6, "OTP is required."),
     email: z.string().transform((email) => email.toLowerCase()),
-    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
-    confirmPassword: z
-      .string()
-      .min(8, "Password is too short. Minimum 8 characters."),
+    password: passwordSchema("Password is too short. Minimum 8 characters."),
+    confirmPassword: passwordSchema(
+      "Password is too short. Minimum 8 characters."
+    ),
   })
   .superRefine(({ password, confirmPassword, otp, email }, ctx) => {
     if (password !== confirmPassword) {
@@ -194,10 +196,22 @@ export default function ForgotPassword() {
     zo.errors.email()?.message || actionData?.error?.message || "";
   const disabled = useDisabled();
 
+  /**
+   * Field-level validation errors from the confirm-otp (password reset) step.
+   * When present, keep the password form mounted so the errors render inline on
+   * their fields — instead of bouncing back to the email step with a generic
+   * message. Hard errors (e.g. an invalid OTP) still fall back to the email step.
+   */
+  const otpValidationErrors = getValidationErrors<typeof OtpSchema>(
+    actionData?.error
+  );
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full">
-        {actionData?.error || !email || email === "" ? (
+        {(actionData?.error && !otpValidationErrors) ||
+        !email ||
+        email === "" ? (
           <div>
             <p className="mb-4 text-center">
               Enter your email address and we'll send you a one-time code to
@@ -267,7 +281,19 @@ function PasswordResetForm({ email }: { email: string }) {
   const zoReset = useZorm("ResetPasswordForm", OtpSchema);
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
-  return !email || email === "" || actionData?.error ? (
+
+  /**
+   * Server-side validation errors for the reset fields, shown as a fallback
+   * when client-side zorm validation is bypassed (disabled JS, modified
+   * request, or client/server rule divergence). See CLAUDE.md form pattern.
+   */
+  const validationErrors = getValidationErrors<typeof OtpSchema>(
+    actionData?.error
+  );
+
+  // Keep the form mounted for validation errors so field-level messages render;
+  // only a hard error (e.g. invalid OTP) falls back to the generic message.
+  return !email || email === "" || (actionData?.error && !validationErrors) ? (
     <div>Something went wrong. Please refresh the page and try again.</div>
   ) : (
     <Form method="post" ref={zoReset.ref} className="space-y-2">
@@ -280,7 +306,10 @@ function PasswordResetForm({ email }: { email: string }) {
         type="password"
         autoComplete="new-password"
         disabled={disabled}
-        error={zoReset.errors.password()?.message}
+        error={
+          validationErrors?.password?.message ||
+          zoReset.errors.password()?.message
+        }
         placeholder="********"
         required
       />
@@ -291,7 +320,10 @@ function PasswordResetForm({ email }: { email: string }) {
         type="password"
         autoComplete="new-password"
         disabled={disabled}
-        error={zoReset.errors.confirmPassword()?.message}
+        error={
+          validationErrors?.confirmPassword?.message ||
+          zoReset.errors.confirmPassword()?.message
+        }
         placeholder="********"
         required
       />
