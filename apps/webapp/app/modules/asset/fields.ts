@@ -53,7 +53,12 @@ export const getAssetOverviewFields = (
       // depend on heap order. Oldest row first keeps the asset's own manual
       // placement primary in list views; kit-driven slices are surfaced with
       // their "via kit" badge in the placements breakdown.
-      orderBy: { createdAt: "asc" as const },
+      //
+      // `id` breaks ties: `createdAt` defaults to CURRENT_TIMESTAMP, which is
+      // transaction-start time in Postgres, so every row written by one
+      // cascade shares a timestamp and would otherwise fall back to heap
+      // order again.
+      orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
       select: {
         quantity: true,
         assetKitId: true,
@@ -204,7 +209,12 @@ export const assetIndexFields = ({
       // depend on heap order. Oldest row first keeps the asset's own manual
       // placement primary in list views; kit-driven slices are surfaced with
       // their "via kit" badge in the placements breakdown.
-      orderBy: { createdAt: "asc" as const },
+      //
+      // `id` breaks ties: `createdAt` defaults to CURRENT_TIMESTAMP, which is
+      // transaction-start time in Postgres, so every row written by one
+      // cascade shares a timestamp and would otherwise fall back to heap
+      // order again.
+      orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
       select: {
         quantity: true,
         assetKitId: true,

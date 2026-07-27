@@ -3313,8 +3313,11 @@ describe("moveAssetKitUnits", () => {
  *   (`assetKitId: null`) row at the kit's location — one row, so the trigger
  *   stays satisfied, and the asset keeps the location when it leaves the kit.
  * - QUANTITY_TRACKED members get a kit-driven row holding just this kit's
- *   slice, with manual rows trimmed by any resulting overflow past
- *   `Asset.quantity`.
+ *   slice, ADDED alongside the asset's manual placements rather than taken out
+ *   of them. Since
+ *   `20260602100000_assetlocation_sum_exclude_kit_driven` the location-axis cap
+ *   counts only `assetKitId IS NULL` rows, so the two axes are additive and
+ *   manual placements are never touched.
  */
 describe("updateKitLocation - cascade to member assets", () => {
   beforeEach(() => {
