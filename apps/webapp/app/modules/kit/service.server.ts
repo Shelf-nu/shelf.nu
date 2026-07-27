@@ -370,8 +370,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
  *
  * Call BEFORE `tx.assetKit.delete*(...)`.
  *
+ * Caller contract: `assetKitIds` MUST already be org-scoped — this helper
+ * rewrites the rows they point at without re-checking. Today's callers satisfy
+ * it via an explicit `organizationId` filter (`performKitDeletion`,
+ * `bulkRemoveAssetsFromKits`), an org-scoped kit (`updateKitAssets`' disconnect
+ * path, `moveAssetKitUnits`), or an org-scoped asset read
+ * (`updateKitAssets`' cross-kit-move path).
+ *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
- * @param assetKitIds `AssetKit` rows about to be deleted
+ * @param assetKitIds `AssetKit` rows about to be deleted; must be org-scoped
  */
 export async function preserveKitDrivenPlacements(
   tx: KitLocationTxClient,
@@ -409,7 +416,7 @@ export async function preserveKitDrivenPlacements(
       row.asset.type !== AssetType.QUANTITY_TRACKED &&
       assetsWithManualRow.has(row.assetId)
     ) {
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above, and every caller derives those ids from an org-scoped AssetKit query
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above; those ids are org-scoped per this helper's caller contract
       await tx.assetLocation.delete({ where: { id: row.id } });
       continue;
     }
@@ -421,13 +428,13 @@ export async function preserveKitDrivenPlacements(
         where: { id: collision.id },
         data: { quantity: collision.quantity + row.quantity },
       });
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above (org-scoped by every caller)
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above; those ids are org-scoped per this helper's caller contract
       await tx.assetLocation.delete({ where: { id: row.id } });
       continue;
     }
 
     await tx.assetLocation.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above (org-scoped by every caller)
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: row.id came from the `assetKitId IN assetKitIds` read above; those ids are org-scoped per this helper's caller contract
       where: { id: row.id },
       data: { assetKitId: null },
     });
