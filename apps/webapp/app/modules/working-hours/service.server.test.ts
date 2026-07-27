@@ -16,6 +16,7 @@ vitest.mock("~/database/db.server", () => ({
     workingHours: {
       findUnique: vitest.fn(),
       upsert: vitest.fn(),
+      findUniqueOrThrow: vitest.fn(),
     },
   },
 }));
@@ -32,7 +33,10 @@ const mockWorkingHoursData = {
   updatedAt: new Date("2024-01-01T00:00:00.000Z"),
 };
 
-/** The exact args the cold-path/helper must pass to keep the write race-safe. */
+/** The include the cold path uses both for the upsert and the P2002 re-read. */
+const OVERRIDES_INCLUDE = { overrides: { orderBy: { date: "asc" } } };
+
+/** The exact guarded upsert args the cold path / helper must pass. */
 const EXPECTED_UPSERT_ARGS = {
   where: { organizationId: mockOrganizationId },
   update: {},
@@ -41,8 +45,15 @@ const EXPECTED_UPSERT_ARGS = {
     enabled: false,
     weeklySchedule: getDefaultWeeklySchedule(),
   },
-  include: { overrides: { orderBy: { date: "asc" } } },
+  include: OVERRIDES_INCLUDE,
 };
+
+/** Builds a P2002 unique-constraint error the way Prisma raises one. */
+function p2002Error() {
+  return Object.assign(new Error("Unique constraint failed"), {
+    code: "P2002",
+  });
+}
 
 describe("getWorkingHoursForOrganization", () => {
   beforeEach(() => {
@@ -62,7 +73,7 @@ describe("getWorkingHoursForOrganization", () => {
 
     expect(db.workingHours.findUnique).toHaveBeenCalledWith({
       where: { organizationId: mockOrganizationId },
-      include: { overrides: { orderBy: { date: "asc" } } },
+      include: OVERRIDES_INCLUDE,
     });
     // why: the read-first path must never take a write lock when the row
     // already exists — this is the connection-pool-exhaustion regression guard.
@@ -70,7 +81,7 @@ describe("getWorkingHoursForOrganization", () => {
     expect(result).toEqual(mockWorkingHoursData);
   });
 
-  it("creates defaults via a race-safe upsert when none exist", async () => {
+  it("creates defaults via the guarded upsert when none exist", async () => {
     expect.assertions(2);
     const defaultRow = { ...mockWorkingHoursData, enabled: false };
     //@ts-expect-error missing vitest type
@@ -80,9 +91,9 @@ describe("getWorkingHoursForOrganization", () => {
 
     const result = await getWorkingHoursForOrganization(mockOrganizationId);
 
-    // why: cold path must use upsert (not a bare create) with `update: {}` so
-    // two concurrent first requests can't race a unique-constraint violation on
-    // WorkingHours.organizationId.
+    // Query contract: the cold path must upsert with `update: {}` (the actual
+    // race recovery — losing the create race — is covered by the P2002 test
+    // in the createDefaultWorkingHours suite).
     expect(db.workingHours.upsert).toHaveBeenCalledWith(EXPECTED_UPSERT_ARGS);
     expect(result).toEqual(defaultRow);
   });
@@ -104,16 +115,51 @@ describe("createDefaultWorkingHours", () => {
     vitest.clearAllMocks();
   });
 
-  it("upserts (idempotent) instead of a bare create", async () => {
+  it("passes the guarded upsert args (update:{}) to keep the create idempotent", async () => {
     expect.assertions(1);
     //@ts-expect-error missing vitest type
     db.workingHours.upsert.mockResolvedValue(mockWorkingHoursData);
 
     await createDefaultWorkingHours(mockOrganizationId);
 
-    // why: this shared helper is reached from three separate find-then-create
-    // call sites; making it an upsert makes all of them race-safe at once
-    // (update:{} = no-op when a concurrent request already created the row).
+    // Query contract only — reached from three find-then-create call sites
+    // (loader, override creator, admin dashboard); `update: {}` makes a
+    // concurrent second call a no-op that returns the existing row.
     expect(db.workingHours.upsert).toHaveBeenCalledWith(EXPECTED_UPSERT_ARGS);
+  });
+
+  it("recovers from a concurrent-create P2002 by re-reading the row", async () => {
+    expect.assertions(2);
+    // The `include` forces Prisma to emulate the upsert (read + create), so a
+    // concurrent first-hit can lose the race and throw P2002. The function must
+    // then re-read the row the winner created rather than surface the error —
+    // this is the actual race-safety behavior, not just the query shape.
+    const existingRow = { ...mockWorkingHoursData, enabled: false };
+    //@ts-expect-error missing vitest type
+    db.workingHours.upsert.mockRejectedValue(p2002Error());
+    //@ts-expect-error missing vitest type
+    db.workingHours.findUniqueOrThrow.mockResolvedValue(existingRow);
+
+    const result = await createDefaultWorkingHours(mockOrganizationId);
+
+    expect(db.workingHours.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      include: OVERRIDES_INCLUDE,
+    });
+    expect(result).toEqual(existingRow);
+  });
+
+  it("re-throws a non-P2002 database error without re-reading", async () => {
+    expect.assertions(2);
+    const dbError = Object.assign(new Error("connection reset"), {
+      code: "P1001",
+    });
+    //@ts-expect-error missing vitest type
+    db.workingHours.upsert.mockRejectedValue(dbError);
+
+    await expect(createDefaultWorkingHours(mockOrganizationId)).rejects.toBe(
+      dbError
+    );
+    expect(db.workingHours.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 });

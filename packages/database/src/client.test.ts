@@ -386,9 +386,14 @@ test("createDatabaseClient wires the transient-retry extension onto the client",
   const factoryStart = source.indexOf("export function createDatabaseClient");
   assert.notEqual(factoryStart, -1, "createDatabaseClient factory not found");
 
-  // Collapse whitespace so the assertions survive prettier reformatting, and
-  // scope to the factory body so a stray reference elsewhere can't satisfy them.
-  const factory = source.slice(factoryStart).replace(/\s+/g, " ");
+  // Bound the slice to the factory body — stop at the next top-level `export`
+  // (or EOF) so a `$extends` / `withPrismaRetry` reference elsewhere in the file
+  // can't satisfy these assertions after the factory wiring is removed. Collapse
+  // whitespace so the assertions survive prettier reformatting.
+  const afterFactory = source.indexOf("\nexport ", factoryStart + 1);
+  const factory = source
+    .slice(factoryStart, afterFactory === -1 ? undefined : afterFactory)
+    .replace(/\s+/g, " ");
 
   assert.match(
     factory,
