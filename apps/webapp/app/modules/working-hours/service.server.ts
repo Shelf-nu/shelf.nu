@@ -4,22 +4,55 @@ import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
+/**
+ * Ensures a default `WorkingHours` row exists for an organization and returns
+ * it (with overrides).
+ *
+ * Idempotent and race-safe. Every caller reaches this through a check-then-create
+ * ("find, create if absent") path — the authenticated layout loader cold path
+ * ({@link getWorkingHoursForOrganization}), the override creator, and the admin
+ * dashboard — so two concurrent first requests for the same organization can
+ * otherwise race a unique-constraint violation on `WorkingHours.organizationId`
+ * (the same loader-path write race hardened for booking settings).
+ *
+ * We `upsert` (not a bare `create`), but returning a nested relation
+ * (`include`) makes Prisma **emulate** the upsert with a separate read + write
+ * instead of a native atomic `INSERT … ON CONFLICT`, so a concurrent first-hit
+ * can still surface `P2002`. We therefore also catch `P2002` and re-read the
+ * row the winning request created — closing the race regardless of which path
+ * Prisma takes.
+ *
+ * @param organizationId - The organization to create/fetch default hours for
+ * @returns The organization's `WorkingHours` row, including its overrides
+ * @throws {Error} Re-throws any non-`P2002` database error.
+ */
 export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
+  const include = { overrides: { orderBy: { date: "asc" as const } } };
 
-  const workingHours = await db.workingHours.create({
-    data: {
-      organizationId,
-      enabled: false,
-      weeklySchedule: defaultSchedule,
-    },
-    include: {
-      overrides: {
-        orderBy: { date: "asc" },
+  try {
+    return await db.workingHours.upsert({
+      where: { organizationId },
+      update: {},
+      create: {
+        organizationId,
+        enabled: false,
+        weeklySchedule: defaultSchedule,
       },
-    },
-  });
-  return workingHours;
+      include,
+    });
+  } catch (cause) {
+    // Emulated upsert lost the create race: a concurrent request already
+    // inserted the row between this call's read and its insert. The row exists
+    // now, so re-read it instead of surfacing the unique-constraint error.
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      return db.workingHours.findUniqueOrThrow({
+        where: { organizationId },
+        include,
+      });
+    }
+    throw cause;
+  }
 }
 
 export async function getWorkingHoursForOrganization(organizationId: string) {

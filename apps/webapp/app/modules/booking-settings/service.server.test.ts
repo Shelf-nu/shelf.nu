@@ -2,7 +2,9 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
 import {
+  BOOKING_NOTIFICATION_SETTINGS_SELECT,
   BOOKING_SETTINGS_SELECT,
+  getBookingNotificationSettingsForOrg,
   getBookingSettingsForOrganization,
   updateBookingSettings,
 } from "./service.server";
@@ -15,6 +17,7 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     bookingSettings: {
       findUnique: vitest.fn(),
+      findUniqueOrThrow: vitest.fn(),
       upsert: vitest.fn(),
       update: vitest.fn(),
     },
@@ -124,6 +127,33 @@ describe("getBookingSettingsForOrganization", () => {
       message: "Failed to retrieve booking settings configuration",
       additionalData: { organizationId: mockOrganizationId },
     });
+  });
+
+  it("recovers from a concurrent-create P2002 by re-reading the row", async () => {
+    expect.assertions(2);
+    // BOOKING_SETTINGS_SELECT returns a nested relation, so Prisma emulates the
+    // upsert (read + create) and a concurrent first-hit can lose the race and
+    // throw P2002. The function must then re-read the row the winner created,
+    // not surface the unique-constraint error.
+    const p2002 = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(p2002);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUniqueOrThrow.mockResolvedValue(
+      mockBookingSettingsData
+    );
+
+    const result = await getBookingSettingsForOrganization(mockOrganizationId);
+
+    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      select: BOOKING_SETTINGS_SELECT,
+    });
+    expect(result).toEqual(mockBookingSettingsData);
   });
 
   it("should throw ShelfError when the upsert fallback fails", async () => {
@@ -780,5 +810,66 @@ describe("updateBookingSettings", () => {
         maxBookingLength: 168,
       },
     });
+  });
+});
+
+describe("getBookingNotificationSettingsForOrg", () => {
+  const mockNotificationSettings = {
+    notifyBookingCreator: true,
+    notifyAdminsOnNewBooking: true,
+    alwaysNotifyTeamMembers: [],
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("upserts and returns the notification settings", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockResolvedValue(mockNotificationSettings);
+
+    const result =
+      await getBookingNotificationSettingsForOrg(mockOrganizationId);
+
+    expect(db.bookingSettings.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(mockNotificationSettings);
+  });
+
+  it("recovers from a concurrent-create P2002 by re-reading the row", async () => {
+    expect.assertions(2);
+    // The notification select returns a nested relation (alwaysNotifyTeamMembers),
+    // so Prisma emulates the upsert and a concurrent first-hit can throw P2002.
+    const p2002 = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(p2002);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUniqueOrThrow.mockResolvedValue(
+      mockNotificationSettings
+    );
+
+    const result =
+      await getBookingNotificationSettingsForOrg(mockOrganizationId);
+
+    // Exact-match the re-read args (where + select) so the "single source of
+    // truth" select can't drift between the upsert and the P2002 recovery.
+    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+    });
+    expect(result).toEqual(mockNotificationSettings);
+  });
+
+  it("wraps a non-P2002 failure in a ShelfError", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      getBookingNotificationSettingsForOrg(mockOrganizationId)
+    ).rejects.toBeInstanceOf(ShelfError);
+    expect(db.bookingSettings.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 });
