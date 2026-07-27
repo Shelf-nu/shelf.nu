@@ -90,6 +90,14 @@ export type DateFormatOptions = {
   onlyTime?: boolean;
   /** Absolute date, no timezone conversion (working-hours overrides). */
   localeOnly?: boolean;
+  /**
+   * Prepend the (long) weekday to the FULL preference-formatted date, e.g.
+   * "Friday, 2026-07-31". Additive: unlike the `weekday` field option — which,
+   * like any explicit field, selects ONLY the named fields — this keeps the
+   * whole date and still follows the user's `dateFormat` order/style. Used by
+   * absolute-date surfaces like working-hours overrides.
+   */
+  includeWeekday?: boolean;
 };
 
 /** Unambiguous reference date (day 3 ≠ month 4) for reading part order. */
@@ -467,6 +475,14 @@ function normalizeOptions(opts: DateFormatOptions): NormalizedOptions {
     Boolean(opts.dateStyle) ||
     Boolean(opts.timeStyle);
 
+  // `includeWeekday` is ADDITIVE: it prepends the weekday to the FULL
+  // pref-formatted date. Unlike the `weekday` FIELD option (an explicit field
+  // that selects only the named fields and thus counts toward `anyExplicit`
+  // above), the flag must NOT affect explicitness — it is resolved here, AFTER
+  // `anyExplicit`, and defaults the weekday to "long" only when the caller
+  // didn't already name one.
+  const weekday = merged.weekday ?? (opts.includeWeekday ? "long" : undefined);
+
   const wantTime =
     opts.onlyTime === true ||
     Boolean(opts.timeStyle) ||
@@ -477,7 +493,7 @@ function normalizeOptions(opts: DateFormatOptions): NormalizedOptions {
   const wantDate = opts.onlyTime
     ? false
     : Boolean(opts.dateStyle) ||
-      merged.weekday != null ||
+      weekday != null ||
       merged.year != null ||
       merged.month != null ||
       merged.day != null ||
@@ -499,7 +515,7 @@ function normalizeOptions(opts: DateFormatOptions): NormalizedOptions {
     includeYear,
     includeMonth,
     includeDay,
-    weekday: merged.weekday,
+    weekday,
     monthStyle: merged.month ?? "2-digit",
     yearStyle: merged.year ?? "numeric",
     dayStyle: merged.day ?? "2-digit",

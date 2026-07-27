@@ -232,6 +232,39 @@ describe("formatDate — month-name preferences", () => {
   });
 });
 
+describe("formatDate — includeWeekday (additive weekday prefix)", () => {
+  // Mirrors the working-hours override surface: an absolute calendar date (bare
+  // YYYY-MM-DD, localeOnly so no tz shift) that must show the weekday BUT still
+  // follow the user's dateFormat order/style. 2026-07-31 is a Friday.
+  const D = "2026-07-31";
+
+  it("prepends the weekday to the FULL date in each pref order/style", () => {
+    // Numeric prefs keep their own separator/padding — NOT a forced long month.
+    expect(formatDate(D, CA, { includeWeekday: true, localeOnly: true })).toBe(
+      "Friday, 2026-07-31"
+    );
+    expect(formatDate(D, US, { includeWeekday: true, localeOnly: true })).toBe(
+      "Friday, 07/31/2026"
+    );
+    expect(formatDate(D, GB, { includeWeekday: true, localeOnly: true })).toBe(
+      "Friday, 31/07/2026"
+    );
+    // Month-name prefs render the name, still with the weekday prefix.
+    expect(
+      formatDate(D, US_NAME, { includeWeekday: true, localeOnly: true })
+    ).toBe("Friday, Jul 31, 2026");
+    expect(
+      formatDate(D, EU_NAME, { includeWeekday: true, localeOnly: true })
+    ).toBe("Friday, 31 Jul 2026");
+  });
+
+  it("does NOT change the `weekday` field option (still weekday-only)", () => {
+    // The calendar subtitle relies on `{ weekday }` returning JUST the weekday,
+    // so includeWeekday must stay a separate, additive capability. V → Monday.
+    expect(formatDate(V, US, { weekday: "long" })).toBe("Monday");
+  });
+});
+
 describe("formatDate — reassembly + timezone conversion", () => {
   it("plain numeric is zero-padded 4-digit-year in the pref order", () => {
     expect(formatDate(V, US)).toBe("06/22/2026");

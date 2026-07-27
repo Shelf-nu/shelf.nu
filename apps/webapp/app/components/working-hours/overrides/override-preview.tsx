@@ -46,12 +46,11 @@ export function OverridePreview({ override }: OverridePreviewProps) {
               // and renders the calendar date exactly.
               date={getOverrideDateKey(override.date)}
               localeOnly
-              options={{
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              }}
+              // Show the weekday, but let the DATE itself follow the user's
+              // dateFormat pref (e.g. "Friday, 2026-07-31" for YYYY-MM-DD).
+              // includeWeekday is additive; naming month/day/year here would
+              // instead force those styles and ignore the numeric pref.
+              options={{ includeWeekday: true }}
             />
           </span>
           <span
