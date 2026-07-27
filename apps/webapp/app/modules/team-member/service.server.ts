@@ -751,35 +751,43 @@ export async function fixTeamMembersNames(
      * 2. Using just first or last name if one exists
      * 3. Falling back to email username if no name exists
      * 4. Using "Unknown" as last resort if no email exists
+     *
+     * Writes are chunked at WRITE_CONCURRENCY so this background repair can't
+     * fire an unbounded burst of updates (callers may pass getAll:true) — same
+     * connection-pressure rationale as the asset-image background flush.
      */
-    await Promise.all(
-      teamMembersToFix.map((teamMember) => {
-        let name: string;
-        const { firstName, lastName, email } = teamMember.user!;
+    const WRITE_CONCURRENCY = 3;
+    for (let i = 0; i < teamMembersToFix.length; i += WRITE_CONCURRENCY) {
+      const batch = teamMembersToFix.slice(i, i + WRITE_CONCURRENCY);
+      await Promise.all(
+        batch.map((teamMember) => {
+          let name: string;
+          const { firstName, lastName, email } = teamMember.user!;
 
-        if (firstName?.trim() || lastName?.trim()) {
-          // At least one name exists - concatenate available names
-          name = [firstName?.trim(), lastName?.trim()]
-            .filter(Boolean)
-            .join(" ");
-        } else {
-          // No names but email exists - use email username
-          name = email.split("@")[0];
-          // Optionally improve email username readability
-          name = name
-            .replace(/[._]/g, " ") // Replace dots/underscores with spaces
-            .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
-        }
+          if (firstName?.trim() || lastName?.trim()) {
+            // At least one name exists - concatenate available names
+            name = [firstName?.trim(), lastName?.trim()]
+              .filter(Boolean)
+              .join(" ");
+          } else {
+            // No names but email exists - use email username
+            name = email.split("@")[0];
+            // Optionally improve email username readability
+            name = name
+              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+          }
 
-        return db.teamMember.update({
-          where: {
-            id: teamMember.id,
-            organizationId: teamMember.organizationId,
-          },
-          data: { name },
-        });
-      })
-    );
+          return db.teamMember.update({
+            where: {
+              id: teamMember.id,
+              organizationId: teamMember.organizationId,
+            },
+            data: { name },
+          });
+        })
+      );
+    }
 
     /** Log auto-fixed empty names as a warning (not error) since the fix is
      * applied successfully. Using Logger.warn avoids sending to Sentry. */
@@ -787,7 +795,13 @@ export async function fixTeamMembersNames(
       new ShelfError({
         cause: null,
         message: "Team members with empty names found and auto-fixed",
-        additionalData: { teamMembersToFix },
+        // Log identifiers only — the full records carry user email/first/last
+        // name (PII). shouldBeCaptured:false stops Sentry capture but not
+        // local/log-aggregator retention, so never log the whole array.
+        additionalData: {
+          teamMemberIds: teamMembersToFix.map((tm) => tm.id),
+          count: teamMembersToFix.length,
+        },
         label,
         shouldBeCaptured: false,
       })

@@ -286,10 +286,11 @@ describe("fixTeamMembersNames", () => {
   type Member = Parameters<typeof fixTeamMembersNames>[0][number];
 
   /**
-   * Builds a minimal team-member shaped for `fixTeamMembersNames`. Only the
-   * fields the function reads (`id`, `name`, `organizationId`, `user`) matter;
-   * the rest are filled with plausible defaults and the whole thing is cast to
-   * the private payload type.
+   * Builds a team-member shaped for `fixTeamMembersNames` on top of the shared
+   * `createTeamMember` factory. The factory supplies the real (type-checked)
+   * TeamMember scalar fields — so a schema change surfaces here instead of
+   * silently drifting — and only the narrow `user` projection the function
+   * actually reads (`firstName`/`lastName`/`displayName`/`email`) is layered on.
    */
   const makeMember = (over: {
     id: string;
@@ -299,17 +300,15 @@ describe("fixTeamMembersNames", () => {
       lastName: string | null;
       email: string;
     } | null;
-  }): Member =>
-    ({
+  }): Member => ({
+    ...createTeamMember({
       id: over.id,
-      userId: over.user ? "user-1" : null,
       name: over.name,
       organizationId: "org-1",
-      deletedAt: null,
-      createdAt: new Date("2023-01-01"),
-      updatedAt: new Date("2023-01-01"),
-      user: over.user ? { ...over.user, displayName: null } : null,
-    }) as unknown as Member;
+      userId: over.user ? "user-1" : null,
+    }),
+    user: over.user ? { ...over.user, displayName: null } : null,
+  });
 
   it("updates only user-linked members whose name is blank", async () => {
     const members: Member[] = [

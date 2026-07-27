@@ -5268,6 +5268,61 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
+ * Process-wide concurrency limiter for background asset-image persists.
+ *
+ * The Prisma connection pool (connection_limit 30) is per-process, so a
+ * per-request write cap gives false protection: N concurrent `/assets` index
+ * loads would each start their own capped batch and the aggregate could still
+ * drain the pool and starve the very reads the deferral is meant to protect
+ * (P2024). Gating every background write through a single module-level counter
+ * guarantees that at most MAX_CONCURRENT_BACKGROUND_PERSISTS writes hold a
+ * connection at any instant, process-wide, regardless of request concurrency.
+ *
+ * A deliberate trade-off vs. a per-write timeout: because Prisma has no query
+ * cancellation, racing each write against a timeout would free the logical slot
+ * while the DB connection stayed held — breaking this very cap. The limiter is
+ * the stronger guarantee (hung writes stay capped at the limit; reads keep the
+ * rest of the pool).
+ */
+const MAX_CONCURRENT_BACKGROUND_PERSISTS = 3;
+
+/** In-flight background persists (0..MAX_CONCURRENT_BACKGROUND_PERSISTS). */
+let activeBackgroundPersists = 0;
+
+/** Resolvers for callers parked until a slot frees up (FIFO). */
+const backgroundPersistWaiters: Array<() => void> = [];
+
+/**
+ * Acquire a background-persist slot, resolving immediately when the process-wide
+ * cap has headroom, or parking the caller in a FIFO queue until a slot frees.
+ *
+ * @returns A promise that resolves once a slot is held by the caller.
+ */
+function acquireBackgroundPersistSlot(): Promise<void> {
+  if (activeBackgroundPersists < MAX_CONCURRENT_BACKGROUND_PERSISTS) {
+    activeBackgroundPersists += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    backgroundPersistWaiters.push(resolve);
+  });
+}
+
+/**
+ * Release a background-persist slot. If a caller is waiting, the slot is handed
+ * straight to it (the active count stays constant); otherwise the active count
+ * is decremented.
+ */
+function releaseBackgroundPersistSlot(): void {
+  const next = backgroundPersistWaiters.shift();
+  if (next) {
+    next();
+  } else {
+    activeBackgroundPersists -= 1;
+  }
+}
+
+/**
  * Refreshes expired signed URLs for asset images server-side.
  * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
  *
@@ -5306,17 +5361,31 @@ export async function refreshExpiredAssetImages<
    * `db.asset.update` burst on this read path was part of what exhausted the
    * Prisma pool (P2024). The response already carries the fresh URLs, so a
    * failed background write is harmless: the next load simply re-signs
-   * (idempotent).
+   * (idempotent). Each entry is an `updateMany` guarded on the original
+   * `mainImage`, so a deferred write can never overwrite an image that changed
+   * between the read and the flush.
    */
-  const pendingWrites: Prisma.AssetUpdateArgs[] = [];
+  const pendingWrites: Array<{
+    assetId: string;
+    args: Prisma.AssetUpdateManyArgs;
+  }> = [];
 
   // Buffer a backoff bump instead of writing it inline. Synchronous now (no DB
   // round-trip on the critical path); the actual write happens in the flush.
+  // Guarded on the original `mainImage` (optimistic concurrency) so a stale
+  // backoff can't land on an image that was replaced between read and flush.
   const applyBackoff = (asset: (typeof expiredAssets)[number]) => {
     const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
     pendingWrites.push({
-      where: { id: asset.id, organizationId: asset.organizationId },
-      data: { mainImageExpiration: backoffExpiration },
+      assetId: asset.id,
+      args: {
+        where: {
+          id: asset.id,
+          organizationId: asset.organizationId,
+          mainImage: asset.mainImage,
+        },
+        data: { mainImageExpiration: backoffExpiration },
+      },
     });
   };
 
@@ -5373,10 +5442,21 @@ export async function refreshExpiredAssetImages<
       // Defer the persist off the awaited path — buffer the payload and let the
       // single background flush below write it. The response value returned here
       // is independent of whether/when this write lands, so the fresh URLs are
-      // served immediately even if the write later fails.
+      // served immediately even if the write later fails. The `mainImage` guard
+      // makes the write optimistic: if the image was replaced (e.g. by
+      // updateAssetMainImage) between this read and the flush, the guard no
+      // longer matches and the stale re-signed URL is silently skipped instead
+      // of clobbering the newer image.
       pendingWrites.push({
-        where: { id: asset.id, organizationId: asset.organizationId },
-        data: updateData,
+        assetId: asset.id,
+        args: {
+          where: {
+            id: asset.id,
+            organizationId: asset.organizationId,
+            mainImage: asset.mainImage,
+          },
+          data: updateData,
+        },
       });
 
       return {
@@ -5386,13 +5466,10 @@ export async function refreshExpiredAssetImages<
         ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
     } catch (error) {
-      // Asset deleted between query and update — not an error
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
-        return null;
-      }
+      // This block only wraps extractStoragePath + createSignedUrl now — the DB
+      // persist was deferred to the background flush — so no Prisma P2025 can
+      // surface here; the flush's guarded updateMany handles deleted/changed
+      // rows (count 0, no throw).
 
       // File deleted from storage — expected, not a bug
       if (isStorageObjectNotFound(error)) {
@@ -5468,47 +5545,44 @@ export async function refreshExpiredAssetImages<
   }
 
   // Flush all buffered writes (re-signed URLs + backoff bumps) OFF the awaited
-  // path in a SINGLE fire-and-forget background task. Serial batches of ≤3 keep
-  // this from re-creating the concurrent write burst that exhausts the Prisma
-  // connection pool (P2024). Running on a long-lived Node server (Fly), the
-  // writes still complete after the response is sent — which is the intent.
-  // Every failure is swallowed and logged (never rethrown): the fresh URL is
-  // already served and the next load simply re-signs, so the write is
-  // idempotent and non-critical.
+  // path in a fire-and-forget background task. Each write goes through the
+  // process-wide persist limiter (acquireBackgroundPersistSlot), so no matter
+  // how many /assets index loads run concurrently the background writes can
+  // never exceed MAX_CONCURRENT_BACKGROUND_PERSISTS connections at once and
+  // starve the reads this deferral protects (P2024). Running on a long-lived
+  // Node server (Fly), the writes still complete after the response is sent —
+  // which is the intent. Every failure is swallowed and logged (never
+  // rethrown): the fresh URL is already served and the next load simply
+  // re-signs, so the write is idempotent and non-critical.
   if (pendingWrites.length > 0) {
-    /** Max concurrent background writes — well under the pool's connection budget. */
-    const PERSIST_CONCURRENCY = 3;
-    void (async () => {
-      for (let i = 0; i < pendingWrites.length; i += PERSIST_CONCURRENCY) {
-        const batch = pendingWrites.slice(i, i + PERSIST_CONCURRENCY);
-        await Promise.all(
-          batch.map((write) =>
-            db.asset.update(write).catch((error: unknown) => {
-              // Asset deleted between query and background write — nothing to
-              // persist, skip silently (same as the inline P2025 handling).
-              if (
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === "P2025"
-              ) {
-                return;
-              }
-              // why: URL already served; log as a warning so a persist failure
-              // never becomes an unhandled rejection or a Sentry error.
-              Logger.warn(
-                new ShelfError({
-                  cause: error,
-                  message:
-                    "Background persist of refreshed asset image URLs failed",
-                  additionalData: { assetId: write.where.id },
-                  label: "Assets",
-                  shouldBeCaptured: false,
-                })
-              );
+    void Promise.all(
+      pendingWrites.map(async ({ assetId, args }) => {
+        await acquireBackgroundPersistSlot();
+        try {
+          // updateMany (not update) applies the `mainImage` guard in args.where:
+          // count 0 means the row was deleted OR its image was replaced since
+          // the read, so there is nothing safe to persist. Both are expected
+          // no-ops, and updateMany returns count 0 rather than throwing P2025,
+          // so those cases need no per-write error handling.
+          await db.asset.updateMany(args);
+        } catch (error: unknown) {
+          // why: URL already served; log as a warning so a persist failure
+          // never becomes an unhandled rejection or a Sentry error.
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Background persist of refreshed asset image URLs failed",
+              additionalData: { assetId },
+              label: "Assets",
+              shouldBeCaptured: false,
             })
-          )
-        );
-      }
-    })().catch(() => {
+          );
+        } finally {
+          releaseBackgroundPersistSlot();
+        }
+      })
+    ).catch(() => {
       // Extra guard: per-write errors are already swallowed above, but keep the
       // outer background promise from ever surfacing as an unhandled rejection.
     });
