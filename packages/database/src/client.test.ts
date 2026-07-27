@@ -10,8 +10,10 @@
  *
  * @see ./client.ts
  */
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   getRetryableErrorCode,
@@ -363,4 +365,39 @@ test("withPrismaRetry", async (t) => {
     assert.equal(result, 42);
     assert.equal(calls, 1);
   });
+});
+
+test("createDatabaseClient wires the transient-retry extension onto the client", () => {
+  // The retry LOGIC is covered exhaustively above; this guards the WIRING — the
+  // exact regression that already happened once, when the monorepo migration
+  // silently dropped the retry `$extends` from this factory.
+  //
+  // A behavioral guard would have to intercept the applied extension chain, but
+  // Prisma's client is a Proxy (its `$extends` isn't reachable on the prototype)
+  // and injecting a fake base client perturbs Prisma's inferred client type
+  // enough to break downstream typechecks. So this asserts the wiring at the
+  // source level — the same cheap regression guard the repo uses elsewhere for
+  // seams that can't be mocked (see the raw-SQL `@map` column-name rule).
+  const source = readFileSync(
+    fileURLToPath(new URL("./client.ts", import.meta.url)),
+    "utf8"
+  );
+
+  const factoryStart = source.indexOf("export function createDatabaseClient");
+  assert.notEqual(factoryStart, -1, "createDatabaseClient factory not found");
+
+  // Collapse whitespace so the assertions survive prettier reformatting, and
+  // scope to the factory body so a stray reference elsewhere can't satisfy them.
+  const factory = source.slice(factoryStart).replace(/\s+/g, " ");
+
+  assert.match(
+    factory,
+    /\$extends\(\{ query: \{ \$allModels: \{/,
+    "the retry query `$extends` appears to have been removed from createDatabaseClient"
+  );
+  assert.match(
+    factory,
+    /withPrismaRetry\(\(\) => query\(args\)/,
+    "createDatabaseClient no longer routes operations through withPrismaRetry"
+  );
 });

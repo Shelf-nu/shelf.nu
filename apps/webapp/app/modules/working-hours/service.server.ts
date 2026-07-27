@@ -4,11 +4,30 @@ import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
+/**
+ * Ensures a default `WorkingHours` row exists for an organization and returns
+ * it (with overrides).
+ *
+ * Uses `upsert` (not a bare `create`) so it is idempotent and race-safe. Every
+ * caller reaches this through a check-then-create ("find, create if absent")
+ * path — the authenticated layout loader cold path
+ * ({@link getWorkingHoursForOrganization}), the override creator, and the admin
+ * dashboard — so two concurrent first requests for the same organization would
+ * otherwise race a unique-constraint violation on `WorkingHours.organizationId`
+ * (the same loader-path write race hardened for booking settings). `update: {}`
+ * makes the losing side of the race a no-op that returns the existing row
+ * instead of throwing.
+ *
+ * @param organizationId - The organization to create/fetch default hours for
+ * @returns The organization's `WorkingHours` row, including its overrides
+ */
 export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
 
-  const workingHours = await db.workingHours.create({
-    data: {
+  const workingHours = await db.workingHours.upsert({
+    where: { organizationId },
+    update: {},
+    create: {
       organizationId,
       enabled: false,
       weeklySchedule: defaultSchedule,
