@@ -2,6 +2,7 @@ import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isNotFoundError, ShelfError } from "~/utils/error";
@@ -330,8 +331,12 @@ export async function getTeamMemberForCustodianFilter({
       return aName.localeCompare(bName);
     });
 
-    /** Checks and fixes teamMember names if they are broken */
-    await fixTeamMembersNames(teamMembers);
+    /**
+     * Checks and fixes teamMember names if they are broken. Fire-and-forget:
+     * it only writes DB rows (never mutates `teamMembers`) so it must not block
+     * the loader or hold a write-connection on this read path.
+     */
+    void fixTeamMembersNames(teamMembers);
     return {
       teamMembers,
       totalTeamMembers,
@@ -405,7 +410,8 @@ export async function getTeamMemberForForm({
         },
       });
 
-      await fixTeamMembersNames(teamMember ? [teamMember] : []);
+      // Fire-and-forget background cleanup — must not block this loader.
+      void fixTeamMembersNames(teamMember ? [teamMember] : []);
 
       return {
         teamMembers: teamMember ? [teamMember] : [],
@@ -467,7 +473,8 @@ export async function getTeamMemberForForm({
           })
         : null;
 
-      await fixTeamMembersNames(
+      // Fire-and-forget background cleanup — must not block this loader.
+      void fixTeamMembersNames(
         custodianTeamMember ? [custodianTeamMember] : []
       );
 
@@ -705,17 +712,39 @@ function validateTeamMemberName(teamMember: TeamMemberWithUserData) {
 }
 
 /**
- * Fixes team members with invalid names. THis runs as void on the background so it doenst block the main thread
- * @param teamMembers  Array of team members with user data
+ * Fixes team members that have a blank/whitespace-only `name` by deriving one
+ * from their linked user (first/last name, else the email username).
+ *
+ * This is a best-effort DB cleanup — it updates rows only and never mutates the
+ * in-memory `teamMembers` array. User-linked members display via
+ * `resolveUserDisplayName(user)` regardless of the stored `name`, so the result
+ * is invisible to the response. It is therefore invoked **fire-and-forget**
+ * (`void fixTeamMembersNames(...)`) so it never blocks a loader or holds a
+ * write-connection on the critical read path (part of the P2024 pool-exhaustion
+ * fix). All errors are caught and logged here so the returned promise never
+ * rejects — callers can safely `void` it without a `.catch`.
+ *
+ * Only members that are BOTH blank-named AND user-linked are considered: NRMs
+ * (`user === null`) have no user record to derive a name from, so they are
+ * excluded up front — otherwise a blank-named NRM would defeat the early-return
+ * and make this run (and log) for nothing.
+ *
+ * @param teamMembers Array of team members with user data
  */
-async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
+export async function fixTeamMembersNames(
+  teamMembers: TeamMemberWithUserData[]
+) {
   try {
-    const teamMembersWithEmptyNames = teamMembers.filter(
-      validateTeamMemberName
+    // Only user-linked blank-named members are fixable — exclude NRMs
+    // (user === null) up front so the early-return below isn't defeated by a
+    // blank-named NRM that can never be fixed anyway.
+    const teamMembersToFix = teamMembers.filter(
+      (teamMember) =>
+        teamMember.user !== null && validateTeamMemberName(teamMember)
     );
 
     /** If there are none, just return */
-    if (teamMembersWithEmptyNames.length === 0) return;
+    if (teamMembersToFix.length === 0) return;
 
     /**
      * Updates team member names by:
@@ -723,36 +752,42 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
      * 2. Using just first or last name if one exists
      * 3. Falling back to email username if no name exists
      * 4. Using "Unknown" as last resort if no email exists
+     *
+     * Each write runs through the shared, process-wide background-write limiter
+     * so this repair (callers may pass getAll:true) can't fire an unbounded
+     * burst of updates, and shares one connection budget with the other
+     * deferred-write paths (e.g. the asset-image flush) rather than adding a
+     * second independent cap.
      */
     await Promise.all(
-      teamMembersWithEmptyNames
-        .filter((teamMember) => teamMember.user !== null)
-        .map((teamMember) => {
-          let name: string;
-          const { firstName, lastName, email } = teamMember.user!;
+      teamMembersToFix.map((teamMember) => {
+        let name: string;
+        const { firstName, lastName, email } = teamMember.user!;
 
-          if (firstName?.trim() || lastName?.trim()) {
-            // At least one name exists - concatenate available names
-            name = [firstName?.trim(), lastName?.trim()]
-              .filter(Boolean)
-              .join(" ");
-          } else {
-            // No names but email exists - use email username
-            name = email.split("@")[0];
-            // Optionally improve email username readability
-            name = name
-              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
-              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
-          }
+        if (firstName?.trim() || lastName?.trim()) {
+          // At least one name exists - concatenate available names
+          name = [firstName?.trim(), lastName?.trim()]
+            .filter(Boolean)
+            .join(" ");
+        } else {
+          // No names but email exists - use email username
+          name = email.split("@")[0];
+          // Optionally improve email username readability
+          name = name
+            .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+            .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+        }
 
-          return db.teamMember.update({
+        return withBackgroundWriteSlot(() =>
+          db.teamMember.update({
             where: {
               id: teamMember.id,
               organizationId: teamMember.organizationId,
             },
             data: { name },
-          });
-        })
+          })
+        );
+      })
     );
 
     /** Log auto-fixed empty names as a warning (not error) since the fix is
@@ -761,17 +796,28 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
       new ShelfError({
         cause: null,
         message: "Team members with empty names found and auto-fixed",
-        additionalData: { teamMembersWithEmptyNames },
+        // Log identifiers only — the full records carry user email/first/last
+        // name (PII). shouldBeCaptured:false stops Sentry capture but not
+        // local/log-aggregator retention, so never log the whole array.
+        additionalData: {
+          teamMemberIds: teamMembersToFix.map((tm) => tm.id),
+          count: teamMembersToFix.length,
+        },
         label,
         shouldBeCaptured: false,
       })
     );
   } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Failed to fix team members names",
-      label,
-    });
+    // Runs fire-and-forget in the background, so log instead of rethrowing —
+    // rethrowing here would become an unhandled rejection at the `void` call
+    // sites, and the cleanup is non-critical (next load will retry).
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to fix team members names",
+        label,
+      })
+    );
   }
 }
 

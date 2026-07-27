@@ -22,9 +22,9 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 
-import { loader } from "./bookings.available-models";
+import { loader } from "~/routes/api+/mobile+/bookings.available-models";
 
-import { assertIsDataWithResponseInit } from "../../../../test/helpers/assertions";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // @vitest-environment node
 

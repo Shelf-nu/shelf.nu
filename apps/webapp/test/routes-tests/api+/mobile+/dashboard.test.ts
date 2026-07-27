@@ -37,7 +37,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 
-import { loader } from "./dashboard";
+import { loader } from "~/routes/api+/mobile+/dashboard";
 
 // why: the dashboard runs the REAL `getBookings`, whose `where` is the subject
 // under test. Mocking the Prisma client is what lets us capture that argument;
