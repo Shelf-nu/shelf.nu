@@ -71,6 +71,7 @@ import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -5268,61 +5269,6 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
- * Process-wide concurrency limiter for background asset-image persists.
- *
- * The Prisma connection pool (connection_limit 30) is per-process, so a
- * per-request write cap gives false protection: N concurrent `/assets` index
- * loads would each start their own capped batch and the aggregate could still
- * drain the pool and starve the very reads the deferral is meant to protect
- * (P2024). Gating every background write through a single module-level counter
- * guarantees that at most MAX_CONCURRENT_BACKGROUND_PERSISTS writes hold a
- * connection at any instant, process-wide, regardless of request concurrency.
- *
- * A deliberate trade-off vs. a per-write timeout: because Prisma has no query
- * cancellation, racing each write against a timeout would free the logical slot
- * while the DB connection stayed held — breaking this very cap. The limiter is
- * the stronger guarantee (hung writes stay capped at the limit; reads keep the
- * rest of the pool).
- */
-const MAX_CONCURRENT_BACKGROUND_PERSISTS = 3;
-
-/** In-flight background persists (0..MAX_CONCURRENT_BACKGROUND_PERSISTS). */
-let activeBackgroundPersists = 0;
-
-/** Resolvers for callers parked until a slot frees up (FIFO). */
-const backgroundPersistWaiters: Array<() => void> = [];
-
-/**
- * Acquire a background-persist slot, resolving immediately when the process-wide
- * cap has headroom, or parking the caller in a FIFO queue until a slot frees.
- *
- * @returns A promise that resolves once a slot is held by the caller.
- */
-function acquireBackgroundPersistSlot(): Promise<void> {
-  if (activeBackgroundPersists < MAX_CONCURRENT_BACKGROUND_PERSISTS) {
-    activeBackgroundPersists += 1;
-    return Promise.resolve();
-  }
-  return new Promise<void>((resolve) => {
-    backgroundPersistWaiters.push(resolve);
-  });
-}
-
-/**
- * Release a background-persist slot. If a caller is waiting, the slot is handed
- * straight to it (the active count stays constant); otherwise the active count
- * is decremented.
- */
-function releaseBackgroundPersistSlot(): void {
-  const next = backgroundPersistWaiters.shift();
-  if (next) {
-    next();
-  } else {
-    activeBackgroundPersists -= 1;
-  }
-}
-
-/**
  * Refreshes expired signed URLs for asset images server-side.
  * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
  *
@@ -5442,11 +5388,14 @@ export async function refreshExpiredAssetImages<
       // Defer the persist off the awaited path — buffer the payload and let the
       // single background flush below write it. The response value returned here
       // is independent of whether/when this write lands, so the fresh URLs are
-      // served immediately even if the write later fails. The `mainImage` guard
-      // makes the write optimistic: if the image was replaced (e.g. by
+      // served immediately even if the write later fails. The guard makes the
+      // write optimistic: if the image was replaced (e.g. by
       // updateAssetMainImage) between this read and the flush, the guard no
       // longer matches and the stale re-signed URL is silently skipped instead
-      // of clobbering the newer image.
+      // of clobbering the newer image. We guard on thumbnailImage too, but only
+      // when this write actually sets one — otherwise a mainImage-only refresh
+      // (thumbnail re-sign failed) would be needlessly skipped by a thumbnail
+      // that changed independently.
       pendingWrites.push({
         assetId: asset.id,
         args: {
@@ -5454,6 +5403,9 @@ export async function refreshExpiredAssetImages<
             id: asset.id,
             organizationId: asset.organizationId,
             mainImage: asset.mainImage,
+            ...(updateData.thumbnailImage !== undefined
+              ? { thumbnailImage: asset.thumbnailImage }
+              : {}),
           },
           data: updateData,
         },
@@ -5546,42 +5498,40 @@ export async function refreshExpiredAssetImages<
 
   // Flush all buffered writes (re-signed URLs + backoff bumps) OFF the awaited
   // path in a fire-and-forget background task. Each write goes through the
-  // process-wide persist limiter (acquireBackgroundPersistSlot), so no matter
-  // how many /assets index loads run concurrently the background writes can
-  // never exceed MAX_CONCURRENT_BACKGROUND_PERSISTS connections at once and
-  // starve the reads this deferral protects (P2024). Running on a long-lived
-  // Node server (Fly), the writes still complete after the response is sent —
-  // which is the intent. Every failure is swallowed and logged (never
-  // rethrown): the fresh URL is already served and the next load simply
-  // re-signs, so the write is idempotent and non-critical.
+  // shared, process-wide background-write limiter (withBackgroundWriteSlot), so
+  // no matter how many /assets index loads run concurrently — or how many other
+  // features defer background writes — the aggregate can never exceed
+  // MAX_CONCURRENT_BACKGROUND_WRITES connections at once and starve the reads
+  // this deferral protects (P2024). Running on a long-lived Node server (Fly),
+  // the writes still complete after the response is sent — which is the intent.
+  // Every failure is swallowed and logged (never rethrown): the fresh URL is
+  // already served and the next load simply re-signs, so the write is
+  // idempotent and non-critical.
   if (pendingWrites.length > 0) {
     void Promise.all(
-      pendingWrites.map(async ({ assetId, args }) => {
-        await acquireBackgroundPersistSlot();
-        try {
-          // updateMany (not update) applies the `mainImage` guard in args.where:
-          // count 0 means the row was deleted OR its image was replaced since
-          // the read, so there is nothing safe to persist. Both are expected
-          // no-ops, and updateMany returns count 0 rather than throwing P2025,
-          // so those cases need no per-write error handling.
-          await db.asset.updateMany(args);
-        } catch (error: unknown) {
-          // why: URL already served; log as a warning so a persist failure
-          // never becomes an unhandled rejection or a Sentry error.
-          Logger.warn(
-            new ShelfError({
-              cause: error,
-              message:
-                "Background persist of refreshed asset image URLs failed",
-              additionalData: { assetId },
-              label: "Assets",
-              shouldBeCaptured: false,
-            })
-          );
-        } finally {
-          releaseBackgroundPersistSlot();
-        }
-      })
+      pendingWrites.map(({ assetId, args }) =>
+        // updateMany (not update) applies the guard in args.where: count 0 means
+        // the row was deleted OR its image changed since the read, so there is
+        // nothing safe to persist. Both are expected no-ops, and updateMany
+        // returns count 0 rather than throwing P2025, so those cases need no
+        // per-write error handling.
+        withBackgroundWriteSlot(() => db.asset.updateMany(args)).catch(
+          (error: unknown) => {
+            // why: URL already served; log as a warning so a persist failure
+            // never becomes an unhandled rejection or a Sentry error.
+            Logger.warn(
+              new ShelfError({
+                cause: error,
+                message:
+                  "Background persist of refreshed asset image URLs failed",
+                additionalData: { assetId },
+                label: "Assets",
+                shouldBeCaptured: false,
+              })
+            );
+          }
+        )
+      )
     ).catch(() => {
       // Extra guard: per-write errors are already swallowed above, but keep the
       // outer background promise from ever surfacing as an unhandled rejection.

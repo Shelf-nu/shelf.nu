@@ -503,12 +503,14 @@ describe("refreshExpiredAssetImages", () => {
     await vi.waitFor(() =>
       expect(mockUpdateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          // Guarded on the original mainImage so a concurrent image replace
-          // can't be clobbered by this deferred write.
+          // Guarded on the original mainImage AND thumbnailImage (a thumbnail is
+          // written here) so a concurrent replace of either can't be clobbered
+          // by this deferred write.
           where: {
             id: "asset-1",
             organizationId: "org-1",
             mainImage: "https://old-signed-url.com",
+            thumbnailImage: "https://old-thumbnail-url.com",
           },
           data: expect.objectContaining({
             mainImage: "https://new-main-url.com",

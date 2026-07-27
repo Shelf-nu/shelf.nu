@@ -2,6 +2,7 @@ import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isNotFoundError, ShelfError } from "~/utils/error";
@@ -752,42 +753,42 @@ export async function fixTeamMembersNames(
      * 3. Falling back to email username if no name exists
      * 4. Using "Unknown" as last resort if no email exists
      *
-     * Writes are chunked at WRITE_CONCURRENCY so this background repair can't
-     * fire an unbounded burst of updates (callers may pass getAll:true) — same
-     * connection-pressure rationale as the asset-image background flush.
+     * Each write runs through the shared, process-wide background-write limiter
+     * so this repair (callers may pass getAll:true) can't fire an unbounded
+     * burst of updates, and shares one connection budget with the other
+     * deferred-write paths (e.g. the asset-image flush) rather than adding a
+     * second independent cap.
      */
-    const WRITE_CONCURRENCY = 3;
-    for (let i = 0; i < teamMembersToFix.length; i += WRITE_CONCURRENCY) {
-      const batch = teamMembersToFix.slice(i, i + WRITE_CONCURRENCY);
-      await Promise.all(
-        batch.map((teamMember) => {
-          let name: string;
-          const { firstName, lastName, email } = teamMember.user!;
+    await Promise.all(
+      teamMembersToFix.map((teamMember) => {
+        let name: string;
+        const { firstName, lastName, email } = teamMember.user!;
 
-          if (firstName?.trim() || lastName?.trim()) {
-            // At least one name exists - concatenate available names
-            name = [firstName?.trim(), lastName?.trim()]
-              .filter(Boolean)
-              .join(" ");
-          } else {
-            // No names but email exists - use email username
-            name = email.split("@")[0];
-            // Optionally improve email username readability
-            name = name
-              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
-              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
-          }
+        if (firstName?.trim() || lastName?.trim()) {
+          // At least one name exists - concatenate available names
+          name = [firstName?.trim(), lastName?.trim()]
+            .filter(Boolean)
+            .join(" ");
+        } else {
+          // No names but email exists - use email username
+          name = email.split("@")[0];
+          // Optionally improve email username readability
+          name = name
+            .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+            .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+        }
 
-          return db.teamMember.update({
+        return withBackgroundWriteSlot(() =>
+          db.teamMember.update({
             where: {
               id: teamMember.id,
               organizationId: teamMember.organizationId,
             },
             data: { name },
-          });
-        })
-      );
-    }
+          })
+        );
+      })
+    );
 
     /** Log auto-fixed empty names as a warning (not error) since the fix is
      * applied successfully. Using Logger.warn avoids sending to Sentry. */
