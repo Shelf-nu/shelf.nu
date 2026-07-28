@@ -35,5 +35,7 @@ const ROLE_PERMISSIONS = { OWNER: { qr: ["read", "update"] } };
  */
 ```
 
-Existing mirrors: `apps/companion/lib/permissions.ts`. When you touch one,
-diff it against its canonical source before shipping.
+Existing mirrors: none — the permissions mirror was extracted to
+`@shelf/permissions` (packages/permissions). If you create a new mirror,
+add it to this list; when you touch one, diff it against its canonical
+source before shipping.
