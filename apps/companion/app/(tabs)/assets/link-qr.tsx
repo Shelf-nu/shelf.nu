@@ -103,17 +103,31 @@ function LinkQrContent() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  /**
+   * Monotonic token identifying the newest fetch. Search/workspace changes
+   * rebuild `fetchAssets` (new deps) and the list effect starts a fresh
+   * request without aborting the old one — if the older response lands
+   * last it must not overwrite the state the UI now reflects.
+   */
+  const fetchVersionRef = useRef(0);
+
   const fetchAssets = useCallback(
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
+      const version = ++fetchVersionRef.current;
       const { data, error: fetchErr } = await api.assets(currentOrg.id, {
         search: debouncedSearch || undefined,
         page: pageNum,
         perPage: PAGE_SIZE,
       });
+      // A newer fetch started while this one was in flight (search typed,
+      // workspace switched) — discard this stale response entirely.
+      if (version !== fetchVersionRef.current) return;
       if (!data && !fetchErr) return; // Request cancelled (navigation) — ignore
       if (fetchErr || !data) {
-        setError(fetchErr || "Failed to load assets");
+        // Only a first-page failure is fatal for the screen; a failed
+        // load-more must not discard the rows already on screen.
+        if (reset) setError(fetchErr || "Failed to load assets");
         return;
       }
       setError(null);

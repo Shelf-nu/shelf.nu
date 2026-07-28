@@ -400,6 +400,12 @@ function ScannerContent() {
   // Scan processing state (extracted hook) -- created first so
   // its setIsPaused can be referenced by the inactivity callback.
   const setIsPausedRef = useRef<(v: boolean) => void>(() => {});
+  /**
+   * Live mirror of the active org id, written by the org-change effect.
+   * Async continuations (claim → navigate) compare their originating org
+   * against this to detect a mid-flight workspace switch.
+   */
+  const activeOrgIdRef = useRef<string | undefined>(undefined);
   const onInactivityTimeout = useCallback(
     () => setIsPausedRef.current(true),
     []
@@ -456,6 +462,12 @@ function ScannerContent() {
   useEffect(() => {
     setScanResult(null);
     lastScanRef.current = "";
+    // Also invalidates any in-flight claim continuation: claimQrAndProceed
+    // compares its originating org against this ref after its awaits and
+    // drops the follow-up navigation when they differ (the claim itself may
+    // have landed in the old org — irreversible — but we must not open the
+    // create/link flow under the newly active workspace).
+    activeOrgIdRef.current = currentOrg?.id;
     // setScanResult / lastScanRef are stable identities (setState / ref), so
     // this effectively runs only when the active org changes (the mount run
     // is a no-op — the card starts null and the dedup memory empty).
@@ -545,6 +557,13 @@ function ScannerContent() {
       setIsProcessing(true);
       setScanResult(null);
 
+      // Pin the originating org: if the user switches workspaces while the
+      // claim is in flight, the continuation below must not run (the claim
+      // may have landed in this org, but navigating would open the
+      // create/link flow under the NEW org, where createAsset silently mints
+      // a different QR and strands the scanned label unlinked).
+      const originOrgId = currentOrg.id;
+
       const { error: claimError } = await api.claimQr(currentOrg.id, claimQrId);
 
       let claimed = !claimError;
@@ -568,6 +587,12 @@ function ScannerContent() {
       }
 
       finalizeScan();
+
+      // Workspace switched while the claim was in flight — drop the
+      // continuation. The org-change effect has already cleared the card;
+      // showing a stale success/error for the previous workspace (or worse,
+      // navigating) would act on a workspace the user no longer sees.
+      if (activeOrgIdRef.current !== originOrgId) return;
 
       if (!claimed) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
