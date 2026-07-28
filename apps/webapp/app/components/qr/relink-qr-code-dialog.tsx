@@ -118,18 +118,29 @@ export function RelinkQrCodeDialog({
         <When truthy={currentState === "initial"}>
           <>
             {/*
-             * The scanner is sized by flex rather than pinned to 450px: it
-             * PREFERS 450px (basis) but shrinks down to 200px when a short
-             * viewport leaves less room, so the code confirmation and the
-             * Link/Rescan actions below stay on screen instead of being
+             * The scanner PREFERS 450px (the explicit height doubles as the
+             * flex basis) but `shrink` lets it compress down to 200px when a
+             * short viewport leaves less room, so the code confirmation and
+             * the Link/Rescan actions below stay on screen instead of being
              * pushed under the fold. `min-h-[200px]` deliberately overrides
              * CodeScanner's own `min-h-[400px]` floor for this dialog only.
+             *
+             * why an explicit `!h-[450px]` and not `!h-auto basis-[450px]`:
+             * ScannerMode paints its dark area with `h-full`, and a
+             * percentage height only resolves against a DEFINITE parent.
+             * Chromium treats a flex item sized by a fixed flex-basis as
+             * definite, but WebKit/Safari does not — there the item stayed
+             * 450px tall while the dark UI collapsed to ~150px of content
+             * with a dead white void below it, at EVERY window size (the
+             * regression DonKoko screenshotted). An explicit height is
+             * definite in every engine, and when flex shrinks the item the
+             * used height stays definite, so `h-full` children keep filling.
              *
              * The removed `[&_.info-overlay]:h-[450px]` and
              * `scannerModeClassName="h-[450px]"` were only there to match the
              * fixed 450px: InfoOverlay is already `absolute inset-0` and
-             * ScannerMode is already `h-full`, so both now track the flexed
-             * height on their own.
+             * ScannerMode is already `h-full`, so both track the height on
+             * their own.
              *
              * overlayPosition="centered" is REQUIRED once the scanner can
              * shrink. The default is "fullscreen", which pins the paused
@@ -140,7 +151,7 @@ export function RelinkQrCodeDialog({
              * scanner and scrolls, so it fits at any height.
              */}
             <CodeScanner
-              className="!h-auto min-h-[200px] shrink basis-[450px]"
+              className="!h-[450px] !min-h-[200px] shrink"
               overlayPosition="centered"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}
