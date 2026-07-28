@@ -1,4 +1,5 @@
 import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 
 import { matchRequestUrl, http, HttpResponse } from "msw";
 import { server } from "@mocks";
@@ -19,6 +20,7 @@ import { db } from "~/database/db.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
+  createUser,
   createUserAccountForTesting,
   createUserOrAttachOrg,
   defaultUserCategories,
@@ -36,6 +38,7 @@ vitest.mock("~/database/db.server", () => ({
     user: {
       create: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
+      findUnique: vitest.fn().mockResolvedValue(null),
     },
     organization: {
       findFirst: vitest.fn().mockResolvedValue({
@@ -445,5 +448,162 @@ describe(createUserOrAttachOrg.name, () => {
     expect(result.id).toBe(USER_ID);
     expect(db.userOrganization.upsert).toHaveBeenCalled();
     expect(db.user.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Tests for `createUser` idempotency on the primary key (SHELF-WEBAPP-1EA).
+ *
+ * When `user.create` hits a P2002 unique-constraint violation on `id`, a `User`
+ * row already exists for this Supabase auth id (re-signup / partial signup).
+ * Because the create + all side-effects run in one `$transaction`, the P2002
+ * rolls everything back, so returning the pre-existing row is safe and does not
+ * duplicate any side-effects.
+ */
+describe(createUser.name, () => {
+  /** Prisma payload shape the transaction's create returns (subset used here). */
+  const existingUser = {
+    id: USER_ID,
+    email: USER_EMAIL,
+    organizations: [{ id: ORGANIZATION_ID }],
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the mocked $transaction just invokes the callback with the mocked db,
+    // so the callback's `tx.user.create` resolves to whatever db.user.create does
+    // @ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback: any) => callback(db));
+  });
+
+  it("returns the existing user when create throws a P2002 unique violation on id", async () => {
+    // why: simulate Prisma raising a primary-key unique violation (id already
+    // has a User row) so the create inside the transaction rejects with P2002
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`id`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["id"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(existingUser);
+
+    const result = await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+    });
+
+    expect(result).toEqual(existingUser);
+    // Looks the row up by id, not by any other field
+    expect(db.user.findUnique).toHaveBeenCalledWith({
+      where: { id: USER_ID },
+      select: expect.objectContaining({
+        organizations: { select: { id: true } },
+      }),
+    });
+    // No duplicate side-effects: nothing was re-created
+    expect(db.userOrganization.upsert).not.toHaveBeenCalled();
+  });
+
+  it("reconciles the org association when an invite/SSO caller races a P2002 and the existing user is not yet a member", async () => {
+    // why: the create + org association run in one rolled-back transaction, so a
+    // concurrent P2002 race returns the existing user WITHOUT the requested org.
+    // The recovery path must re-attach it (SHELF-WEBAPP-1EA follow-up).
+    const NEW_ORG_ID = "org-the-user-is-not-in-yet";
+    // Fresh object per test: the recovery path mutates `organizations` via push.
+    const userMissingOrg = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      organizations: [] as { id: string }[],
+    };
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`id`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["id"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(userMissingOrg);
+
+    const result = await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      organizationId: NEW_ORG_ID,
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    // Re-attaches the existing user to the requested org idempotently
+    expect(db.userOrganization.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_organizationId: {
+            userId: USER_ID,
+            organizationId: NEW_ORG_ID,
+          },
+        },
+      })
+    );
+    // Still returns the pre-existing user, now carrying the reconciled org
+    expect(result).toBe(userMissingOrg);
+    expect(result.organizations).toContainEqual({ id: NEW_ORG_ID });
+  });
+
+  it("does NOT re-attach the org when the racing user is already a member", async () => {
+    // why: re-attaching an existing membership would re-push roles via the
+    // upsert's `push` update branch — the membership check must short-circuit.
+    const userAlreadyMember = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      organizations: [{ id: ORGANIZATION_ID }],
+    };
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`id`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["id"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(userAlreadyMember);
+
+    const result = await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(result).toBe(userAlreadyMember);
+    expect(db.userOrganization.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when P2002 has no matching row for this id (conflict on another unique field)", async () => {
+    // why: a P2002 on e.g. `email` with no row for this id is a genuine conflict
+    const p2002 = new PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`email`)",
+      { code: "P2002", clientVersion: "test", meta: { target: ["email"] } }
+    );
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(p2002);
+    // @ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValueOnce(null);
+
+    await expect(
+      createUser({ email: USER_EMAIL, userId: USER_ID, username })
+    ).rejects.toThrow("We had trouble while creating your account");
+  });
+
+  it("throws when create fails with a non-P2002 error", async () => {
+    // why: a generic DB failure must still surface as a ShelfError, not silently
+    // resolve — and must not attempt the idempotent lookup
+    // @ts-expect-error missing vitest type
+    db.user.create.mockRejectedValueOnce(new Error("connection reset"));
+
+    await expect(
+      createUser({ email: USER_EMAIL, userId: USER_ID, username })
+    ).rejects.toThrow("We had trouble while creating your account");
+    expect(db.user.findUnique).not.toHaveBeenCalled();
   });
 });

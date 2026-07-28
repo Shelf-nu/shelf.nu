@@ -26,9 +26,9 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 
-import { loader } from "./assets";
+import { loader } from "~/routes/api+/mobile+/assets";
 
-import { assertIsDataWithResponseInit } from "../../../../test/helpers/assertions";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // @vitest-environment node
 

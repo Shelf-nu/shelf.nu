@@ -433,7 +433,9 @@ describe("uploadDuplicateAssetMainImage", () => {
 });
 
 describe("refreshExpiredAssetImages", () => {
-  const mockUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+  // The background flush persists via a guarded updateMany (on the original
+  // mainImage), not update — assert on updateMany here.
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
   const mockCreateSignedUrl = createSignedUrl as ReturnType<typeof vitest.fn>;
   const mockExtractStoragePath = extractStoragePath as ReturnType<
     typeof vitest.fn
@@ -443,7 +445,8 @@ describe("refreshExpiredAssetImages", () => {
     vitest.clearAllMocks();
     mockExtractStoragePath.mockReturnValue("org/asset/image.jpg");
     mockCreateSignedUrl.mockResolvedValue("https://new-signed-url.com");
-    mockUpdate.mockResolvedValue({});
+    // Default: the guarded write matches one row (image unchanged since read).
+    mockUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   const makeAsset = (
@@ -474,7 +477,7 @@ describe("refreshExpiredAssetImages", () => {
 
     expect(result).toEqual(assets);
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
   it("refreshes mainImage and thumbnailImage when expired", async () => {
@@ -490,16 +493,31 @@ describe("refreshExpiredAssetImages", () => {
 
     const result = await refreshExpiredAssetImages(assets);
 
+    // The return value carries the fresh URLs synchronously — re-signing stays
+    // awaited, only the DB persist is deferred.
     expect(result[0].mainImage).toBe("https://new-main-url.com");
     expect(result[0].thumbnailImage).toBe("https://new-thumbnail-url.com");
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImage: "https://new-main-url.com",
-          thumbnailImage: "https://new-thumbnail-url.com",
-        }),
-      })
+
+    // The persist now runs in a fire-and-forget background batch, so wait for
+    // the flush before asserting the write happened.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // Guarded on the original mainImage AND thumbnailImage (a thumbnail is
+          // written here) so a concurrent replace of either can't be clobbered
+          // by this deferred write.
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+            thumbnailImage: "https://old-thumbnail-url.com",
+          },
+          data: expect.objectContaining({
+            mainImage: "https://new-main-url.com",
+            thumbnailImage: "https://new-thumbnail-url.com",
+          }),
+        })
+      )
     );
   });
 
@@ -511,16 +529,24 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (no refresh)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Should bump expiration to prevent retry storm
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
-    );
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+
+    // The backoff bump is now persisted in the deferred background batch —
+    // wait for the flush before asserting the write.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+          },
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
+    );
   });
 
   it("logs error and applies backoff when createSignedUrl fails", async () => {
@@ -538,30 +564,47 @@ describe("refreshExpiredAssetImages", () => {
 
     // Asset should be returned unchanged
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Backoff update should have been called
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
+
+    // Backoff update is deferred to the background batch — wait for the flush.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
     );
   });
 
-  it("handles deleted asset (P2025) gracefully without logging error", async () => {
-    const { Prisma: ActualPrisma } = await import("@prisma/client");
-    mockUpdate.mockRejectedValue(
-      new ActualPrisma.PrismaClientKnownRequestError(
-        "Record to update not found",
-        { code: "P2025", clientVersion: "5.0.0" }
-      )
-    );
+  it("returns fresh URLs when the row was deleted or its image changed (updateMany count 0)", async () => {
+    // Regression guard for the deferred-write refactor: the persist is a guarded
+    // updateMany that runs fire-and-forget AFTER the response value is built. If
+    // the asset was deleted OR its image was replaced between the read and the
+    // flush, the guard matches no rows and updateMany resolves { count: 0 }
+    // (never throws P2025). The returned URLs must still be the freshly
+    // re-signed ones — the next load simply re-signs (idempotent).
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+    const assets = [makeAsset()];
+
+    // Resolves (no throw) with the freshly re-signed URL.
+    const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
+
+    // The guarded write was still attempted in the background.
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
+  });
+
+  it("returns fresh URLs even when the background persist throws unexpectedly", async () => {
+    // A non-expected write failure (e.g. a pool timeout) is swallowed + logged
+    // in the background and must not affect the returned URLs or throw.
+    mockUpdateMany.mockRejectedValue(new Error("connection pool timeout"));
     const assets = [makeAsset()];
 
     const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
 
-    // Should return original asset (refresh failed gracefully)
-    expect(result[0].mainImage).toBe("https://old-signed-url.com");
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
   });
 });
 
@@ -668,12 +711,14 @@ describe("checkOutQuantity — availability accounting", () => {
     mockAssetFindUniqueOrThrow.mockResolvedValue({
       ...lockedAsset,
     });
-    // why: the `refreshExpiredAssetImages` suite earlier in this file
-    // sets `db.asset.update.mockRejectedValue(P2025)`. `clearAllMocks`
-    // only resets call history — the rejection implementation persists
-    // and breaks the new symmetric `tx.asset.update` step inside
-    // `checkOutQuantity`. Restore the resolve.
+    // why: the `refreshExpiredAssetImages` suite earlier in this file leaves
+    // `db.asset.updateMany.mockRejectedValue(...)` set (its last test).
+    // `clearAllMocks` only resets call history — the rejection implementation
+    // persists across suites — so restore both write mocks to a resolve.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {
@@ -782,9 +827,12 @@ describe("checkOutQuantity — activity events", () => {
     vitest.clearAllMocks();
     mockLock.mockResolvedValue(lockedAsset);
     // See note on the sibling availability-accounting suite — the
-    // `refreshExpiredAssetImages` test earlier rejects `asset.update`
-    // and that implementation survives `clearAllMocks`.
+    // `refreshExpiredAssetImages` test earlier leaves `asset.updateMany`
+    // rejected, and that implementation survives `clearAllMocks`.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("emits CUSTODY_ASSIGNED with quantity + viaQuantity meta on successful checkout", async () => {

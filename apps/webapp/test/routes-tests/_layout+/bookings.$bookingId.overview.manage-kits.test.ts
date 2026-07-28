@@ -13,8 +13,11 @@ import * as httpServer from "~/utils/http.server";
 import * as rolesServer from "~/utils/roles.server";
 
 // Import the action + loader functions
-import { action, loader } from "./bookings.$bookingId.overview.manage-kits";
-import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
+import {
+  action,
+  loader,
+} from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // @vitest-environment node
 
@@ -404,7 +407,7 @@ describe("manage-kits route validation", () => {
       vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
 
       const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
+        "~/routes/_layout+/bookings.$bookingId.overview.manage-kits"
       );
 
       // Should succeed without validation since no new AssetKits
@@ -467,7 +470,7 @@ describe("manage-kits route validation", () => {
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(true);
 
       const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
+        "~/routes/_layout+/bookings.$bookingId.overview.manage-kits"
       );
 
       // Should succeed because kit is partially checked in within booking context
@@ -514,7 +517,7 @@ describe("manage-kits route validation", () => {
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
 
       const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
+        "~/routes/_layout+/bookings.$bookingId.overview.manage-kits"
       );
 
       // Should return error response because kit is truly checked out
@@ -552,7 +555,7 @@ describe("manage-kits route validation", () => {
       vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
 
       const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
+        "~/routes/_layout+/bookings.$bookingId.overview.manage-kits"
       );
 
       // Should succeed because kit status is AVAILABLE

@@ -20,9 +20,9 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 
-import { loader } from "./bookings.$bookingId";
+import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
-import { assertIsDataWithResponseInit } from "../../../../test/helpers/assertions";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 // @vitest-environment node
 
