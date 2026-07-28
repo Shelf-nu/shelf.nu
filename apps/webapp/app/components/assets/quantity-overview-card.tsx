@@ -214,6 +214,7 @@ export function QuantityOverviewCard({
             assetId={assetId}
             unitOfMeasure={unitOfMeasure}
             availableQuantity={custodyAvailableQuantity ?? available}
+            totalQuantity={quantity}
             trigger={
               <Button type="button" variant="secondary" size="sm">
                 Adjust
