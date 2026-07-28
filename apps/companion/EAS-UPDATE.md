@@ -57,8 +57,19 @@ scope.
 cd apps/companion
 # JS-only fix already merged to main and checked out:
 eas update --channel production --environment production \
-  --message "fix: <what changed> (#PR)"
+  --message "fix: <what changed> (#PR)" \
+  --private-key-path ./keys/private-key.pem
+
+# Upload source maps for the OTA bundle. Native builds upload theirs in an
+# Xcode build phase, but `eas update` bundles do not — skip this and every
+# crash in OTA'd code reaches Sentry unsymbolicated, precisely when we are
+# shipping hotfixes. Needs SENTRY_AUTH_TOKEN in the environment.
+npx sentry-expo-upload-sourcemaps dist
 ```
+
+This is THE canonical publish procedure — every flag matters. The
+`--private-key-path` flag is the code-signing key (see the code-signing
+section below for what it is and where it lives).
 
 > **⚠️ Always pass `--environment production` (or otherwise set the production
 > `EXPO_PUBLIC_API_URL`).** `eas update` re-bundles the JS and inlines
@@ -102,12 +113,8 @@ key**.
 - Private key: `keys/private-key.pem` — **gitignored, never committed.**
 
 Publish signs with the private key (kept as a temporary untracked local copy or
-injected by CI — see custody below):
-
-```bash
-eas update --channel production --environment production \
-  --message "fix: … (#PR)" --private-key-path ./keys/private-key.pem
-```
+injected by CI — see custody below). The command lives in the canonical publish
+procedure at the top of this document — one copy, so the two can never drift.
 
 ### 🔑 Key custody — do this before the first production OTA build
 
