@@ -1,10 +1,12 @@
 import {
   ShelfError,
+  isAssetQuantityOverAllocationError,
   isHandledClientError,
   isLikeShelfError,
   isPrismaTransientError,
   makeShelfError,
   notAllowedMethod,
+  throwIfAssetQuantityOverAllocation,
 } from "./error";
 
 // @vitest-environment node
@@ -469,6 +471,160 @@ describe(notAllowedMethod.name, () => {
   it("produces an error that flows through makeShelfError without throwing", () => {
     const error = notAllowedMethod("POST");
     expect(() => makeShelfError(error)).not.toThrow();
+  });
+});
+
+describe(isAssetQuantityOverAllocationError.name, () => {
+  // why: emulate the runtime shape of the trigger violation — a
+  // `PrismaClientUnknownRequestError` is just an Error whose `message` carries
+  // the raw `RAISE EXCEPTION` text. We don't import the Prisma class to keep
+  // this a pure unit test.
+  const assetKitTriggerError = new Error(
+    "Invalid `prisma.assetKit.createMany()` invocation: AssetKit total 6 exceeds Asset.quantity 3 for asset abc123"
+  );
+  const assetLocationTriggerError = new Error(
+    "Invalid `prisma.assetLocation.createMany()` invocation: AssetLocation total 2 exceeds Asset.quantity 1 for asset abc123"
+  );
+
+  it("detects the AssetKit over-allocation trigger message", () => {
+    expect(isAssetQuantityOverAllocationError(assetKitTriggerError)).toBe(true);
+  });
+
+  it("detects the AssetLocation over-allocation trigger message", () => {
+    expect(isAssetQuantityOverAllocationError(assetLocationTriggerError)).toBe(
+      true
+    );
+  });
+
+  it("detects the trigger error when wrapped inside a ShelfError", () => {
+    const wrapped = new ShelfError({
+      cause: assetKitTriggerError,
+      label: "Kit",
+      message: "Something went wrong while updating kit assets.",
+    });
+    expect(isAssetQuantityOverAllocationError(wrapped)).toBe(true);
+  });
+
+  it("detects the trigger error nested two ShelfError layers deep", () => {
+    const inner = new ShelfError({
+      cause: assetLocationTriggerError,
+      label: "Location",
+      message: "Something went wrong while updating the location assets.",
+    });
+    const outer = new ShelfError({
+      cause: inner,
+      label: "Location",
+      message: "wrapper",
+    });
+    expect(isAssetQuantityOverAllocationError(outer)).toBe(true);
+  });
+
+  it("does NOT match unrelated errors", () => {
+    expect(isAssetQuantityOverAllocationError(new Error("boom"))).toBe(false);
+    // A different Prisma unique-constraint violation must not be swallowed.
+    expect(
+      isAssetQuantityOverAllocationError(
+        new Error("Unique constraint failed on the fields: (`qrId`)")
+      )
+    ).toBe(false);
+    // Another trigger that mentions the same tables but a DIFFERENT invariant.
+    expect(
+      isAssetQuantityOverAllocationError(
+        new Error("INDIVIDUAL asset abc123 already linked to a kit")
+      )
+    ).toBe(false);
+    expect(isAssetQuantityOverAllocationError(null)).toBe(false);
+    expect(isAssetQuantityOverAllocationError("exceeds Asset.quantity")).toBe(
+      false
+    );
+  });
+
+  it("returns false (does not stack-overflow) on a self-referential cause cycle", () => {
+    // why: a malformed error whose `.cause` points at itself must terminate the
+    // walk instead of recursing forever — the visited-set guards against it.
+    const cyclic: { message: string; cause?: unknown } = { message: "boom" };
+    cyclic.cause = cyclic;
+    expect(isAssetQuantityOverAllocationError(cyclic)).toBe(false);
+  });
+
+  it("returns false on a two-object cause cycle", () => {
+    const a: { message: string; cause?: unknown } = { message: "a" };
+    const b: { message: string; cause?: unknown } = { message: "b", cause: a };
+    a.cause = b; // a -> b -> a
+    expect(isAssetQuantityOverAllocationError(a)).toBe(false);
+  });
+
+  it("still detects the marker even when the cause graph is cyclic", () => {
+    // The marker on an outer node is found before the cycle is revisited.
+    const inner: { message: string; cause?: unknown } = { message: "inner" };
+    const outer: { message: string; cause?: unknown } = {
+      message: "AssetKit total 6 exceeds Asset.quantity 3 for asset abc123",
+      cause: inner,
+    };
+    inner.cause = outer; // cycle, but the marker is on `outer`
+    expect(isAssetQuantityOverAllocationError(outer)).toBe(true);
+  });
+});
+
+describe(throwIfAssetQuantityOverAllocation.name, () => {
+  const triggerError = new Error(
+    "AssetKit total 6 exceeds Asset.quantity 3 for asset abc123"
+  );
+
+  it("throws a friendly 400, non-captured ShelfError for the trigger violation", () => {
+    let thrown: unknown;
+    try {
+      throwIfAssetQuantityOverAllocation(triggerError, {
+        label: "Kit",
+        additionalData: { kitId: "kit-1", assetIds: ["a1"] },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const shelfError = thrown as ShelfError;
+    expect(shelfError.status).toBe(400);
+    expect(shelfError.shouldBeCaptured).toBe(false);
+    expect(shelfError.label).toBe("Kit");
+    expect(shelfError.cause).toBe(triggerError);
+    expect(shelfError.additionalData).toEqual({
+      kitId: "kit-1",
+      assetIds: ["a1"],
+    });
+    // Non-technical, actionable user message.
+    expect(shelfError.message).toContain("Lower the quantity");
+  });
+
+  it("also translates the AssetLocation variant", () => {
+    expect(() =>
+      throwIfAssetQuantityOverAllocation(
+        new Error("AssetLocation total 2 exceeds Asset.quantity 1 for asset x"),
+        { label: "Location" }
+      )
+    ).toThrow(ShelfError);
+  });
+
+  it("does NOT throw (passes through) for any other error", () => {
+    expect(() =>
+      throwIfAssetQuantityOverAllocation(new Error("some other DB error"), {
+        label: "Assets",
+      })
+    ).not.toThrow();
+    expect(() =>
+      throwIfAssetQuantityOverAllocation(null, { label: "Assets" })
+    ).not.toThrow();
+  });
+
+  it("resulting error is a handled client error (Sentry log, not issue)", () => {
+    let thrown: unknown;
+    try {
+      throwIfAssetQuantityOverAllocation(triggerError, { label: "Assets" });
+    } catch (error) {
+      thrown = error;
+    }
+    // 400 → routed to Sentry logs, kept out of the error/issue pipeline.
+    expect(isHandledClientError(thrown)).toBe(true);
   });
 });
 
