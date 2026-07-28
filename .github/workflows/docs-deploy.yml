@@ -42,7 +42,13 @@ jobs:
       - name: 📥 Install Wrangler
         if: github.event_name == 'push' ||
           github.event.pull_request.head.repo.full_name == github.repository
-        run: npm install -g wrangler
+        # Pinned to the major: this step hands CLOUDFLARE_API_TOKEN to whatever
+        # it installs, so resolving "latest" at runtime would let a compromised
+        # release reach the credential. Major-pinned rather than exact so patch
+        # and minor fixes still land — an exact pin goes stale and breaks the
+        # deploy when Cloudflare moves their API forward.
+        # Installed globally rather than via pnpm on purpose (acb25d0d1).
+        run: npm install -g wrangler@4
 
       - name: 🚀 Deploy to Cloudflare Pages
         if: github.event_name == 'push' ||
