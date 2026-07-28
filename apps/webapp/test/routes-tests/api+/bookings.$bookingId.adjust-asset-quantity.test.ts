@@ -37,12 +37,18 @@ const dbMocks = vi.hoisted(() => ({
   // configure the "current" quantity read under the lock and assert what
   // was actually persisted, independently of the ownership-guard tests
   // above which only assert $transaction call count.
-  bookingAssetFindUniqueOrThrow: vi.fn().mockResolvedValue({ quantity: 5 }),
+  //
+  // The value seeded here is a bare bootstrap, NOT a shared default: the
+  // suite's beforeEach uses vi.clearAllMocks(), which clears calls but
+  // deliberately preserves implementations, so whatever the previously-run
+  // test set with mockResolvedValue persists. Every test that reaches this
+  // read sets its own value in the describe-level beforeEach below.
+  bookingAssetFindUnique: vi.fn().mockResolvedValue({ quantity: 5 }),
   bookingAssetUpdate: vi.fn().mockResolvedValue(undefined),
   $transaction: vi.fn(async (cb: any) =>
     cb({
       bookingAsset: {
-        findUniqueOrThrow: dbMocks.bookingAssetFindUniqueOrThrow,
+        findUnique: dbMocks.bookingAssetFindUnique,
         update: dbMocks.bookingAssetUpdate,
       },
     })
@@ -333,7 +339,7 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — directional availabi
     );
     // The row currently reserves 17 units (an over-reserved pool: total=10,
     // reserved elsewhere ~17 -> available = -7). The user reduces to 1.
-    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 17 });
     consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
       total: 10,
       inCustody: 0,
@@ -360,7 +366,7 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — directional availabi
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
     );
-    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 17 });
     consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
       total: 10,
       inCustody: 0,
@@ -384,7 +390,7 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — directional availabi
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
     );
-    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 5 });
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 5 });
     consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
       total: 10,
       inCustody: 0,
@@ -407,7 +413,7 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — directional availabi
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
     );
-    dbMocks.bookingAssetFindUniqueOrThrow.mockResolvedValue({ quantity: 17 });
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 17 });
     consumptionMocks.computeBookingAvailableQuantity.mockResolvedValue({
       total: 10,
       inCustody: 0,
@@ -422,5 +428,27 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — directional availabi
     expect(
       consumptionMocks.computeBookingAvailableQuantity
     ).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The under-lock re-read closes a TOCTOU window, but it also introduces a
+   * new one: the row can be removed from the booking by a concurrent request
+   * between the pre-transaction lookup and the lock acquisition. That must
+   * surface as the same 404 the pre-transaction lookup returns for the
+   * identical condition, not as an unclassified Prisma error.
+   */
+  it("returns 404 when the row is removed from the booking before the lock is acquired", async () => {
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // Present pre-transaction, gone by the time the lock is held.
+    dbMocks.bookingAssetFindUnique.mockResolvedValue(null);
+
+    const response = (await action(
+      buildArgs(buildRequest(3))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(404);
+    expect(dbMocks.bookingAssetUpdate).not.toHaveBeenCalled();
   });
 });

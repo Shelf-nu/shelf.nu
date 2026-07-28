@@ -178,11 +178,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * rather than trusting the pre-transaction snapshot captured above —
        * a concurrent adjuster of the same asset could have changed it
        * between that read and this lock acquisition.
+       *
+       * `findUnique` + explicit guard rather than `findUniqueOrThrow`: the
+       * row can legitimately disappear in that same window (a concurrent
+       * request removing the asset from the booking), and Prisma's P2025
+       * would surface as an unclassified error. This keeps that race on the
+       * same 404 the pre-transaction lookup above already returns for the
+       * identical condition.
        */
-      const current = await tx.bookingAsset.findUniqueOrThrow({
+      const current = await tx.bookingAsset.findUnique({
         where: { id: bookingAsset.id },
         select: { quantity: true },
       });
+
+      if (!current) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not found",
+          message: "This asset is not part of the booking.",
+          label: "Booking",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
 
       /**
        * A reduction relative to the CURRENT booked quantity can never
