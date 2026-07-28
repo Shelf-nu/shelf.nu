@@ -35,11 +35,22 @@ jobs:
       - name: 🔨 Build docs
         run: pnpm docs:build
 
+      # Fork PRs receive no repository secrets, so CLOUDFLARE_API_TOKEN is empty
+      # and the deploy is a guaranteed failure. Skip it for them — the docs
+      # BUILD above still runs, which is the part that can actually regress.
+      # The `push` arm is required: pushes to main have no pull_request context.
       - name: 📥 Install Wrangler
+        if: github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
         run: npm install -g wrangler
 
       - name: 🚀 Deploy to Cloudflare Pages
-        run: wrangler pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch=${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        if: github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # github.head_ref is attacker-controlled PR input (a branch name), so
+          # it goes through env instead of being interpolated into the script.
+          DEPLOY_BRANCH: ${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        run: wrangler pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch="$DEPLOY_BRANCH"
