@@ -1,0 +1,7 @@
+{
+  "extends": "@shelf/typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*.ts"]
+}
