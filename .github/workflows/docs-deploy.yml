@@ -42,13 +42,23 @@ jobs:
       - name: 📥 Install Wrangler
         if: github.event_name == 'push' ||
           github.event.pull_request.head.repo.full_name == github.repository
-        # Pinned to the major: this step hands CLOUDFLARE_API_TOKEN to whatever
-        # it installs, so resolving "latest" at runtime would let a compromised
-        # release reach the credential. Major-pinned rather than exact so patch
-        # and minor fixes still land — an exact pin goes stale and breaks the
-        # deploy when Cloudflare moves their API forward.
-        # Installed globally rather than via pnpm on purpose (acb25d0d1).
-        run: npm install -g wrangler@4
+        # Pinned EXACTLY, on purpose. This step hands CLOUDFLARE_API_TOKEN to
+        # whatever it installs, so a floating range would let a compromised
+        # release reach the credential. Wrangler pins all of its own non-optional
+        # deps exactly (esbuild, workerd, miniflare, unenv...), so an exact pin
+        # here resolves a deterministic tree without needing a lockfile entry.
+        #
+        # Bumping is MANUAL: Dependabot's github-actions ecosystem parses `uses:`
+        # references, not npm package names inside `run:` scripts, so nothing
+        # updates this automatically. That is the accepted trade — a stale
+        # wrangler fails loudly at deploy time, a compromised one fails silently.
+        #
+        # Not a devDependency of apps/docs: wrangler pulls in workerd (~127MB),
+        # and with no pnpm caching in CI every job in the monorepo would
+        # download it on every PR, to upload a static VitePress site.
+        # Not via pnpm/wrangler-action either — that hits the pnpm
+        # workspace-root restriction this step was written to avoid (acb25d0d1).
+        run: npm install -g wrangler@4.114.0
 
       - name: 🚀 Deploy to Cloudflare Pages
         if: github.event_name == 'push' ||
