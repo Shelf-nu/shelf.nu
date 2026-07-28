@@ -587,7 +587,7 @@ importers:
         version: 2.1.9(vitest@2.1.9(@types/node@25.3.0)(happy-dom@20.8.9)(lightningcss@1.32.0)(msw@2.14.2(@types/node@25.3.0)(typescript@6.0.3))(terser@5.46.0))
       autoprefixer:
         specifier: ^10.4.27
-        version: 10.4.27(postcss@8.5.13)
+        version: 10.4.27(postcss@8.5.18)
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
@@ -637,8 +637,8 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5
       postcss:
-        specifier: ^8.5.10
-        version: 8.5.13
+        specifier: ^8.5.18
+        version: 8.5.18
       prettier:
         specifier: 3.0.3
         version: 3.0.3
@@ -8562,8 +8562,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@3.3.12:
-    resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
+  nanoid@3.3.16:
+    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -9065,8 +9065,8 @@ packages:
     resolution: {integrity: sha512-pMMHxBOZKFU6HgAZ4eyGnwXF/EvPGGqUr0MnZ5+99485wwW41kW91A4LOGxSHhgugZmSChL5AlElNdwlNgcnLQ==}
     engines: {node: ^10 || ^12 || >=14}
 
-  postcss@8.5.13:
-    resolution: {integrity: sha512-qif0+jGGZoLWdHey3UFHHWP0H7Gbmsk8T5VEqyYFbWqPr1XqvLGBbk/sl8V5exGmcYJklJOhOQq1pV9IcsiFag==}
+  postcss@8.5.18:
+    resolution: {integrity: sha512-xdB1oSLHbz1vRWgCDalrCqEFTWzFlhqFC5tIHLMOSUIjhm3XXQ1qrFy8S/ESr1JYRRXqM3c1QFiMZUJdUTqyMQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   postgres-array@2.0.0:
@@ -14657,7 +14657,7 @@ snapshots:
 
   '@react-navigation/routers@7.5.3':
     dependencies:
-      nanoid: 3.3.11
+      nanoid: 3.3.16
 
   '@react-router/dev@7.16.0(@react-router/serve@7.16.0(react-router@7.16.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.3))(@types/node@25.3.0)(jiti@1.21.7)(lightningcss@1.32.0)(react-router@7.16.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(terser@5.46.0)(tsx@4.21.0)(typescript@6.0.3)(vite@7.3.5(@types/node@25.3.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.3))(yaml@2.8.3)':
     dependencies:
@@ -16333,13 +16333,13 @@ snapshots:
 
   attr-accept@2.2.5: {}
 
-  autoprefixer@10.4.27(postcss@8.5.13):
+  autoprefixer@10.4.27(postcss@8.5.18):
     dependencies:
       browserslist: 4.28.1
       caniuse-lite: 1.0.30001776
       fraction.js: 5.3.4
       picocolors: 1.1.1
-      postcss: 8.5.13
+      postcss: 8.5.18
       postcss-value-parser: 4.2.0
 
   available-typed-arrays@1.0.7:
@@ -19819,7 +19819,7 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  nanoid@3.3.12: {}
+  nanoid@3.3.16: {}
 
   napi-postinstall@0.3.4: {}
 
@@ -20399,13 +20399,13 @@ snapshots:
 
   postcss@8.5.10:
     dependencies:
-      nanoid: 3.3.12
+      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postcss@8.5.13:
+  postcss@8.5.18:
     dependencies:
-      nanoid: 3.3.11
+      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
