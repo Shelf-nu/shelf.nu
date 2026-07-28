@@ -20,6 +20,12 @@ jobs:
 
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
+        with:
+          # `pnpm install` and `pnpm docs:build` below run fork-authored code
+          # (lifecycle scripts, vitepress config) BEFORE the deploy guard, and
+          # checkout persists GITHUB_TOKEN into .git/config by default. Nothing
+          # here needs git auth after checkout, so don't leave it on disk.
+          persist-credentials: false
 
       - name: 📦 Setup pnpm
         uses: pnpm/action-setup@v4
