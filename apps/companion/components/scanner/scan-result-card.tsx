@@ -1,7 +1,14 @@
+import type { ComponentProps } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+
+/**
+ * A valid Ionicons glyph name. Deriving it from the component keeps action
+ * icons type-checked (no `as any` casts) and in sync with the icon set.
+ */
+export type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 /**
  * Optional action button displayed on the scan result card.
@@ -9,7 +16,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
  */
 type ScanResultAction = {
   label: string;
-  icon?: string;
+  icon?: IoniconName;
   onPress: () => void;
 };
 
@@ -19,6 +26,12 @@ export type ScanResult = {
   message: string;
   /** Optional action button (e.g., "Link in Browser" for unlinked QR codes) */
   action?: ScanResultAction;
+  /**
+   * Optional second action, rendered below the primary one (e.g. the
+   * unclaimed-QR card offers "Create New Asset" and "Link Existing Asset").
+   * Only meaningful when `action` is also set.
+   */
+  secondaryAction?: ScanResultAction;
 };
 
 type ScanResultCardProps = {
@@ -26,7 +39,7 @@ type ScanResultCardProps = {
   onDismiss: () => void;
 };
 
-const ICON_MAP: Record<ScanResult["type"], string> = {
+const ICON_MAP: Record<ScanResult["type"], IoniconName> = {
   success: "checkmark-circle",
   error: "alert-circle",
   not_found: "help-circle",
@@ -56,7 +69,7 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         accessibilityRole="button"
         accessibilityLabel={`${result.title}. ${result.message}. Tap to dismiss.`}
       >
-        <Ionicons name={ICON_MAP[result.type] as any} size={24} color="#fff" />
+        <Ionicons name={ICON_MAP[result.type]} size={24} color="#fff" />
         <View style={styles.resultTextContainer}>
           <Text style={styles.resultTitle}>{result.title}</Text>
           <Text style={styles.resultMessage}>{result.message}</Text>
@@ -76,13 +89,33 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         >
           {result.action.icon && (
             <Ionicons
-              name={result.action.icon as any}
+              name={result.action.icon}
               size={16}
               color="#fff"
               style={styles.actionIcon}
             />
           )}
           <Text style={styles.actionLabel}>{result.action.label}</Text>
+        </TouchableOpacity>
+      )}
+
+      {result.secondaryAction && (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={result.secondaryAction.onPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={result.secondaryAction.label}
+        >
+          {result.secondaryAction.icon && (
+            <Ionicons
+              name={result.secondaryAction.icon}
+              size={16}
+              color="#fff"
+              style={styles.actionIcon}
+            />
+          )}
+          <Text style={styles.actionLabel}>{result.secondaryAction.label}</Text>
         </TouchableOpacity>
       )}
     </View>

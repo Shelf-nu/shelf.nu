@@ -45,6 +45,32 @@ export const BOOKING_SETTINGS_SELECT = {
 } satisfies Prisma.BookingSettingsSelect;
 
 /**
+ * Lean `select` for the notification-only booking settings.
+ *
+ * Hoisted so the `upsert` in {@link getBookingNotificationSettingsForOrg} and
+ * its `P2002` re-read return the exact same shape (single source of truth).
+ */
+export const BOOKING_NOTIFICATION_SETTINGS_SELECT = {
+  notifyBookingCreator: true,
+  notifyAdminsOnNewBooking: true,
+  alwaysNotifyTeamMembers: {
+    select: {
+      id: true,
+      name: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSettingsSelect;
+
+/**
  * Retrieves the `BookingSettings` row for an organization, creating a
  * default row only on first access.
  *
@@ -53,10 +79,11 @@ export const BOOKING_SETTINGS_SELECT = {
  * and React Router `.data` revalidation. It is deliberately **read-first**:
  * a plain `findUnique` satisfies the overwhelming majority of calls (the row
  * almost always already exists), avoiding an unconditional write + row lock
- * on every request. Only when the row is genuinely absent do we fall
- * through to an `upsert` (not a bare `create`) so two concurrent first
- * requests for the same organization can't race into a unique-constraint
- * error.
+ * on every request. Only when the row is genuinely absent do we fall through
+ * to an `upsert` that also catches `P2002` and re-reads, so two concurrent
+ * first requests for the same organization can't race into a unique-constraint
+ * error (the upsert emulates a read + create because it returns a nested
+ * relation, so it isn't atomic on its own).
  *
  * @param organizationId - The organization whose settings to fetch
  * @returns The organization's booking settings, creating defaults if absent
@@ -77,33 +104,46 @@ export async function getBookingSettingsForOrganization(
       return existing;
     }
 
-    // Cold path: first access for this organization. Use `upsert` (not
-    // `create`) so a concurrent first-hit from another request doesn't
-    // throw a unique-constraint error.
-    const bookingSettings = await db.bookingSettings.upsert({
-      where: {
-        organizationId,
-      },
-      update: {},
-      create: {
-        bufferStartTime: 0,
-        maxBookingLength: null,
-        maxBookingLengthSkipClosedDays: false,
-        tagsRequired: false,
-        autoArchiveBookings: false,
-        autoArchiveDays: 2,
-        autoArchiveExpiredReservations: false,
-        requireExplicitCheckinForAdmin: false,
-        requireExplicitCheckinForSelfService: false,
-        countKitsAsSingleUnit: false,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        organizationId,
-      },
-      select: BOOKING_SETTINGS_SELECT,
-    });
-
-    return bookingSettings;
+    // Cold path: first access for this organization. `upsert` (not `create`)
+    // makes a concurrent first-hit idempotent — but because this returns a
+    // nested relation (`alwaysNotifyTeamMembers` in BOOKING_SETTINGS_SELECT),
+    // Prisma emulates the upsert with a separate read + create rather than a
+    // native atomic `INSERT … ON CONFLICT`, so a concurrent create can still
+    // throw P2002. Catch it and re-read the row the winning request created.
+    try {
+      return await db.bookingSettings.upsert({
+        where: {
+          organizationId,
+        },
+        update: {},
+        create: {
+          bufferStartTime: 0,
+          maxBookingLength: null,
+          maxBookingLengthSkipClosedDays: false,
+          tagsRequired: false,
+          autoArchiveBookings: false,
+          autoArchiveDays: 2,
+          autoArchiveExpiredReservations: false,
+          requireExplicitCheckinForAdmin: false,
+          requireExplicitCheckinForSelfService: false,
+          countKitsAsSingleUnit: false,
+          notifyBookingCreator: true,
+          notifyAdminsOnNewBooking: true,
+          organizationId,
+        },
+        select: BOOKING_SETTINGS_SELECT,
+      });
+    } catch (cause) {
+      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+        // `await` so a (rare) re-read failure is caught by the outer try and
+        // wrapped in a ShelfError rather than escaping as a bare rejection.
+        return await db.bookingSettings.findUniqueOrThrow({
+          where: { organizationId },
+          select: BOOKING_SETTINGS_SELECT,
+        });
+      }
+      throw cause;
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -209,8 +249,11 @@ export async function updateBookingSettings({
  * config, etc.) to keep the notification resolver lightweight and avoid
  * pulling unnecessary data on every booking email.
  *
- * Uses `upsert` to lazily create default settings if the organization
- * doesn't have a `BookingSettings` row yet.
+ * Uses `upsert` to lazily create default settings if the organization doesn't
+ * have a `BookingSettings` row yet. Because the select returns a nested
+ * relation (`alwaysNotifyTeamMembers`), Prisma emulates the upsert with a
+ * separate read + create, so a concurrent first-hit can throw `P2002`; we catch
+ * it and re-read (same as {@link getBookingSettingsForOrganization}).
  *
  * @param organizationId - The organization whose settings to fetch
  * @returns Notification flags and the always-notify team member list
@@ -219,34 +262,28 @@ export async function getBookingNotificationSettingsForOrg(
   organizationId: string
 ) {
   try {
-    return await db.bookingSettings.upsert({
-      where: { organizationId },
-      update: {},
-      create: {
-        organizationId,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-      },
-      select: {
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
+    try {
+      return await db.bookingSettings.upsert({
+        where: { organizationId },
+        update: {},
+        create: {
+          organizationId,
+          notifyBookingCreator: true,
+          notifyAdminsOnNewBooking: true,
         },
-      },
-    });
+        select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+      });
+    } catch (cause) {
+      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+        // `await` so a (rare) re-read failure is caught by the outer try and
+        // wrapped in a ShelfError rather than escaping as a bare rejection.
+        return await db.bookingSettings.findUniqueOrThrow({
+          where: { organizationId },
+          select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+        });
+      }
+      throw cause;
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
