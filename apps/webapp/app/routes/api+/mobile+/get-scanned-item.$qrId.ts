@@ -27,7 +27,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const result = await resolveMobileScannedCode({ request, params, user });
     if (!result.ok) {
       return data(
-        { error: { message: result.message } },
+        {
+          error: {
+            message: result.message,
+            // Additive structured discriminator (e.g. "unclaimed") + the
+            // scanned QR id. Audit-scanner behavior is unchanged for callers
+            // that ignore it — still the same status and message.
+            ...(result.reason
+              ? { reason: result.reason, qrId: result.qrId }
+              : {}),
+          },
+        },
         { status: result.status }
       );
     }
