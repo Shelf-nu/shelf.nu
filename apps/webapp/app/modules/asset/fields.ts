@@ -13,6 +13,38 @@ export const LOCATION_WITH_HIERARCHY = {
   },
 } satisfies Prisma.LocationDefaultArgs;
 
+/**
+ * An asset's placement rows, shared by every surface that resolves a location.
+ *
+ * `quantity` lets loaders show per-location slices and derive the
+ * "placed / unplaced" split for qty-tracked assets. `assetKitId` plus the
+ * nested `assetKit.kit` discriminate manual from kit-driven placements, so the
+ * UI can render the "via kit" badge alongside the kit-driven rows.
+ *
+ * Ordering is explicit because `getPrimaryLocation()` reads index 0 and must
+ * not depend on heap order. Oldest row first keeps the asset's own manual
+ * placement primary in list views. `id` breaks ties: `createdAt` defaults to
+ * CURRENT_TIMESTAMP, which Postgres evaluates at transaction start, so every
+ * row written by one cascade shares a timestamp.
+ *
+ * Kept in one place so the ordering guarantee can't drift between surfaces —
+ * a divergence there would silently change which location an asset reports.
+ */
+export const ASSET_LOCATIONS_INCLUDE = {
+  orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  select: {
+    quantity: true,
+    assetKitId: true,
+    location: LOCATION_WITH_HIERARCHY,
+    assetKit: {
+      select: {
+        id: true,
+        kit: { select: { id: true, name: true } },
+      },
+    },
+  },
+} satisfies Prisma.Asset$assetLocationsArgs;
+
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assetKits: true } },
   custody: {
@@ -43,34 +75,7 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    // `quantity` is pulled so loaders can show per-location slices and
-    // derive the "placed / unplaced" split for qty-tracked assets.
-    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
-    // driven placements so the UI can render the "via kit" badge
-    // alongside the kit-driven rows.
-    assetLocations: {
-      // Stable order so `getPrimaryLocation()` (which reads index 0) doesn't
-      // depend on heap order. Oldest row first keeps the asset's own manual
-      // placement primary in list views; kit-driven slices are surfaced with
-      // their "via kit" badge in the placements breakdown.
-      //
-      // `id` breaks ties: `createdAt` defaults to CURRENT_TIMESTAMP, which is
-      // transaction-start time in Postgres, so every row written by one
-      // cascade shares a timestamp and would otherwise fall back to heap
-      // order again.
-      orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
-      select: {
-        quantity: true,
-        assetKitId: true,
-        location: LOCATION_WITH_HIERARCHY,
-        assetKit: {
-          select: {
-            id: true,
-            kit: { select: { id: true, name: true } },
-          },
-        },
-      },
-    },
+    assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
         createdAt: true,
@@ -199,34 +204,7 @@ export const assetIndexFields = ({
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    // `quantity` is pulled so loaders can show per-location slices and
-    // derive the "placed / unplaced" split for qty-tracked assets.
-    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
-    // driven placements so the UI can render the "via kit" badge
-    // alongside the kit-driven rows.
-    assetLocations: {
-      // Stable order so `getPrimaryLocation()` (which reads index 0) doesn't
-      // depend on heap order. Oldest row first keeps the asset's own manual
-      // placement primary in list views; kit-driven slices are surfaced with
-      // their "via kit" badge in the placements breakdown.
-      //
-      // `id` breaks ties: `createdAt` defaults to CURRENT_TIMESTAMP, which is
-      // transaction-start time in Postgres, so every row written by one
-      // cascade shares a timestamp and would otherwise fall back to heap
-      // order again.
-      orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
-      select: {
-        quantity: true,
-        assetKitId: true,
-        location: LOCATION_WITH_HIERARCHY,
-        assetKit: {
-          select: {
-            id: true,
-            kit: { select: { id: true, name: true } },
-          },
-        },
-      },
-    },
+    assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
         quantity: true,
