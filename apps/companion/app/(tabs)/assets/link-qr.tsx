@@ -32,11 +32,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  api,
-  type AssetListItem,
-  type QrResolveFailureReason,
-} from "@/lib/api";
+import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
   fontSize,
@@ -104,6 +100,26 @@ function LinkQrContent() {
   }, [searchInput]);
 
   /**
+   * Workspace-switch guard (mirrors the scanner's originOrgId pin): the
+   * scanned `qrId` belongs to the workspace that was active when the picker
+   * opened. If the user switches workspaces mid-flow, the list would show
+   * the NEW org's assets while the link targets the OLD org's code — the
+   * server would 403 on confirm, a confusing dead end. Leave instead.
+   */
+  const originOrgIdRef = useRef(currentOrg?.id);
+  useEffect(() => {
+    if (!originOrgIdRef.current || !currentOrg?.id) return;
+    if (currentOrg.id !== originOrgIdRef.current) {
+      Alert.alert(
+        "Workspace Changed",
+        "The scanned QR code belongs to the workspace you started in. Scan it again from this workspace to link it here.",
+        [{ text: "OK", onPress: () => router.back() }],
+        { cancelable: false }
+      );
+    }
+  }, [currentOrg?.id, router]);
+
+  /**
    * Monotonic token identifying the newest fetch. Search/workspace changes
    * rebuild `fetchAssets` (new deps) and the list effect starts a fresh
    * request without aborting the old one — if the older response lands
@@ -161,37 +177,21 @@ function LinkQrContent() {
   };
 
   /**
-   * POST the link, recovering once from a claim that didn't stick: a 400 with
-   * `reason: "unclaimed"` means the QR lost (or never got) its org — re-run
-   * the claim and retry the link a single time before surfacing the error.
+   * POST the link. No claim-recovery path: the link-asset endpoint delegates
+   * to `relinkAssetQrCode`, which claims an unclaimed code inline as part of
+   * the link, so a `reason: "unclaimed"` failure can no longer occur here.
    *
-   * @returns The final `{ error }` string, or `null` on success.
+   * @returns The `{ error }` string, or `null` on success.
    */
-  const linkWithClaimRecovery = useCallback(
+  const linkQr = useCallback(
     async (linkQrId: string, assetId: string): Promise<string | null> => {
       if (!currentOrg) return "No workspace selected.";
-      const first = await api.linkQrToAsset(currentOrg.id, linkQrId, assetId);
-      if (!first.error) return null;
-      // `satisfies` ties the literal to the wire contract type, so a typo
-      // (or a server-side rename) fails to compile.
-      if (
-        first.errorDetails?.reason !==
-        ("unclaimed" satisfies QrResolveFailureReason)
-      ) {
-        return first.error;
-      }
-
-      // Claim didn't stick — claim into the current org and retry once.
-      // The claim's error is deliberately NOT short-circuited: its 403 is
-      // generic ("Failed to claim qr code") and also covers a
-      // timed-out-but-landed claim or a same-org teammate winning the race —
-      // cases where the code IS now claimed by this org and the retry
-      // succeeds (mirrors the scanner's re-resolve recovery). The link
-      // endpoint's own guards (unclaimed / wrong-org / already-linked)
-      // produce the definitive, accurate error either way.
-      await api.claimQr(currentOrg.id, linkQrId);
-      const second = await api.linkQrToAsset(currentOrg.id, linkQrId, assetId);
-      return second.error;
+      const { error } = await api.linkQrToAsset(
+        currentOrg.id,
+        linkQrId,
+        assetId
+      );
+      return error ?? null;
     },
     [currentOrg]
   );
@@ -218,7 +218,7 @@ function LinkQrContent() {
             text: "Link",
             onPress: async () => {
               setLinkingAssetId(asset.id);
-              const linkError = await linkWithClaimRecovery(qrId, asset.id);
+              const linkError = await linkQr(qrId, asset.id);
               setLinkingAssetId(null);
 
               if (linkError) {
@@ -266,7 +266,7 @@ function LinkQrContent() {
         { cancelable: false }
       );
     },
-    [qrId, currentOrg, linkingAssetId, linkWithClaimRecovery, router]
+    [qrId, currentOrg, linkingAssetId, linkQr, router]
   );
 
   const renderAsset = useCallback(
