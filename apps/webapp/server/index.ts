@@ -234,6 +234,7 @@ export default createHonoServer<ServerEnv>({
           "/api/public-stats",
           "/api/oss-friends",
           "/api/stripe-webhook",
+          "/api/scim/v2/*path", // SCIM API (bearer-token auth, not cookie); *path is a named wildcard
           "/qr",
           "/qr/:qrId",
           "/qr/:qrId/not-logged-in",
