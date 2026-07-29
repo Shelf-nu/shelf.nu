@@ -96,9 +96,7 @@
       }
     },
     "owner": "shelfassetmanagement",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.2.0",
     "updates": {
       "url": "https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58",
       "enabled": true,

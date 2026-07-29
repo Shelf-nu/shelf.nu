@@ -5,8 +5,9 @@
   // `lint` here is not only ESLint: it also runs scripts/check-version-sync.mjs,
   // which asserts the app version agrees across app.json, Info.plist, both
   // MARKETING_VERSION build configs and Expo.plist's EXUpdatesRuntimeVersion.
-  // With `runtimeVersion: { policy: "appVersion" }` that string is the OTA
-  // compatibility key, so drift silently stops updates reaching installs.
+  // That version string is the OTA compatibility key (app.json carries it as a
+  // literal `runtimeVersion`, since bare iOS rejects version policies), so
+  // drift silently stops updates reaching installs.
   //
   // The root `lint` inputs cover only JS/TS sources, so a release bump touching
   // *only* those five declarations would hash identically and replay a cached
