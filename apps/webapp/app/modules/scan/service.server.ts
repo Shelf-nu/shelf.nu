@@ -82,7 +82,11 @@ export async function createScan(params: {
       cause,
       message:
         "Something went wrong while creating a scan. Please try again or contact support.",
-      additionalData: { params },
+      // why: NOT the whole `params` — it carries `latitude`/`longitude`, and
+      // `additionalData` is forwarded to the logger and to Sentry. Precise
+      // user location must never enter the error pipeline; the QR id is what
+      // makes a failing scan traceable.
+      additionalData: { qrId },
       label,
     });
   }
@@ -123,7 +127,10 @@ export async function updateScan(params: {
       cause,
       message:
         "Something went wrong while updating the scan. Please try again or contact support.",
-      additionalData: { params },
+      // why: NOT the whole `params` — it carries `latitude`/`longitude` and
+      // `additionalData` reaches the logger + Sentry. The scan id is enough
+      // to trace the failure without leaking a user's position.
+      additionalData: { id },
       label,
     });
   }

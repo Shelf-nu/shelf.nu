@@ -62,15 +62,43 @@ export const assetsApi = {
    * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
+   * Wire contract for coordinates (matches the route's Zod schema): optional
+   * `x-shelf-scan-latitude` / `x-shelf-scan-longitude` HEADERS, decimal
+   * degrees, both or neither (lat −90..90, lng −180..180). They are
+   * best-effort provenance — the server silently ignores invalid values and a
+   * resolve NEVER fails because of them, mirroring the web flow's non-fatal
+   * geolocation post.
+   *
+   * why headers, not query params: a URL is logged everywhere (proxy access
+   * logs, APM traces, Sentry breadcrumbs). Precise GPS in the query string
+   * would leak the user's position into all of them. The web sibling already
+   * keeps coordinates out of the URL by posting them in a request body.
+   *
    * @param codeId - The scanned QR id or normalized SAM id.
    * @param orgId - Caller's current workspace id; required for SAM lookups.
+   * @param coordinates - Optional GPS position captured at scan time (see
+   *   `lib/scan-location.ts`); attached to the recorded scan server-side.
    */
-  qr: (codeId: string, orgId?: string) =>
-    apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${
-        orgId ? `?orgId=${orgId}` : ""
-      }`
-    ),
+  qr: (
+    codeId: string,
+    orgId?: string,
+    coordinates?: { latitude: number; longitude: number } | null
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (orgId) searchParams.set("orgId", orgId);
+    const query = searchParams.toString();
+    return apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
+      coordinates
+        ? {
+            headers: {
+              "x-shelf-scan-latitude": String(coordinates.latitude),
+              "x-shelf-scan-longitude": String(coordinates.longitude),
+            },
+          }
+        : undefined
+    );
+  },
 
   /**
    * Resolve a scanned code to an asset or kit **without recording** a scan,
