@@ -53,32 +53,46 @@ scope.
 
 ## Publishing an update
 
+Three steps, in this order. JS-only fix already merged to main and checked out:
+
 ```bash
 cd apps/companion
-# JS-only fix already merged to main and checked out:
-eas update --channel production --environment production \
+
+# 1. Bundle ONCE, with source maps, under the production environment.
+#    `eas update` on its own would also write dist/ — but it exports without
+#    source maps, so step 3 would find no .map files and report
+#    "Uploaded 0 of N". EXPO_PUBLIC_* are inlined HERE, not at publish time.
+eas env:exec production "npx expo export --dump-sourcemap"
+
+# 2. Publish exactly that bundle. --skip-bundler is what makes this safe:
+#    without it, eas re-exports over dist/ and both drops the source maps and
+#    ships a bundle that the maps uploaded in step 3 no longer describe.
+eas update --channel production --skip-bundler --input-dir dist \
   --message "fix: <what changed> (#PR)" \
   --private-key-path ./keys/private-key.pem
 
-# Upload source maps for the OTA bundle. Native builds upload theirs in an
-# Xcode build phase, but `eas update` bundles do not — skip this and every
-# crash in OTA'd code reaches Sentry unsymbolicated, precisely when we are
-# shipping hotfixes. Needs SENTRY_AUTH_TOKEN in the environment.
-npx sentry-expo-upload-sourcemaps dist
+# 3. Upload the maps for the bundle that just shipped. SENTRY_AUTH_TOKEN comes
+#    from 1Password; org/project are read from the Sentry Expo plugin config.
+SENTRY_AUTH_TOKEN=<token> npx sentry-expo-upload-sourcemaps dist
 ```
 
 This is THE canonical publish procedure — every flag matters. The
 `--private-key-path` flag is the code-signing key (see the code-signing
 section below for what it is and where it lives).
 
-> **⚠️ Always pass `--environment production` (or otherwise set the production
-> `EXPO_PUBLIC_API_URL`).** `eas update` re-bundles the JS and inlines
-> `EXPO_PUBLIC_*` at publish time. Publishing from a dev checkout without the
-> production environment would bake the local fallback
-> (`http://localhost:3000`) into the bundle and ship it to live users, breaking
-> every API call. The env vars must match what the production **build** used —
-> configure them as EAS environment variables (or export them in CI) before
-> publishing.
+**Why source maps are step 3 and not optional:** native builds upload theirs in
+an Xcode build phase, which covers nothing that ships over the air. Skip step 3
+and every crash in OTA'd code reaches Sentry as unreadable minified frames —
+precisely when we are shipping blind hotfixes and most need to read them.
+
+> **⚠️ The production environment is applied in step 1, not step 2 —
+> `EXPO_PUBLIC_*` values are inlined at export time.** With `--skip-bundler`, an
+> `--environment production` flag on `eas update` no longer influences what
+> shipped. Exporting from a dev shell without the production environment is what
+> bakes a wrong `EXPO_PUBLIC_API_URL` into a bundle that then reaches live users.
+> `lib/api/client.ts` falls back to `https://app.shelf.nu` outside `__DEV__` so
+> this can't strand users on localhost, but that is a backstop, not the
+> mechanism — export under the production environment.
 
 Users get it on the **next app launch**: the running app launches instantly from
 its cached bundle (`fallbackToCacheTimeout: 0`) and downloads the new bundle in
