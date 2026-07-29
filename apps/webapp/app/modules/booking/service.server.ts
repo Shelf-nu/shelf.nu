@@ -33,6 +33,7 @@ import type { BookingForEmail } from "~/emails/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
+import { notifyLowStockForAssets } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import {
   computeBookingAvailableQuantity,
@@ -2056,19 +2057,39 @@ async function checkoutBookingWritesWithinTx(
         const title =
           qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
             .title ?? "";
+        /**
+         * `available` is SIGNED (the wrapper returns raw headroom so guards
+         * can detect oversubscription) — but user-facing copy must never
+         * print a negative count ("only -7 available" reads as a bug and
+         * hides the real story). Clamp the printed number and, when the
+         * pool is over-committed, say so explicitly with the amount.
+         */
+        const oversubscribedNote =
+          available < 0
+            ? ` (pool over-committed by ${-available} unit(s) across other bookings)`
+            : "";
         insufficientQtyWarnings.push(
-          `"${title}": requested ${requested}, only ${available} available`
+          `"${title}": requested ${requested}, only ${Math.max(
+            0,
+            available
+          )} available${oversubscribedNote}`
         );
       }
     }
 
     if (insufficientQtyWarnings.length > 0) {
+      /**
+       * Checkout is never a reduction, so unlike the adjust-quantity route
+       * this guard KEEPS blocking (#2744 alignment: directionality lives on
+       * the adjust path). The copy names concrete recovery paths instead of
+       * a bare "insufficient availability" dead-end.
+       */
       throw new ShelfError({
         cause: null,
         label,
         message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
           "\n"
-        )}\nPlease adjust quantities in the booking before checkout.`,
+        )}\nReduce the booked quantities here, reduce or remove these assets from other bookings, or cancel one of those bookings before checking out.`,
         shouldBeCaptured: false,
         status: 400,
       });
@@ -4232,6 +4253,17 @@ export async function checkinBooking({
          */
         const summaryByAssetId = new Map<string, CheckinQtySummary>();
 
+        /**
+         * Net `Asset.quantity` movement per asset caused by this check-in's
+         * CONSUME/LOSS/DAMAGE dispositions. Folded across slices so one
+         * asset emits ONE `ASSET_QUANTITY_CHANGED` event for the net change
+         * (`.claude/rules/record-event-payload-shapes.md`), not one per slice.
+         */
+        const quantityChangeByAssetId = new Map<
+          string,
+          { from: number; to: number }
+        >();
+
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
@@ -4373,6 +4405,17 @@ export async function checkinBooking({
               where: { id: slice.assetId },
               data: { quantity: { decrement: poolDecrement } },
             });
+
+            // Fold the stock movement for the post-loop event batch. `locked`
+            // was re-read under the row lock at the top of THIS iteration, so
+            // it already reflects any earlier slice's decrement — keeping the
+            // first `from` and the latest `to` yields the net change.
+            const before = locked.quantity ?? 0;
+            const previous = quantityChangeByAssetId.get(slice.assetId);
+            quantityChangeByAssetId.set(slice.assetId, {
+              from: previous?.from ?? before,
+              to: before - poolDecrement,
+            });
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -4398,6 +4441,33 @@ export async function checkinBooking({
         }
 
         qtySummariesRef.value.push(...summaryByAssetId.values());
+
+        /**
+         * Stock movement caused by this check-in, as structured events, in
+         * the SAME transaction (`.claude/rules/use-record-event.md` +
+         * `bulk-event-parity.md`).
+         *
+         * why: CONSUME/LOSS/DAMAGE dispositions permanently reduce
+         * `Asset.quantity` — real stock movement the "Quantity changed" row
+         * in the Asset Activity report has to show. Emitting
+         * `ASSET_QUANTITY_CHANGED` only from `updateAsset` (form/CSV) made
+         * that report tell a partial truth. RETURN is deliberately absent:
+         * it moves nothing out of the pool.
+         */
+        await recordEvents(
+          [...quantityChangeByAssetId.entries()].map(([assetId, change]) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "ASSET_QUANTITY_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            field: "quantity",
+            fromValue: change.from,
+            toValue: change.to,
+          })),
+          tx
+        );
 
         if (assetsToCheckin.length > 0) {
           // INDIVIDUAL assets always get reset to AVAILABLE. Scope to the
@@ -4729,6 +4799,31 @@ export async function checkinBooking({
             additionalData: { userId, bookingId: id },
           })
         );
+      }
+    }
+
+    /**
+     * Low-stock coverage (#2677): CONSUME/LOSS/DAMAGE dispositions above
+     * decremented `Asset.quantity` inside the tx — the same stock decrease
+     * `adjustQuantity` already alerts on, so check here too. Post-commit,
+     * fire-and-forget (`void` + the helper's own allSettled/Logger): the
+     * check-in result must never fail or wait on alerting. RETURN
+     * dispositions don't decrement the pool and are excluded. Guarded on
+     * `userId` like the notes block — the helper needs an acting user as
+     * the in-app recipient.
+     */
+    if (userId) {
+      const lowStockCandidateIds = qtySummariesRef.value
+        .filter(
+          (summary) => summary.consumed + summary.lost + summary.damaged > 0
+        )
+        .map((summary) => summary.assetId);
+      if (lowStockCandidateIds.length > 0) {
+        void notifyLowStockForAssets({
+          assetIds: lowStockCandidateIds,
+          userId,
+          organizationId,
+        });
       }
     }
 
@@ -5404,6 +5499,17 @@ export async function partialCheckinBooking({
       const qtySummaries: QtyDispositionSummary[] = [];
       const fullyReconciledQtyAssetIds: string[] = [];
 
+      /**
+       * Net `Asset.quantity` movement per asset caused by this session's
+       * CONSUME/LOSS/DAMAGE dispositions. Folded across dispositions so one
+       * asset emits ONE `ASSET_QUANTITY_CHANGED` event for the net change
+       * (`.claude/rules/record-event-payload-shapes.md`), not one per slice.
+       */
+      const quantityChangeByAssetId = new Map<
+        string,
+        { from: number; to: number }
+      >();
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -5566,6 +5672,18 @@ export async function partialCheckinBooking({
             where: { id: disp.assetId },
             data: { quantity: { decrement: poolDecrement } },
           });
+
+          // Fold the stock movement for the post-loop event batch.
+          // `lockedAsset` was re-read under the row lock at the top of THIS
+          // iteration, so it already reflects any earlier disposition's
+          // decrement — keeping the first `from` and the latest `to` yields
+          // the net change for this session.
+          const before = lockedAsset.quantity ?? 0;
+          const previous = quantityChangeByAssetId.get(disp.assetId);
+          quantityChangeByAssetId.set(disp.assetId, {
+            from: previous?.from ?? before,
+            to: before - poolDecrement,
+          });
         }
 
         const pendingAfter = remaining - claimed;
@@ -5585,6 +5703,33 @@ export async function partialCheckinBooking({
           pendingAfter,
         });
       }
+
+      /**
+       * Stock movement caused by this partial check-in, as structured
+       * events, in the SAME transaction (`.claude/rules/use-record-event.md`
+       * + `bulk-event-parity.md`).
+       *
+       * why: CONSUME/LOSS/DAMAGE dispositions permanently reduce
+       * `Asset.quantity` — real stock movement the "Quantity changed" row in
+       * the Asset Activity report has to show. Emitting
+       * `ASSET_QUANTITY_CHANGED` only from `updateAsset` (form/CSV) made that
+       * report tell a partial truth. RETURN is deliberately absent: it moves
+       * nothing out of the pool.
+       */
+      await recordEvents(
+        [...quantityChangeByAssetId.entries()].map(([assetId, change]) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          field: "quantity",
+          fromValue: change.from,
+          toValue: change.to,
+        })),
+        tx
+      );
 
       // ---- Individual asset status updates (unchanged) ----
       const individualAssetIds = effectiveAssetIds.filter(
@@ -5964,6 +6109,29 @@ export async function partialCheckinBooking({
           additionalData: { userId, bookingId: id },
         })
       );
+    }
+
+    /**
+     * Low-stock coverage (#2677): CONSUME/LOSS/DAMAGE dispositions in this
+     * partial check-in decremented `Asset.quantity` inside the tx — the
+     * same stock decrease `adjustQuantity` already alerts on. Post-commit,
+     * fire-and-forget (`void` + the helper's own allSettled/Logger); the
+     * helper dedupes multi-slice submissions of the same asset. RETURN
+     * dispositions don't decrement the pool and are excluded.
+     */
+    {
+      const lowStockCandidateIds = txResult.qtySummaries
+        .filter(
+          (summary) => summary.consumed + summary.lost + summary.damaged > 0
+        )
+        .map((summary) => summary.assetId);
+      if (lowStockCandidateIds.length > 0) {
+        void notifyLowStockForAssets({
+          assetIds: lowStockCandidateIds,
+          userId,
+          organizationId,
+        });
+      }
     }
 
     // Compute a coarse "remaining" count for the toast: bookingAssets not

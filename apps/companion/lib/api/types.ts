@@ -745,7 +745,15 @@ export type RemoveBookingAssetsResponse = {
   removedCount: number;
 };
 
-/** Availability-aware asset row for the booking picker. */
+/**
+ * Availability-aware asset row for the booking picker.
+ *
+ * Wire twin of the server's `MobileAvailableAssetRow`
+ * (`apps/webapp/app/routes/api+/mobile+/bookings.available-assets.ts`) — the
+ * webapp's `test/mobile/booking-picker-quantity-contract.test.ts` asserts the
+ * two stay assignable, so add new fields on BOTH sides (optional here: live
+ * app versions must tolerate servers that predate a field).
+ */
 export type AvailableAsset = {
   id: string;
   title: string;
@@ -761,6 +769,24 @@ export type AvailableAsset = {
    * the exact unit. Null when the asset has no resolvable code.
    */
   displayCode?: { value: string; label: string } | null;
+  /**
+   * Workspace stock (`Asset.quantity`) — the "of N" part of the row's
+   * "X of N available" meta line. `null` for INDIVIDUAL assets; absent on
+   * pre-quantity servers (render nothing, like {@link AssetQuantityFields}).
+   */
+  quantity?: number | null;
+  /** Display unit for `quantity` (e.g. "pcs"). Optional like `quantity`. */
+  unitOfMeasure?: string | null;
+  /**
+   * Bookable headroom for THIS booking's date window, server-computed by the
+   * canonical booking-pool availability module and clamped at 0 (display-safe:
+   * an oversubscribed pool reports 0, never a negative). `null` for INDIVIDUAL
+   * assets — their availability is already enforced by the server's list
+   * filter, whereas QUANTITY_TRACKED rows are always listed and need this
+   * per-unit signal. Read-only: selection is still allowed at 0 and the server
+   * remains the enforcement point at add/reserve time.
+   */
+  availableQuantity?: number | null;
 };
 
 export type AvailableAssetsResponse = {

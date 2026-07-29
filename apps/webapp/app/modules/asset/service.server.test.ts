@@ -8,10 +8,12 @@ import {
   recordEvents,
 } from "~/modules/activity-event/service.server";
 import { getCategory } from "~/modules/category/service.server";
+import { notifyLowStockForAssets } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
+import { createAssetQuantityChangeNote } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -142,6 +144,13 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // why: avoid touching real consumption log writes during checkOutQuantity tests
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: updateAsset fires the low-stock check post-commit (fire-and-forget)
+// after a stock-decreasing edit; stub the module so tests assert the trigger
+// wiring without running the real notification/email pipeline.
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  notifyLowStockForAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -1435,6 +1444,373 @@ describe("updateAsset newLocationQuantity", () => {
 
     // Validation fires before db.asset.update, so the update never runs.
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Quantity-ledger coverage for updateAsset (scope C of the availability-trust
+ * work): edit-form / CSV-import quantity changes must write a ConsumptionLog
+ * ADJUSTMENT row + an ASSET_QUANTITY_CHANGED event INSIDE the update
+ * transaction — closing the "direct mutation bypasses the audit trail" gap
+ * the old TODO admitted — and must fire the low-stock check after a
+ * reduction. The CSV update path funnels through this same function
+ * (`import-update.server.ts` → `updateAsset`), so these tests cover both.
+ */
+describe("updateAsset — quantity ledger + low-stock trigger", () => {
+  /** Pre-update snapshot returned by fetchAssetBeforeUpdate. */
+  const beforeState = {
+    title: "Pens",
+    description: null,
+    preferredBarcodeId: null,
+    category: null,
+    valuation: null,
+    quantity: 10,
+    minQuantity: 2,
+    consumptionType: null,
+    unitOfMeasure: "units",
+    organization: { currency: "USD" },
+    tags: [],
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: clearAllMocks keeps implementations; reset findUnique so queued
+    // *Once values from other describes can't bleed into the before-update
+    // snapshot fetch, then seed the pre-update state every test reads.
+    vi.mocked(db.asset.findUnique)
+      .mockReset()
+      .mockResolvedValue(beforeState as any);
+    // why: the tx returns the updated row; the post-tx note/event block
+    // reads id/category/valuation/tags from it (note writers are mocked).
+    vi.mocked(db.asset.update).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      category: null,
+      valuation: null,
+      tags: [],
+      quantity: 4,
+    } as any);
+  });
+
+  it("writes one ConsumptionLog ADJUSTMENT + one ASSET_QUANTITY_CHANGED event in-tx when quantity actually changes", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 4, // 10 → 4
+    } as any);
+
+    // Serialized with concurrent quantity writers, same as adjustQuantity.
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(db, "asset-1");
+
+    // One ADJUSTMENT row: always-positive magnitude, direction in the note.
+    expect(createConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        category: "ADJUSTMENT",
+        quantity: 6,
+        userId: "user-1",
+        note: expect.stringContaining("10 → 4"),
+        // The $transaction mock routes the callback to `db`, so receiving
+        // `db` here proves the write went through the tx client.
+        tx: db,
+      })
+    );
+
+    // One event for the quantity field, atomically with the mutation.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_QUANTITY_CHANGED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        field: "quantity",
+        fromValue: 10,
+        toValue: 4,
+      }),
+      db
+    );
+  });
+
+  it("writes nothing to the ledger when the quantity is resubmitted unchanged (edit form resubmission)", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 10, // same as before-state
+    } as any);
+
+    expect(createConsumptionLog).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    // The lock IS taken whenever the field is submitted — "unchanged" can
+    // only be decided from the under-lock re-read, never the pre-tx
+    // snapshot (a concurrent adjust could have moved the value).
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(db, "asset-1");
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("derives the ledger from the under-lock re-read, not the pre-tx snapshot (concurrent adjust between snapshot and lock)", async () => {
+    // why: the quantity path issues THREE `asset.findUnique` reads in order —
+    // (1) the pre-tx note snapshot (still 10), (2) the in-tx org-ownership
+    // proof taken BEFORE the row lock (id only), (3) the in-tx under-lock
+    // re-read, where a concurrent adjustQuantity has already committed
+    // 10 → 7. The ledger must record the REAL movement 7 → 4, or the
+    // ConsumptionLog running total desyncs from Asset.quantity.
+    vi.mocked(db.asset.findUnique)
+      .mockReset()
+      .mockResolvedValueOnce(beforeState as any)
+      .mockResolvedValueOnce({ id: "asset-1" } as any)
+      .mockResolvedValueOnce({ quantity: 7, minQuantity: 2 } as any);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 4,
+    } as any);
+
+    expect(createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "ADJUSTMENT",
+        quantity: 3, // |4 − 7|, not |4 − 10|
+        note: expect.stringContaining("7 → 4"),
+      })
+    );
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_QUANTITY_CHANGED",
+        fromValue: 7,
+        toValue: 4,
+      }),
+      db
+    );
+    // The timeline note must tell the SAME story as the ledger (7 → 4),
+    // not the pre-tx snapshot's stale 10 → 4.
+    expect(createAssetQuantityChangeNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousQuantity: 7,
+        newQuantity: 4,
+      })
+    );
+  });
+
+  it("still ledgers when the submitted value equals the STALE snapshot but differs under the lock (no silent unledgered overwrite)", async () => {
+    // why: snapshot says 10 and the form resubmits 10, but a concurrent
+    // adjust committed 10 → 5 before the lock. The absolute write still
+    // overwrites 5 with 10, so skipping the ledger here would recreate the
+    // exact unledgered-edit gap this ledger exists to close.
+    // Same three-read order as the test above: snapshot → org proof → the
+    // under-lock re-read that reveals the concurrent 10 → 5 commit.
+    vi.mocked(db.asset.findUnique)
+      .mockReset()
+      .mockResolvedValueOnce(beforeState as any)
+      .mockResolvedValueOnce({ id: "asset-1" } as any)
+      .mockResolvedValueOnce({ quantity: 5, minQuantity: 2 } as any);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 10, // "unchanged" per the stale snapshot
+    } as any);
+
+    expect(createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "ADJUSTMENT",
+        quantity: 5,
+        note: expect.stringContaining("5 → 10"),
+      })
+    );
+    // The timeline note must record the same real 5 → 10 movement the
+    // ledger did — the pre-tx snapshot sees 10 → 10 and would write NO
+    // note for a ledgered stock movement.
+    expect(createAssetQuantityChangeNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousQuantity: 5,
+        newQuantity: 10,
+      })
+    );
+    // 5 → 10 is an increase — the low-stock check must not fire.
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("records ASSET_MIN_QUANTITY_CHANGED without a ConsumptionLog row (a threshold is not stock)", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      minQuantity: 7, // 2 → 7
+    } as any);
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_MIN_QUANTITY_CHANGED",
+        field: "minQuantity",
+        fromValue: 2,
+        toValue: 7,
+      }),
+      db
+    );
+    expect(createConsumptionLog).not.toHaveBeenCalled();
+    // A threshold edit is not a stock decrease.
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("skips the row lock entirely for an INDIVIDUAL edit (schema-normalized bare `minQuantity: null`)", async () => {
+    // why: INDIVIDUAL before-state — the edit form never renders the
+    // quantity fields, but NewAssetFormSchema still normalizes the ABSENT
+    // minQuantity input to `null` on EVERY save, so this is the shape the
+    // hottest mutation path submits.
+    vi.mocked(db.asset.findUnique)
+      .mockReset()
+      .mockResolvedValue({
+        ...beforeState,
+        quantity: null,
+        minQuantity: null,
+      } as any);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      minQuantity: null, // schema transform of the never-rendered field
+    } as any);
+
+    // No serialization against concurrent quantity writers for a write
+    // that is a no-op by construction (null over null).
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(createConsumptionLog).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_MIN_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    // The unsubmitted field is also dropped from the write itself, so a
+    // hand-crafted QT post omitting `quantity` can never CLEAR a real
+    // threshold without the lock + event — write and ledger stay in
+    // lockstep.
+    const updateArg = vi.mocked(db.asset.update).mock.calls[0][0] as any;
+    expect(updateArg.data.minQuantity).toBeUndefined();
+    // The note writer must receive the gate's verdict too: a QT asset with
+    // an existing threshold submitted as bare `{ minQuantity: null }` must
+    // NOT get a "threshold cleared" note for a write that never persisted
+    // (the note would lie against the DB, which still holds the value).
+    expect(createAssetQuantityChangeNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newQuantity: undefined,
+        newMinQuantity: undefined,
+      })
+    );
+  });
+
+  it("still ledgers a threshold CLEAR when the QT form submits quantity alongside minQuantity: null", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 10, // the QT form always submits quantity (unchanged here)
+      minQuantity: null, // user cleared the threshold input
+    } as any);
+
+    // The clear is a genuine 2 → null change and must stay ledgered even
+    // though the bare-null INDIVIDUAL shape above is filtered out.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_MIN_QUANTITY_CHANGED",
+        field: "minQuantity",
+        fromValue: 2,
+        toValue: null,
+      }),
+      db
+    );
+    // A threshold is not stock — no ConsumptionLog row for the clear.
+    expect(createConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("emits one event per changed field when quantity and minQuantity change together", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 4,
+      minQuantity: 7,
+    } as any);
+
+    const actions = vi
+      .mocked(recordEvent)
+      .mock.calls.map(([event]) => (event as { action: string }).action);
+    // One per field (record-event-payload-shapes) — never an umbrella event.
+    expect(actions.filter((a) => a === "ASSET_QUANTITY_CHANGED")).toHaveLength(
+      1
+    );
+    expect(
+      actions.filter((a) => a === "ASSET_MIN_QUANTITY_CHANGED")
+    ).toHaveLength(1);
+    // Still exactly one ledger row (minQuantity contributes none).
+    expect(createConsumptionLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires the low-stock check after a reduction but not after an increase", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 4, // 10 → 4: reduction
+    } as any);
+
+    expect(notifyLowStockForAssets).toHaveBeenCalledWith({
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    vitest.clearAllMocks();
+    vi.mocked(db.asset.findUnique)
+      .mockReset()
+      .mockResolvedValue(beforeState as any);
+    vi.mocked(db.asset.update).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      category: null,
+      valuation: null,
+      tags: [],
+      quantity: 25,
+    } as any);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      // why: the valuation-note helper derives a locale from request headers.
+      request: new Request("https://app.shelf.test/assets/asset-1/edit"),
+      quantity: 25, // 10 → 25: increase — can't newly breach a minimum
+    } as any);
+
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+    // The increase is still ledgered (log + event) — only the alert is skipped.
+    expect(createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "ADJUSTMENT", quantity: 15 })
+    );
   });
 });
 

@@ -41,7 +41,12 @@ export interface AdjustBookingAssetQuantityDialogProps {
   assetTitle?: string;
   /** The currently booked quantity (pre-fills the input) */
   currentQuantity: number;
-  /** Maximum quantity the user can set (available + currently booked) */
+  /**
+   * Maximum quantity the user can set — the largest value the server
+   * guard will accept (guard-family pool headroom excluding this booking,
+   * which therefore already includes this booking's own booked units).
+   * The dialog floors it at `currentQuantity` so reductions always pass.
+   */
   maxQuantity?: number;
   /** Unit of measure label (e.g., "pcs", "liters") */
   unitOfMeasure?: string | null;
@@ -97,6 +102,19 @@ export function AdjustBookingAssetQuantityDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
+  /**
+   * Directional cap (#2755): the user must ALWAYS be able to keep or reduce
+   * the current booked quantity — even when the pool is oversubscribed and
+   * the loader-provided `maxQuantity` is 0 (or stale). Flooring the cap at
+   * `currentQuantity` makes the client validation directional by
+   * construction: reductions/unchanged values can never exceed it, and only
+   * a genuine increase is measured against availability. This mirrors the
+   * server guard's directional check, so a stale or absent loader value can
+   * never re-create the "no valid number exists" dead-end client-side.
+   */
+  const effectiveMax =
+    maxQuantity != null ? Math.max(maxQuantity, currentQuantity) : undefined;
+
   /** Server-side error message from the action response */
   const serverError =
     fetcher.data?.error != null
@@ -125,9 +143,11 @@ export function AdjustBookingAssetQuantityDialog({
       return;
     }
 
-    if (maxQuantity != null && qty > maxQuantity) {
+    // Directional: `effectiveMax >= currentQuantity`, so reductions and
+    // unchanged resubmissions always pass; only an increase can trip this.
+    if (effectiveMax != null && qty > effectiveMax) {
       setQuantityError(
-        `Only ${maxQuantity} ${unitLabel} available. Please reduce the quantity.`
+        `You can reserve at most ${effectiveMax} ${unitLabel} for this booking. Reduce the quantity, or free up units by reducing or removing this asset from other bookings.`
       );
       return;
     }
@@ -169,16 +189,16 @@ export function AdjustBookingAssetQuantityDialog({
               type="number"
               label={`Quantity (${unitLabel})`}
               min={1}
-              max={maxQuantity ?? undefined}
+              max={effectiveMax}
               step={1}
               required
               defaultValue={currentQuantity}
               error={quantityError || serverError || undefined}
               onChange={() => setQuantityError(null)}
             />
-            {maxQuantity != null ? (
+            {effectiveMax != null ? (
               <p className="-mt-2 text-xs text-gray-500">
-                Max: {maxQuantity} {unitLabel}
+                Max: {effectiveMax} {unitLabel}
               </p>
             ) : null}
           </div>

@@ -67,6 +67,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { getBookingPoolAvailability } from "~/modules/asset/availability.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -228,91 +229,53 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * For QUANTITY_TRACKED assets, compute available quantity factoring
-     * in kit allocations, custody, AND overlapping booking reservations.
-     * Exclude the current booking so its own reservation doesn't reduce
-     * the displayed availability.
-     *
-     * Kits MUST be in the formula — qty-tracked-in-kit assets are
-     * selectable in the picker for their free pool, so the picker's
-     * MAX has to subtract the slices committed to any kit. Matches the
-     * asset-overview "Available" formula in `quantity-overview-card.tsx`
-     * so the two surfaces agree.
+     * For QUANTITY_TRACKED assets, compute available quantity via the
+     * canonical booking-pool module. This picker gates what may be ADDED
+     * to the booking, so its named flag set is:
+     *  - `excludeBookingId: id` — the current booking's own reservation
+     *    must not reduce the displayed availability.
+     *  - `includeKitSlices: true` — kits MUST be in the formula:
+     *    qty-tracked-in-kit assets are selectable in the picker for their
+     *    free pool, so the picker's MAX has to subtract the slices
+     *    committed to any kit.
+     *  - `custodyScope: "all"` — every custody row subtracts (this
+     *    surface's historical convention; it does not separately track
+     *    kit custody vs operator custody).
+     *  - `window` — only count reservations from bookings whose dates
+     *    overlap with the current booking; non-overlapping bookings don't
+     *    compete for the same quantity window (#2724 divergence preserved:
+     *    dateless bookings fall back to the global pool).
+     *  - `dispositionAware: false` — preserves this picker's raw
+     *    booked-sum behavior pre-migration; flipping is a documented
+     *    follow-up, not silent drift.
      */
     const qtyAssetIds = assets
       .filter((a) => a.type === "QUANTITY_TRACKED")
       .map((a) => a.id);
 
-    const [assetKitSums, custodySums, bookingSums] =
-      qtyAssetIds.length > 0
-        ? await Promise.all([
-            db.assetKit.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds }, organizationId },
-              _sum: { quantity: true },
-            }),
-            db.custody.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds } },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIds },
-                bookingId: { not: id },
-                booking: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  /**
-                   * Only count reservations from bookings whose dates
-                   * overlap with the current booking. Non-overlapping
-                   * bookings don't compete for the same quantity window.
-                   */
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
-                        },
-                      ],
-                    }),
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], [], []];
+    const pickerPoolByAsset = await getBookingPoolAvailability({
+      assetIds: qtyAssetIds,
+      organizationId,
+      excludeBookingId: id,
+      window:
+        booking.from && booking.to
+          ? { from: booking.from, to: booking.to }
+          : null,
+      custodyScope: "all",
+      includeKitSlices: true,
+      dispositionAware: false,
+    });
 
-    const inKitsByAsset = new Map(
-      assetKitSums.map((k) => [k.assetId, k._sum.quantity ?? 0])
-    );
-    const custodyByAsset = new Map(
-      custodySums.map((c) => [c.assetId, c._sum.quantity ?? 0])
-    );
-    const reservedByAsset = new Map(
-      bookingSums.map((b) => [b.assetId, b._sum.quantity ?? 0])
-    );
-
-    /** Attach availableQuantity and filter out fully-allocated qty assets */
+    /**
+     * Attach availableQuantity and filter out fully-allocated qty assets.
+     * `raw` (signed) is used on purpose: the row keeps its true headroom
+     * for display math, and the `> 0` filter behaves identically to the
+     * pre-migration unclamped subtraction.
+     */
     const assetsWithAvailability = assets
       .map((a) => {
         if (a.type !== "QUANTITY_TRACKED") return a;
-        const inKits = inKitsByAsset.get(a.id) ?? 0;
-        const inCustody = custodyByAsset.get(a.id) ?? 0;
-        const reserved = reservedByAsset.get(a.id) ?? 0;
-        const availableQuantity =
-          (a.quantity ?? 0) - inKits - inCustody - reserved;
+        const availableQuantity = pickerPoolByAsset.get(a.id)?.raw ?? 0;
         return { ...a, availableQuantity };
       })
       .filter((a) => {

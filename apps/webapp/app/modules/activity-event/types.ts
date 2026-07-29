@@ -33,6 +33,10 @@ export type FieldChangeAction =
   | "ASSET_TAGS_CHANGED"
   | "ASSET_STATUS_CHANGED"
   | "ASSET_VALUATION_CHANGED"
+  /** Workspace-stock (`Asset.quantity`) edits via asset form / CSV import — paired with a ConsumptionLog ADJUSTMENT row. */
+  | "ASSET_QUANTITY_CHANGED"
+  /** Low-stock threshold (`Asset.minQuantity`) edits — event only, no ConsumptionLog (a threshold is not stock). */
+  | "ASSET_MIN_QUANTITY_CHANGED"
   | "ASSET_CUSTOM_FIELD_CHANGED"
   | "ASSET_PREFERRED_BARCODE_CHANGED"
   | "BOOKING_STATUS_CHANGED"

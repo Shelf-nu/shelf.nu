@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   api,
   type AssetCustodyListEntry,
+  type AssetQuantityBreakdown,
   type Location as LocationType,
   type TeamMember,
 } from "@/lib/api";
@@ -60,6 +61,26 @@ try {
     require("react-native-qrcode-svg");
 } catch {
   // Will render graceful fallback instead of QR code
+}
+
+/**
+ * Names the commitments that actually consume a quantity pool, so the
+ * over-commitment callout can state a true cause instead of always blaming
+ * bookings (custody, check-outs or kits can be the real driver).
+ *
+ * @param breakdown - The server's quantity breakdown for the asset.
+ * @returns e.g. "bookings", "bookings and custody" — never an empty string.
+ */
+function describeCommitments(breakdown: AssetQuantityBreakdown): string {
+  const causes = [
+    breakdown.reserved > 0 ? "bookings" : null,
+    breakdown.inCustody > 0 ? "custody" : null,
+    breakdown.checkedOut > 0 ? "check-outs" : null,
+  ].filter(Boolean) as string[];
+
+  if (causes.length === 0) return "commitments";
+  if (causes.length === 1) return causes[0];
+  return `${causes.slice(0, -1).join(", ")} and ${causes[causes.length - 1]}`;
 }
 
 export default function AssetDetailScreen() {
@@ -380,9 +401,15 @@ export default function AssetDetailScreen() {
                     we show only the total above. */}
                 {breakdown && (
                   <View style={styles.quantityBreakdownRow}>
+                    {/* `breakdown.available` is the server's RAW signed
+                        diagnostic (same `getQuantityData` value the web badge
+                        uses). Clamp for display — a bare "-1 pcs" reads as a
+                        glitch; the over-committed note below carries the
+                        deficit truthfully (mirrors the webapp's overview
+                        card / badge-tooltip copy). */}
                     <QuantityStat
                       label="Available"
-                      value={`${breakdown.available}${unitSuffix}`}
+                      value={`${Math.max(0, breakdown.available)}${unitSuffix}`}
                     />
                     <QuantityStat
                       label="In custody"
@@ -397,6 +424,20 @@ export default function AssetDetailScreen() {
                       value={`${breakdown.checkedOut}${unitSuffix}`}
                     />
                   </View>
+                )}
+                {/* Read-only over-commitment callout (raw available < 0).
+                    why: names the commitments that ACTUALLY consume this pool
+                    instead of blaming bookings unconditionally — with 5 total
+                    / 5 in custody / 5 reserved, "bookings reserved more than
+                    are in stock" is false (they reserved exactly stock; the
+                    COMBINATION over-commits). Mirrors the web callout in
+                    quantity-overview-card.tsx. */}
+                {breakdown && breakdown.available < 0 && (
+                  <Text style={styles.quantityOverCommittedNote}>
+                    Over-committed by {Math.abs(breakdown.available)}
+                    {unitSuffix} — {describeCommitments(breakdown)} account for
+                    more units than are in stock.
+                  </Text>
                 )}
               </View>
             </View>
@@ -970,6 +1011,14 @@ const useStyles = createStyles((colors, shadows) => ({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: spacing.md,
+  },
+  // Over-commitment callout under the 2x2 stats grid (shown only when the
+  // raw signed availability is negative). Warning-toned, read-only.
+  quantityOverCommittedNote: {
+    marginTop: spacing.sm,
+    fontSize: fontSize.sm,
+    lineHeight: 18,
+    color: colors.warning,
   },
   // Two-up grid: each stat takes ~half the row so 4 stats wrap to 2x2.
   quantityStat: {

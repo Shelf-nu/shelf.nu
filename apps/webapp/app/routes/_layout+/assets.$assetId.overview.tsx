@@ -49,6 +49,8 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { splitDisplayBookingCommitments } from "~/modules/asset/availability";
+import { getBookingPoolAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   MOVE_UNITS_INTENT_FIELD,
@@ -247,21 +249,35 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * Units committed to bookings but NOT yet physically off the shelf.
        * Covers RESERVED bookings (future) + the ONGOING/OVERDUE
        * booked-but-not-yet-checked-out remainder. Disjoint from
-       * `checkedOut` — every booked unit appears in exactly one bucket.
+       * `checkedOut` — every booked unit appears in exactly one bucket —
+       * and disposition-aware, so units consumed/lost/damaged at partial
+       * check-in stop being counted here the moment they leave `total`.
        */
       reserved: number;
       /**
-       * Units actively off the shelf via ONGOING/OVERDUE bookings,
-       * computed via the shared OUT-flow primitive
-       * (`computeCheckedOutForAsset`).
+       * Units actively off the shelf via ONGOING/OVERDUE bookings. The
+       * OUT-flow primitive (`computeCheckedOutForAsset`) supplies the raw
+       * scan count; `splitDisplayBookingCommitments` reconciles it against
+       * the disposition-aware pool so `reserved + checkedOut` always equals
+       * the commitment `available` was computed from.
        */
       checkedOut: number;
       /**
        * Booking-aware availability: how many units can be reserved for a
        * *future* booking. Subtracts everything that's already spoken for —
        * kits + operator custody + reserved in other bookings + checked-out.
+       * CLAMPED at 0 for display; when the pool is over-committed the
+       * truth lives in `overCommittedBy` instead of a negative here.
        */
       available: number;
+      /**
+       * How many units the workspace has promised BEYOND its stock
+       * (`max(0, -raw)` from the canonical booking-pool module). 0 in the
+       * healthy case. The card renders an explicit "over-committed by N"
+       * callout from this — clamping alone would hide the oversubscription
+       * and the quantity system must never lie.
+       */
+      overCommittedBy: number;
       /**
        * Physical availability: how many units are *actually* on the shelf
        * right now — not in a kit, not held by a custodian, and not
@@ -274,33 +290,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } | null = null;
 
     if (isQuantityTracked(asset)) {
-      // "Reserved (bookings)" on the overview card surfaces every unit
-      // that is committed to a booking but NOT yet physically off the
-      // shelf — so users instantly see the chunk that's neither truly
-      // free nor already gone. That single bucket has two contributors:
+      // The card renders three booking-related rows — "Reserved
+      // (bookings)", "Checked out (bookings)" and "Available" — and users
+      // read them as a ledger, so they MUST reconcile:
       //
-      //   1. RESERVED bookings — no progressive-checkout component, the
-      //      naive `Σ BookingAsset.quantity` is the whole earmarked count.
-      //   2. ONGOING / OVERDUE bookings — the booked total MINUS what's
-      //      already been scanned out via PartialBookingCheckout. The
-      //      OUT-side primitive (`computeCheckedOutForAsset`) gives us
-      //      the truly-out count; subtracting it from the active-booking
-      //      booked total yields the booked-but-not-yet-out remainder.
+      //   total − inKits − inCustody − reserved − checkedOut === raw
       //
-      // "Checked out (bookings)" is computed via the shared helper so
-      // the overview sidebar stays in lock-step with the OUT-flow's
-      // per-slice math.
-      const [reservedSum, ongoingBookedSum, checkedOut] = await Promise.all([
-        db.bookingAsset.aggregate({
-          where: {
-            assetId: asset.id,
-            booking: { status: "RESERVED", organizationId },
-          },
-          _sum: { quantity: true },
-        }),
-        // Active-booking booked total — sum of every `BookingAsset.quantity`
-        // slice on an ONGOING/OVERDUE booking. The not-yet-out remainder
-        // is this minus `checkedOut`.
+      // All three therefore derive from ONE disposition-aware booking-pool
+      // read. The pool splits its commitment by BOOKING STATUS; this card
+      // promises a PHYSICAL split (still on the shelf vs already gone), so
+      // `splitDisplayBookingCommitments` re-partitions the pool's
+      // active-booking commitment using the OUT-flow's scanned-out count
+      // without changing the total the availability formula consumes.
+      const [ongoingBookedSum, scannedOut, bookingPoolMap] = await Promise.all([
+        // RAW active-booking booked total (`Σ BookingAsset.quantity` on
+        // ONGOING/OVERDUE bookings). Not a display number — the physical
+        // split needs it to recover how many units partial check-in
+        // dispositions removed (`raw − dispositionAware pool`).
         db.bookingAsset.aggregate({
           where: {
             assetId: asset.id,
@@ -315,21 +321,42 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // never accidentally surface checked-out counts from another
         // workspace if a cross-org asset id were ever supplied.
         computeCheckedOutForAsset(db, asset.id, organizationId),
+        /**
+         * Canonical booking-pool availability — the source of BOTH the
+         * "Available" number and the reserved/checked-out display rows.
+         * Named flags per this surface's semantics: operator custody only
+         * + kit slices subtract (both have their own display rows on this
+         * card), global window (#2724 divergence preserved), and
+         * dispositionAware — partial-check-in dispositions already
+         * decremented `Asset.quantity`, so counting the raw booked sums
+         * would double-count them.
+         */
+        getBookingPoolAvailability({
+          assetIds: [asset.id],
+          organizationId,
+          window: null,
+          custodyScope: "operator",
+          includeKitSlices: true,
+          dispositionAware: true,
+        }),
       ]);
 
       const total = asset.quantity ?? 0;
-      // Floor at 0 defensively — pathological data (PartialBookingCheckout
-      // claims exceeding the booked total) could otherwise produce a
-      // negative remainder.
-      const ongoingBookedNotYetOut = Math.max(
-        0,
-        (ongoingBookedSum._sum?.quantity ?? 0) - checkedOut
-      );
-      // Combine RESERVED bookings + the ONGOING-not-yet-out remainder
-      // so the "Reserved (bookings)" row reflects every unit committed
-      // to a booking but still physically present.
-      const reserved =
-        (reservedSum._sum?.quantity ?? 0) + ongoingBookedNotYetOut;
+      const bookingPool = bookingPoolMap.get(asset.id);
+
+      /**
+       * Physical split of the pool's booking commitment. Total-preserving:
+       * `reserved + checkedOut === bookingPool.reserved + bookingPool.checkedOut`,
+       * which is exactly the term the availability formula subtracts — so the
+       * card's rows and its "Available" row can never disagree.
+       */
+      const { reserved, checkedOut } = splitDisplayBookingCommitments({
+        poolReserved: bookingPool?.reserved ?? 0,
+        poolActive: bookingPool?.checkedOut ?? 0,
+        rawActiveBooked: ongoingBookedSum._sum?.quantity ?? 0,
+        scannedOut,
+      });
+
       // Sum each kit's slice — the asset's pool earmarked for kit use.
       const inKits = (asset.assetKits ?? []).reduce(
         (sum: number, ak) => sum + (ak.quantity ?? 0),
@@ -358,11 +385,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         reserved,
         checkedOut,
         // Strict-available pool: kits + operator + reserved + checked-out
-        // are all separate consumers; what's left is truly free.
-        available: total - inKits - operatorCustody - reserved - checkedOut,
-        // Adjust-cap: reservations don't subtract here (units are still
-        // physically present), but kits do because dropping below
-        // `inKits` would violate the sum-within-total DB trigger.
+        // are all separate consumers; what's left is truly free. Clamped
+        // for display — the signed truth surfaces via `overCommittedBy`.
+        available: bookingPool?.available ?? 0,
+        // Explicit oversubscription callout (founder bar: never lie about
+        // availability — 0 alone would hide that the pool is over-promised).
+        overCommittedBy: Math.max(0, -(bookingPool?.raw ?? 0)),
+        // Adjust-cap: CUSTODY family — reservations don't subtract here
+        // (units are still physically present), but kits do because
+        // dropping below `inKits` would violate the sum-within-total DB
+        // trigger. Deliberately NOT merged into the booking-pool module —
+        // see the two-families JSDoc in `~/modules/asset/availability.server`.
+        // `checkedOut` here is the reconciled physical count, so units
+        // consumed at partial check-in (already gone from `total`) are not
+        // subtracted a second time.
         custodyAvailable: total - inKits - operatorCustody - checkedOut,
       };
     }
@@ -1844,6 +1880,7 @@ export default function AssetOverview() {
               minQuantity={asset.minQuantity ?? null}
               consumptionType={asset.consumptionType ?? null}
               availableQuantity={quantityData?.available}
+              overCommittedByQuantity={quantityData?.overCommittedBy}
               custodyAvailableQuantity={quantityData?.custodyAvailable}
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}

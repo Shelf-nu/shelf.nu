@@ -30,6 +30,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { getBookingPoolAvailability } from "~/modules/asset/availability.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import {
@@ -886,78 +887,86 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * asset row + assets sidebar: fires when `bookedQuantity` on a row
      * exceeds `availableUnitsByAsset[assetId]`.
      *
-     * Subtraction notes:
-     *  - Only ASSET-level custody (`kitCustodyId == null`) counts. Kit
-     *    custody rows are internal earmarking and must not reduce global
-     *    headroom (avoids double-counting kit-driven slices, mirrors the
-     *    availableHelper audit gotcha).
-     *  - This booking is EXCLUDED via `id: { not: bookingId }` — the
-     *    badge is about pressure from OTHER bookings on the shared pool;
-     *    the current booking's own reservation is what we're comparing
-     *    against.
-     *  - `assetKits` allocations are NOT subtracted. Pre-kit-checkout,
-     *    units inside a kit are still in the asset's available pool.
+     * Semantics (now expressed as named flags on the canonical module —
+     * `getBookingPoolAvailability` — instead of inline formulas):
+     *  - `custodyScope: "operator"` — only ASSET-level custody
+     *    (`kitCustodyId == null`) counts. Kit custody rows are internal
+     *    earmarking and must not reduce global headroom (avoids
+     *    double-counting kit-driven slices).
+     *  - `excludeBookingId: bookingId` — the badge is about pressure from
+     *    OTHER bookings on the shared pool; the current booking's own
+     *    reservation is what we're comparing against.
+     *  - `includeKitSlices: false` — pre-kit-checkout, units inside a kit
+     *    are still in the asset's available pool.
+     *  - `window: null` — global pool, not date-scoped (#2724 divergence
+     *    preserved as-is for this surface).
+     *  - `dispositionAware: false` — preserves this surface's raw
+     *    booked-sum behavior from before the canonical-module migration;
+     *    flipping it to true is a documented follow-up, not a silent drift.
      *
-     * The groupBys are scoped to this workspace's bookings via the
-     * relation filter (`booking: { organizationId, ... }`) to prevent
-     * cross-org leakage.
+     * Cross-org safety: the module org-scopes every query when
+     * `organizationId` is provided.
      */
-    const [globalReservedRows, globalCheckedOutRows] =
-      qtyAssetIdsInBooking.length > 0
-        ? await Promise.all([
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: "RESERVED",
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: { in: ["ONGOING", "OVERDUE"] },
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], []];
+    const [bookingPoolByAsset, adjustCapPoolByAsset] = await Promise.all([
+      getBookingPoolAvailability({
+        assetIds: qtyAssetIdsInBooking,
+        organizationId,
+        excludeBookingId: bookingId,
+        window: null,
+        custodyScope: "operator",
+        includeKitSlices: false,
+        dispositionAware: false,
+      }),
+      /**
+       * SECOND flag set, GUARD family, for the adjust-quantity dialog cap.
+       * The dialog's "Max: N" advertises "the largest quantity the server
+       * will accept", and the server guard
+       * (api+/bookings.$bookingId.adjust-asset-quantity.ts →
+       * `computeBookingAvailableQuantity`) uses `custodyScope: "all"` +
+       * `dispositionAware: true` — NOT the badge flags above. Computing
+       * the cap from the badge map made "Max: N" wrong in both directions
+       * (kit-custody rows → overstated cap, server 400 inside it; logged
+       * dispositions → understated cap, client hard-blocked an increase
+       * the server would accept). Deliberate family mismatch with the
+       * badge map: the badge asks "is this booking's reservation
+       * satisfiable?", the cap asks "what will the guard accept?".
+       */
+      getBookingPoolAvailability({
+        assetIds: qtyAssetIdsInBooking,
+        organizationId,
+        excludeBookingId: bookingId,
+        window: null,
+        custodyScope: "all",
+        includeKitSlices: false,
+        dispositionAware: true,
+      }),
+    ]);
 
     /**
-     * Map of `assetId → available units in the workspace pool`. Built
-     * after both rawAssets and the two groupBys land. Keys are restricted
-     * to QT assets that appear on this booking; INDIVIDUAL assets are
-     * omitted (they have their own AvailabilityBadge paths and never get
-     * the InsufficientStockBadge).
+     * Map of `assetId → available units in the workspace pool` (clamped).
+     * Keys are restricted to QT assets that appear on this booking;
+     * INDIVIDUAL assets are omitted (they have their own AvailabilityBadge
+     * paths and never get the InsufficientStockBadge). Consumed by the
+     * InsufficientStockBadge in `list-asset-content.tsx` and
+     * `booking-assets-sidebar.tsx`.
      */
     const availableUnitsByAsset: Record<string, number> = {};
-    for (const asset of rawAssets) {
-      if (asset.type !== "QUANTITY_TRACKED") continue;
-      const total = asset.quantity ?? 0;
-      // Operator (asset-level) custody only — kit-level custody is
-      // internal earmarking and must not reduce global headroom.
-      const inCustody = (asset.custody ?? [])
-        .filter((c) => c.kitCustodyId == null)
-        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const reserved =
-        globalReservedRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      const checkedOut =
-        globalCheckedOutRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      availableUnitsByAsset[asset.id] = Math.max(
-        0,
-        total - inCustody - reserved - checkedOut
-      );
+    for (const [assetId, pool] of bookingPoolByAsset) {
+      availableUnitsByAsset[assetId] = pool.available;
+    }
+
+    /**
+     * Map of `assetId → max quantity the adjust dialog may submit`
+     * (clamped guard-family headroom, excluding this booking — so it
+     * already includes this booking's own booked units; do NOT add
+     * `bookedQuantity` on top). Consumed by `asset-row-actions-dropdown`
+     * for the adjust dialog's `maxQuantity` (#2755); the dialog's
+     * directional floor at `currentQuantity` keeps reductions possible
+     * when the pool is oversubscribed and this reads 0.
+     */
+    const adjustCapByAsset: Record<string, number> = {};
+    for (const [assetId, pool] of adjustCapPoolByAsset) {
+      adjustCapByAsset[assetId] = pool.available;
     }
 
     // Attach per-row qty disposition data onto the shaped view items so
@@ -1157,6 +1166,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * the booking has no QT assets — so consumers can rely on the key.
          */
         availableUnitsByAsset,
+        /**
+         * QT adjust-dialog cap map (assetId → largest quantity the server
+         * guard will accept). Guard-family flags on purpose — see the
+         * loader comment where it is computed. Always serialised — empty
+         * `{}` when the booking has no QT assets.
+         */
+        adjustCapByAsset,
         partialCheckoutDetails,
         // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
         // so clientLoader can re-shape without a server round-trip on

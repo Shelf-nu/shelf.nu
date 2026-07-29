@@ -17,6 +17,7 @@
 
 import type { AssetType } from "@prisma/client";
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
+import { computeBookingPoolAvailability } from "~/modules/asset/availability";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 
@@ -122,7 +123,21 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
   /* Nothing to show — fall through to standard status badge */
   if (inCustody === 0 && reserved === 0 && checkedOut === 0) return null;
 
-  const available = total - inCustody - reserved - checkedOut;
+  /**
+   * Canonical booking-pool formula via the shared pure core (client-safe —
+   * `availability.ts` has no `.server` suffix). `inKits` is omitted on
+   * purpose: this reducer's inputs are the loader-fed EFFECTIVE rows (kit
+   * slices are already folded into the booking rows by the breakdown
+   * fetcher). The badge keeps the SIGNED value: its label logic branches
+   * on `available <= 0`, and a negative here truthfully means the pool is
+   * over-committed.
+   */
+  const { raw: available } = computeBookingPoolAvailability({
+    total,
+    inCustody,
+    reserved,
+    checkedOut,
+  });
 
   /* AssetKit lookup so the tooltip can resolve a kit name from a
    * BookingAsset row's `assetKitId` (kit-driven slice attribution). */

@@ -16,12 +16,10 @@
  * @see {@link file://../../../packages/database/prisma/schema.prisma} — ConsumptionLog model
  */
 
-import type { ConsumptionCategory, Prisma } from "@prisma/client";
-import {
-  BookingStatus,
-  ConsumptionCategory as ConsumptionCategoryEnum,
-} from "@prisma/client";
+import type { ConsumptionCategory } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
+import { getBookingPoolAvailabilityUnscopedForLegacyWrapper } from "~/modules/asset/availability.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
@@ -219,6 +217,17 @@ export type AvailableQuantity = {
  * Calculates how many units are currently in custody (summing all custody
  * records for the asset) and subtracts from the total to determine availability.
  *
+ * CUSTODY FAMILY — intentionally NOT booking-aware, and intentionally NOT
+ * merged into the canonical booking-pool module
+ * (`~/modules/asset/availability.server`). Per the asset-overview rationale:
+ * reservations deliberately don't subtract here because reserved units are
+ * still physically present on the shelf until the booking checks out. This
+ * family caps custody assignment and quantity adjustments; its siblings are
+ * the overview's `custodyAvailable` and `low-stock.server.ts`. If you need
+ * "can I reserve N more units for a booking?", use the booking family
+ * ({@link computeBookingAvailableQuantity} / `getBookingPoolAvailability`)
+ * instead — the two answer different questions by design.
+ *
  * @param assetId - The ID of the asset to compute availability for
  * @returns The quantity breakdown: total, inCustody, and available
  * @throws {ShelfError} If the asset is not found or the query fails
@@ -281,6 +290,22 @@ export async function computeAvailableQuantity(
  * which only considers custody. Use this function when you need to know how
  * many units are actually available for new bookings or checkouts.
  *
+ * BACK-COMPAT WRAPPER: since the canonical-module extraction this is a thin
+ * delegation to `getBookingPoolAvailability`
+ * (`~/modules/asset/availability.server`) with the guard family's fixed flag
+ * set — `custodyScope: "all"`, `includeKitSlices: false`, global window,
+ * `dispositionAware: true` — and `available` kept UNCLAMPED (signed): its
+ * consumers (checkout guard, adjust-quantity route) branch on the sign to
+ * detect oversubscription. The exported name, module path, signature, and
+ * return shape are load-bearing for external PR #2744's test suite and for
+ * `booking/service.server`'s checkout guard — do not move or reshape
+ * without checking both.
+ *
+ * It also intentionally keeps reading through the ambient `db` client (no
+ * `tx` param): callers rely on their own asset row lock + read-committed
+ * isolation — a documented status quo (see the call-site comments and
+ * #2744's scoping note).
+ *
  * @param assetId - The ID of the asset to compute availability for
  * @param excludeBookingId - Optional booking ID to exclude from the reserved
  *   count. Useful when checking availability for a booking that already holds
@@ -293,96 +318,43 @@ export async function computeBookingAvailableQuantity(
   excludeBookingId?: string
 ): Promise<AvailableQuantity & { reserved: number }> {
   try {
-    /** Reuse existing custody-based availability calculation */
-    const { total, inCustody } = await computeAvailableQuantity(assetId);
-
-    /** Build the where clause for selecting active reservations */
-    const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
-      assetId,
-      booking: {
-        status: {
-          in: [
-            BookingStatus.RESERVED,
-            BookingStatus.ONGOING,
-            BookingStatus.OVERDUE,
-          ],
-        },
-      },
-    };
-
-    /** Exclude a specific booking if provided (e.g., the booking being edited) */
-    if (excludeBookingId) {
-      bookingAssetWhere.bookingId = { not: excludeBookingId };
-    }
-
     /**
-     * Fetch the reserved pivot rows for this asset across active bookings.
-     * We need individual rows (not an aggregate) so we can subtract the
-     * per-booking logged disposition quantities before summing.
+     * `organizationId: null` — this legacy signature predates org threading;
+     * every caller org-validates the asset id upstream (see the
+     * `GetBookingPoolAvailabilityArgs` JSDoc). The unscoped entry point is
+     * exported ONLY for this wrapper; new code must call the org-scoped
+     * `getBookingPoolAvailability` directly with a real organizationId.
      */
-    const reservedRows = await db.bookingAsset.findMany({
-      where: bookingAssetWhere,
-      select: { bookingId: true, assetId: true, quantity: true },
+    const poolMap = await getBookingPoolAvailabilityUnscopedForLegacyWrapper({
+      assetIds: [assetId],
+      organizationId: null,
+      excludeBookingId,
+      window: null,
+      custodyScope: "all",
+      includeKitSlices: false,
+      dispositionAware: true,
     });
 
-    let reserved = 0;
-
-    if (reservedRows.length > 0) {
-      const bookingIds = reservedRows.map((r) => r.bookingId);
-
-      /**
-       * Sum already-logged disposition quantities per booking for this
-       * asset. Dispositions are terminal for reserved units:
-       *   - RETURN   — unit came back to stock
-       *   - CONSUME  — unit consumed (permanently out)
-       *   - LOSS     — unit reported lost
-       *   - DAMAGE   — unit reported damaged
-       * CHECKOUT is intentionally excluded: it represents a handoff into
-       * custody, not a reduction of the booking's reservation footprint.
-       */
-      const loggedGroups = await db.consumptionLog.groupBy({
-        by: ["bookingId"],
-        where: {
-          assetId,
-          bookingId: { in: bookingIds },
-          category: {
-            in: [
-              ConsumptionCategoryEnum.RETURN,
-              ConsumptionCategoryEnum.CONSUME,
-              ConsumptionCategoryEnum.LOSS,
-              ConsumptionCategoryEnum.DAMAGE,
-            ],
-          },
-        },
-        _sum: { quantity: true },
+    const pool = poolMap.get(assetId);
+    if (!pool) {
+      /** Preserve the pre-wrapper not-found behavior (findUniqueOrThrow). */
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found.",
+        additionalData: { assetId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
       });
-
-      /** bookingId → total logged disposition quantity for this asset */
-      const loggedByBookingId = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
-        }
-      }
-
-      /**
-       * For each active reservation, subtract the logged dispositions from
-       * the booked quantity. Clamp at 0 per row so an over-logged booking
-       * (should not happen, but defence-in-depth) can't push `reserved`
-       * negative and silently inflate availability elsewhere.
-       */
-      for (const row of reservedRows) {
-        const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-        const remaining = Math.max(0, row.quantity - logged);
-        reserved += remaining;
-      }
     }
 
     return {
-      total,
-      inCustody,
-      reserved,
-      available: total - inCustody - reserved,
+      total: pool.total,
+      inCustody: pool.inCustody,
+      /** The status-split telescopes back to the single active-booking sum. */
+      reserved: pool.reserved + pool.checkedOut,
+      /** Signed on purpose — consumers need to see oversubscription. */
+      available: pool.raw,
     };
   } catch (cause) {
     /** Re-throw ShelfErrors as-is to preserve status/message */
@@ -535,6 +507,32 @@ export async function adjustQuantity({
         note,
         tx,
       });
+
+      /**
+       * Step 8: Structured activity event, in the SAME transaction
+       * (`.claude/rules/use-record-event.md`).
+       *
+       * why: the "Quantity changed" row in the Asset Activity report reads
+       * `ASSET_QUANTITY_CHANGED`. Emitting it only from `updateAsset`
+       * (form/CSV) made the report tell a partial truth — Quick Adjust is
+       * the primary way stock actually moves. `currentQuantity` is the value
+       * read under the row lock acquired in Step 1, so the event can never
+       * disagree with the ConsumptionLog written above.
+       */
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          field: "quantity",
+          fromValue: currentQuantity,
+          toValue: newQuantity,
+        },
+        tx
+      );
 
       return updatedAsset;
     });

@@ -30,6 +30,7 @@
 import type { Asset, Prisma } from "@prisma/client";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { computeBookingPoolAvailability } from "~/modules/asset/availability";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -174,7 +175,19 @@ export async function getAssetModelAvailability({
       (modelRequestAgg._sum.quantity ?? 0) -
       (modelRequestAgg._sum.fulfilledQuantity ?? 0);
     const reserved = reservedConcrete + reservedViaRequest;
-    const available = Math.max(0, total - inCustody - reserved);
+    /**
+     * MODEL-pool surface: same canonical formula shape as the asset
+     * booking pool (`~/modules/asset/availability.ts`), but the fetch
+     * layer stays model-specific — `reserved` folds in outstanding
+     * model-level requests (`reservedViaRequest`), which have no
+     * asset-level analogue, so only the pure core is shared. `.available`
+     * (clamped) preserves this surface's pre-migration behavior.
+     */
+    const { available } = computeBookingPoolAvailability({
+      total,
+      inCustody,
+      reserved,
+    });
 
     return {
       total,

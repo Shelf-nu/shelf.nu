@@ -73,10 +73,30 @@ export interface UpdateAssetPayload {
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
   request: Request;
-  quantity?: Asset["quantity"];
+  /**
+   * New workspace stock. Deliberately NARROWER than `Asset["quantity"]`
+   * (no `null`): an explicit-null submission would write NULL to a stock
+   * field while bypassing the quantity ledger (no ConsumptionLog category
+   * models a → NULL transition), recreating the unledgered-edit gap the
+   * in-tx ledger in `updateAsset` exists to close. Callers that don't
+   * touch stock omit the field entirely.
+   */
+  quantity?: number;
   minQuantity?: Asset["minQuantity"];
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
+  /**
+   * Opt OUT of this call's post-commit low-stock alert.
+   *
+   * why: `updateAsset` runs once per row in the CSV bulk-update flow. An
+   * import that lowers stock on N already-low assets would otherwise fire N
+   * in-app notifications, N owner emails and ~3N un-awaited queries — a
+   * notification storm for what the user performed as ONE action. Batch
+   * callers set this and call `notifyLowStockForAssets` ONCE with every
+   * reduced asset id after their loop (the helper dedupes and
+   * `Promise.allSettled`s). Single-asset callers leave it unset.
+   */
+  skipLowStockNotification?: boolean;
 }
 
 export interface CreateAssetFromContentImportPayload

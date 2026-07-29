@@ -121,6 +121,9 @@ importers:
       expo-linking:
         specifier: ~8.0.11
         version: 8.0.11(expo@54.0.33)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+      expo-location:
+        specifier: ~19.0.8
+        version: 19.0.8(expo@54.0.33)
       expo-quick-actions:
         specifier: ^6.0.1
         version: 6.0.1(expo@54.0.33)
@@ -181,7 +184,7 @@ importers:
         version: 10.0.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@9.39.4(jiti@2.6.1))
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1))
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -650,7 +653,7 @@ importers:
         version: 6.19.3(magicast@0.3.5)(typescript@6.0.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1)
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@8.57.1)
       remix-flat-routes:
         specifier: ^0.8.5
         version: 0.8.5
@@ -1983,7 +1986,6 @@ packages:
 
   '@evilmartians/lefthook@2.1.6':
     resolution: {integrity: sha512-ysZbzryf74wlISmgm0PH/n1lJ0HD7AHmI6DoJgWO9qzIETQknhGdmKbkOi0MjLYtiOHWQl8Dr2qwg0ksDpNZjA==}
-    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -7008,6 +7010,11 @@ packages:
     peerDependencies:
       react: '*'
       react-native: '*'
+
+  expo-location@19.0.8:
+    resolution: {integrity: sha512-H/FI75VuJ1coodJbbMu82pf+Zjess8X8Xkiv9Bv58ZgPKS/2ztjC1YO1/XMcGz7+s9DrbLuMIw22dFuP4HqneA==}
+    peerDependencies:
+      expo: '*'
 
   expo-manifests@1.0.10:
     resolution: {integrity: sha512-oxDUnURPcL4ZsOBY6X1DGWGuoZgVAFzp6PISWV7lPP2J0r8u1/ucuChBgpK7u1eLGFp6sDIPwXyEUCkI386XSQ==}
@@ -17997,6 +18004,10 @@ snapshots:
       - expo
       - supports-color
 
+  expo-location@19.0.8(expo@54.0.33):
+    dependencies:
+      expo: 54.0.33(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(graphql@16.13.2)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+
   expo-manifests@1.0.10(expo@54.0.33):
     dependencies:
       '@expo/config': 12.0.13
@@ -20745,10 +20756,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
+      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       ora: 9.4.0
       oxlint: 1.62.0
@@ -20762,10 +20773,10 @@ snapshots:
       - oxlint-tsgolint
       - supports-color
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@9.39.4(jiti@2.6.1)):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@8.57.1):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)
       ora: 9.4.0
       oxlint: 1.62.0

@@ -23,6 +23,7 @@ import type {
   ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
+import { notifyLowStockForAssets } from "~/modules/consumption-log/low-stock.server";
 import { buildCustomFieldValue } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -397,6 +398,20 @@ export async function applyBulkUpdatesFromImport({
   /** Distinct assetModel names to batch-resolve. INDIVIDUAL rows only. */
   const assetModelNamesToResolve = new Set<string>();
 
+  /**
+   * Assets whose stock this import actually REDUCED. Each per-row
+   * `updateAsset` opts out of its own low-stock alert
+   * (`skipLowStockNotification`) and we fan out ONCE after the loop —
+   * otherwise one import touching N low-stock assets fires N in-app
+   * notifications, N owner emails and ~3N un-awaited queries for what the
+   * user performed as a single action.
+   *
+   * Over-inclusion is harmless: `notifyLowStockForAssets` re-reads live
+   * stock per asset and only alerts when it is genuinely at/below the
+   * configured threshold.
+   */
+  const stockReducedAssetIds = new Set<string>();
+
   for (const assetPreview of diffs.assetsToUpdate) {
     const existingAsset =
       existingAssets.get(assetPreview.id) ??
@@ -752,8 +767,20 @@ export async function applyBulkUpdatesFromImport({
             customFieldsValues.length > 0
               ? (customFieldsValues as UpdateAssetPayload["customFieldsValues"])
               : undefined,
+          // Batched: this loop fans the alerts out once, after every row
+          // has been applied (see `stockReducedAssetIds`).
+          skipLowStockNotification: true,
         };
         await updateAsset(payload);
+
+        // Record the reduction only AFTER the write committed, so a failed
+        // row never contributes an alert.
+        if (
+          quantityPatch !== undefined &&
+          quantityPatch < (existingAsset.quantity ?? 0)
+        ) {
+          stockReducedAssetIds.add(assetDbId);
+        }
       }
 
       // Handle location separately to catch kit constraint
@@ -893,6 +920,19 @@ export async function applyBulkUpdatesFromImport({
         error: describeBulkUpdateRowFailure(cause),
       });
     }
+  }
+
+  /**
+   * ONE low-stock fan-out for the whole import. Fire-and-forget, after every
+   * row has been applied: alerting must never fail or delay the import, and
+   * the helper dedupes + `Promise.allSettled`s internally.
+   */
+  if (stockReducedAssetIds.size > 0) {
+    void notifyLowStockForAssets({
+      assetIds: [...stockReducedAssetIds],
+      userId,
+      organizationId,
+    });
   }
 
   // Count unique assets — some may appear in both updated and failed

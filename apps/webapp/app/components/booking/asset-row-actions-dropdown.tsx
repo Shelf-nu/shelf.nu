@@ -77,9 +77,36 @@ const TriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
 TriggerButton.displayName = "AssetRowActionsTrigger";
 
 const ConditionalActionsDropdown = ({ asset, fullWidth }: Props) => {
-  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  /**
+   * `adjustCapByAsset` is the booking-overview loader's GUARD-family cap
+   * map: the largest quantity the adjust endpoint's availability guard
+   * will accept for this asset (clamped, excludes THIS booking — so it
+   * already includes this booking's own booked units). Distinct from
+   * `availableUnitsByAsset` (badge family), whose flags disagree with the
+   * server guard in both directions (kit custody / logged dispositions) —
+   * do not swap them back; the badge map answers a different question.
+   */
+  const { booking, adjustCapByAsset } = useLoaderData<{
+    booking: BookingWithCustodians;
+    adjustCapByAsset?: Record<string, number>;
+  }>();
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
   const isQtyTracked = isQuantityTracked(asset);
+
+  /**
+   * #2755 fix: this caller once passed `asset.quantity` — the WORKSPACE
+   * STOCK multiplier (see quantity-semantics-per-surface rule), which
+   * ignores other bookings/custody and both over- and under-caps the
+   * input. Correct cap = the guard-family headroom above, used AS-IS: it
+   * excludes this booking's reservation, so its own booked units are
+   * already part of the number (adding `bookedQuantity` would double-count
+   * them and advertise a Max the server rejects). Falls back to workspace
+   * stock only when the loader map is missing (the dialog's directional
+   * floor still guarantees reductions pass in that case).
+   */
+  const bookedQuantity = asset.bookedQuantity ?? 1;
+  const adjustMaxQuantity =
+    adjustCapByAsset?.[asset.id] ?? asset.quantity ?? undefined;
 
   /**
    * `skipDefault: true` — we don't want the hook's auto-open-on-QR-scan
@@ -227,8 +254,8 @@ const ConditionalActionsDropdown = ({ asset, fullWidth }: Props) => {
           bookingId={booking.id}
           assetId={asset.id}
           assetTitle={asset.title}
-          currentQuantity={asset.bookedQuantity ?? 1}
-          maxQuantity={asset.quantity ?? undefined}
+          currentQuantity={bookedQuantity}
+          maxQuantity={adjustMaxQuantity}
           unitOfMeasure={asset.unitOfMeasure}
           open={isAdjustDialogOpen}
           onOpenChange={setIsAdjustDialogOpen}

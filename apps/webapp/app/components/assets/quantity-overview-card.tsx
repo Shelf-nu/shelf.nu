@@ -25,8 +25,63 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { computeBookingPoolAvailability } from "~/modules/asset/availability";
 import { tw } from "~/utils/tw";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
+
+/**
+ * Builds the over-commitment callout copy from the commitments that actually
+ * consume the pool.
+ *
+ * why this exists: the deficit is `total − inKits − custody − reserved −
+ * checkedOut`, but the copy used to blame bookings unconditionally. With 5
+ * total, 5 in custody and 5 reserved, "bookings have reserved more units than
+ * are in stock" is literally FALSE — bookings reserved exactly stock; the
+ * COMBINATION over-commits — and "release custody", the cure that would
+ * actually work, went unmentioned. A feature whose promise is "the numbers
+ * never lie" cannot ship a warning that can state something untrue.
+ *
+ * @param commitments - The per-bucket unit counts shown on the card.
+ * @returns `causeLabel` (e.g. "bookings and custody") and `cureLabel`
+ *   listing only the remedies that apply to those commitments.
+ */
+export function describeOverCommitment({
+  reserved,
+  inCustody,
+  checkedOut,
+  inKits,
+}: {
+  reserved: number;
+  inCustody: number;
+  checkedOut: number;
+  inKits: number;
+}): { causeLabel: string; cureLabel: string } {
+  /** Joins with Oxford-free "A, B and C" / "A and B" / "A". */
+  const join = (parts: string[], last: string) =>
+    parts.length > 1
+      ? `${parts.slice(0, -1).join(", ")}${last}${parts[parts.length - 1]}`
+      : parts[0];
+
+  const causes = [
+    reserved > 0 ? "bookings" : null,
+    inCustody > 0 ? "custody" : null,
+    checkedOut > 0 ? "check-outs" : null,
+    inKits > 0 ? "kits" : null,
+  ].filter(Boolean) as string[];
+
+  const cures = [
+    reserved > 0 ? "reduce or remove this asset from a booking" : null,
+    inCustody > 0 ? "release custody" : null,
+    "increase the total quantity",
+  ].filter(Boolean) as string[];
+
+  return {
+    // "commitments" is unreachable in practice (a deficit requires at least
+    // one non-zero bucket) but keeps the sentence grammatical if it ever is.
+    causeLabel: causes.length ? join(causes, " and ") : "commitments",
+    cureLabel: join(cures, ", or "),
+  };
+}
 
 /** Props for the QuantityOverviewCard component */
 export interface QuantityOverviewCardProps {
@@ -46,6 +101,15 @@ export interface QuantityOverviewCardProps {
    * future booking.
    */
   availableQuantity?: number;
+  /**
+   * Units the workspace has promised beyond its stock (`max(0, -raw)` from
+   * the canonical booking-pool module). When > 0 the card renders an
+   * explicit "over-committed" callout under the (clamped) "Available" row —
+   * showing 0 alone would hide a real oversubscription, and the quantity
+   * system must never lie. Falls back to a client-side derivation when the
+   * loader doesn't provide it.
+   */
+  overCommittedByQuantity?: number;
   /**
    * Physical availability (total - inCustody). Used as the cap for the
    * QuickAdjustDialog's "Remove" operation — subtracting reservations here
@@ -168,6 +232,7 @@ export function QuantityOverviewCard({
   minQuantity,
   consumptionType,
   availableQuantity,
+  overCommittedByQuantity,
   custodyAvailableQuantity,
   inCustodyQuantity,
   inKitsQuantity,
@@ -185,11 +250,38 @@ export function QuantityOverviewCard({
   const inLocations = inLocationsQuantity ?? 0;
   const unplaced = Math.max(0, qty - inLocations);
 
-  /** Use computed values from the loader, falling back to phase-1 defaults */
-  const available =
-    availableQuantity ??
-    qty - inKits - (inCustodyQuantity ?? 0) - reserved - checkedOut;
   const inCustody = inCustodyQuantity ?? 0;
+
+  /**
+   * Use computed values from the loader, falling back to the shared pure
+   * core (`computeBookingPoolAvailability` — the same formula every
+   * booking-availability surface derives from; no inline re-derivation).
+   * The rendered "Available" is CLAMPED at 0; the signed truth surfaces
+   * through the over-committed callout below instead of a negative count.
+   */
+  const fallbackPool = computeBookingPoolAvailability({
+    total: qty,
+    inKits,
+    inCustody,
+    reserved,
+    checkedOut,
+  });
+  const rawAvailable = availableQuantity ?? fallbackPool.raw;
+  const available = Math.max(0, rawAvailable);
+  /**
+   * Loader-provided when present (it has the authoritative raw value);
+   * otherwise derived from the fallback raw. A loader-provided CLAMPED
+   * `availableQuantity` with no callout prop yields 0 here — correct,
+   * because that loader already decided the pool is healthy.
+   */
+  const overCommittedBy = overCommittedByQuantity ?? Math.max(0, -rawAvailable);
+
+  const { causeLabel, cureLabel } = describeOverCommitment({
+    reserved,
+    inCustody,
+    checkedOut,
+    inKits,
+  });
 
   /** Low stock when a threshold is set and available quantity is at or below it */
   const isLowStock = minQuantity != null && available <= minQuantity;
@@ -230,6 +322,19 @@ export function QuantityOverviewCard({
         value={formatWithUnit(available, unit)}
         warning={isLowStock}
       />
+      {/* Over-committed callout — load-bearing honesty, not polish: the
+          clamped 0 above must never silently swallow an oversubscribed
+          pool (bookings have promised more units than exist). */}
+      {overCommittedBy > 0 ? (
+        <div className="flex items-start gap-1.5 border-b border-gray-100 bg-error-50 px-4 py-2 last:border-b-0">
+          <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-error-500" />
+          <p className="text-xs text-error-700">
+            Over-committed by {formatWithUnit(overCommittedBy, unit)} —{" "}
+            {causeLabel} account for more units than are in stock. To fix it,{" "}
+            {cureLabel}.
+          </p>
+        </div>
+      ) : null}
       {/* Render the kit allocation total only when the asset is actually
           in a kit. Mirrors the same conditional pattern used for "Reserved"
           / "Checked out" below — clutter-free for assets that don't belong

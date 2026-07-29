@@ -195,15 +195,25 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
       )}
 
       {/* Available line — emerald when non-zero so the "you can still
-          book N" signal pops; muted gray when zero. */}
-      <p
-        className={tw(
-          "font-medium",
-          available > 0 ? "text-emerald-700" : "text-gray-500"
-        )}
-      >
-        {available} available
-      </p>
+          book N" signal pops; muted gray when zero. When the pool is
+          over-committed we clamp the user-facing number to 0 and name
+          the deficit explicitly (mirrors the overview card's
+          "Over-committed by N" copy) instead of leaking the raw signed
+          diagnostic value as a bare "-3 available". */}
+      {available < 0 ? (
+        <p className="font-medium text-orange-700">
+          0 available · over-committed by {Math.abs(available)}
+        </p>
+      ) : (
+        <p
+          className={tw(
+            "font-medium",
+            available > 0 ? "text-emerald-700" : "text-gray-500"
+          )}
+        >
+          {available} available
+        </p>
+      )}
     </div>
   );
 }

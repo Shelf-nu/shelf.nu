@@ -37,6 +37,7 @@ import {
   type AvailableModelExistingRequest,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { formatQuantity } from "@/lib/quantity-format";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -364,6 +365,25 @@ export default function AddBookingAssetsScreen() {
   const renderAsset = useCallback(
     ({ item }: { item: AvailableAsset }) => {
       const selected = selectedAssetIds.has(item.id);
+      /**
+       * Quantity-tracked availability meta, read-only ("3 of 10 pcs
+       * available"). Only QUANTITY_TRACKED rows carry `availableQuantity`
+       * (the server always lists them — partial availability can't be a row
+       * filter), and pre-quantity servers omit it entirely — both render
+       * nothing, so INDIVIDUAL rows and old servers are unchanged. Selection
+       * stays enabled even at 0: the server is the enforcement point at
+       * add/reserve time; this line just stops the picker lying about
+       * headroom until then. `availableQuantity` arrives clamped (never
+       * negative) — an oversubscribed pool shows as "0 … available".
+       */
+      const totalLabel = formatQuantity(item.quantity, item.unitOfMeasure);
+      const availabilityLabel =
+        typeof item.availableQuantity === "number"
+          ? totalLabel
+            ? `${item.availableQuantity} of ${totalLabel} available`
+            : `${item.availableQuantity} available`
+          : null;
+      const noneAvailable = item.availableQuantity === 0;
       return (
         <TouchableOpacity
           style={[styles.row, selected && styles.rowSelected]}
@@ -374,7 +394,9 @@ export default function AddBookingAssetsScreen() {
             item.displayCode
               ? `, ${item.displayCode.label} ${item.displayCode.value}`
               : ""
-          }${selected ? ", selected" : ""}`}
+          }${availabilityLabel ? `, ${availabilityLabel}` : ""}${
+            selected ? ", selected" : ""
+          }`}
         >
           <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
             {selected && (
@@ -413,6 +435,20 @@ export default function AddBookingAssetsScreen() {
                   {item.displayCode.value}
                 </Text>
               </View>
+            ) : null}
+            {/* Windowed headroom for quantity-tracked rows (read-only) —
+                error-tinted at 0 so "nothing left to book" is visible before
+                the server rejects the add. */}
+            {availabilityLabel ? (
+              <Text
+                style={[
+                  styles.rowQuantity,
+                  noneAvailable && styles.rowQuantityNone,
+                ]}
+                numberOfLines={1}
+              >
+                {availabilityLabel}
+              </Text>
             ) : null}
           </View>
         </TouchableOpacity>
@@ -818,6 +854,16 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.xs,
     color: colors.muted,
     fontVariant: ["tabular-nums"],
+  },
+  // Quantity-tracked availability meta line ("3 of 10 pcs available").
+  rowQuantity: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    fontVariant: ["tabular-nums"],
+  },
+  rowQuantityNone: {
+    color: colors.error,
+    fontWeight: "600",
   },
   // Book-by-model rows
   modelInfo: {

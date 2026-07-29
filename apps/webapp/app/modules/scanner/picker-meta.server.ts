@@ -16,9 +16,10 @@
  *   booking picker's inline availability formula (Phase 4b)
  */
 
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { getBookingPoolAvailability } from "~/modules/asset/availability.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 
@@ -98,68 +99,43 @@ export async function getScannerPickerMeta({
     };
   }
 
-  // Booking: matches the asset overview's "Available" formula so the
-  // scanner MAX agrees with what the user sees on the asset page:
-  //
-  //   maxAllowed = Asset.quantity
-  //              − sum(AssetKit.quantity)                ← kit-committed
-  //              − sum(Custody.quantity)                  ← held by custodians
-  //              − sum(BookingAsset.quantity from overlapping
-  //                    active bookings, excluding this booking)
-  //
-  // The booking picker's inline formula (`bookings.$bookingId.
-  // overview.manage-assets.tsx:264`) drops the kit term because it
-  // pre-filters qty-tracked assets with any kit membership out of the
-  // results entirely — that's a separate bug for the picker, but the
-  // scanner needs the full formula so multi-kit qty-tracked rows can
-  // still be added to a booking from their free pool.
-  //
-  // The "overlapping" filter only fires when the booking has dates.
-  // Bookings without dates compete with every other reservation.
+  // Booking: single-asset call of the canonical booking-pool module with
+  // the SAME named flag set as the manage-assets picker — the header
+  // comment of this file demands parity with the picker, and sharing
+  // `getBookingPoolAvailability` makes that parity structural instead of
+  // copy-paste discipline:
+  //   custodyScope "all"      — every custody row subtracts
+  //   includeKitSlices true   — kit-committed units subtract (multi-kit
+  //                             qty-tracked rows can still be added to a
+  //                             booking from their free pool)
+  //   window when both dates  — the "overlapping" filter only fires when
+  //                             the booking has dates; dateless bookings
+  //                             compete with every reservation (#2724
+  //                             divergence preserved)
+  //   dispositionAware false  — raw booked sums, pre-migration behavior
+  //   excludeBookingId        — this booking's own reservation doesn't
+  //                             count against itself
   const booking = await db.booking.findUnique({
     where: { id: context.id, organizationId },
     select: { id: true, from: true, to: true },
   });
   if (!booking) return null;
 
-  const [assetKitSum, custodySum, bookingSum] = await Promise.all([
-    db.assetKit.aggregate({
-      where: { assetId, organizationId },
-      _sum: { quantity: true },
-    }),
-    db.custody.aggregate({
-      where: { assetId },
-      _sum: { quantity: true },
-    }),
-    db.bookingAsset.aggregate({
-      where: {
-        assetId,
-        bookingId: { not: booking.id },
-        booking: {
-          status: {
-            in: [
-              BookingStatus.RESERVED,
-              BookingStatus.ONGOING,
-              BookingStatus.OVERDUE,
-            ],
-          },
-          ...(booking.from &&
-            booking.to && {
-              OR: [
-                { from: { lte: booking.to }, to: { gte: booking.from } },
-                { from: { gte: booking.from }, to: { lte: booking.to } },
-              ],
-            }),
-        },
-      },
-      _sum: { quantity: true },
-    }),
-  ]);
+  const poolMap = await getBookingPoolAvailability({
+    assetIds: [assetId],
+    organizationId,
+    excludeBookingId: booking.id,
+    window:
+      booking.from && booking.to
+        ? { from: booking.from, to: booking.to }
+        : null,
+    custodyScope: "all",
+    includeKitSlices: true,
+    dispositionAware: false,
+  });
 
-  const inKits = assetKitSum._sum.quantity ?? 0;
-  const inCustody = custodySum._sum.quantity ?? 0;
-  const reserved = bookingSum._sum.quantity ?? 0;
-  const maxAllowed = Math.max(0, totalQty - inKits - inCustody - reserved);
+  // `.available` (clamped) — the qty input MAX can't be negative.
+  const maxAllowed = poolMap.get(assetId)?.available ?? 0;
 
   return {
     maxAllowed,

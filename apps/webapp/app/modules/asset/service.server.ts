@@ -169,6 +169,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { notifyLowStockForAssets } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -2035,6 +2036,7 @@ export async function updateAsset({
   minQuantity,
   consumptionType,
   unitOfMeasure,
+  skipLowStockNotification = false,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -2162,15 +2164,61 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
-      // Quantity-tracked fields (type is immutable, never updated here)
-      // TODO(Phase 2): Route quantity changes through an audited adjustment
-      // path that writes to ConsumptionLog. Direct mutation here bypasses
-      // the full-attribution audit trail required by the PRD.
+      // Quantity-tracked fields (type is immutable, never updated here).
+      // Quantity/minQuantity changes are ledgered inside the main
+      // transaction below (ConsumptionLog ADJUSTMENT + activity events),
+      // so form/CSV edits carry the same full-attribution audit trail as
+      // the adjust-quantity flow.
       quantity,
       minQuantity,
       consumptionType,
       unitOfMeasure,
     };
+
+    /**
+     * Quantity-ledger SUBMISSION detection only — whether the value
+     * actually CHANGED is decided inside the transaction below, from a
+     * re-read taken under the asset row lock. Deciding it here from the
+     * pre-tx `assetBeforeUpdate` snapshot raced the lock: a concurrent
+     * `adjustQuantity`/check-in decrement committing between that snapshot
+     * and the lock acquisition would make the ledger's from→to note and
+     * delta misstate the real stock movement — or, worse, make an
+     * "unchanged" resubmission skip the lock and ledger entirely while
+     * still overwriting the concurrent value. Mirrors the under-lock
+     * re-read in the adjust-asset-quantity route (the working sibling).
+     * `assetBeforeUpdate` remains the source for the NON-quantity note
+     * builders only; the quantity note builder consumes the under-lock
+     * from-values hoisted out of the transaction below, so the timeline
+     * note can never diverge from what the ledger/event recorded.
+     */
+    const quantitySubmitted = typeof quantity === "number";
+    /**
+     * Bare-`null` filter: the edit form's schema normalizes an ABSENT
+     * minQuantity input to `null` (`NewAssetFormSchema`), so INDIVIDUAL
+     * edits — whose form never renders the quantity fields — arrive here
+     * as `{ quantity: undefined, minQuantity: null }` on EVERY save. No
+     * caller can express a genuine threshold edit with that shape: QT
+     * form edits always submit `quantity` alongside (so a user clearing
+     * the threshold to null still passes this gate), and the CSV parser
+     * emits `number | undefined`, never `null`. Treating bare `null` as
+     * "not submitted" keeps the hot INDIVIDUAL edit path off the
+     * SELECT ... FOR UPDATE row lock + under-lock re-read below, so it
+     * no longer serializes against concurrent quantity writers for a
+     * write that is a no-op by construction.
+     */
+    const minQuantitySubmitted =
+      minQuantity !== undefined && (quantitySubmitted || minQuantity !== null);
+    /**
+     * Keep the write and the ledger in lockstep: when the bare-`null`
+     * shape is filtered out above, also drop the field from the update
+     * payload (Prisma skips `undefined`). Otherwise a hand-crafted QT
+     * submission omitting `quantity` could still CLEAR a real threshold
+     * without the lock, event, or ledger entry — the write must never
+     * outrun the audit trail.
+     */
+    if (!minQuantitySubmitted) {
+      data.minQuantity = undefined;
+    }
 
     /** If uncategorized is passed, disconnect the category */
     if (categoryId === "uncategorized") {
@@ -2513,10 +2561,102 @@ export async function updateAsset({
     // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
     let locationChangeQuantity: number | null = null;
 
+    // Set under the in-tx lock when the submitted quantity is lower than
+    // the locked pre-update value; drives the post-commit low-stock check
+    // (the pre-tx snapshot may be stale — see the ledger comment below).
+    let quantityReducedUnderLock = false;
+
+    // Under-lock from-values hoisted out of the tx for the post-tx quantity
+    // note builder — the pre-tx snapshot races the lock exactly like the
+    // ledger did (a concurrent 10→7 commit before the lock would make the
+    // note say "10 → 4" while log + event correctly record 7 → 4, or make
+    // the note skip a real 5 → 10 movement the ledger recorded). The note
+    // must match the ConsumptionLog/event bit-for-bit.
+    let lockedPreviousQuantity: number | null = null;
+    let lockedPreviousMinQuantity: number | null = null;
+
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
     const asset = await db.$transaction(async (tx) => {
+      /**
+       * Serialize with concurrent quantity writers (adjust-quantity,
+       * check-in decrements) BEFORE writing a new total — same locking
+       * discipline as `adjustQuantity` — then RE-READ the stock fields
+       * under the lock. The from-values, change detection, and the
+       * low-stock decision must come from this locked read, not the
+       * pre-tx snapshot: a concurrent writer committing between snapshot
+       * and lock would otherwise make the ledger lie (wrong delta, or a
+       * silent unledgered overwrite when the submitted value equals the
+       * stale snapshot). Same pattern as the adjust-asset-quantity
+       * route's under-lock `current` re-read.
+       */
+      let lockedStockBefore: {
+        quantity: number | null;
+        minQuantity: number | null;
+      } | null = null;
+      if (quantitySubmitted || minQuantitySubmitted) {
+        /**
+         * Org proof BEFORE the lock (org-scope-user-supplied-ids).
+         *
+         * why: `lockAssetForQuantityUpdate` issues `SELECT … WHERE id = $1
+         * FOR UPDATE` with no org filter, and `id` is route-supplied. Locking
+         * first let a caller in org A take a row lock on org B's asset for the
+         * length of this transaction (cross-org contention with that org's own
+         * quantity writes), and let them distinguish a real foreign asset from
+         * a nonexistent id by which error came back — an asset-id enumeration
+         * oracle. Proving ownership first makes a foreign id indistinguishable
+         * from a missing one and never touches the row. Sibling-correct: the
+         * adjust-asset-quantity route also proves org membership before it
+         * locks.
+         */
+        const ownedAsset = await tx.asset.findUnique({
+          where: { id, organizationId },
+          select: { id: true },
+        });
+        if (!ownedAsset) {
+          throw new ShelfError({
+            cause: null,
+            message: "Asset not found",
+            additionalData: { id, organizationId },
+            label: "Assets",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        await lockAssetForQuantityUpdate(tx, id);
+        // Re-read UNDER the lock: values can change between the pre-check
+        // above and the lock, so the ledger's from-values must come from the
+        // locked read, not the pre-lock snapshot.
+        lockedStockBefore = await tx.asset.findUnique({
+          where: { id, organizationId },
+          select: { quantity: true, minQuantity: true },
+        });
+      }
+
+      /**
+       * Change detection from the UNDER-LOCK values — only a genuine value
+       * change may write ledger entries/events (the edit form resubmits
+       * unchanged values; CSV import applies row patches). A missing row
+       * (foreign-org id) leaves both flags false; the org-scoped
+       * `tx.asset.update` below then throws the same not-found it always
+       * did.
+       */
+      const previousQuantityValue = lockedStockBefore?.quantity ?? null;
+      const previousMinQuantityValue = lockedStockBefore?.minQuantity ?? null;
+      // Hoist for the post-tx note builder (see declaration above).
+      lockedPreviousQuantity = previousQuantityValue;
+      lockedPreviousMinQuantity = previousMinQuantityValue;
+      const quantityChanged =
+        quantitySubmitted &&
+        lockedStockBefore != null &&
+        previousQuantityValue !== quantity;
+      const minQuantityChanged =
+        minQuantitySubmitted &&
+        lockedStockBefore != null &&
+        previousMinQuantityValue !== (minQuantity ?? null);
+
       const updated = await tx.asset.update({
         where: { id, organizationId },
         data,
@@ -2527,6 +2667,77 @@ export async function updateAsset({
           organization: true,
         },
       });
+
+      /**
+       * Quantity ledger — commits atomically with the mutation (per
+       * `.claude/rules/use-record-event.md`): one ConsumptionLog
+       * ADJUSTMENT row (ConsumptionLog.quantity is always-positive by
+       * schema; the DIRECTION lives in the note text and in the event's
+       * fromValue/toValue) plus one ASSET_QUANTITY_CHANGED event. This is
+       * what closes the "edit form / CSV import bypasses ConsumptionLog"
+       * audit gap — the CSV update path funnels through this same
+       * function (`import-update.server.ts` → `updateAsset`).
+       */
+      // why the redundant typeof: `quantityChanged` already proves it, but
+      // TS can't narrow a captured param through a derived boolean — the
+      // inline typeof re-narrows `quantity` to `number` for the arithmetic.
+      if (quantityChanged && typeof quantity === "number") {
+        const fromQuantity = previousQuantityValue ?? 0;
+        const toQuantity = quantity;
+        const delta = toQuantity - fromQuantity;
+        // Captured under the lock for the post-commit low-stock check —
+        // increases can't newly breach a minimum threshold.
+        quantityReducedUnderLock = delta < 0;
+        // Guard the log write for the `null → 0` edge (a genuine field
+        // change with zero stock movement): ConsumptionLog.quantity must
+        // be > 0, so only the event records that transition.
+        if (delta !== 0) {
+          await createConsumptionLog({
+            assetId: id,
+            category: "ADJUSTMENT",
+            quantity: Math.abs(delta),
+            userId,
+            note: `Edited via asset form/CSV import: ${fromQuantity} → ${toQuantity}`,
+            tx,
+          });
+        }
+        // One event per changed field (record-event-payload-shapes rule).
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: id,
+            assetId: id,
+            field: "quantity",
+            fromValue: previousQuantityValue,
+            toValue: toQuantity,
+          },
+          tx
+        );
+      }
+
+      /**
+       * minQuantity is a THRESHOLD, not stock — event only, no
+       * ConsumptionLog row (nothing entered or left the pool).
+       */
+      if (minQuantityChanged) {
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_MIN_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: id,
+            assetId: id,
+            field: "minQuantity",
+            fromValue: previousMinQuantityValue,
+            toValue: minQuantity ?? null,
+          },
+          tx
+        );
+      }
 
       if (shouldUpdatePlacement) {
         if (newLocationId) {
@@ -2863,10 +3074,22 @@ export async function updateAsset({
           assetId: asset.id,
           organizationId,
           userId,
-          previousQuantity: assetBeforeUpdate.quantity,
-          newQuantity: quantity,
-          previousMinQuantity: assetBeforeUpdate.minQuantity,
-          newMinQuantity: minQuantity,
+          // Quantity/minQuantity from-values come from the under-lock
+          // re-read (hoisted out of the tx), NOT `assetBeforeUpdate` — the
+          // snapshot races the lock and would make the note disagree with
+          // the ConsumptionLog/event in exactly the concurrent windows the
+          // tx was hardened for. `undefined` when unsubmitted keeps the
+          // gate-dropped bare-`null` threshold shape (no write, no lock,
+          // no event) from fabricating a "threshold cleared" note for a
+          // change that never persisted.
+          previousQuantity: quantitySubmitted
+            ? lockedPreviousQuantity
+            : assetBeforeUpdate.quantity,
+          newQuantity: quantitySubmitted ? quantity : undefined,
+          previousMinQuantity: minQuantitySubmitted
+            ? lockedPreviousMinQuantity
+            : assetBeforeUpdate.minQuantity,
+          newMinQuantity: minQuantitySubmitted ? minQuantity : undefined,
           previousConsumptionType: assetBeforeUpdate.consumptionType,
           newConsumptionType: consumptionType,
           previousUnitOfMeasure: assetBeforeUpdate.unitOfMeasure,
@@ -3049,6 +3272,28 @@ export async function updateAsset({
           );
         }
       }
+    }
+
+    /**
+     * Low-stock check after a stock-DECREASING edit (form or CSV — the CSV
+     * update path funnels through this function). Post-commit and
+     * fire-and-forget: alerting must never fail or delay the save. The
+     * helper dedupes, swallows and logs failures. The decrease decision was
+     * made under the in-tx lock (not from the pre-tx snapshot) so it can't
+     * disagree with what the ledger recorded.
+     *
+     * why it lives at the very END of the function: a later step
+     * (`updateBarcodes`, preferred-barcode, custom fields, notes) can still
+     * throw. Firing earlier would tell the user "low stock — the owner has
+     * been notified" for a save they see fail. Batch callers opt out and
+     * fan out once (see `skipLowStockNotification`).
+     */
+    if (quantityReducedUnderLock && !skipLowStockNotification) {
+      void notifyLowStockForAssets({
+        assetIds: [id],
+        userId,
+        organizationId,
+      });
     }
 
     return asset;

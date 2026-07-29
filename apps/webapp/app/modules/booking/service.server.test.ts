@@ -10,6 +10,7 @@ import {
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
+import { notifyLowStockForAssets } from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
@@ -227,6 +228,10 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       count: vitest.fn().mockResolvedValue(0),
+      // why: the checkout availability guard runs the REAL
+      // computeBookingAvailableQuantity (partial-mock above keeps it),
+      // which aggregates custody per asset via groupBy.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -273,6 +278,13 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
     title: "Default Asset",
     quantity: 0,
   }),
+}));
+
+// why: check-in CONSUME/LOSS/DAMAGE decrements fire the low-stock check
+// post-commit (fire-and-forget); stub the module so tests can assert the
+// trigger wiring without running the real notification/email pipeline.
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  notifyLowStockForAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
@@ -401,6 +413,29 @@ const mockClientHints = {
   timeZone: "America/New_York",
   locale: "en-US",
 };
+
+/**
+ * Flattens every `recordEvents` batch down to just the
+ * `ASSET_QUANTITY_CHANGED` entries.
+ *
+ * why: the check-in flows emit several event batches (BOOKING_CHECKED_IN,
+ * status changes, …) and always call `recordEvents` for the quantity batch —
+ * with an EMPTY array when nothing left the pool (`recordEvents([])` is a
+ * no-op). Asserting on call counts would therefore be meaningless; asserting
+ * on the flattened quantity events is the behaviour that matters.
+ */
+function quantityChangedEventsFrom(mockedRecordEvents: unknown) {
+  const calls = (mockedRecordEvents as { mock: { calls: unknown[][] } }).mock
+    .calls;
+  return calls
+    .flatMap((call) => (Array.isArray(call[0]) ? call[0] : []))
+    .filter(
+      (event): event is Record<string, unknown> =>
+        typeof event === "object" &&
+        event !== null &&
+        (event as { action?: string }).action === "ASSET_QUANTITY_CHANGED"
+    );
+}
 
 const mockCreateBookingParams = {
   booking: {
@@ -2388,6 +2423,73 @@ describe("checkoutBooking", () => {
       expect(shelfError.message).toContain("Dell Latitude 5550");
       // Checkout must not flip the booking status when the guard fires.
       expect(db.booking.update).not.toHaveBeenCalled();
+    }
+  });
+
+  /**
+   * THE checkout guard's user-facing copy for an oversubscribed QT pool
+   * (#2724 recovery-path work): the wrapper's `available` is SIGNED, so the
+   * copy must clamp the printed count at 0, name the over-commitment, and
+   * point at the recovery paths — never print a negative count. Mirrors the
+   * adjust-route 400-path assertions so the two guards stay contract-tested
+   * symmetrically.
+   */
+  it("blocks checkout of an oversubscribed QT pool with clamped counts and recovery-path copy (never a negative number)", async () => {
+    expect.assertions(6);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qt-1",
+            type: "QUANTITY_TRACKED",
+            assetKits: [],
+            title: "HDMI Cable",
+            status: "AVAILABLE",
+            bookingAssets: [],
+            unitOfMeasure: "units",
+          },
+          assetId: "asset-qt-1",
+          quantity: 3,
+          id: "ba-qt-oversub",
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: drive the REAL computeBookingAvailableQuantity to a SIGNED -7.
+    // The asset.findMany echo returns no `quantity` (total = 0), custody
+    // groupBy is empty, and another active booking holds 7 units → raw
+    // headroom = 0 - 0 - 7 = -7. This is the oversubscribed-pool shape the
+    // guard's copy must clamp and explain.
+    // Once so the reservation rows can't leak into later tests (the guard
+    // is the only bookingAsset.findMany consumer before the throw).
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "asset-qt-1",
+        bookingId: "other-booking",
+        quantity: 7,
+        booking: { status: "RESERVED" },
+      },
+    ]);
+
+    try {
+      await checkoutBooking(mockCheckoutParams);
+    } catch (error) {
+      const shelfError = error as ShelfError;
+      expect(shelfError.status).toBe(400);
+      // Clamped: the user never sees a negative availability count.
+      expect(shelfError.message).toContain('"HDMI Cable": requested 3');
+      expect(shelfError.message).toContain("only 0 available");
+      expect(shelfError.message).not.toContain("-7");
+      // The over-commitment and the recovery paths are named explicitly —
+      // no bare "insufficient availability" dead-end.
+      expect(shelfError.message).toContain("over-committed by 7 unit(s)");
+      expect(shelfError.message).toContain("Reduce the booked quantities");
     }
   });
 
@@ -6508,6 +6610,84 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       })
     );
   });
+
+  it("fires the low-stock check (post-commit) for the assets a CONSUME/LOSS/DAMAGE disposition decremented (#2677)", async () => {
+    expect.assertions(2);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      // lost 3 + damaged 2 decrement the pool; returned 5 does not.
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    expect(notifyLowStockForAssets).toHaveBeenCalledTimes(1);
+    expect(notifyLowStockForAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: expect.arrayContaining([mockQtyAssetId]),
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    );
+  });
+
+  it("does not fire the low-stock check for RETURN-only dispositions (pool untouched)", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED for the units a disposition removed from the pool", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      // 3 lost + 2 damaged leave the pool permanently: 100 → 95.
+      // The 5 returned units go back on the shelf and change nothing.
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    expect(
+      quantityChangedEventsFrom(activityEventService.recordEvents)
+    ).toEqual([
+      {
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_QUANTITY_CHANGED",
+        entityType: "ASSET",
+        entityId: mockQtyAssetId,
+        assetId: mockQtyAssetId,
+        field: "quantity",
+        fromValue: 100,
+        toValue: 95,
+      },
+    ]);
+  });
+
+  it("emits no quantity event for a RETURN-only disposition (nothing left the pool)", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(
+      quantityChangedEventsFrom(activityEventService.recordEvents)
+    ).toEqual([]);
+  });
 });
 
 describe("checkinBooking — qty-tracked auto-default", () => {
@@ -6656,6 +6836,69 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("fires the low-stock check after a full check-in whose CONSUME auto-default decremented the pool (#2677)", async () => {
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+
+    await checkinBooking(baseParams);
+
+    expect(notifyLowStockForAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: expect.arrayContaining([mockQtyAssetId]),
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    );
+  });
+
+  it("does not fire the low-stock check when the RETURN auto-default leaves the pool untouched", async () => {
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+
+    await checkinBooking(baseParams);
+
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED for the units the CONSUME auto-default removed", async () => {
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+
+    await checkinBooking(baseParams);
+
+    // ONE_WAY auto-default consumes all 10 booked units: pool 100 → 90.
+    expect(
+      quantityChangedEventsFrom(activityEventService.recordEvents)
+    ).toEqual([
+      {
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_QUANTITY_CHANGED",
+        entityType: "ASSET",
+        entityId: mockQtyAssetId,
+        assetId: mockQtyAssetId,
+        field: "quantity",
+        fromValue: 100,
+        toValue: 90,
+      },
+    ]);
+  });
+
+  it("emits no quantity event when the RETURN auto-default leaves the pool untouched", async () => {
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+
+    await checkinBooking(baseParams);
+
+    expect(
+      quantityChangedEventsFrom(activityEventService.recordEvents)
+    ).toEqual([]);
   });
 
   it("auto-defaults to RETURN for TWO_WAY assets and leaves the pool untouched", async () => {

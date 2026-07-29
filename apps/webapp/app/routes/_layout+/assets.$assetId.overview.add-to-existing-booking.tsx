@@ -159,9 +159,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           bookingId
         );
         if (quantity > availability.available) {
+          /**
+           * `availability.available` is SIGNED (raw headroom from the
+           * canonical module via the wrapper). Clamp the printed count —
+           * "only -7 available" reads as a bug — and name recovery paths
+           * instead of a bare rejection.
+           */
+          const oversubscribedNote =
+            availability.available < 0
+              ? ` This asset's pool is already over-committed by ${-availability.available} unit(s) across other bookings — reduce or remove it from one of them, or cancel a booking, first.`
+              : "";
           throw new ShelfError({
             cause: null,
-            message: `Cannot reserve ${quantity} units of "${asset.title}". Only ${availability.available} available.`,
+            message: `Cannot reserve ${quantity} units of "${
+              asset.title
+            }". Only ${Math.max(
+              0,
+              availability.available
+            )} available.${oversubscribedNote}`,
             label: "Booking",
             shouldBeCaptured: false,
             status: 400,
@@ -247,7 +262,19 @@ export default function ExistingBooking() {
 
   const isQtyTracked = asset ? isQuantityTracked(asset) : false;
   const unitLabel = asset?.unitOfMeasure || "units";
-  const maxQuantity = assetAvailability?.available ?? undefined;
+  /**
+   * `available` is the SIGNED raw headroom (the wrapper keeps it unclamped
+   * so guards can branch on the sign). Clamp for display: an oversubscribed
+   * pool must not render "Max available: -7" nor set `max={-7}` on the
+   * input (min=1 > max makes every value invalid client-side). This is an
+   * ADD flow, so blocking at 0 is correct — the over-committed note below
+   * keeps the clamped 0 from silently hiding the oversubscription.
+   */
+  const rawAvailable = assetAvailability?.available;
+  const maxQuantity =
+    rawAvailable != null ? Math.max(0, rawAvailable) : undefined;
+  const overCommittedBy =
+    rawAvailable != null && rawAvailable < 0 ? -rawAvailable : 0;
 
   function isValidBooking(
     booking: { status?: string | null } | null | undefined
@@ -341,6 +368,24 @@ export default function ExistingBooking() {
             {maxQuantity != null ? (
               <p className="mt-1 text-xs text-gray-500">
                 Max available: {maxQuantity} {unitLabel}
+              </p>
+            ) : null}
+            {/* Over-committed callout so the clamped 0 above never silently
+                swallows an oversubscribed pool.
+
+                why (copy): this surface receives only the signed `available`
+                number — it cannot tell whether bookings, custody or
+                check-outs consumed the pool. The old copy asserted "across
+                other bookings", which is false whenever custody is the
+                driver (5 total / 5 in custody / 5 reserved over-commits with
+                bookings at exactly stock). State only what is known here and
+                point at the overview card, which HAS the breakdown and names
+                the real causes and cures. */}
+            {overCommittedBy > 0 ? (
+              <p className="mt-1 text-xs text-error-600">
+                This asset's pool is already over-committed by {overCommittedBy}{" "}
+                unit(s). Open the asset's overview to see what's holding the
+                units and free some up first.
               </p>
             ) : null}
           </div>

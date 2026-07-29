@@ -18,6 +18,7 @@ import { AssetType, ConsumptionType } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { updateAsset } from "~/modules/asset/service.server";
+import { notifyLowStockForAssets } from "~/modules/consumption-log/low-stock.server";
 import { applyBulkUpdatesFromImport } from "./import-update.server";
 
 // why: we drive the apply path end-to-end. The real DB + the real `updateAsset`
@@ -61,6 +62,13 @@ vitest.mock("~/modules/asset/service.server", () => ({
 // reads `assetLocations[0]` — we don't need its real behaviour here.
 vitest.mock("~/modules/asset/utils", () => ({
   getPrimaryLocation: vitest.fn().mockReturnValue(null),
+}));
+
+// why: the low-stock fan-out sends real in-app notifications + owner emails.
+// Stubbing it is the only way to assert HOW MANY times the import triggers
+// it — which is the whole point of the batching behaviour under test.
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  notifyLowStockForAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 const organizationId = "org-1";
@@ -467,5 +475,155 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     expect(db.assetModel.create).not.toHaveBeenCalled();
     // Row goes into the all-warnings-skipped branch, NOT updated.
     expect(result.summary.updated).toBe(0);
+  });
+});
+
+/**
+ * Regression guard for the CSV low-stock notification storm: `updateAsset`
+ * used to fire its own fire-and-forget low-stock alert per row, so an import
+ * touching N low-stock assets produced N in-app notifications, N owner emails
+ * and ~3N un-awaited queries for a single user action.
+ *
+ * @see {@link file://./import-update.server.ts}
+ * @see {@link file://./../modules/consumption-log/low-stock.server.ts}
+ */
+describe("applyBulkUpdatesFromImport — low-stock notification batching", () => {
+  /** Three QT assets at stock 10, so a CSV can raise or lower each one. */
+  const threeQtyTrackedAssets = [
+    makeDbAsset({
+      id: "uuid-a",
+      sequentialId: "SAM-A",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 10,
+      consumptionType: ConsumptionType.ONE_WAY,
+    }),
+    makeDbAsset({
+      id: "uuid-b",
+      sequentialId: "SAM-B",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 10,
+      consumptionType: ConsumptionType.ONE_WAY,
+    }),
+    makeDbAsset({
+      id: "uuid-c",
+      sequentialId: "SAM-C",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 10,
+      consumptionType: ConsumptionType.ONE_WAY,
+    }),
+  ];
+
+  it("fans out ONCE for every stock-reducing row instead of once per row", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce(
+      threeQtyTrackedAssets as unknown as Awaited<
+        ReturnType<typeof db.asset.findMany>
+      >
+    );
+
+    const csvData = [
+      ["Asset ID", "Quantity"],
+      ["SAM-A", "2"], // reduction
+      ["SAM-B", "3"], // reduction
+      ["SAM-C", "20"], // increase — must NOT be alerted on
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.updated).toBe(3);
+    // Three writes…
+    expect(updateAsset).toHaveBeenCalledTimes(3);
+    // …but exactly ONE notification fan-out for the whole import.
+    expect(notifyLowStockForAssets).toHaveBeenCalledTimes(1);
+    expect(notifyLowStockForAssets).toHaveBeenCalledWith({
+      assetIds: ["uuid-a", "uuid-b"],
+      userId,
+      organizationId,
+    });
+  });
+
+  it("opts every per-row updateAsset out of its own alert", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce(
+      threeQtyTrackedAssets as unknown as Awaited<
+        ReturnType<typeof db.asset.findMany>
+      >
+    );
+
+    const csvData = [
+      ["Asset ID", "Quantity"],
+      ["SAM-A", "2"],
+      ["SAM-B", "3"],
+      ["SAM-C", "20"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    for (const call of vi.mocked(updateAsset).mock.calls) {
+      expect(call[0].skipLowStockNotification).toBe(true);
+    }
+  });
+
+  it("does not notify when no row reduced stock", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce(
+      threeQtyTrackedAssets as unknown as Awaited<
+        ReturnType<typeof db.asset.findMany>
+      >
+    );
+
+    const csvData = [
+      ["Asset ID", "Quantity"],
+      ["SAM-A", "11"],
+      ["SAM-B", "12"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(notifyLowStockForAssets).not.toHaveBeenCalled();
+  });
+
+  it("does not count a row whose write threw", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce(
+      threeQtyTrackedAssets as unknown as Awaited<
+        ReturnType<typeof db.asset.findMany>
+      >
+    );
+    // First row's write fails; its id must not reach the fan-out.
+    vi.mocked(updateAsset)
+      .mockRejectedValueOnce(new Error("write failed"))
+      .mockResolvedValue({ id: "uuid-b" } as Awaited<
+        ReturnType<typeof updateAsset>
+      >);
+
+    const csvData = [
+      ["Asset ID", "Quantity"],
+      ["SAM-A", "2"],
+      ["SAM-B", "3"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(notifyLowStockForAssets).toHaveBeenCalledTimes(1);
+    expect(notifyLowStockForAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["uuid-b"] })
+    );
   });
 });
