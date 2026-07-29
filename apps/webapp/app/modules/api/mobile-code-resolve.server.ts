@@ -44,14 +44,42 @@ type ResolvedCode = {
 };
 
 /**
+ * Structured discriminator for actionable not-ok resolves.
+ *
+ * `"unclaimed"` — the QR row exists, has no `organizationId` (a printed
+ * Shelf code nobody claimed yet) AND is not linked to an asset or kit. The
+ * companion uses this to offer the native claim → link flow instead of
+ * string-matching the 404 message. Orgless-but-linked rows (a corrupted
+ * state `createAsset`'s loose QR-connect branch can produce) deliberately
+ * carry NO reason: the web claim loader refuses them (`assetId: null,
+ * kitId: null` guard), so the companion must not offer claim either.
+ * Additive: the status/message of the not-ok result are unchanged, so
+ * existing consumers (audit scanner included) keep behaving exactly as
+ * before.
+ */
+type ResolveMobileCodeFailureReason = "unclaimed";
+
+/**
  * Discriminated result of {@link resolveMobileScannedCode}.
  *
  * On success, `recordableQrId` is the QR id a recording caller may attribute a
  * scan to, or `null` for a SAM resolve (no backing QR record, so nothing to
  * record, matching the web).
+ *
+ * On failure, `reason`/`qrId` are only present for actionable cases (see
+ * {@link ResolveMobileCodeFailureReason}); plain not-found / wrong-org
+ * failures carry the message alone.
  */
 export type ResolveMobileCodeResult =
-  | { ok: false; status: number; message: string }
+  | {
+      ok: false;
+      status: number;
+      message: string;
+      /** Structured failure discriminator — present only when actionable. */
+      reason?: ResolveMobileCodeFailureReason;
+      /** The scanned QR id, echoed back when `reason` is set. */
+      qrId?: string;
+    }
   | { ok: true; qr: ResolvedCode; recordableQrId: string | null };
 
 /**
@@ -125,10 +153,20 @@ export async function resolveMobileScannedCode({
 
   // Require organization membership — deny unowned QR codes.
   if (!qr.organizationId) {
+    // Only a truly unclaimed AND unlinked code is claimable — the web claim
+    // loader enforces `assetId: null, kitId: null`, so an orgless-but-linked
+    // row (corrupted state) must not advertise the claim flow. It falls back
+    // to the plain 404 (companion dead-ends, matching web's refusal).
+    const claimable = !qr.assetId && !qr.kitId;
     return {
       ok: false,
       status: 404,
       message: "This QR code is not linked to any organization",
+      // Structured discriminator so the companion can take over the native
+      // claim → link flow (mirroring web's `/qr/:qrId/claim`) without
+      // string-matching the message. Status + message stay unchanged so the
+      // audit scanner and older app builds see the exact same 404.
+      ...(claimable ? { reason: "unclaimed" as const, qrId: qr.id } : {}),
     };
   }
 
