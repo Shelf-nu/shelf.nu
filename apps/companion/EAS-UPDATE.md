@@ -164,6 +164,18 @@ build onward, every JS-only fix on that app version ships free via `eas update`.
 So: merge this → cut one more build (the last "paid" one for a while) → publish
 JS fixes over the air after that.
 
+> **Local `expo run:ios --configuration Release` gotchas on macOS.** Neither is
+> a repo problem and neither affects EAS cloud builds, but both cost time:
+>
+> - CocoaPods on Ruby 3+ aborts with `Unicode Normalization not appropriate for
+ASCII-8BIT`. Prefix the command with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`.
+> - **A space anywhere in the checkout path breaks the build.** The
+>   `expo-constants` pod script does not quote its path, so a clone under
+>   e.g. `~/Documents/Shelf Local Dev/` fails late, after ~2200 compile steps,
+>   with `bash: /Users/you/Documents/Shelf: No such file or directory`. Clone to
+>   a space-free path to build locally. EAS is unaffected (it checks out to
+>   `/home/expo/workingdir`).
+
 ## Code signing (required — the client verifies every bundle)
 
 OTA without code signing means the app trusts **any** bundle the EAS endpoint
