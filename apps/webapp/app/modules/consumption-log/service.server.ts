@@ -22,6 +22,11 @@ import {
   ConsumptionCategory as ConsumptionCategoryEnum,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+// Imported from the dependency-free leaf (NOT `availability.server`) to avoid
+// the cycle `consumption-log → availability.server → booking/service.server →
+// consumption-log`, which corrupts Vitest partial-mock bindings on
+// `createConsumptionLog` in the booking suite. See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
@@ -511,6 +516,25 @@ export async function adjustQuantity({
             additionalData: { assetId, quantity, currentQuantity, inCustody },
           });
         }
+
+        /**
+         * Reservations guard. The in-custody check above only protects units
+         * held by custodians right now; this also blocks lowering the total
+         * below what active bookings have RESERVED (their peak-concurrent
+         * booked footprint) or what's allocated into kits. This is the shared
+         * stock-lowering guard used by `updateAsset` too, so the `adjust
+         * quantity` endpoint can't strand a reservation the asset-edit path
+         * would reject. Runs inside this same tx with the asset already
+         * row-locked above, so the read-then-decide is race-safe.
+         */
+        await assertAssetQuantityNotBelowReservations({
+          assetId,
+          organizationId,
+          tx,
+          newTotal: currentQuantity - quantity,
+          assetTitle: asset.title,
+          unitOfMeasure: asset.unitOfMeasure,
+        });
       }
 
       /** Step 5: Compute the new total quantity */

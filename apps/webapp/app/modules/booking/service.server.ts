@@ -30,14 +30,16 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import {
+  ACTIVE_BOOKING_STATUSES,
+  assertAssetQuantitiesAvailable,
+  getAssetAvailability,
+} from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
-import {
-  computeBookingAvailableQuantity,
-  createConsumptionLog,
-} from "~/modules/consumption-log/service.server";
+import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -1487,6 +1489,10 @@ export async function reserveBooking({
                   ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
                     .asset.select,
                   status: true,
+                  // Needed for the QUANTITY_TRACKED windowed-availability
+                  // guard's shortfall message (see the DRAFT → RESERVED
+                  // transaction below).
+                  unitOfMeasure: true,
                   bookingAssets: {
                     ...createBookingConflictConditions({
                       currentBookingId: id,
@@ -1663,10 +1669,85 @@ export async function reserveBooking({
       });
     }
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
-      where: { id: bookingFound.id },
-      data: dataToUpdate,
+    /**
+     * QUANTITY_TRACKED windowed-availability guard, run atomically with the
+     * DRAFT → RESERVED status flip.
+     *
+     * The conflict check above (`hasAssetBookingConflicts`) only catches
+     * INDIVIDUAL-asset date collisions — it always returns `false` for
+     * QUANTITY_TRACKED rows (their whole premise is that several bookings
+     * legitimately share the same asset's pool). Without this guard a
+     * DRAFT booking whose QT asset already exceeds the windowed pool
+     * (e.g. built before other bookings consumed the stock, or hand-typed
+     * with too high a quantity) could commit straight to RESERVED
+     * unchecked — the over-commit-on-create bug this wiring closes.
+     *
+     * Uses `bookingFound.bookingAssets` (already loaded above, outside the
+     * tx) rather than a fresh read for WHICH assets/quantities to check —
+     * mirrors `checkoutBooking`'s existing precedent (its own
+     * `qtyTrackedBookingAssets`/`uniqueQtyTrackedAssetIds` are derived the
+     * same way). Only the POOL read itself (`assertAssetQuantitiesAvailable`
+     * → `getAssetAvailabilityBatch`) needs to be transaction-fresh and
+     * lock-guarded — that's the number racing writers can change; this
+     * booking's own composition cannot change concurrently through any
+     * other code path while this request is in flight. Aggregates BOTH
+     * standalone (`assetKitId: null`) and kit-driven `BookingAsset` rows per
+     * unique asset id, since both compete for the same physical pool.
+     *
+     * Mirrors `checkoutBookingWritesWithinTx`'s pattern: lock every unique
+     * QT asset via `lockAssetForQuantityUpdate` (serializing concurrent
+     * writers on the same asset) before reading availability, all inside
+     * the SAME transaction as the status write, so the read-then-decide
+     * can't race a sibling reservation/checkout/quantity-adjustment.
+     */
+    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
+      isQuantityTracked(ba.asset)
+    );
+    const uniqueQtyTrackedAssetIds = Array.from(
+      new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
+    );
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      if (uniqueQtyTrackedAssetIds.length > 0) {
+        const assetById = new Map(
+          qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
+        );
+
+        // Sum the requested units per unique QT asset across every
+        // BookingAsset row (standalone + kit-driven) that references it.
+        const requestedQtyByAssetId = new Map<string, number>();
+        for (const ba of qtyTrackedBookingAssets) {
+          requestedQtyByAssetId.set(
+            ba.asset.id,
+            (requestedQtyByAssetId.get(ba.asset.id) ?? 0) + ba.quantity
+          );
+        }
+
+        for (const assetId of uniqueQtyTrackedAssetIds) {
+          await lockAssetForQuantityUpdate(tx, assetId);
+        }
+
+        await assertAssetQuantitiesAvailable(
+          uniqueQtyTrackedAssetIds.map((assetId) => ({
+            assetId,
+            requestedQuantity: requestedQtyByAssetId.get(assetId) ?? 0,
+            assetTitle: assetById.get(assetId)?.title ?? "",
+            unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
+          })),
+          {
+            organizationId,
+            tx,
+            window: from && to ? { from, to } : null,
+            excludeBookingId: id,
+          }
+        );
+      }
+
+      return tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
+        where: { id: bookingFound.id },
+        data: dataToUpdate,
+      });
     });
 
     /** Calculate the time difference between the booking.to and the current time */
@@ -1942,6 +2023,8 @@ async function checkoutBookingWritesWithinTx(
     dataToUpdate,
     kitIds,
     hasKits,
+    from,
+    to,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
@@ -1954,6 +2037,21 @@ async function checkoutBookingWritesWithinTx(
     dataToUpdate: Prisma.BookingUpdateInput;
     kitIds: string[];
     hasKits: boolean;
+    /**
+     * The booking's own committed reservation window (`Booking.from`/`.to`
+     * — non-nullable in the schema). Used to windowed-scope the
+     * QUANTITY_TRACKED availability guard below via
+     * {@link getAssetAvailability}'s `window`, so that OTHER bookings whose
+     * dates don't overlap this one no longer count against it (the #2724
+     * "checkout wrongly refused" bug — the previous guard summed every
+     * active reservation for the asset GLOBALLY, all-time). This is
+     * deliberately the booking's PERSISTED dates, not the optional
+     * conflict-check override params `checkoutBooking`/
+     * `fulfilModelRequestsAndCheckout` accept for early-checkout handling —
+     * those gate a different, pre-tx guard.
+     */
+    from: Booking["from"];
+    to: Booking["to"];
   }
 ) {
   /**
@@ -2028,11 +2126,21 @@ async function checkoutBookingWritesWithinTx(
    * concurrent writers can both pass this guard against the same
    * snapshot.
    *
-   * `computeBookingAvailableQuantity` doesn't take a `tx`, but
-   * read-committed isolation combined with the row lock acquired
-   * above guarantees that once any competing writer has committed
-   * its change it is visible here; any still-open writer is
-   * blocked on the same row lock until we commit or roll back.
+   * Windowed by this booking's own `[from, to]` via
+   * {@link getAssetAvailability} — NOT a global all-time sum. The prior
+   * implementation (`computeBookingAvailableQuantity`) summed every
+   * RESERVED/ONGOING/OVERDUE reservation for the asset regardless of
+   * date, so three non-overlapping bookings of 7 against a 10-qty asset
+   * would wrongly block each other's checkout (#2724). Peak-concurrent
+   * sweeping (inside {@link getAssetAvailability}) only counts
+   * reservations that actually overlap this booking's window.
+   *
+   * `getAssetAvailability` is called with `db: tx` so its reads run
+   * inside this same transaction; combined with the row lock acquired
+   * above, read-committed isolation guarantees that once any competing
+   * writer has committed its change it is visible here, and any
+   * still-open writer is blocked on the same row lock until we commit or
+   * roll back.
    */
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
@@ -2040,10 +2148,13 @@ async function checkoutBookingWritesWithinTx(
     for (const assetId of uniqueQtyTrackedAssetIds) {
       await lockAssetForQuantityUpdate(tx, assetId);
 
-      const { available } = await computeBookingAvailableQuantity(
+      const { bookable } = await getAssetAvailability({
         assetId,
-        bookingId
-      );
+        organizationId,
+        window: { from, to },
+        excludeBookingId: bookingId,
+        db: tx,
+      });
 
       // Sum the requested units for this asset on this booking.
       // (Typically there's one BookingAsset per asset, but we sum
@@ -2052,12 +2163,15 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > available) {
+      if (requested > bookable) {
         const title =
           qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
             .title ?? "";
         insufficientQtyWarnings.push(
-          `"${title}": requested ${requested}, only ${available} available`
+          `"${title}": requested ${requested}, only ${Math.max(
+            0,
+            bookable
+          )} available in this window`
         );
       }
     }
@@ -2435,6 +2549,10 @@ export async function checkoutBooking({
           dataToUpdate,
           kitIds,
           hasKits,
+          // Booking's own committed window — windows the QT availability
+          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
+          from: bookingFound.from,
+          to: bookingFound.to,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -2799,6 +2917,10 @@ export async function fulfilModelRequestsAndCheckout({
           dataToUpdate,
           kitIds: unionKitIds,
           hasKits,
+          // Booking's own committed window — windows the QT availability
+          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
+          from: bookingFound.from,
+          to: bookingFound.to,
         });
 
         /**
@@ -7507,6 +7629,10 @@ export async function updateBookingAssets({
           id: true,
           name: true,
           status: true,
+          // Needed to window the QUANTITY_TRACKED availability guard below
+          // to this booking's own dates.
+          from: true,
+          to: true,
         },
       });
 
@@ -7524,10 +7650,12 @@ export async function updateBookingAssets({
       // to prevent FK violations when assets are deleted between UI load and
       // submission. `type` is selected so we can enforce the standalone/
       // kit-driven invariant below (INDIVIDUAL assets can't legitimately be
-      // both in the same booking).
+      // both in the same booking). `title`/`unitOfMeasure` are selected too
+      // so the QUANTITY_TRACKED availability guard below can build its
+      // shortfall message without a second read.
       const validAssets = await tx.asset.findMany({
         where: { id: { in: uniqueAssetIds }, organizationId },
-        select: { id: true, type: true },
+        select: { id: true, type: true, title: true, unitOfMeasure: true },
       });
       const validAssetIds = validAssets.map((a) => a.id);
 
@@ -7643,6 +7771,82 @@ export async function updateBookingAssets({
       const addedAssetIds = [
         ...new Set([...standaloneAssetIds, ...kitAssetIds]),
       ];
+
+      /**
+       * QUANTITY_TRACKED windowed-availability guard for assets being
+       * added/updated on an already-ACTIVE booking (RESERVED/ONGOING/
+       * OVERDUE). A DRAFT booking is exempt here — it hasn't committed to
+       * holding any stock yet, and `reserveBooking`'s own guard validates
+       * the full asset list at the DRAFT → RESERVED transition, so
+       * checking twice would only reject drafts prematurely while they're
+       * still being assembled.
+       *
+       * Scope: only the standalone quantities and kit slices THIS CALL is
+       * writing (`standaloneQuantities` / `effectiveSlices`) are checked —
+       * not a full re-aggregation of every existing `BookingAsset` row for
+       * the asset already on the booking. Existing rows untouched by this
+       * call already passed this same guard (or the reserve/checkout-time
+       * guard) when they were added; re-validating them here would be a
+       * redundant read for every call. The standalone amount IS the row's
+       * new target quantity (the upsert below sets it exactly), so — with
+       * `currentQuantity` defaulted to 0 and `excludeBookingId: id`
+       * removing this booking's own prior reservation from the pool — the
+       * check compares the full new total against every OTHER booking's
+       * demand, exactly like `reserveBooking`'s guard.
+       */
+      if (
+        (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(b.status)
+      ) {
+        const qtAssetIds = new Set(
+          validAssets
+            .filter((asset) => isQuantityTracked(asset))
+            .map((a) => a.id)
+        );
+
+        if (qtAssetIds.size > 0) {
+          const requestedQtyByAssetId = new Map<string, number>();
+          standaloneAssetIds.forEach((assetId, index) => {
+            if (!qtAssetIds.has(assetId)) return;
+            requestedQtyByAssetId.set(
+              assetId,
+              (requestedQtyByAssetId.get(assetId) ?? 0) +
+                standaloneQuantities[index]
+            );
+          });
+          effectiveSlices.forEach((slice) => {
+            if (!qtAssetIds.has(slice.assetId)) return;
+            requestedQtyByAssetId.set(
+              slice.assetId,
+              (requestedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+            );
+          });
+
+          if (requestedQtyByAssetId.size > 0) {
+            const assetById = new Map(validAssets.map((a) => [a.id, a]));
+
+            for (const assetId of requestedQtyByAssetId.keys()) {
+              await lockAssetForQuantityUpdate(tx, assetId);
+            }
+
+            await assertAssetQuantitiesAvailable(
+              Array.from(requestedQtyByAssetId.entries()).map(
+                ([assetId, requestedQuantity]) => ({
+                  assetId,
+                  requestedQuantity,
+                  assetTitle: assetById.get(assetId)?.title ?? "",
+                  unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
+                })
+              ),
+              {
+                organizationId,
+                tx,
+                window: b.from && b.to ? { from: b.from, to: b.to } : null,
+                excludeBookingId: id,
+              }
+            );
+          }
+        }
+      }
 
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique

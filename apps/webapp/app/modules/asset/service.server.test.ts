@@ -7,6 +7,7 @@ import {
   recordEvent,
   recordEvents,
 } from "~/modules/activity-event/service.server";
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability.server";
 import { getCategory } from "~/modules/category/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
@@ -137,6 +138,16 @@ vitest.mock("~/database/db.server", () => ({
 // cannot execute against a mocked tx — stub it to return a controlled asset
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
+}));
+
+// why: the stock-lowering guard's own committed-peak math (custody + kits +
+// peak-concurrent bookings) is exhaustively unit-tested in
+// `availability.server.test.ts`. Here we only verify updateAsset's WIRING —
+// that it's called with the right args when quantity is lowered on a
+// QUANTITY_TRACKED asset, and that its rejection propagates — so stubbing it
+// avoids re-deriving custody/kit/booking fixtures in this already-large file.
+vitest.mock("~/modules/asset/availability.server", () => ({
+  assertAssetQuantityNotBelowReservations: vitest.fn(),
 }));
 
 // why: avoid touching real consumption log writes during checkOutQuantity tests
@@ -1387,6 +1398,195 @@ describe("updateAsset newLocationQuantity", () => {
 
     // Validation fires before db.asset.update, so the update never runs.
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring for the STOCK-LOWERING guard: `updateAsset` must not let a
+ * QUANTITY_TRACKED asset's total `quantity` drop below what's already
+ * committed to custody, kits, or bookings. The guard's own committed-peak
+ * math is unit-tested in `availability.server.test.ts` — these tests only
+ * verify updateAsset calls it (with the right args, at the right time) and
+ * correctly propagates its rejection. `db.asset.findUnique` (the
+ * `assetBeforeUpdate` snapshot) is left at its default `null` resolve so the
+ * unrelated note/event-emission block — gated on `assetBeforeUpdate` being
+ * non-null — never runs, keeping each test focused on the guard wiring.
+ */
+describe("updateAsset stock-lowering guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      quantity: 5,
+    });
+  });
+
+  it("locks the asset then calls the guard when lowering quantity on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 5, // 5 < 10 (current) — a genuine reduction
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset-1"
+    );
+    expect(assertAssetQuantityNotBelowReservations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        newTotal: 5,
+        assetTitle: "Widget",
+        unitOfMeasure: "boards",
+      })
+    );
+    // The guard must run BEFORE the write.
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("propagates the guard's 400 and never writes when the reduction is below commitments", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          'Cannot reduce "Widget" to 5 boards — 8 boards are committed ' +
+          "(custody, kits, or overlapping bookings). Release or reduce those first.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 5,
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("committed"),
+    });
+
+    // The rejection must land before the write.
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("allows a safe reduction (down to or above what's committed)", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 8,
+      } as any)
+    ).resolves.toMatchObject({ id: "asset-1" });
+
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the lock and the guard entirely when quantity is not being changed", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "Renamed",
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the guard when quantity is being INCREASED, even on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 15, // 15 > 10 — an increase, never a stock-lowering concern
+    } as any);
+
+    // The lock still runs (it's how the guard learns the fresh current
+    // total), but the guard itself is never invoked for an increase.
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+  });
+
+  it("skips the guard for an INDIVIDUAL asset even if a lower quantity is submitted", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      title: "Drill",
+      unitOfMeasure: null,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 0,
+    } as any);
+
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
   });
 });
 

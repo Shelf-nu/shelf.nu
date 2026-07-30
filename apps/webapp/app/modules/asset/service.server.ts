@@ -34,6 +34,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
@@ -2516,6 +2517,28 @@ export async function updateAsset({
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
     const asset = await db.$transaction(async (tx) => {
+      // Block lowering a QUANTITY_TRACKED asset's total below the units
+      // already committed to custody, kits, or overlapping bookings. Lock the
+      // asset row first so the read-then-write is race-safe (mirrors
+      // `adjustQuantity` and the booking write guards). Also covers the CSV
+      // update-existing import, which routes through `updateAsset`.
+      if (quantity != null) {
+        const locked = await lockAssetForQuantityUpdate(tx, id);
+        if (
+          locked.type === AssetType.QUANTITY_TRACKED &&
+          quantity < (locked.quantity ?? 0)
+        ) {
+          await assertAssetQuantityNotBelowReservations({
+            assetId: id,
+            organizationId,
+            tx,
+            newTotal: quantity,
+            assetTitle: locked.title,
+            unitOfMeasure: locked.unitOfMeasure,
+          });
+        }
+      }
+
       const updated = await tx.asset.update({
         where: { id, organizationId },
         data,

@@ -516,7 +516,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 3 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 3, physicalNow: 3 } },
       });
 
       render(
@@ -605,7 +605,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 5 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 5, physicalNow: 5 } },
       });
 
       render(
@@ -625,6 +625,117 @@ describe("ListAssetContent", () => {
       );
 
       expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+    });
+
+    it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow", async () => {
+      // (b) — "Boards" real case: 10 total, 7 needed for this RESERVED
+      // booking. The 7 currently out on another booking return before this
+      // booking's window opens, so bookable=10 (no in-window conflict) but
+      // physicalNow=3 (7 are literally off the shelf right now). Soft amber
+      // warning, NOT the red blocker.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 7,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 10, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      // No red hard-blocker — the row fits within the booking's window.
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+
+      const trigger = screen.getByText("Checked out elsewhere");
+      expect(trigger).toBeInTheDocument();
+      // Amber (default `AvailabilityBadge` variant) — NOT the red variant.
+      expect(trigger).toHaveClass("bg-warning-50");
+      expect(trigger).toHaveClass("text-warning-700");
+
+      // Tooltip explains the "expected back before this booking starts" logic.
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/7 units/);
+      expect(tooltip.textContent).toMatch(/only 3/);
+      expect(tooltip.textContent).toMatch(
+        /expected back before this booking starts/i
+      );
+    });
+
+    it("does NOT render any stock badge for a row that is already checked out, even though bookedQuantity exceeds bookable", () => {
+      // (d) — Regression guard for the "checked-out row showed Insufficient
+      // stock" bug: this slice's own 22 booked units are all checked out
+      // already (nothing returned yet), so `contextStatus` resolves to
+      // CHECKED_OUT via the real `isBookingRowQtyFullyCheckedOut` branch.
+      // Even though the workspace pool is critically low (bookable: 3), the
+      // row's own checkout already happened — nothing to warn about for it.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 22,
+        checkedOutQuantity: 22,
+        dispositionedQuantity: 0,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-checked-out",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 3, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
+      // Confirms the row really did resolve to CHECKED_OUT (not silently
+      // skipped for an unrelated reason).
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "CHECKED_OUT" })
+      );
     });
   });
 
