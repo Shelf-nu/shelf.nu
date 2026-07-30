@@ -10,6 +10,50 @@ import type { Column } from "../asset-index-settings/helpers";
 const label = "Assets";
 
 /**
+ * Builds the raw SQL that resolves asset IDs for an advanced-filter bulk
+ * operation. Extracted so the join/column shape is unit-testable without a DB —
+ * raw SQL can't be typechecked, so a string assertion is the regression guard
+ * (see `.claude/rules/raw-sql-respects-prisma-map.md` and the co-located test).
+ *
+ * The joins mirror the main paginated query because {@link generateWhereClause}
+ * may reference the joined aliases (c.name, l.name, t.id, tm.name, …). Asset
+ * placement lives on the `AssetLocation` pivot — there is no `Asset.locationId`
+ * FK — so location is joined via a LATERAL primary-pick (oldest pivot row),
+ * exactly like the index query. The previous `LEFT JOIN "Location" l ON
+ * a."locationId" = l.id` referenced a dropped column and 500'd on every
+ * advanced-mode select-all (SHELF-WEBAPP-21X).
+ *
+ * @param whereClause - The `Prisma.Sql` WHERE fragment from generateWhereClause.
+ * @returns The composed `Prisma.Sql` SELECT query.
+ */
+export function buildAdvancedFilteredAssetIdsQuery(
+  whereClause: Prisma.Sql
+): Prisma.Sql {
+  return Prisma.sql`
+    SELECT DISTINCT a.id
+    FROM public."Asset" a
+    LEFT JOIN public."Category" c ON a."categoryId" = c.id
+    -- Placement lives on the AssetLocation pivot (no Asset.locationId FK).
+    -- LATERAL primary-pick yields one location per asset so the search
+    -- clause's l.name reference resolves without row fan-out.
+    LEFT JOIN LATERAL (
+      SELECT l.id, l.name, l."parentId"
+      FROM public."AssetLocation" al
+      JOIN public."Location" l ON al."locationId" = l.id
+      WHERE al."assetId" = a.id
+      ORDER BY al."createdAt" ASC, al.id ASC
+      LIMIT 1
+    ) l ON TRUE
+    LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
+    LEFT JOIN public."Tag" t ON att."B" = t.id
+    LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
+    LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
+    LEFT JOIN public."User" u ON tm."userId" = u.id
+    ${whereClause}
+  `;
+}
+
+/**
  * Gets asset IDs matching advanced filters - optimized for bulk operations
  *
  * Uses the same filter parsing and where clause generation as the advanced
@@ -62,20 +106,10 @@ async function getAdvancedFilteredAssetIds({
       timeZone
     );
 
-    // Minimal query: only SELECT id, but include necessary joins
-    // Joins are needed because WHERE clause may reference: c.name, l.name, t.id, tm.name, etc.
-    const query = Prisma.sql`
-      SELECT DISTINCT a.id
-      FROM public."Asset" a
-      LEFT JOIN public."Category" c ON a."categoryId" = c.id
-      LEFT JOIN public."Location" l ON a."locationId" = l.id
-      LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
-      LEFT JOIN public."Tag" t ON att."B" = t.id
-      LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
-      LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
-      LEFT JOIN public."User" u ON tm."userId" = u.id
-      ${whereClause}
-    `;
+    // Minimal query: only SELECT id, but include the same joins the main
+    // paginated query uses, because the WHERE clause may reference joined
+    // aliases (c.name, l.name, t.id, tm.name, etc.).
+    const query = buildAdvancedFilteredAssetIdsQuery(whereClause);
 
     const results = await db.$queryRaw<Array<{ id: string }>>(query);
     return results.map((r) => r.id);

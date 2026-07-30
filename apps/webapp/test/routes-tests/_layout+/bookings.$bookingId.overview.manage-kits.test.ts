@@ -188,6 +188,11 @@ describe("manage-kits route validation", () => {
       id: "booking123",
       name: "Test Booking",
       status: BookingStatus.ONGOING,
+      // why: updateBookingAssets now selects from/to for its in-tx
+      // QUANTITY_TRACKED availability guard; the mocked resolved value
+      // must satisfy the widened return type.
+      from: new Date("2024-01-01"),
+      to: new Date("2024-01-10"),
     });
     vi.mocked(bookingService.createKitBookingNote).mockResolvedValue(
       undefined as any

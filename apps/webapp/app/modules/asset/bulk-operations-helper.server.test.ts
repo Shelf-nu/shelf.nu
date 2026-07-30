@@ -1,27 +1,37 @@
+// @vitest-environment node
 /**
- * Tests for select-all bulk-operation id resolution.
+ * Tests for bulk-operation asset-id resolution helpers.
  *
- * Regression guard for the timezone off-by-one: when "select all" is active in
- * ADVANCED mode, {@link resolveAssetIdsForBulkOperation} must forward the acting
- * user's IANA timezone into the raw filter query so built-in date-column filters
- * truncate the calendar day in the user's tz. A UTC-only resolution near a day
- * boundary mutates adjacent-day assets. These tests assert the resolved id SET
- * actually depends on the forwarded timezone.
+ * Two suites, two concerns:
+ *  - `resolveAssetIdsForBulkOperation` — the select-all timezone off-by-one
+ *    guard: in ADVANCED mode it must forward the acting user's IANA timezone
+ *    into the raw filter query so built-in date-column filters truncate the
+ *    calendar day in the user's tz (a UTC-only resolution near a day boundary
+ *    mutates adjacent-day assets). These tests assert the resolved id SET
+ *    actually depends on the forwarded timezone.
+ *  - `buildAdvancedFilteredAssetIdsQuery` — the raw-SQL shape guard
+ *    (SHELF-WEBAPP-21X): raw SQL isn't typechecked, so a string assertion
+ *    ensures location joins through the `AssetLocation` pivot and never
+ *    references the dropped `Asset.locationId` column.
  *
  * @see {@link file://./bulk-operations-helper.server.ts}
  */
-import type { Prisma } from "@prisma/client";
-import { type AssetIndexSettings } from "@prisma/client";
+import { Prisma, type AssetIndexSettings } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import {
+  buildAdvancedFilteredAssetIdsQuery,
+  resolveAssetIdsForBulkOperation,
+} from "./bulk-operations-helper.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 
 // why: the advanced select-all path issues a raw `$queryRaw`; stub it to avoid a
 // real DB and to return a tz-dependent id set (proving the tz reaches the SQL
-// and changes which rows match near a day boundary).
+// and changes which rows match near a day boundary). This stub also covers the
+// module-scope db import that the `buildAdvancedFilteredAssetIdsQuery` suite
+// relies on (its pure builder never touches db at runtime).
 vi.mock("~/database/db.server", () => ({
   db: { $queryRaw: vi.fn() },
 }));
@@ -118,5 +128,33 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
 
     expect(capturedQueries[0]?.values).toContain("UTC");
     expect(ids).toEqual(["utc-only-asset"]);
+  });
+});
+
+describe("buildAdvancedFilteredAssetIdsQuery", () => {
+  // Raw SQL isn't typechecked, so the join/column shape is guarded by a string
+  // assertion per `.claude/rules/raw-sql-respects-prisma-map.md`. Regression for
+  // SHELF-WEBAPP-21X: the query referenced the dropped `Asset.locationId`
+  // column and 500'd (`42703: column a.locationId does not exist`).
+  const sql = buildAdvancedFilteredAssetIdsQuery(Prisma.empty).strings.join(
+    "?"
+  );
+
+  it("joins location through the AssetLocation pivot (LATERAL primary-pick)", () => {
+    expect(sql).toContain('public."AssetLocation"');
+    expect(sql).toContain("LEFT JOIN LATERAL");
+  });
+
+  it("does not reference the dropped Asset.locationId column", () => {
+    expect(sql).not.toContain('a."locationId"');
+  });
+
+  it("still selects distinct asset ids and interpolates the where clause", () => {
+    const withWhere = buildAdvancedFilteredAssetIdsQuery(
+      Prisma.sql`WHERE a."organizationId" = ${"org-1"}`
+    );
+    expect(withWhere.strings.join("?")).toContain("SELECT DISTINCT a.id");
+    // The org id is carried as a bound parameter, never interpolated inline.
+    expect(withWhere.values).toContain("org-1");
   });
 });

@@ -19,6 +19,7 @@ import type { ConsumptionType } from "@prisma/client";
 import { TriangleAlertIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import {
   Tooltip,
   TooltipContent,
@@ -41,16 +42,21 @@ export interface QuantityOverviewCardProps {
   /** Consumption behavior: ONE_WAY (used up) or TWO_WAY (returnable) */
   consumptionType: ConsumptionType | null;
   /**
-   * Booking-aware availability (total - inCustody - reserved - checkedOut),
-   * shown on the "Available" row. This is what's available to reserve for a
-   * future booking.
+   * Current physical availability (total - inCustody - inKits -
+   * checkedOut), shown on the "Available" row. Deliberately window-agnostic
+   * — it reflects what's on the shelf RIGHT NOW and is never reduced by
+   * future booking reservations (see the "Reserved (bookings)" row below
+   * for those). This is the #2724 fix: the headline must never go negative
+   * just because far-future reservations exist.
    */
   availableQuantity?: number;
   /**
-   * Physical availability (total - inCustody). Used as the cap for the
-   * QuickAdjustDialog's "Remove" operation — subtracting reservations here
-   * would wrongly block valid total-quantity adjustments when future
-   * bookings exist. Falls back to `availableQuantity` when not provided.
+   * Physical availability. Used as the cap for the QuickAdjustDialog's
+   * "Remove" operation. As of the #2724 fix this is numerically identical
+   * to `availableQuantity` (both source from the same `physicalAvailable`
+   * primitive field) — kept as a separate prop only so existing call sites
+   * don't need to change. Falls back to `availableQuantity` when not
+   * provided.
    */
   custodyAvailableQuantity?: number;
   /**
@@ -87,6 +93,12 @@ export interface QuantityOverviewCardProps {
    */
   reservedQuantity?: number;
   /**
+   * Count of distinct upcoming bookings contributing to `reservedQuantity`.
+   * Used only by the explanatory tooltip next to the "Reserved (bookings)"
+   * row — see {@link QuantityOverviewCardProps.reservedQuantity}.
+   */
+  reservingBookingCount?: number;
+  /**
    * Units actively off the shelf via ONGOING/OVERDUE bookings — computed
    * via `computeCheckedOutForAsset` so this stays in lock-step with the
    * OUT-flow's per-slice math. Disjoint from `reservedQuantity`: every
@@ -116,19 +128,25 @@ function formatWithUnit(value: number, unit: string | null): string {
  * @param props.label - Row label displayed on the left
  * @param props.value - Row value displayed on the right
  * @param props.warning - When true, renders the value in amber with a warning icon
+ * @param props.labelTooltip - Optional explanatory tooltip rendered next to the label (e.g. `InfoTooltip`)
  */
 function OverviewRow({
   label,
   value,
   warning,
+  labelTooltip,
 }: {
   label: string;
   value: React.ReactNode;
   warning?: boolean;
+  labelTooltip?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 last:border-b-0">
-      <span className="text-[14px] text-gray-600">{label}</span>
+      <span className="flex items-center gap-1.5 text-[14px] text-gray-600">
+        {label}
+        {labelTooltip}
+      </span>
       <span className="flex items-center gap-1.5 text-[14px] font-medium text-gray-900">
         {warning ? (
           <TooltipProvider>
@@ -173,6 +191,7 @@ export function QuantityOverviewCard({
   inKitsQuantity,
   inLocationsQuantity,
   reservedQuantity,
+  reservingBookingCount,
   checkedOutQuantity,
   canUpdate = false,
   className,
@@ -180,6 +199,7 @@ export function QuantityOverviewCard({
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
   const reserved = reservedQuantity ?? 0;
+  const bookingCount = reservingBookingCount ?? 0;
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
@@ -257,6 +277,18 @@ export function QuantityOverviewCard({
         <OverviewRow
           label="Reserved (bookings)"
           value={formatWithUnit(reserved, unit)}
+          labelTooltip={
+            <InfoTooltip
+              content={
+                <p className="text-xs">
+                  {reserved} {unit || "units"} reserved across {bookingCount}{" "}
+                  upcoming {bookingCount === 1 ? "booking" : "bookings"}. These
+                  are committed for future dates and don&apos;t reduce
+                  what&apos;s physically on the shelf now.
+                </p>
+              }
+            />
+          }
         />
       ) : null}
       {checkedOut > 0 ? (
