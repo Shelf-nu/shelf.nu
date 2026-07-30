@@ -32,6 +32,7 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
   primeBookingOverviewCache,
   readBookingOverviewCache,
@@ -872,93 +873,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Workspace-level "available units" per QT asset on this booking.
+     * Workspace-level "available units" per QT asset on this booking:
+     * `{ bookable, physicalNow }`. Used by the RED "Insufficient stock"
+     * badge (fires when `bookedQuantity` exceeds `.bookable`) and the AMBER
+     * "pending return" badge (fires on not-yet-started bookings when
+     * `bookedQuantity` exceeds `.physicalNow` while still fitting within
+     * `.bookable`) on the booking-overview asset row + assets sidebar.
      *
-     * For each qty-tracked asset on this booking, computes the units that
-     * are NOT currently committed elsewhere in the workspace:
-     *
-     *   available = total
-     *             − (operator custody)
-     *             − (reserved in OTHER bookings, status = RESERVED)
-     *             − (checked out in OTHER bookings, status in ONGOING/OVERDUE)
-     *
-     * Used by the new "Insufficient stock" badge on the booking-overview
-     * asset row + assets sidebar: fires when `bookedQuantity` on a row
-     * exceeds `availableUnitsByAsset[assetId]`.
-     *
-     * Subtraction notes:
-     *  - Only ASSET-level custody (`kitCustodyId == null`) counts. Kit
-     *    custody rows are internal earmarking and must not reduce global
-     *    headroom (avoids double-counting kit-driven slices, mirrors the
-     *    availableHelper audit gotcha).
-     *  - This booking is EXCLUDED via `id: { not: bookingId }` — the
-     *    badge is about pressure from OTHER bookings on the shared pool;
-     *    the current booking's own reservation is what we're comparing
-     *    against.
-     *  - `assetKits` allocations are NOT subtracted. Pre-kit-checkout,
-     *    units inside a kit are still in the asset's available pool.
-     *
-     * The groupBys are scoped to this workspace's bookings via the
-     * relation filter (`booking: { organizationId, ... }`) to prevent
-     * cross-org leakage.
+     * Delegates to the shared, windowed QT availability primitive via
+     * `buildAvailableUnitsByAsset` — see
+     * `~/modules/booking/booking-overview-availability` for the full
+     * rationale (windowed peak-concurrent reservations + no kit
+     * double-count, replacing the old GLOBAL un-windowed groupBys). That
+     * helper deliberately lives in its own server module rather than inline
+     * in this route file: this route also exports `clientLoader`, so any
+     * server-only helper EXPORTED directly from here would pull its
+     * server-only dependency chain into Vite's client bundle.
      */
-    const [globalReservedRows, globalCheckedOutRows] =
-      qtyAssetIdsInBooking.length > 0
-        ? await Promise.all([
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: "RESERVED",
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: { in: ["ONGOING", "OVERDUE"] },
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], []];
-
-    /**
-     * Map of `assetId → available units in the workspace pool`. Built
-     * after both rawAssets and the two groupBys land. Keys are restricted
-     * to QT assets that appear on this booking; INDIVIDUAL assets are
-     * omitted (they have their own AvailabilityBadge paths and never get
-     * the InsufficientStockBadge).
-     */
-    const availableUnitsByAsset: Record<string, number> = {};
-    for (const asset of rawAssets) {
-      if (asset.type !== "QUANTITY_TRACKED") continue;
-      const total = asset.quantity ?? 0;
-      // Operator (asset-level) custody only — kit-level custody is
-      // internal earmarking and must not reduce global headroom.
-      const inCustody = (asset.custody ?? [])
-        .filter((c) => c.kitCustodyId == null)
-        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const reserved =
-        globalReservedRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      const checkedOut =
-        globalCheckedOutRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      availableUnitsByAsset[asset.id] = Math.max(
-        0,
-        total - inCustody - reserved - checkedOut
-      );
-    }
+    const availableUnitsByAsset = await buildAvailableUnitsByAsset({
+      rawAssets,
+      qtyAssetIdsInBooking,
+      organizationId,
+      booking,
+    });
 
     // Attach per-row qty disposition data onto the shaped view items so
     // the UI gets the Polish-6 / Phase 4 enrichment alongside main's
@@ -1150,11 +1087,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         checkedOutAssetIds,
         remainingToCheckOutByAsset,
         /**
-         * QT workspace-availability map (assetId → units free across the
-         * workspace, excluding this booking + kit-custody). Drives the
-         * "Insufficient stock" badge in `list-asset-content.tsx` and
-         * `booking-assets-sidebar.tsx`. Always serialised — empty `{}` when
-         * the booking has no QT assets — so consumers can rely on the key.
+         * QT workspace-availability map (assetId → `{ bookable, physicalNow,
+         * reserved }`, all excluding this booking + kit-custody). Drives the
+         * RED "Insufficient stock" and AMBER "pending return" badges in
+         * `list-asset-content.tsx` and `booking-assets-sidebar.tsx` — see
+         * `resolveQtyStockBadgeVariant` (`~/utils/booking-assets`) — and, via
+         * `qtyAvailability` in `list-asset-content.tsx`, the real windowed
+         * max (+ "reserved by other bookings" note) shown by the "Adjust
+         * booked quantity" dialog instead of the workspace total. Always
+         * serialised — empty `{}` when the booking has no QT assets — so
+         * consumers can rely on the key.
          */
         availableUnitsByAsset,
         partialCheckoutDetails,

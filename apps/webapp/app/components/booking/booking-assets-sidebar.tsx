@@ -38,8 +38,12 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
-import { InsufficientStockBadge } from "./availability-label";
+import {
+  InsufficientStockBadge,
+  PendingReturnBadge,
+} from "./availability-label";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -195,18 +199,27 @@ interface BookingAssetsSidebarProps {
    */
   checkedOutByAsset?: Record<string, number>;
   /**
-   * Optional map of `assetId → units available across the workspace pool`
-   * (after subtracting operator custody + other-booking reservations +
-   * active checkouts elsewhere). Drives the `InsufficientStockBadge`
-   * rendered alongside the status badge on QT rows whose `bookedQuantity`
-   * exceeds the per-asset workspace headroom.
+   * Optional map of `assetId → { bookable, physicalNow, reserved }` units
+   * available across the workspace pool (after subtracting operator
+   * custody + other-booking reservations + active checkouts elsewhere).
+   * Drives the `InsufficientStockBadge` (RED, `bookedQuantity > bookable`)
+   * and `PendingReturnBadge` (AMBER, not-started booking + `bookedQuantity
+   * > physicalNow` while still `<= bookable`) rendered alongside the
+   * status badge on QT rows — see `resolveQtyStockBadgeVariant`. `reserved`
+   * (units held by OTHER bookings) isn't consumed by this sidebar today —
+   * it's carried through the shared shape for parity with
+   * `list-asset-content.tsx`, which threads it into the "Adjust booked
+   * quantity" dialog's messaging.
    *
    * Optional so callers that don't ship the map (e.g. the bookings index
    * sidebar trigger) keep working — the badge condition short-circuits
    * when the lookup is `undefined`. INDIVIDUAL assets are never surfaced
-   * regardless (gated on `isQuantityTracked` at the render site).
+   * regardless (the builder only populates QT entries).
    */
-  availableUnitsByAsset?: Record<string, number>;
+  availableUnitsByAsset?: Record<
+    string,
+    { bookable: number; physicalNow: number; reserved: number }
+  >;
 }
 
 /**
@@ -302,12 +315,16 @@ function AssetTitleAndStatus({
   dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
   checkedOutByAsset?: Record<string, number>;
   /**
-   * Per-asset workspace-availability lookup. Drives the
-   * `InsufficientStockBadge` rendered alongside the status badge for QT
-   * rows whose `bookedQuantity` exceeds the per-asset workspace headroom.
-   * Optional — missing map short-circuits the badge condition.
+   * Per-asset workspace-availability lookup (`{ bookable, physicalNow }`).
+   * Drives the `InsufficientStockBadge` / `PendingReturnBadge` rendered
+   * alongside the status badge for QT rows — see
+   * `resolveQtyStockBadgeVariant`. Optional — missing map short-circuits
+   * the badge condition.
    */
-  availableUnitsByAsset?: Record<string, number>;
+  availableUnitsByAsset?: Record<
+    string,
+    { bookable: number; physicalNow: number; reserved: number }
+  >;
 }) {
   // Workspace pref + addon entitlement — resolveDisplayCode short-circuits to
   // QR when the org has lost the barcode add-on, so this read is always safe.
@@ -384,21 +401,24 @@ function AssetTitleAndStatus({
 
   /**
    * Workspace-availability lookup for this row's asset (sidebar version).
-   * Mirrors the per-row computation in `list-asset-content.tsx` — fires
-   * the `InsufficientStockBadge` when the booked qty exceeds the global
-   * pool's headroom on this asset, INDIVIDUAL assets excluded.
-   *
-   * Suppressed for COMPLETE / ARCHIVED bookings — the stock signal is
-   * historical at that point and shouldn't surface as an actionable
-   * warning.
+   * `undefined` for INDIVIDUAL assets (the builder only populates QT
+   * entries) or when the caller doesn't ship the map.
    */
-  const availableUnits = availableUnitsByAsset?.[asset.id];
-  const hasInsufficientStock =
-    isQuantityTracked(asset) &&
-    availableUnits != null &&
-    qtyBooked > availableUnits &&
-    bookingStatus !== "COMPLETE" &&
-    bookingStatus !== "ARCHIVED";
+  const availability = availableUnitsByAsset?.[asset.id];
+
+  /**
+   * Three-state QT stock badge, resolved by the SAME shared decision
+   * helper `list-asset-content.tsx` uses, so this aggregated sidebar row
+   * and the per-slice booking-overview row can never disagree. Gated on
+   * `effectiveStatus` (this component's equivalent of `contextStatus`) so
+   * an asset that's already checked out / fulfilled gets neither badge.
+   */
+  const stockBadgeVariant = resolveQtyStockBadgeVariant({
+    rowQty: qtyBooked,
+    availability,
+    contextStatus: effectiveStatus,
+    bookingStatus,
+  });
 
   return (
     <div className="min-w-[180px]">
@@ -536,10 +556,15 @@ function AssetTitleAndStatus({
           availableToBook={asset.availableToBook}
           asset={asset}
         />
-        {hasInsufficientStock ? (
+        {stockBadgeVariant === "insufficient" ? (
           <InsufficientStockBadge
             bookedQuantity={qtyBooked}
-            availableUnits={availableUnits ?? 0}
+            availableUnits={availability?.bookable ?? 0}
+          />
+        ) : stockBadgeVariant === "pending-return" ? (
+          <PendingReturnBadge
+            bookedQuantity={qtyBooked}
+            physicalUnitsNow={availability?.physicalNow ?? 0}
           />
         ) : null}
         {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
