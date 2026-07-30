@@ -37,9 +37,9 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
  * @param assetIds - Optional array of specific asset IDs to include
  * @param availableToBookOnly - Restrict to bookable assets (self-service)
  * @param timeZone - IANA timezone name the acting user displays dates in.
- *   Used only by built-in `timestamptz` date-column filters so their day
- *   truncation matches what the user sees (see {@link addDateFilter}).
- *   Defaults to `"UTC"` to preserve behavior for callers that don't supply it.
+ *   Used only by built-in date-column filters so their day truncation matches
+ *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
+ *   preserve behavior for callers that don't supply it.
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -443,13 +443,22 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 /**
  * Adds a built-in date-column filter to the WHERE clause.
  *
- * Built-in date columns (`createdAt`, `updatedAt`, …) are `timestamptz`. A bare
- * `::date` cast resolves the calendar day in the DB session timezone (UTC),
- * which disagrees with the day the row is *displayed* in for a non-UTC user —
- * an off-by-one when they filter "on the day a row shows". We normalize the
- * column into the acting user's preferred timezone before truncating to a date
- * (`(a."col" AT TIME ZONE ${timeZone})::date`) so the compared day matches the
- * UI. The right-hand side stays a date-only string (`value::date`), unchanged.
+ * Built-in date columns (`createdAt`, `updatedAt`, …) are Prisma's default
+ * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+ * as a bare wall clock. A plain `::date` cast resolves the calendar day of that
+ * UTC wall clock, which disagrees with the day the row is *displayed* in for a
+ * non-UTC user — an off-by-one when they filter "on the day a row shows".
+ *
+ * To get the user-tz calendar day we must convert in TWO steps, because
+ * `AT TIME ZONE` behaves differently on a `timestamp` than on a `timestamptz`:
+ *   1. `AT TIME ZONE 'UTC'` — reinterpret the bare wall clock AS a UTC instant
+ *      (`timestamp` → `timestamptz`). A single `AT TIME ZONE ${timeZone}` here
+ *      would instead ASSUME the value is already in the user's zone, mis-shifting
+ *      it by the offset (verified: an asset at `2026-07-20 23:00Z`, which shows
+ *      as Jul 21 in Tokyo, truncated to Jul 20 under the single-cast bug).
+ *   2. `AT TIME ZONE ${timeZone}` — convert that instant to the user's wall
+ *      clock (`timestamptz` → `timestamp`), then `::date` is session-independent.
+ * The right-hand side stays a date-only string (`value::date`), unchanged.
  *
  * NOTE: this is intentionally NOT applied to custom-field DATE filters
  * ({@link addCustomFieldDateFilter}) — those values are stored date-only, so
@@ -467,11 +476,15 @@ function addDateFilter(
   filter: Filter,
   timeZone: string
 ): Prisma.Sql {
-  // The timestamptz column truncated to a calendar date in the user's tz.
-  // `timeZone` is passed as a bound parameter (`AT TIME ZONE $n`), not raw SQL.
+  // The UTC-stored `timestamp` column truncated to a calendar date in the
+  // user's tz. `AT TIME ZONE 'UTC'` reinterprets the bare wall clock as a UTC
+  // instant; the second `AT TIME ZONE ${timeZone}` converts it to the user's
+  // wall clock before `::date` (see the two-step rationale above). `'UTC'` is a
+  // fixed literal; `timeZone` is a bound parameter (`AT TIME ZONE $n`), not raw
+  // SQL, so it stays injection-safe.
   const localDate = Prisma.sql`(a."${Prisma.raw(
     filter.name
-  )}" AT TIME ZONE ${timeZone})::date`;
+  )}" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
 
   switch (filter.operator) {
     case "is":

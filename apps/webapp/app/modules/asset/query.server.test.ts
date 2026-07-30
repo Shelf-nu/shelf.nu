@@ -702,13 +702,22 @@ describe("generateWhereClause - built-in date filter timezone", () => {
   const orgId = "test-org-id";
 
   /**
-   * Built-in `timestamptz` columns (createdAt, updatedAt, …) must be truncated
-   * to a calendar day in the acting user's timezone, otherwise a non-UTC user
-   * filtering "on the day a row shows" hits an off-by-one. The tz is bound as a
-   * SQL parameter (`AT TIME ZONE $n`), so it surfaces in `values`, not the
-   * `strings` array that `getSqlString` reconstructs.
+   * Built-in date columns (createdAt, updatedAt, …) are Prisma-default
+   * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+   * as a bare wall clock. To truncate to the calendar day the row DISPLAYS in
+   * for a non-UTC user, the column is converted in TWO steps —
+   * `AT TIME ZONE 'UTC'` (reinterpret the wall clock as a UTC instant) then
+   * `AT TIME ZONE ${tz}` (to the user's wall clock) — before `::date`.
+   *
+   * A single `AT TIME ZONE ${tz}` is the bug this guards: it ASSUMES the stored
+   * value is already in the user's zone, mis-shifting by the offset. Verified
+   * against Postgres: an asset at `2026-07-20 23:00Z` (shows as Jul 21 in Tokyo)
+   * truncates to Jul 20 under the single cast, Jul 21 under the double cast.
+   *
+   * The user tz is bound as a SQL parameter (`AT TIME ZONE $n`), so it surfaces
+   * in `values`; the leading `'UTC'` is a fixed literal in the SQL text.
    */
-  it("wraps the column in AT TIME ZONE using the supplied user timezone", () => {
+  it("converts UTC→user-tz (double AT TIME ZONE) before truncating to a date", () => {
     const filter: Filter = {
       name: "createdAt",
       type: "date",
@@ -725,8 +734,9 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       "Asia/Tokyo"
     );
 
-    expect(getSqlString(result)).toContain("AT TIME ZONE");
-    // Bound as a parameter (injection-safe), so it lands in `values`.
+    // The two-step conversion — a single `AT TIME ZONE` would be the off-by-one
+    // bug. The literal 'UTC' lives in the SQL text; the user tz is bound.
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
     expect(result.values).toContain("Asia/Tokyo");
   });
 
@@ -740,7 +750,8 @@ describe("generateWhereClause - built-in date filter timezone", () => {
 
     const result = generateWhereClause(orgId, null, [filter]);
 
-    expect(getSqlString(result)).toContain("AT TIME ZONE");
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    // The (defaulted) user tz is bound as a parameter.
     expect(result.values).toContain("UTC");
   });
 
