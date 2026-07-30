@@ -42,6 +42,7 @@ import {
   removeAssets,
   addScannedAssetsToBooking,
   processBooking,
+  getAvailableAssetsIdsForBooking,
   getExistingBookingDetails,
   assertKitsAddableToActiveBooking,
   getOngoingBookingForAsset,
@@ -8201,6 +8202,54 @@ describe("getExistingBookingDetails — addable statuses", () => {
     await expect(
       getExistingBookingDetails("booking-1", "org-1")
     ).rejects.toThrow(/Draft, Reserved, Ongoing or Overdue/i);
+  });
+});
+
+describe("getAvailableAssetsIdsForBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("returns the ids of assets that don't belong to a kit", async () => {
+    // why: stub the org-scoped asset lookup so the function resolves against
+    // deterministic rows without a real DB; neither asset belongs to a kit.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "asset-1", status: AssetStatus.AVAILABLE, assetKits: [] },
+      { id: "asset-2", status: AssetStatus.AVAILABLE, assetKits: [] },
+    ]);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(["asset-1", "asset-2"], "org-1")
+    ).resolves.toEqual(["asset-1", "asset-2"]);
+  });
+
+  it("rejects a kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
+    // A selected asset that belongs to a kit is user-input validation, not a
+    // server fault, so it must be a 400 kept out of the Sentry error pipeline.
+    // why: stub the org-scoped lookup to return one asset that IS a kit member
+    // (assetKits non-empty) — the rejection branch under test.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        status: AssetStatus.AVAILABLE,
+        assetKits: [{ kitId: "kit-1" }],
+      },
+    ]);
+
+    let thrown: unknown;
+    try {
+      await getAvailableAssetsIdsForBooking(["asset-1"], "org-1");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    expect(err.message).toContain("belong to a kit");
+    // The outer catch re-wraps, but ShelfError inherits status/shouldBeCaptured
+    // from the cause, so the handled-client classification survives.
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
   });
 });
 
