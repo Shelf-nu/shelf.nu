@@ -472,7 +472,8 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
 
 describe("applyBulkUpdatesFromImport — custom field clearing (SHELF-WEBAPP-21W)", () => {
   it("clears a custom field by emitting `undefined`, never a `{ raw: '' }` value", async () => {
-    // Org has a TEXT custom field "Notes".
+    // why: give the org one TEXT custom field ("Notes") so the "Notes" CSV
+    // header resolves to a customField column instead of being ignored.
     vi.mocked(db.customField.findMany).mockResolvedValue([
       {
         id: "cf-notes",
@@ -488,8 +489,9 @@ describe("applyBulkUpdatesFromImport — custom field clearing (SHELF-WEBAPP-21W
       },
     ] as unknown as Awaited<ReturnType<typeof db.customField.findMany>>);
 
-    // The asset currently HAS a value for "Notes", so a blank cell clears it
-    // (detectClearing only fires when there's an existing non-empty value).
+    // why: the asset must already HAVE a "Notes" value so a blank cell is
+    // detected as a clear (detectClearing only fires on an existing non-empty
+    // value) — that's the branch that produced the invalid write.
     vi.mocked(db.asset.findMany).mockResolvedValueOnce([
       makeDbAsset({
         customFields: [
