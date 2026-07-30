@@ -22,6 +22,7 @@ import {
   isNotFoundError,
   maybeUniqueConstraintViolation,
   throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -2388,6 +2389,12 @@ export async function updateLocationAssets({
       label,
       additionalData: { assetIds, organizationId, locationId },
     });
+    // Likewise translate the single-location trigger: an INDIVIDUAL asset added
+    // here while it's still placed at another location. See SHELF-WEBAPP-1P4.
+    throwIfIndividualAssetAlreadyPlaced(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
 
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -2598,12 +2605,26 @@ export async function updateLocationKits({
           }
         })
         .catch((cause) => {
+          // Adding kit-driven `AssetLocation` rows can trip two DB triggers.
+          // Translate both into friendly 400s (no-op for any other error):
+          // - a QUANTITY_TRACKED member exceeding Asset.quantity across
+          //   locations, and
+          // - an INDIVIDUAL member still placed at another location.
+          // See SHELF-WEBAPP-1P4.
+          throwIfAssetQuantityOverAllocation(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
+          throwIfIndividualAssetAlreadyPlaced(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
           throw new ShelfError({
             cause,
             message:
               "Something went wrong while adding the kits to the location. Please try again or contact support.",
             additionalData: { kitIds, userId, locationId },
-            label: "Location",
+            label,
           });
         });
 
