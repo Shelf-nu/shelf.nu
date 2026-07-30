@@ -1256,4 +1256,76 @@ describe("buildAdvancedAssetsQuery", () => {
     expect(sql).toContain(") custody_agg ON TRUE");
     expect(sql).toContain('ORDER BY cu."createdAt" ASC, cu.id ASC');
   });
+
+  // why: regression coverage for the "Created at is 6 hours ahead" report from a
+  // UTC-6 workspace. Prisma maps `DateTime` to `TIMESTAMP(3)` *without* time
+  // zone, and `jsonb_build_object` renders those with no zone designator
+  // ("2026-07-27T19:42:46.459"). `new Date()` then reads that as LOCAL time, so
+  // every non-UTC viewer saw a shifted clock in the advanced asset index while
+  // the asset Activity tab (normal Prisma path) showed the truth. Assert the
+  // shipped SQL stamps an explicit UTC marker on every such field — and, just as
+  // importantly, that it leaves genuine `timestamptz` columns alone.
+  describe("timestamp fields carry an explicit UTC designator in the JSON payload", () => {
+    const UTC_ISO_FORMAT = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
+
+    const wrappedFields: { jsonKey: string; column: string }[] = [
+      { jsonKey: "createdAt", column: 'aq."assetCreatedAt"' },
+      { jsonKey: "updatedAt", column: 'aq."assetUpdatedAt"' },
+      {
+        jsonKey: "mainImageExpiration",
+        column: 'aq."assetMainImageExpiration"',
+      },
+      { jsonKey: "alertDateTime", column: 'ar."alertDateTime"' },
+    ];
+
+    for (const { jsonKey, column } of wrappedFields) {
+      it(`wraps '${jsonKey}' so the client parses it as UTC`, () => {
+        const sql = getQuerySqlString(build());
+
+        expect(sql).toContain(
+          `'${jsonKey}', to_char(${column}, ${UTC_ISO_FORMAT})`
+        );
+        // The bare column must not survive as the JSON value — that is the bug.
+        // Matched up to the delimiter so this also holds for the last key in an
+        // object (no trailing comma), e.g. `alertDateTime`.
+        const bare = new RegExp(
+          `'${jsonKey}',\\s*${column.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            "\\$&"
+          )}\\s*[,)\\n]`
+        );
+        expect(sql).not.toMatch(bare);
+      });
+    }
+
+    it("pins the table aliases the wrapper hardcodes", () => {
+      // `utcJsonTimestamp` builds its SQL with `Prisma.raw`, so typecheck cannot
+      // see these references. Renaming either alias would 500 every /assets page
+      // with `column aq.assetCreatedAt does not exist`; fail here instead.
+      const sql = getQuerySqlString(build());
+
+      expect(sql).toContain(") aq ON TRUE");
+      expect(sql).toContain('FROM public."AssetReminder" ar');
+    });
+
+    it("does not wrap Booking.from/to — they are timestamptz and already correct", () => {
+      // `to_char` on a timestamptz renders in the *session* TimeZone, so
+      // wrapping these would make the payload depend on ambient server config.
+      const sql = getQuerySqlString(build({ withBookings: true }));
+
+      expect(sql).toContain(`'from', bk."from"`);
+      expect(sql).toContain(`'to', bk."to"`);
+      expect(sql).not.toContain(`to_char(bk."from"`);
+      expect(sql).not.toContain(`to_char(bk."to"`);
+    });
+
+    it("keeps the sort keys as real timestamps, not formatted text", () => {
+      // Ordering must stay on the typed column; formatting it would turn the
+      // comparison into a lexicographic one on text.
+      const sql = getQuerySqlString(build({ sortBy: ["createdAt:desc"] }));
+
+      expect(sql).toContain('a."createdAt" AS "assetCreatedAt"');
+      expect(sql).not.toContain('to_char(a."createdAt"');
+    });
+  });
 });
