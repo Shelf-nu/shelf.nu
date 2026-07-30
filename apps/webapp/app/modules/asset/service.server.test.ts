@@ -1459,6 +1459,8 @@ describe("updateAsset asset-model cover image", () => {
   });
 
   it("stamps the model's image onto an asset that has none of its own", async () => {
+    // why: stands in for the model row being linked to — the source of the
+    // image this asset should inherit.
     (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       {
         image: MODEL_IMAGE_URL,
@@ -1480,10 +1482,14 @@ describe("updateAsset asset-model cover image", () => {
   });
 
   it("never overwrites an image the user uploaded for the asset itself", async () => {
+    // why: the persisted row is what makes this case distinct — an image stored
+    // under the asset's own folder, which must survive the model link.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       type: "INDIVIDUAL",
       mainImage: OWN_IMAGE_URL,
     });
+    // why: a model that does have an image, so the test proves the asset's own
+    // image wins rather than that there was nothing to inherit.
     (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       {
         image: MODEL_IMAGE_URL,
@@ -1508,10 +1514,14 @@ describe("updateAsset asset-model cover image", () => {
   // image used to leave the previous model's photo on the row, so the asset
   // showed model A's picture while linked to model B.
   it("clears a previously inherited image when the new model has none", async () => {
+    // why: an asset currently inheriting model A's image — the starting state
+    // the reconcile has to clear when it is relinked.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       type: "INDIVIDUAL",
       mainImage: MODEL_IMAGE_URL,
     });
+    // why: the newly-linked model has no image, which is the case that used to
+    // leave model A's photo behind.
     (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       {
         image: null,
@@ -1534,6 +1544,8 @@ describe("updateAsset asset-model cover image", () => {
   });
 
   it("drops the inherited image when the model is unlinked", async () => {
+    // why: an asset that HAS a link and is showing that model's image; both
+    // fields are read to decide whether the unlink needs reconciling.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       mainImage: MODEL_IMAGE_URL,
       assetModelId: "am-1",
@@ -1553,6 +1565,8 @@ describe("updateAsset asset-model cover image", () => {
   });
 
   it("leaves the asset's own image alone when the model is unlinked", async () => {
+    // why: same linked starting state as above but with the asset's own image,
+    // so the ownership test is what decides the outcome.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       mainImage: OWN_IMAGE_URL,
       assetModelId: "am-1",
@@ -1575,6 +1589,9 @@ describe("updateAsset asset-model cover image", () => {
   // so an unrelated metadata edit would otherwise re-read the model and re-sign
   // its thumbnail every time.
   it("does not touch the image when a save keeps the same model", async () => {
+    // why: stands in for the persisted row this scenario needs — an asset
+    // already linked to `am-1` and already showing that model's image, which is
+    // what makes the incoming `assetModelId` an unchanged link.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       type: "INDIVIDUAL",
       mainImage: MODEL_IMAGE_URL,
