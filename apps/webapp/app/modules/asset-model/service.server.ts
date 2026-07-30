@@ -287,7 +287,14 @@ export async function getInheritableAssetModelImage({
 
   return {
     image: assetModel.image,
-    imageExpiration: assetModel.imageExpiration,
+    /**
+     * `refreshExpiredAssetImages` skips rows whose `mainImageExpiration` is
+     * null, so copying a null through would leave the inheriting asset with a
+     * URL that lapses and is never re-signed. Treat an unknown expiration as
+     * already elapsed: the next read re-signs it from the storage path, which is
+     * self-healing and costs one signed-URL call.
+     */
+    imageExpiration: assetModel.imageExpiration ?? new Date(0),
     thumbnailImage: await signAssetModelThumbnail(assetModel.image),
   };
 }

@@ -165,7 +165,10 @@ const AssetModelItem = ({
       */}
       <div className="flex items-center gap-3">
         {item.image ? (
+          // `imageUrl` is required alongside `withPreview` — see the note at the
+          // matching call site in components/asset-model/form.tsx.
           <ImageWithPreview
+            imageUrl={item.image}
             thumbnailUrl={item.image}
             alt={`${item.name} image`}
             className="size-10 shrink-0 rounded border object-cover"

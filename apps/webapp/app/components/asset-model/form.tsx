@@ -355,7 +355,11 @@ function FullPageForm({
         >
           <div>
             {assetModel?.image ? (
+              // `imageUrl` is required alongside `withPreview`: the preview
+              // trigger is keyboard-focusable and labelled "Open preview for …",
+              // but its handler no-ops without a full-size URL — a dead control.
               <ImageWithPreview
+                imageUrl={assetModel.image}
                 thumbnailUrl={assetModel.image}
                 alt={`${assetModel.name} image`}
                 className="mb-2 size-16 rounded border object-cover"

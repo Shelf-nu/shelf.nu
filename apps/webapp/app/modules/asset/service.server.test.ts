@@ -1536,6 +1536,7 @@ describe("updateAsset asset-model cover image", () => {
   it("drops the inherited image when the model is unlinked", async () => {
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       mainImage: MODEL_IMAGE_URL,
+      assetModelId: "am-1",
     });
 
     await updateAsset({
@@ -1554,6 +1555,7 @@ describe("updateAsset asset-model cover image", () => {
   it("leaves the asset's own image alone when the model is unlinked", async () => {
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       mainImage: OWN_IMAGE_URL,
+      assetModelId: "am-1",
     });
 
     await updateAsset({
@@ -1567,6 +1569,36 @@ describe("updateAsset asset-model cover image", () => {
       .calls[0][0];
     expect(data.assetModel).toEqual({ disconnect: true });
     expect(data.mainImage).toBeUndefined();
+  });
+
+  // why: the edit route resends the asset's current assetModelId on every save,
+  // so an unrelated metadata edit would otherwise re-read the model and re-sign
+  // its thumbnail every time.
+  it("does not touch the image when a save keeps the same model", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      type: "INDIVIDUAL",
+      mainImage: MODEL_IMAGE_URL,
+      assetModelId: "am-1",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: "am-1",
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(data.mainImage).toBeUndefined();
+    // The org-scope IDOR guard still reads the model (select: { id }), but the
+    // image read never happens — so neither does the signed-URL request.
+    expect(db.assetModel.findFirst).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { image: true, imageExpiration: true },
+      })
+    );
+    expect(createSignedUrl).not.toHaveBeenCalled();
   });
 });
 

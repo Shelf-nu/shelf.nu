@@ -2234,17 +2234,20 @@ export async function updateAsset({
        * signals to reconcile ("no model" + "the model's photo"). An image the
        * user uploaded for THIS asset is left untouched.
        *
-       * Note the edit route always sends `assetModelId: assetModelId || null`,
-       * so this branch runs on every save of a model-less asset; the ownership
-       * test makes it a no-op there.
+       * The edit route always sends `assetModelId: assetModelId || null`, so
+       * this branch also runs on every save of an already-model-less asset. Only
+       * a save that actually removes a link needs reconciling, so the read is
+       * skipped when there was no link to begin with.
        */
       if (mainImage === undefined) {
         const currentAsset = await db.asset.findUnique({
           where: { id, organizationId },
-          select: { mainImage: true },
+          select: { mainImage: true, assetModelId: true },
         });
 
-        if (isAssetModelImageUrl(currentAsset?.mainImage)) {
+        const isRemovingLink = currentAsset?.assetModelId != null;
+
+        if (isRemovingLink && isAssetModelImageUrl(currentAsset.mainImage)) {
           Object.assign(data, {
             mainImage: null,
             mainImageExpiration: null,
@@ -2269,7 +2272,7 @@ export async function updateAsset({
       // org-scoped index lookup, only on the link branch.
       const currentAsset = await db.asset.findUnique({
         where: { id, organizationId },
-        select: { type: true, mainImage: true },
+        select: { type: true, mainImage: true, assetModelId: true },
       });
       if (currentAsset && currentAsset.type === AssetType.QUANTITY_TRACKED) {
         throw new ShelfError({
@@ -2302,12 +2305,19 @@ export async function updateAsset({
        * an image) so that re-linking an inheriting asset to a model with no
        * image clears the old model's photo instead of leaving the asset showing
        * model A's picture while linked to model B.
+       *
+       * Gated on the link actually changing: the edit route resends the current
+       * `assetModelId` on every save, so without this an unrelated metadata edit
+       * would cost a model read plus a Supabase signed-URL request each time. A
+       * model whose image changed has already been propagated to its assets by
+       * `propagateAssetModelImageToAssets`, so there is nothing to catch up on.
        */
+      const isChangingModel = currentAsset?.assetModelId !== assetModelId;
       const hasOwnImage =
         currentAsset?.mainImage != null &&
         !isAssetModelImageUrl(currentAsset.mainImage);
 
-      if (mainImage === undefined && !hasOwnImage) {
+      if (isChangingModel && mainImage === undefined && !hasOwnImage) {
         const inherited = await getInheritableAssetModelImage({
           assetModelId,
           organizationId,
