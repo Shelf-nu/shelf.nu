@@ -31,6 +31,9 @@ export default function AssetsLayout() {
       <Stack.Screen name="[id]" options={{ title: "Asset Details" }} />
       <Stack.Screen name="new" options={{ title: "New Asset" }} />
       <Stack.Screen name="edit" options={{ title: "Edit Asset" }} />
+      {/* Asset picker for linking a scanned (claimed, unlinked) QR code —
+          reached from the scanner's Unclaimed Code / No Asset Linked cards. */}
+      <Stack.Screen name="link-qr" options={{ title: "Link QR Code" }} />
       {/* Kits live in this stack so the segmented Assets|Kits switcher swaps
           lists in place and the tab bar keeps Assets active. */}
       <Stack.Screen name="kits/index" options={{ title: "Kits" }} />

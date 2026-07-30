@@ -72,6 +72,7 @@ import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -5321,16 +5322,40 @@ export async function refreshExpiredAssetImages<
   /** Short backoff to prevent retry storms when refresh fails */
   const BACKOFF_SECONDS = 30;
 
-  const applyBackoff = async (asset: (typeof expiredAssets)[number]) => {
-    try {
-      const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
+  /**
+   * DB persist payloads collected while re-signing. Every write this function
+   * would previously `await` inline (the re-signed URLs AND the retry-storm
+   * backoff bumps) is buffered here and flushed OFF the awaited path in a
+   * single background batch after the response value is built — the concurrent
+   * `db.asset.update` burst on this read path was part of what exhausted the
+   * Prisma pool (P2024). The response already carries the fresh URLs, so a
+   * failed background write is harmless: the next load simply re-signs
+   * (idempotent). Each entry is an `updateMany` guarded on the original
+   * `mainImage`, so a deferred write can never overwrite an image that changed
+   * between the read and the flush.
+   */
+  const pendingWrites: Array<{
+    assetId: string;
+    args: Prisma.AssetUpdateManyArgs;
+  }> = [];
+
+  // Buffer a backoff bump instead of writing it inline. Synchronous now (no DB
+  // round-trip on the critical path); the actual write happens in the flush.
+  // Guarded on the original `mainImage` (optimistic concurrency) so a stale
+  // backoff can't land on an image that was replaced between read and flush.
+  const applyBackoff = (asset: (typeof expiredAssets)[number]) => {
+    const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+    pendingWrites.push({
+      assetId: asset.id,
+      args: {
+        where: {
+          id: asset.id,
+          organizationId: asset.organizationId,
+          mainImage: asset.mainImage,
+        },
         data: { mainImageExpiration: backoffExpiration },
-      });
-    } catch {
-      // If even the backoff update fails, just move on
-    }
+      },
+    });
   };
 
   const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
@@ -5338,7 +5363,7 @@ export async function refreshExpiredAssetImages<
       const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
       if (!mainImagePath) {
         // Can't extract path — apply backoff to avoid retrying every load
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5383,9 +5408,30 @@ export async function refreshExpiredAssetImages<
         updateData.thumbnailImage = newThumbnailUrl;
       }
 
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
-        data: updateData,
+      // Defer the persist off the awaited path — buffer the payload and let the
+      // single background flush below write it. The response value returned here
+      // is independent of whether/when this write lands, so the fresh URLs are
+      // served immediately even if the write later fails. The guard makes the
+      // write optimistic: if the image was replaced (e.g. by
+      // updateAssetMainImage) between this read and the flush, the guard no
+      // longer matches and the stale re-signed URL is silently skipped instead
+      // of clobbering the newer image. We guard on thumbnailImage too, but only
+      // when this write actually sets one — otherwise a mainImage-only refresh
+      // (thumbnail re-sign failed) would be needlessly skipped by a thumbnail
+      // that changed independently.
+      pendingWrites.push({
+        assetId: asset.id,
+        args: {
+          where: {
+            id: asset.id,
+            organizationId: asset.organizationId,
+            mainImage: asset.mainImage,
+            ...(updateData.thumbnailImage !== undefined
+              ? { thumbnailImage: asset.thumbnailImage }
+              : {}),
+          },
+          data: updateData,
+        },
       });
 
       return {
@@ -5395,20 +5441,17 @@ export async function refreshExpiredAssetImages<
         ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
     } catch (error) {
-      // Asset deleted between query and update — not an error
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
-        return null;
-      }
+      // This block only wraps extractStoragePath + createSignedUrl now — the DB
+      // persist was deferred to the background flush — so no Prisma P2025 can
+      // surface here; the flush's guarded updateMany handles deleted/changed
+      // rows (count 0, no throw).
 
       // File deleted from storage — expected, not a bug
       if (isStorageObjectNotFound(error)) {
         Logger.info(
           `Image file not found in storage for asset ${asset.id}, applying backoff`
         );
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5431,7 +5474,7 @@ export async function refreshExpiredAssetImages<
         })
       );
 
-      await applyBackoff(asset);
+      applyBackoff(asset);
       throw error;
     }
   };
@@ -5474,6 +5517,48 @@ export async function refreshExpiredAssetImages<
       }
       refreshedMap.set(result.value.id, entry);
     }
+  }
+
+  // Flush all buffered writes (re-signed URLs + backoff bumps) OFF the awaited
+  // path in a fire-and-forget background task. Each write goes through the
+  // shared, process-wide background-write limiter (withBackgroundWriteSlot), so
+  // no matter how many /assets index loads run concurrently — or how many other
+  // features defer background writes — the aggregate can never exceed
+  // MAX_CONCURRENT_BACKGROUND_WRITES connections at once and starve the reads
+  // this deferral protects (P2024). Running on a long-lived Node server (Fly),
+  // the writes still complete after the response is sent — which is the intent.
+  // Every failure is swallowed and logged (never rethrown): the fresh URL is
+  // already served and the next load simply re-signs, so the write is
+  // idempotent and non-critical.
+  if (pendingWrites.length > 0) {
+    void Promise.all(
+      pendingWrites.map(({ assetId, args }) =>
+        // updateMany (not update) applies the guard in args.where: count 0 means
+        // the row was deleted OR its image changed since the read, so there is
+        // nothing safe to persist. Both are expected no-ops, and updateMany
+        // returns count 0 rather than throwing P2025, so those cases need no
+        // per-write error handling.
+        withBackgroundWriteSlot(() => db.asset.updateMany(args)).catch(
+          (error: unknown) => {
+            // why: URL already served; log as a warning so a persist failure
+            // never becomes an unhandled rejection or a Sentry error.
+            Logger.warn(
+              new ShelfError({
+                cause: error,
+                message:
+                  "Background persist of refreshed asset image URLs failed",
+                additionalData: { assetId },
+                label: "Assets",
+                shouldBeCaptured: false,
+              })
+            );
+          }
+        )
+      )
+    ).catch(() => {
+      // Extra guard: per-write errors are already swallowed above, but keep the
+      // outer background promise from ever surfacing as an unhandled rejection.
+    });
   }
 
   return assets.map((a) => {
