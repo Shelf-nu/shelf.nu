@@ -2,11 +2,13 @@ import {
   ShelfError,
   isAssetQuantityOverAllocationError,
   isHandledClientError,
+  isIndividualAssetAlreadyPlacedError,
   isLikeShelfError,
   isPrismaTransientError,
   makeShelfError,
   notAllowedMethod,
   throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "./error";
 
 // @vitest-environment node
@@ -625,6 +627,104 @@ describe(throwIfAssetQuantityOverAllocation.name, () => {
     }
     // 400 → routed to Sentry logs, kept out of the error/issue pipeline.
     expect(isHandledClientError(thrown)).toBe(true);
+  });
+});
+
+describe(isIndividualAssetAlreadyPlacedError.name, () => {
+  // why: emulate the runtime shape of the trigger violation — a
+  // `PrismaClientUnknownRequestError` is just an Error whose `message` carries
+  // the raw `RAISE EXCEPTION` text.
+  const singleLocationTriggerError = new Error(
+    "Invalid `prisma.assetLocation.createMany()` invocation: INDIVIDUAL asset abc123 already placed at a location"
+  );
+
+  it("detects the single-location trigger message", () => {
+    expect(
+      isIndividualAssetAlreadyPlacedError(singleLocationTriggerError)
+    ).toBe(true);
+  });
+
+  it("detects the trigger error nested two ShelfError layers deep", () => {
+    const inner = new ShelfError({
+      cause: singleLocationTriggerError,
+      label: "Location",
+      message:
+        "Something went wrong while adding the kits to the location. Please try again or contact support.",
+    });
+    const outer = new ShelfError({
+      cause: inner,
+      label: "Location",
+      message: "Something went wrong while updating the location kits.",
+    });
+    expect(isIndividualAssetAlreadyPlacedError(outer)).toBe(true);
+  });
+
+  it("does NOT match the quantity over-allocation trigger or unrelated errors", () => {
+    // The two pivot triggers must stay distinct so each maps to its own message.
+    expect(
+      isIndividualAssetAlreadyPlacedError(
+        new Error("AssetLocation total 2 exceeds Asset.quantity 1 for asset x")
+      )
+    ).toBe(false);
+    // The sibling single-kit trigger has different wording.
+    expect(
+      isIndividualAssetAlreadyPlacedError(
+        new Error("INDIVIDUAL asset abc123 already linked to a kit")
+      )
+    ).toBe(false);
+    expect(isIndividualAssetAlreadyPlacedError(new Error("boom"))).toBe(false);
+    expect(isIndividualAssetAlreadyPlacedError(null)).toBe(false);
+  });
+
+  it("returns false (does not stack-overflow) on a self-referential cause cycle", () => {
+    const cyclic: { message: string; cause?: unknown } = { message: "boom" };
+    cyclic.cause = cyclic;
+    expect(isIndividualAssetAlreadyPlacedError(cyclic)).toBe(false);
+  });
+});
+
+describe(throwIfIndividualAssetAlreadyPlaced.name, () => {
+  const triggerError = new Error(
+    "INDIVIDUAL asset abc123 already placed at a location"
+  );
+
+  it("throws a friendly 400, non-captured ShelfError for the trigger violation", () => {
+    let thrown: unknown;
+    try {
+      throwIfIndividualAssetAlreadyPlaced(triggerError, {
+        label: "Location",
+        additionalData: { locationId: "loc-1", kitIds: ["k1"] },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const shelfError = thrown as ShelfError;
+    expect(shelfError.status).toBe(400);
+    expect(shelfError.shouldBeCaptured).toBe(false);
+    expect(shelfError.label).toBe("Location");
+    expect(shelfError.cause).toBe(triggerError);
+    expect(shelfError.additionalData).toEqual({
+      locationId: "loc-1",
+      kitIds: ["k1"],
+    });
+    // Non-technical, actionable user message.
+    expect(shelfError.message).toContain("one location at a time");
+    // 400 → routed to Sentry logs, kept out of the error/issue pipeline.
+    expect(isHandledClientError(shelfError)).toBe(true);
+  });
+
+  it("does NOT throw (passes through) for any other error", () => {
+    expect(() =>
+      throwIfIndividualAssetAlreadyPlaced(
+        new Error("AssetLocation total 2 exceeds Asset.quantity 1 for asset x"),
+        { label: "Location" }
+      )
+    ).not.toThrow();
+    expect(() =>
+      throwIfIndividualAssetAlreadyPlaced(null, { label: "Location" })
+    ).not.toThrow();
   });
 });
 
