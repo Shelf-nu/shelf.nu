@@ -109,6 +109,22 @@ export default function AssetModelForm({
   const nameError =
     fetcherValidationErrors?.name?.message || zo.errors.name()?.message;
 
+  // Client-side file guard (type + 8MB cap), shared with the asset, kit and
+  // full-page model image inputs so every surface rejects the same files with
+  // the same copy.
+  const [, validateFile] = useAtom(assetImageValidateFileAtom);
+  const fileError = useAtomValue(fileErrorAtom);
+
+  /**
+   * The image has no zod field (a File can't be parsed by the text schema), so
+   * its errors arrive either from the client-side guard or as the server's
+   * `field: "image"` ShelfError on the fetcher.
+   */
+  const inlineImageError =
+    (fetcher.data?.error?.additionalData?.field === "image"
+      ? fetcher.data.error.message
+      : undefined) ?? fileError;
+
   /* ------------------------------------------------------------------ */
   /*  Inline / dialog mode                                               */
   /* ------------------------------------------------------------------ */
@@ -120,6 +136,13 @@ export default function AssetModelForm({
         className="w-full rounded border border-gray-200 bg-white px-6 py-5"
         ref={zo.ref}
         action={apiUrl}
+        /**
+         * Multipart so this dialog can carry the cover image too. Without it the
+         * file input silently posts nothing and a model created from the asset
+         * form would have no image — leaving its assets nothing to inherit,
+         * which reads as "the feature doesn't work".
+         */
+        encType="multipart/form-data"
       >
         <div className="gap-4 md:flex md:items-end">
           <Input
@@ -143,6 +166,24 @@ export default function AssetModelForm({
             defaultValue={assetModel?.description || undefined}
           />
           <input type="hidden" name="preventRedirect" value="true" />
+        </div>
+
+        {/* Same cover-image field as the settings form, in a compact layout. */}
+        <div className="mt-4">
+          <Input
+            label="Image"
+            disabled={disabled}
+            accept={ACCEPT_SUPPORTED_IMAGES}
+            name="image"
+            type="file"
+            onChange={validateFile}
+            error={inlineImageError}
+            inputClassName="border-0 shadow-none p-0 rounded-none"
+          />
+          <p className="mt-1 text-[12px] text-gray-500">
+            Optional. Shown on every asset of this model that has no image of
+            its own. PNG, JPG, JPEG or WebP, max. 8 MB.
+          </p>
         </div>
 
         <div className="mt-4">
