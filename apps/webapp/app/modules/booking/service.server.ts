@@ -11766,10 +11766,17 @@ export async function getAvailableAssetsIdsForBooking(
     });
 
     if (selectedAssets.some((asset) => asset.assetKits.length > 0)) {
+      // User-input validation, not a server fault: adding kit-member assets
+      // directly is disallowed (kits are added as a unit). A 400 keeps this out
+      // of the Sentry error pipeline (handled client error). The outer catch
+      // re-wraps but inherits status/shouldBeCaptured from this cause. See
+      // SHELF-WEBAPP-21Y.
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
         label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
