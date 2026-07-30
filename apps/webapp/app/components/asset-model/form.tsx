@@ -17,7 +17,10 @@ import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
-import { assetImageValidateFileAtom, fileErrorAtom } from "~/atoms/file";
+import {
+  assetModelImageErrorAtom,
+  assetModelImageValidateFileAtom,
+} from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
@@ -33,6 +36,10 @@ import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+
+/** Links each image input to the <p> stating its accepted formats and size. */
+const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
+const PAGE_IMAGE_HELP_ID = "asset-model-image-help";
 
 /** Zod schema for creating/editing an asset model. */
 export const AssetModelFormSchema = z.object({
@@ -109,11 +116,11 @@ export default function AssetModelForm({
   const nameError =
     fetcherValidationErrors?.name?.message || zo.errors.name()?.message;
 
-  // Client-side file guard (type + 8MB cap), shared with the asset, kit and
-  // full-page model image inputs so every surface rejects the same files with
-  // the same copy.
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
-  const fileError = useAtomValue(fileErrorAtom);
+  // Client-side file guard (type + 8MB cap). Deliberately SCOPED, not the shared
+  // `fileErrorAtom`: this dialog opens inside the asset form, whose own image
+  // input would otherwise surface — and clear — this field's error.
+  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  const fileError = useAtomValue(assetModelImageErrorAtom);
 
   /**
    * The image has no zod field (a File can't be parsed by the text schema), so
@@ -172,6 +179,10 @@ export default function AssetModelForm({
         <div className="mt-4">
           <Input
             label="Image"
+            // Input spreads unknown props straight onto the <input> and adds no
+            // describedby of its own, so this is the only link between the field
+            // and its format/size requirements for assistive tech.
+            aria-describedby={INLINE_IMAGE_HELP_ID}
             disabled={disabled}
             accept={ACCEPT_SUPPORTED_IMAGES}
             name="image"
@@ -180,7 +191,10 @@ export default function AssetModelForm({
             error={inlineImageError}
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
-          <p className="mt-1 text-[12px] text-gray-500">
+          <p
+            id={INLINE_IMAGE_HELP_ID}
+            className="mt-1 text-[12px] text-gray-500"
+          >
             Optional. Shown on every asset of this model that has no image of
             its own. PNG, JPG, JPEG or WebP, max. 8 MB.
           </p>
@@ -260,8 +274,8 @@ function FullPageForm({
 
   // Client-side file guard (type + 8MB cap) shared with the asset/kit image
   // inputs, so all three surfaces reject the same files with the same copy.
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
-  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  const fileError = useAtomValue(assetModelImageErrorAtom);
 
   /**
    * The image upload has no zod field (a File can't be parsed by the text
@@ -407,7 +421,7 @@ function FullPageForm({
                 withPreview
               />
             ) : null}
-            <p className="hidden lg:block">
+            <p id={PAGE_IMAGE_HELP_ID} className="hidden lg:block">
               Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
             </p>
             <Input
@@ -418,11 +432,19 @@ function FullPageForm({
               onChange={validateFile}
               label="Image"
               hideLabel
+              /**
+               * The requirements text is duplicated for the two breakpoints, so
+               * both ids are referenced — whichever copy is display:none is
+               * absent from the accessibility tree, leaving exactly one
+               * description. `Input` spreads unknown props onto the <input> and
+               * adds no describedby of its own, so nothing is being overridden.
+               */
+              aria-describedby={`${PAGE_IMAGE_HELP_ID} ${PAGE_IMAGE_HELP_ID}-sm`}
               error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
-            <p className="mt-2 lg:hidden">
+            <p id={`${PAGE_IMAGE_HELP_ID}-sm`} className="mt-2 lg:hidden">
               Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
             </p>
           </div>
