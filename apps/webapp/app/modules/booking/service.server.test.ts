@@ -2012,14 +2012,14 @@ describe("updateBookingAssets", () => {
         const orBranches = args?.where?.booking?.OR as
           | Array<
               | { status: string }
-              | { AND: [{ from: { lte: Date } }, { to: { gte: Date } }] }
+              | { AND: [{ from: { lt: Date } }, { to: { gt: Date } }] }
             >
           | undefined;
         const dateBranch = orBranches?.find(
           (
             branch
           ): branch is {
-            AND: [{ from: { lte: Date } }, { to: { gte: Date } }];
+            AND: [{ from: { lt: Date } }, { to: { gt: Date } }];
           } => "AND" in branch
         );
         const matching = rows
@@ -2027,8 +2027,8 @@ describe("updateBookingAssets", () => {
           .filter((r) => {
             if (!dateBranch) return true;
             return (
-              r.from <= dateBranch.AND[0].from.lte &&
-              r.to >= dateBranch.AND[1].to.gte
+              r.from < dateBranch.AND[0].from.lt &&
+              r.to > dateBranch.AND[1].to.gt
             );
           })
           .map((r) => ({
@@ -2128,6 +2128,44 @@ describe("updateBookingAssets", () => {
           quantity: 5,
           from: otherFrom,
           to: otherTo,
+        },
+      ]);
+
+      const result = await updateBookingAssets(qtyParams);
+
+      expect(result).toEqual(mockBooking);
+    });
+
+    it("allows REDUCING an already-over-committed booking even when the pool is exhausted (directional #2725)", async () => {
+      expect.assertions(1);
+
+      const mockBooking = {
+        id: "booking-1",
+        name: "Test Booking",
+        status: BookingStatus.RESERVED,
+        from: futureFromDate,
+        to: futureToDate,
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+      // This booking ALREADY holds 8 standalone units of the asset — the
+      // directional guard reads this via `bookingAsset.groupBy`.
+      (
+        db.bookingAsset.groupBy as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: QT_ASSET_ID, _sum: { quantity: 8 } }]);
+
+      // Another overlapping booking holds 5 of the 10-unit pool, so only 5 is
+      // bookable for OTHERS — this booking is already over-committed (holds 8).
+      // `qtyParams` reduces it to 7: still above the 5 bookable, but 7 <= its
+      // current 8, so the directional guard must ALLOW it (the #2725 recovery
+      // rule — without `currentQuantity` this would be rejected as an increase).
+      mockOtherReservations([
+        {
+          bookingId: "other-booking",
+          quantity: 5,
+          from: futureFromDate,
+          to: futureToDate,
         },
       ]);
 
@@ -2451,14 +2489,14 @@ describe("reserveBooking", () => {
         const orBranches = args?.where?.booking?.OR as
           | Array<
               | { status: string }
-              | { AND: [{ from: { lte: Date } }, { to: { gte: Date } }] }
+              | { AND: [{ from: { lt: Date } }, { to: { gt: Date } }] }
             >
           | undefined;
         const dateBranch = orBranches?.find(
           (
             branch
           ): branch is {
-            AND: [{ from: { lte: Date } }, { to: { gte: Date } }];
+            AND: [{ from: { lt: Date } }, { to: { gt: Date } }];
           } => "AND" in branch
         );
         const matching = rows
@@ -2466,8 +2504,8 @@ describe("reserveBooking", () => {
           .filter((r) => {
             if (!dateBranch) return true;
             return (
-              r.from <= dateBranch.AND[0].from.lte &&
-              r.to >= dateBranch.AND[1].to.gte
+              r.from < dateBranch.AND[0].from.lt &&
+              r.to > dateBranch.AND[1].to.gt
             );
           })
           .map((r) => ({
@@ -2510,6 +2548,49 @@ describe("reserveBooking", () => {
       );
       // The guard throws inside the transaction, before the status write.
       expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("reserves a KIT-only QT asset even when the free pool is exhausted (kit slices skip the free-pool guard)", async () => {
+      expect.assertions(1);
+
+      // The QT asset is on this booking ONLY as a kit-driven slice
+      // (`assetKitId` set). Its units come from the kit's own allocation —
+      // already subtracted from `bookable` via `inKits` — NOT the free pool,
+      // so the reserve-time free-pool guard must skip it even though OTHER
+      // bookings have exhausted the standalone pool. Counting the kit slice
+      // against `bookable` would wrongly reject this reservation (Codex P1).
+      const base = draftBookingWithQtyAsset(7);
+      const kitOnlyBooking = {
+        ...base,
+        bookingAssets: [
+          { ...base.bookingAssets[0], assetKitId: "kit-1", id: "ba-kit-1" },
+        ],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(kitOnlyBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...kitOnlyBooking,
+        status: BookingStatus.RESERVED,
+      });
+
+      // Other bookings hold the ENTIRE 10-unit standalone pool in this window.
+      mockOtherReservations([
+        {
+          bookingId: "other-booking",
+          quantity: 10,
+          from: mockReserveParams.from,
+          to: mockReserveParams.to,
+        },
+      ]);
+
+      await reserveBooking(mockReserveParams);
+
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BookingStatus.RESERVED }),
+        })
+      );
     });
 
     it("reserves successfully when the other booking's window does not overlap", async () => {
@@ -2986,14 +3067,14 @@ describe("checkoutBooking", () => {
         const orBranches = args?.where?.booking?.OR as
           | Array<
               | { status: string }
-              | { AND: [{ from: { lte: Date } }, { to: { gte: Date } }] }
+              | { AND: [{ from: { lt: Date } }, { to: { gt: Date } }] }
             >
           | undefined;
         const dateBranch = orBranches?.find(
           (
             branch
           ): branch is {
-            AND: [{ from: { lte: Date } }, { to: { gte: Date } }];
+            AND: [{ from: { lt: Date } }, { to: { gt: Date } }];
           } => "AND" in branch
         );
         const rows = reservedRows
@@ -3002,10 +3083,10 @@ describe("checkoutBooking", () => {
           .filter((r) => {
             if (!dateBranch) return true;
             // Mirrors the production `.OR` overlap test:
-            // booking.from <= window.to AND booking.to >= window.from.
+            // booking.from < window.to AND booking.to > window.from (strict).
             return (
-              r.from <= dateBranch.AND[0].from.lte &&
-              r.to >= dateBranch.AND[1].to.gte
+              r.from < dateBranch.AND[0].from.lt &&
+              r.to > dateBranch.AND[1].to.gt
             );
           })
           .map((r) => ({

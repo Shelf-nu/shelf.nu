@@ -1700,8 +1700,15 @@ export async function reserveBooking({
      * the SAME transaction as the status write, so the read-then-decide
      * can't race a sibling reservation/checkout/quantity-adjustment.
      */
-    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
-      isQuantityTracked(ba.asset)
+    // Only STANDALONE (free-pool) slices are validated against `bookable`.
+    // Kit-driven slices (`assetKitId != null`) draw from their kit's own
+    // allocation, which `getAssetAvailability` already subtracts from the pool
+    // via `inKits` — validating them against the free pool too would
+    // double-count and reject a booking whose kit legitimately owns those units
+    // (e.g. an asset entirely allocated to a kit has `bookable = 0`, yet
+    // reserving a booking that contains that kit must still succeed). Codex P1.
+    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter(
+      (ba) => isQuantityTracked(ba.asset) && ba.assetKitId == null
     );
     const uniqueQtyTrackedAssetIds = Array.from(
       new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
@@ -1713,8 +1720,8 @@ export async function reserveBooking({
           qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
         );
 
-        // Sum the requested units per unique QT asset across every
-        // BookingAsset row (standalone + kit-driven) that references it.
+        // Sum the requested units per unique QT asset across the standalone
+        // BookingAsset rows that reference it (kit rows excluded above).
         const requestedQtyByAssetId = new Map<string, number>();
         for (const ba of qtyTrackedBookingAssets) {
           requestedQtyByAssetId.set(
@@ -7781,18 +7788,23 @@ export async function updateBookingAssets({
        * checking twice would only reject drafts prematurely while they're
        * still being assembled.
        *
-       * Scope: only the standalone quantities and kit slices THIS CALL is
-       * writing (`standaloneQuantities` / `effectiveSlices`) are checked —
-       * not a full re-aggregation of every existing `BookingAsset` row for
-       * the asset already on the booking. Existing rows untouched by this
-       * call already passed this same guard (or the reserve/checkout-time
-       * guard) when they were added; re-validating them here would be a
-       * redundant read for every call. The standalone amount IS the row's
-       * new target quantity (the upsert below sets it exactly), so — with
-       * `currentQuantity` defaulted to 0 and `excludeBookingId: id`
-       * removing this booking's own prior reservation from the pool — the
-       * check compares the full new total against every OTHER booking's
-       * demand, exactly like `reserveBooking`'s guard.
+       * Scope: only the STANDALONE quantities THIS CALL is writing
+       * (`standaloneQuantities`) are validated against the free pool. Kit
+       * slices (`effectiveSlices`) draw from their kit's own allocation, which
+       * `getAssetAvailability` already subtracts from the pool via `inKits` —
+       * counting them here too would double-count and reject a legitimate kit
+       * booking (Codex P1). The standalone amount IS the row's new target
+       * quantity (the upsert below sets it exactly).
+       *
+       * `currentQuantity` is this booking's EXISTING standalone quantity for
+       * the asset (fetched below), so the shared guard's directional rule
+       * treats a reduction as always-allowed: a booking already over-committed
+       * by OTHER bookings must still be reducible via the manage-assets route
+       * (the same #2725 recovery rule the adjust dialog relies on). Without it,
+       * `excludeBookingId: id` removes this booking's own reservation from the
+       * pool and every edit — including reductions — would be checked as a
+       * fresh increase against every OTHER booking's demand, re-creating the
+       * over-reservation dead-end.
        */
       if (
         (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(b.status)
@@ -7813,30 +7825,44 @@ export async function updateBookingAssets({
                 standaloneQuantities[index]
             );
           });
-          effectiveSlices.forEach((slice) => {
-            if (!qtAssetIds.has(slice.assetId)) return;
-            requestedQtyByAssetId.set(
-              slice.assetId,
-              (requestedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
-            );
-          });
 
           if (requestedQtyByAssetId.size > 0) {
             const assetById = new Map(validAssets.map((a) => [a.id, a]));
+            const affectedAssetIds = Array.from(requestedQtyByAssetId.keys());
 
-            for (const assetId of requestedQtyByAssetId.keys()) {
+            for (const assetId of affectedAssetIds) {
               await lockAssetForQuantityUpdate(tx, assetId);
             }
 
+            // This booking's CURRENT standalone quantity per affected asset
+            // (pre-upsert), so a reduction is recognized as directional and
+            // always allowed by the guard.
+            const existingStandalone = await tx.bookingAsset.groupBy({
+              by: ["assetId"],
+              where: {
+                bookingId: id,
+                assetId: { in: affectedAssetIds },
+                assetKitId: null,
+              },
+              _sum: { quantity: true },
+            });
+            const currentQtyByAssetId = new Map<string, number>(
+              existingStandalone.map(
+                (row: {
+                  assetId: string;
+                  _sum: { quantity: number | null };
+                }) => [row.assetId, row._sum.quantity ?? 0]
+              )
+            );
+
             await assertAssetQuantitiesAvailable(
-              Array.from(requestedQtyByAssetId.entries()).map(
-                ([assetId, requestedQuantity]) => ({
-                  assetId,
-                  requestedQuantity,
-                  assetTitle: assetById.get(assetId)?.title ?? "",
-                  unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
-                })
-              ),
+              affectedAssetIds.map((assetId) => ({
+                assetId,
+                requestedQuantity: requestedQtyByAssetId.get(assetId) ?? 0,
+                currentQuantity: currentQtyByAssetId.get(assetId) ?? 0,
+                assetTitle: assetById.get(assetId)?.title ?? "",
+                unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
+              })),
               {
                 organizationId,
                 tx,

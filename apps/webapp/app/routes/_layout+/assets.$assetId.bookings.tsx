@@ -7,7 +7,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { getStockConflictedBookingIds } from "~/modules/booking/stock-conflicts.server";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -129,13 +129,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `.claude/rules/quantity-semantics-per-surface.md` / the module doc in
      * `~/modules/booking/stock-conflicts.server`).
      */
-    const conflictedBookingIds = await getStockConflictedBookingIds({
-      bookings: bookings.map((b) => ({
-        id: b.id,
-        status: b.status,
-        from: b.from,
-        to: b.to,
-      })),
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
       organizationId,
     });
 
@@ -150,10 +145,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: bookings.map((b) => ({
-          ...b,
-          hasStockConflict: conflictedBookingIds.has(b.id),
-        })),
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

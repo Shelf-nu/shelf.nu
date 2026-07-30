@@ -58,7 +58,16 @@ function StockConflictPill() {
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="cursor-help">
+          {/* `role="img"` + `aria-label` so screen-reader users get the full
+              explanation, not just the bare "Stock conflict" text (WCAG 2.1
+              AA). A non-interactive role (rather than `tabIndex`/`role=button`)
+              keeps this valid inside the clickable booking row and satisfies
+              jsx-a11y/no-noninteractive-tabindex. */}
+          <span
+            role="img"
+            aria-label="Stock conflict: one or more quantity-tracked assets are over-reserved for these dates. Open the booking to resolve."
+            className="cursor-help"
+          >
             <Badge
               color={BADGE_COLORS.amber.bg}
               textColor={BADGE_COLORS.amber.text}

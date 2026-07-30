@@ -292,7 +292,8 @@ describe("action (adjust-asset-quantity)", () => {
     // One other booking overlaps the full window reserving 7 units, so
     // bookable = 10 - 7 = 3. Current row quantity = 2, requested = 8, so the
     // increase (6) exceeds bookable (3) and must be rejected. The message's
-    // `available` figure is `currentQuantity + bookable` = 2 + 3 = 5.
+    // `available` figure is the ABSOLUTE `bookable` (3) — the max this booking
+    // may hold — not `currentQuantity + bookable`.
     const bookingAsset = buildBookingAssetFixture({
       quantity: 2,
       unitOfMeasure: null,

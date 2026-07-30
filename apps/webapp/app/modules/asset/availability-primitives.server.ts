@@ -170,7 +170,15 @@ export function buildActiveBookingWhere(
     bookingWhere.OR = [
       { status: BookingStatus.OVERDUE },
       {
-        AND: [{ from: { lte: window.to } }, { to: { gte: window.from } }],
+        // STRICT (half-open) overlap: `from < window.to` AND `to > window.from`.
+        // The peak-concurrent sweep is end-exclusive (a booking ending exactly
+        // when another begins never overlaps — see `peakConcurrent`'s tie-break),
+        // so the fetch predicate must match: an inclusive `lte`/`gte` would pull
+        // in a back-to-back booking that ends exactly at `window.from` (or starts
+        // exactly at `window.to`), and because the sweep uses that booking's own
+        // interval it would contribute its full quantity to the peak and make a
+        // legitimately-available back-to-back booking look out of stock.
+        AND: [{ from: { lt: window.to } }, { to: { gt: window.from } }],
       },
     ];
   }
@@ -314,7 +322,10 @@ export async function assertAssetQuantityNotBelowReservations({
       // Custody has no `organizationId` column of its own — scope through
       // the asset relation, mirroring `getAssetAvailabilityBatch`'s
       // identical org-scope guard (org-scope-user-supplied-ids rule).
-      where: { assetId, asset: { organizationId } },
+      // `kitCustodyId: null` = OPERATOR custody only — kit-inherited custody is
+      // already counted via `AssetKit.quantity` (`inKits` below), so including
+      // it here would double-count against the committed threshold.
+      where: { assetId, asset: { organizationId }, kitCustodyId: null },
       _sum: { quantity: true },
     }),
     tx.assetKit.groupBy({

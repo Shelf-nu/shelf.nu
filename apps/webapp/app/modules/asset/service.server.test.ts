@@ -7,7 +7,7 @@ import {
   recordEvent,
   recordEvents,
 } from "~/modules/activity-event/service.server";
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability.server";
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
@@ -146,7 +146,10 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // that it's called with the right args when quantity is lowered on a
 // QUANTITY_TRACKED asset, and that its rejection propagates — so stubbing it
 // avoids re-deriving custody/kit/booking fixtures in this already-large file.
-vitest.mock("~/modules/asset/availability.server", () => ({
+// `updateAsset` imports the guard from the dependency-free leaf (not
+// `availability.server`) to avoid the heavy transitive import chain — mock the
+// leaf so the stub intercepts.
+vitest.mock("~/modules/asset/availability-primitives.server", () => ({
   assertAssetQuantityNotBelowReservations: vitest.fn(),
 }));
 

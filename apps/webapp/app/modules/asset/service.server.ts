@@ -34,7 +34,13 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability.server";
+// Imported from the dependency-free leaf (NOT `availability.server`) so that
+// importing asset/service.server does NOT drag in the heavy
+// `availability.server → booking/service.server` graph (which transitively
+// pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
+// the reports `*.server.test.ts` files import this module via
+// `refreshExpiredAssetImages`). See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,

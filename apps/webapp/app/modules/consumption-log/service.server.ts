@@ -225,21 +225,36 @@ export type AvailableQuantity = {
  * records for the asset) and subtracts from the total to determine availability.
  *
  * @param assetId - The ID of the asset to compute availability for
+ * @param client - Prisma client or interactive transaction. Defaults to the
+ *   global `db`. `getAssetAvailability` passes its active `tx` so this read
+ *   joins the caller's transaction — row locks taken and uncommitted writes
+ *   made earlier in that tx are visible here, which is what keeps the
+ *   availability write guards race-safe (reading `total`/`inCustody` outside
+ *   the tx would defeat the `lockAssetForQuantityUpdate` serialization).
  * @returns The quantity breakdown: total, inCustody, and available
  * @throws {ShelfError} If the asset is not found or the query fails
  */
 export async function computeAvailableQuantity(
-  assetId: string
+  assetId: string,
+  // Typed `any` for the same reason `createConsumptionLog.tx` is: the extended
+  // client's interactive-tx type doesn't reduce to a clean `typeof db`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any = db
 ): Promise<AvailableQuantity> {
   try {
     const [asset, custodySum] = await Promise.all([
-      db.asset.findUniqueOrThrow({
+      client.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging)
         where: { id: assetId },
         select: { quantity: true },
       }),
-      db.custody.aggregate({
-        where: { assetId },
+      client.custody.aggregate({
+        // `kitCustodyId: null` = OPERATOR custody only. Kit-inherited custody
+        // rows (a kit holding this asset that is itself assigned custody) carry
+        // a non-null `kitCustodyId`; those units are already accounted for via
+        // `AssetKit.quantity` (`inKits`) in the availability model, so counting
+        // them here too would double-deduct them from the pool.
+        where: { assetId, kitCustodyId: null },
         _sum: { quantity: true },
       }),
     ]);

@@ -688,7 +688,12 @@ describe("flagBookingStockConflicts", () => {
 
     expect(client.custody.groupBy).toHaveBeenCalledWith({
       by: ["assetId"],
-      where: { assetId: { in: ["a1"] }, asset: { organizationId: ORG_ID } },
+      where: {
+        assetId: { in: ["a1"] },
+        asset: { organizationId: ORG_ID },
+        // Operator custody only — kit-inherited custody is counted via inKits.
+        kitCustodyId: null,
+      },
       _sum: { quantity: true },
     });
     expect(client.assetKit.groupBy).toHaveBeenCalledWith({

@@ -64,6 +64,7 @@ import {
 } from "~/modules/asset/availability.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 const label: ErrorLabel = "Booking";
 
@@ -222,7 +223,14 @@ export async function flagBookingStockConflicts({
         // `getAssetAvailabilityBatch`'s identical `custody.groupBy` call.
         client.custody.groupBy({
           by: ["assetId"],
-          where: { assetId: { in: assetIds }, asset: { organizationId } },
+          where: {
+            assetId: { in: assetIds },
+            asset: { organizationId },
+            // Operator custody only — kit-inherited custody is counted via
+            // inKits (assetKit.groupBy below), so including it here would
+            // double-deduct and produce false stock conflicts.
+            kitCustodyId: null,
+          },
           _sum: { quantity: true },
         }),
         // Units currently allocated into kits. Mirrors
@@ -480,4 +488,66 @@ export async function getStockConflictedBookingIds({
       label,
     });
   }
+}
+
+/**
+ * Loader helper: decorates a bookings-list page's rows with the
+ * `hasStockConflict` flag that drives the amber "Stock conflict" pill.
+ *
+ * The pill is DECORATIVE, so a failure computing conflicts must never take the
+ * whole bookings list down. {@link getStockConflictedBookingIds} throws on any
+ * query error, so it is wrapped here in a try/catch: on failure every row is
+ * returned with `hasStockConflict: false` and the error is logged, rather than
+ * bubbling a 500 up through the loader. Centralizes the identical decoration
+ * the five bookings-list loaders share (`bookings._index`, `me.bookings`,
+ * `kits.$kitId.bookings`, `assets.$assetId.bookings`,
+ * `settings.team.users.$userId.bookings`).
+ *
+ * @param args.bookings - The loader's booking rows (each needs at least
+ *   `{ id, status, from, to }`; extra fields are preserved).
+ * @param args.organizationId - Caller's organization — scopes every query.
+ * @param args.db - Prisma client or active transaction; defaults to `db`.
+ * @returns The same rows, each extended with `hasStockConflict: boolean`.
+ */
+export async function decorateBookingsWithStockConflicts<
+  B extends BookingForStockConflictLookup,
+>({
+  bookings,
+  organizationId,
+  db: dbOrTx,
+}: {
+  bookings: B[];
+  organizationId: string;
+  db?: StockConflictedBookingIdsDbClient;
+}): Promise<Array<B & { hasStockConflict: boolean }>> {
+  let conflictedIds = new Set<string>();
+  try {
+    conflictedIds = await getStockConflictedBookingIds({
+      bookings: bookings.map((b) => ({
+        id: b.id,
+        status: b.status,
+        from: b.from,
+        to: b.to,
+      })),
+      organizationId,
+      db: dbOrTx,
+    });
+  } catch (cause) {
+    // Decorative pill only — never fail the whole list because conflict
+    // detection errored. Log and fall back to "no conflicts".
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Failed to compute booking stock conflicts; rendering the bookings list without the conflict pill.",
+        additionalData: { organizationId, bookingCount: bookings.length },
+        label,
+      })
+    );
+  }
+
+  return bookings.map((b) => ({
+    ...b,
+    hasStockConflict: conflictedIds.has(b.id),
+  }));
 }

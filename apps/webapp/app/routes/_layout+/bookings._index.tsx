@@ -26,7 +26,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { getStockConflictedBookingIds } from "~/modules/booking/stock-conflicts.server";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -202,13 +202,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * page's bookings — same batching contract as the disposition/checkout
      * maps below, just one more fixed-cost query group.
      */
-    const conflictedBookingIds = await getStockConflictedBookingIds({
-      bookings: bookings.map((b) => ({
-        id: b.id,
-        status: b.status,
-        from: b.from,
-        to: b.to,
-      })),
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
       organizationId,
     });
 
@@ -331,10 +326,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       payload({
         header,
         currentOrganization,
-        items: bookings.map((b) => ({
-          ...b,
-          hasStockConflict: conflictedBookingIds.has(b.id),
-        })),
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

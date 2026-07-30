@@ -615,9 +615,10 @@ describe("getAssetAvailability", () => {
       expect(call?.[0]?.where?.booking?.OR).toEqual([
         { status: "OVERDUE" },
         {
+          // STRICT half-open overlap (end-exclusive, matches peakConcurrent).
           AND: [
-            { from: { lte: new Date("2026-08-01T15:00:00Z") } },
-            { to: { gte: new Date("2026-07-30T08:58:00Z") } },
+            { from: { lt: new Date("2026-08-01T15:00:00Z") } },
+            { to: { gt: new Date("2026-07-30T08:58:00Z") } },
           ],
         },
       ]);
@@ -841,7 +842,12 @@ describe("getAssetAvailabilityBatch", () => {
     });
     expect(client.custody.groupBy).toHaveBeenCalledWith({
       by: ["assetId"],
-      where: { assetId: { in: ["a1"] }, asset: { organizationId: ORG_ID } },
+      where: {
+        assetId: { in: ["a1"] },
+        asset: { organizationId: ORG_ID },
+        // Operator custody only — kit-inherited custody is counted via inKits.
+        kitCustodyId: null,
+      },
       _sum: { quantity: true },
     });
   });
@@ -1973,7 +1979,12 @@ describe("assertAssetQuantityNotBelowReservations", () => {
 
     expect(tx.custody.groupBy).toHaveBeenCalledWith({
       by: ["assetId"],
-      where: { assetId: ASSET_ID, asset: { organizationId: ORG_ID } },
+      where: {
+        assetId: ASSET_ID,
+        asset: { organizationId: ORG_ID },
+        // Operator custody only — kit-inherited custody is counted via inKits.
+        kitCustodyId: null,
+      },
       _sum: { quantity: true },
     });
     expect(tx.assetKit.groupBy).toHaveBeenCalledWith({

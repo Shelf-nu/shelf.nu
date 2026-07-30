@@ -346,7 +346,10 @@ export async function getAssetAvailability({
   const client = (dbOrTx ?? db) as unknown as PrismaClientOrTx;
   try {
     const [{ total, inCustody }, inKitsAgg, checkedOut] = await Promise.all([
-      computeAvailableQuantity(assetId),
+      // Pass the active client so `total`/`inCustody` read from the SAME
+      // transaction as the rest of this availability computation (matters when
+      // a write guard calls this inside a row-locked tx — see the param doc).
+      computeAvailableQuantity(assetId, client),
       client.assetKit.aggregate({
         where: { assetId, organizationId },
         _sum: { quantity: true },
@@ -666,7 +669,14 @@ export async function getAssetAvailabilityBatch(
           // resolved ourselves, but this primitive is a reusable export
           // that any caller can hand arbitrary ids to) can never leak into
           // `inCustody`. Mirrors the org-scope-user-supplied-ids rule.
-          where: { assetId: { in: uniqueAssetIds }, asset: { organizationId } },
+          // `kitCustodyId: null` = OPERATOR custody only — kit-inherited
+          // custody rows are already counted via `AssetKit.quantity`
+          // (`inKits`), so including them here would double-deduct.
+          where: {
+            assetId: { in: uniqueAssetIds },
+            asset: { organizationId },
+            kitCustodyId: null,
+          },
           _sum: { quantity: true },
         }),
         client.assetKit.groupBy({
