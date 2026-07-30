@@ -12,7 +12,10 @@ import AssetModelForm, {
   AssetModelFormSchema,
 } from "~/components/asset-model/form";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
-import { createAssetModel } from "~/modules/asset-model/service.server";
+import {
+  createAssetModel,
+  updateAssetModelImage,
+} from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -74,8 +77,17 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
+    /**
+     * The form is multipart (it carries an optional cover image), so the
+     * request body has to be read twice: once here for the text fields and
+     * once by `updateAssetModelImage`'s streaming file parser. Cloning is the
+     * same pattern the kit routes use — a body stream can only be consumed
+     * once.
+     */
+    const clonedRequest = request.clone();
+
     const parsedData = parseData(
-      await request.formData(),
+      await clonedRequest.formData(),
       AssetModelFormSchema,
       {
         additionalData: { userId, organizationId },
@@ -84,6 +96,17 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const assetModel = await createAssetModel({
       ...parsedData,
+      userId: authSession.userId,
+      organizationId,
+    });
+
+    /**
+     * Runs after the create so the image is stored under the new model's id.
+     * No-ops when the user didn't pick a file.
+     */
+    await updateAssetModelImage({
+      request,
+      assetModelId: assetModel.id,
       userId: authSession.userId,
       organizationId,
     });

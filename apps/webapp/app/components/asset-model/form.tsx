@@ -13,13 +13,16 @@
  */
 import { useEffect } from "react";
 import type { AssetModel } from "@prisma/client";
+import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import { assetImageValidateFileAtom, fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/settings.asset-models.new";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -27,6 +30,7 @@ import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 
@@ -47,7 +51,7 @@ type AssetModelFormProps = {
   /** Pre-filled values for edit mode */
   assetModel?: Pick<
     AssetModel,
-    "name" | "description" | "defaultCategoryId" | "defaultValuation"
+    "name" | "description" | "defaultCategoryId" | "defaultValuation" | "image"
   >;
   /** The API URL to submit the form to (used in inline/dialog mode). */
   apiUrl?: string;
@@ -213,9 +217,29 @@ function FullPageForm({
     actionData?.error
   );
 
+  // Client-side file guard (type + 8MB cap) shared with the asset/kit image
+  // inputs, so all three surfaces reject the same files with the same copy.
+  const [, validateFile] = useAtom(assetImageValidateFileAtom);
+  const fileError = useAtomValue(fileErrorAtom);
+
+  /**
+   * The image upload has no zod field (a File can't be parsed by the text
+   * schema), so its errors arrive either as the client-side file guard's
+   * message or as the server's `field: "image"` ShelfError.
+   */
+  const imageError =
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ?? fileError;
+
   return (
     <Card className="w-full lg:w-min">
-      <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+      <Form
+        ref={zo.ref}
+        method="post"
+        className="flex w-full flex-col gap-2"
+        encType="multipart/form-data"
+      >
         {/* -- Top action bar (visible on md+) -- */}
         <div className="flex items-start justify-between border-b pb-5">
           <div>
@@ -320,6 +344,42 @@ function FullPageForm({
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
             </span>
+          </div>
+        </FormRow>
+
+        {/* -- Image -- */}
+        <FormRow
+          rowLabel="Image"
+          subHeading="Uploaded once and shown on every asset of this model that has no image of its own."
+          className="border-b-0 pt-[10px]"
+        >
+          <div>
+            {assetModel?.image ? (
+              <ImageWithPreview
+                thumbnailUrl={assetModel.image}
+                alt={`${assetModel.name} image`}
+                className="mb-2 size-16 rounded border object-cover"
+                withPreview
+              />
+            ) : null}
+            <p className="hidden lg:block">
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
+            </p>
+            <Input
+              disabled={disabled}
+              accept={ACCEPT_SUPPORTED_IMAGES}
+              name="image"
+              type="file"
+              onChange={validateFile}
+              label="Image"
+              hideLabel
+              error={imageError}
+              className="mt-2"
+              inputClassName="border-0 shadow-none p-0 rounded-none"
+            />
+            <p className="mt-2 lg:hidden">
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
+            </p>
           </div>
         </FormRow>
 

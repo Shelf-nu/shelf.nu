@@ -119,6 +119,17 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest.fn().mockResolvedValue({ user: null }),
       findFirst: vitest.fn().mockResolvedValue({ user: null }),
     },
+    // why: the model-image inheritance path reads the linked model's image
+    // (getInheritableAssetModelImage). Default: a model with no image, so the
+    // existing suites see no behaviour change.
+    assetModel: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+      findFirstOrThrow: vitest.fn().mockResolvedValue({
+        id: "am-1",
+        defaultCategoryId: null,
+        defaultValuation: null,
+      }),
+    },
     assetCustomFieldValue: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
@@ -1388,6 +1399,174 @@ describe("updateAsset custom-field writes", () => {
     ]);
     // Existence info is read in a single query, not once per field.
     expect(db.assetCustomFieldValue.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ====================================================================== */
+/*  Asset-model cover-image inheritance                                    */
+/* ====================================================================== */
+
+/**
+ * An asset linked to an AssetModel that carries a cover image shows that
+ * image instead of the grey placeholder — the model's file is uploaded and
+ * stored once, and each asset points at that single storage object.
+ */
+describe("updateAsset asset-model cover image", () => {
+  /** Signed URL of model `am-1`'s shared cover image. */
+  const MODEL_IMAGE_URL =
+    "https://xyz.supabase.co/storage/v1/object/sign/assets/user-1/asset-models/am-1/image-1700000000000.png?token=abc";
+  /** An image the user uploaded for this specific asset. */
+  const OWN_IMAGE_URL =
+    "https://xyz.supabase.co/storage/v1/object/sign/assets/user-1/asset-1/main-image-1700000000000.png?token=abc";
+
+  beforeEach(async () => {
+    vitest.clearAllMocks();
+    // why: clearAllMocks keeps implementations AND unconsumed `...Once` queues,
+    // so sibling suites leak into these tests — one pins extractStoragePath to a
+    // fixed path, others leave queued findUnique values behind. These tests hinge
+    // on the real path parsing (model folder vs per-asset folder) and on their
+    // own asset row, so reset the mocks this suite drives and re-arm them.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockReset();
+
+    const actualImageUtils = await vitest.importActual<
+      Record<string, (...args: unknown[]) => unknown>
+    >("~/components/assets/asset-image/utils");
+    (extractStoragePath as ReturnType<typeof vitest.fn>).mockImplementation(
+      actualImageUtils.extractStoragePath
+    );
+
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Asset 1",
+      category: null,
+      valuation: null,
+    });
+    // INDIVIDUAL so the model link is allowed; no image of its own by default.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      type: "INDIVIDUAL",
+      mainImage: null,
+    });
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        id: "am-1",
+      }
+    );
+    (createSignedUrl as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      "https://signed-thumbnail"
+    );
+  });
+
+  it("stamps the model's image onto an asset that has none of its own", async () => {
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        image: MODEL_IMAGE_URL,
+        imageExpiration: new Date("2026-08-01T00:00:00.000Z"),
+      }
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: "am-1",
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(data.mainImage).toBe(MODEL_IMAGE_URL);
+    expect(data.thumbnailImage).toBe("https://signed-thumbnail");
+  });
+
+  it("never overwrites an image the user uploaded for the asset itself", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      type: "INDIVIDUAL",
+      mainImage: OWN_IMAGE_URL,
+    });
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        image: MODEL_IMAGE_URL,
+        imageExpiration: new Date("2026-08-01T00:00:00.000Z"),
+      }
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: "am-1",
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    // `undefined` = field untouched by this update.
+    expect(data.mainImage).toBeUndefined();
+  });
+
+  // why: regression — re-linking an inheriting asset to a model that has NO
+  // image used to leave the previous model's photo on the row, so the asset
+  // showed model A's picture while linked to model B.
+  it("clears a previously inherited image when the new model has none", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      type: "INDIVIDUAL",
+      mainImage: MODEL_IMAGE_URL,
+    });
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        image: null,
+        imageExpiration: null,
+      }
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: "am-2",
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(data.mainImage).toBeNull();
+    expect(data.mainImageExpiration).toBeNull();
+    expect(data.thumbnailImage).toBeNull();
+  });
+
+  it("drops the inherited image when the model is unlinked", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      mainImage: MODEL_IMAGE_URL,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: null,
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(data.assetModel).toEqual({ disconnect: true });
+    expect(data.mainImage).toBeNull();
+  });
+
+  it("leaves the asset's own image alone when the model is unlinked", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      mainImage: OWN_IMAGE_URL,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      assetModelId: null,
+    } as any);
+
+    const { data } = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(data.assetModel).toEqual({ disconnect: true });
+    expect(data.mainImage).toBeUndefined();
   });
 });
 
