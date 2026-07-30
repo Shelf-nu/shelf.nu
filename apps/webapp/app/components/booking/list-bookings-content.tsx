@@ -156,8 +156,6 @@ type ListBookingsContentProps = {
           profilePicture: true;
         };
       };
-      from: true;
-      to: true;
       custodianUser: true;
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
