@@ -67,7 +67,10 @@ import { db } from "~/database/db.server";
 import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
 import { checkoutSessionsToLogsByAsset } from "~/modules/booking/checkout-attribution";
 import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
-import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
+import {
+  computeAvailableQuantity,
+  type AvailableQuantityClient,
+} from "~/modules/consumption-log/service.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import {
@@ -349,7 +352,14 @@ export async function getAssetAvailability({
       // Pass the active client so `total`/`inCustody` read from the SAME
       // transaction as the rest of this availability computation (matters when
       // a write guard calls this inside a row-locked tx — see the param doc).
-      computeAvailableQuantity(assetId, client),
+      // `client` is the real db/tx behind the module's minimal `PrismaClientOrTx`
+      // structural type, so it genuinely carries the `asset`/`custody` delegates
+      // `AvailableQuantityClient` needs — same `as unknown as` bridge this
+      // module already uses for its clients (see the cast above).
+      computeAvailableQuantity(
+        assetId,
+        client as unknown as AvailableQuantityClient
+      ),
       client.assetKit.aggregate({
         where: { assetId, organizationId },
         _sum: { quantity: true },

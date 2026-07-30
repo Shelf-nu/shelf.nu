@@ -1730,7 +1730,11 @@ export async function reserveBooking({
           );
         }
 
-        for (const assetId of uniqueQtyTrackedAssetIds) {
+        // Acquire locks in a deterministic (sorted) global order so two
+        // concurrent transactions touching the same assets can never deadlock
+        // by locking them in opposite orders. Mirrors `updateBookingAssets`
+        // and the checkout guard.
+        for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
           await lockAssetForQuantityUpdate(tx, assetId);
         }
 
@@ -2152,7 +2156,10 @@ async function checkoutBookingWritesWithinTx(
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
-    for (const assetId of uniqueQtyTrackedAssetIds) {
+    // Sorted so concurrent transactions acquire these row locks in the same
+    // global order — prevents deadlocks with `reserveBooking` /
+    // `updateBookingAssets`, which lock the same assets sorted too.
+    for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
       await lockAssetForQuantityUpdate(tx, assetId);
 
       const { bookable } = await getAssetAvailability({
@@ -7828,7 +7835,11 @@ export async function updateBookingAssets({
 
           if (requestedQtyByAssetId.size > 0) {
             const assetById = new Map(validAssets.map((a) => [a.id, a]));
-            const affectedAssetIds = Array.from(requestedQtyByAssetId.keys());
+            // Sorted for a deterministic global lock order (deadlock-safety) —
+            // matches `reserveBooking` / the checkout guard.
+            const affectedAssetIds = Array.from(
+              requestedQtyByAssetId.keys()
+            ).sort();
 
             for (const assetId of affectedAssetIds) {
               await lockAssetForQuantityUpdate(tx, assetId);

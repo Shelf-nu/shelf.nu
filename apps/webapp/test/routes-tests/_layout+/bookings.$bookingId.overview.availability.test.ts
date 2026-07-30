@@ -97,7 +97,7 @@ function wireReservedRows(
         | {
             OR?: Array<
               | { status: string }
-              | { AND: [{ from: { lte: Date } }, { to: { gte: Date } }] }
+              | { AND: [{ from: { lt: Date } }, { to: { gt: Date } }] }
             >;
           }
         | undefined;
@@ -105,18 +105,18 @@ function wireReservedRows(
         (
           branch
         ): branch is {
-          AND: [{ from: { lte: Date } }, { to: { gte: Date } }];
+          AND: [{ from: { lt: Date } }, { to: { gt: Date } }];
         } => "AND" in branch
       );
       if (!dateBranch) {
         // Un-windowed read — every candidate row is a plain-total contributor.
         return Promise.resolve(candidateRows);
       }
-      const windowTo = dateBranch.AND[0].from.lte;
-      const windowFrom = dateBranch.AND[1].to.gte;
+      const windowTo = dateBranch.AND[0].from.lt;
+      const windowFrom = dateBranch.AND[1].to.gt;
       return Promise.resolve(
         candidateRows.filter(
-          (row) => row.booking.from <= windowTo && row.booking.to >= windowFrom
+          (row) => row.booking.from < windowTo && row.booking.to > windowFrom
         )
       );
     }
@@ -186,8 +186,8 @@ describe("buildAvailableUnitsByAsset", () => {
       { status: "OVERDUE" },
       {
         AND: [
-          { from: { lte: new Date("2026-02-10T00:00:00Z") } },
-          { to: { gte: new Date("2026-02-01T00:00:00Z") } },
+          { from: { lt: new Date("2026-02-10T00:00:00Z") } },
+          { to: { gt: new Date("2026-02-01T00:00:00Z") } },
         ],
       },
     ]);

@@ -45,7 +45,9 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
   computeAvailableQuantity: vitest.fn(),
 }));
 
+import { Logger } from "~/utils/logger";
 import {
+  decorateBookingsWithStockConflicts,
   flagBookingStockConflicts,
   getStockConflictedBookingIds,
 } from "./stock-conflicts.server";
@@ -912,5 +914,107 @@ describe("getStockConflictedBookingIds", () => {
       },
       select: { bookingId: true, assetId: true },
     });
+  });
+});
+
+/**
+ * Tests for the loader helper `decorateBookingsWithStockConflicts`, which wraps
+ * `getStockConflictedBookingIds` in a try/catch so the decorative "Stock
+ * conflict" pill can never take down a whole bookings list.
+ */
+describe("decorateBookingsWithStockConflicts", () => {
+  /** A loader row with an extra field, to prove field preservation. */
+  type Row = BookingForStockConflictLookup & { name: string };
+
+  it("adds hasStockConflict per row from the detector and preserves every original field", async () => {
+    const client = createMockClient();
+    // Grouping query (the wrapper's own): b1 & b2 both reserve QT asset a1.
+    client.bookingAsset.findMany.mockResolvedValueOnce([
+      { bookingId: "b1", assetId: "a1" },
+      { bookingId: "b2", assetId: "a1" },
+    ]);
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // Reserved-rows query: b1(6) + b2(6) overlap → peak 12 > 10 → both flagged.
+    client.bookingAsset.findMany.mockResolvedValueOnce([
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b1",
+        quantity: 6,
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-10T00:00:00Z",
+      }),
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b2",
+        quantity: 6,
+        from: "2026-01-05T00:00:00Z",
+        to: "2026-01-15T00:00:00Z",
+      }),
+    ]);
+
+    const bookings: Row[] = [
+      {
+        id: "b1",
+        name: "Alpha",
+        status: "RESERVED",
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+      {
+        id: "b2",
+        name: "Beta",
+        status: "RESERVED",
+        from: new Date("2026-01-05T00:00:00Z"),
+        to: new Date("2026-01-15T00:00:00Z"),
+      },
+      {
+        // No QT asset row → never flagged.
+        id: "b3",
+        name: "Gamma",
+        status: "RESERVED",
+        from: new Date("2026-02-01T00:00:00Z"),
+        to: new Date("2026-02-10T00:00:00Z"),
+      },
+    ];
+
+    const result = await decorateBookingsWithStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings,
+    });
+
+    expect(result).toEqual([
+      { ...bookings[0], hasStockConflict: true },
+      { ...bookings[1], hasStockConflict: true },
+      { ...bookings[2], hasStockConflict: false },
+    ]);
+  });
+
+  it("falls back to hasStockConflict:false for every row (and logs) when detection throws", async () => {
+    const client = createMockClient();
+    // Any query error inside `getStockConflictedBookingIds` must be swallowed.
+    client.bookingAsset.findMany.mockRejectedValue(new Error("db unavailable"));
+    const errorSpy = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+
+    const bookings: Row[] = [
+      { id: "b1", name: "Alpha", status: "RESERVED", from: null, to: null },
+      { id: "b2", name: "Beta", status: "RESERVED", from: null, to: null },
+    ];
+
+    const result = await decorateBookingsWithStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings,
+    });
+
+    // Never throws; every row falls back to `false`; the error is logged once.
+    expect(result).toEqual([
+      { ...bookings[0], hasStockConflict: false },
+      { ...bookings[1], hasStockConflict: false },
+    ]);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    errorSpy.mockRestore();
   });
 });

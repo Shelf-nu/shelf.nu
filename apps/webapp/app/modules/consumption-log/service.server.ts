@@ -21,6 +21,7 @@ import {
   BookingStatus,
   ConsumptionCategory as ConsumptionCategoryEnum,
 } from "@prisma/client";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 // Imported from the dependency-free leaf (NOT `availability.server`) to avoid
 // the cycle `consumption-log → availability.server → booking/service.server →
@@ -219,6 +220,18 @@ export type AvailableQuantity = {
 };
 
 /**
+ * Minimal client surface {@link computeAvailableQuantity} reads through — the
+ * `asset` and `custody` delegates only. A `Pick` of {@link ExtendedPrismaClient}
+ * so BOTH the root `db` client and an interactive-transaction client satisfy it
+ * without a cast (an interactive tx is structurally a subset of the extended
+ * client), letting `getAssetAvailability` thread its active `tx` straight in.
+ */
+export type AvailableQuantityClient = Pick<
+  ExtendedPrismaClient,
+  "asset" | "custody"
+>;
+
+/**
  * Computes the available quantity for a quantity-tracked asset.
  *
  * Calculates how many units are currently in custody (summing all custody
@@ -236,10 +249,7 @@ export type AvailableQuantity = {
  */
 export async function computeAvailableQuantity(
   assetId: string,
-  // Typed `any` for the same reason `createConsumptionLog.tx` is: the extended
-  // client's interactive-tx type doesn't reduce to a clean `typeof db`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any = db
+  client: AvailableQuantityClient = db
 ): Promise<AvailableQuantity> {
   try {
     const [asset, custodySum] = await Promise.all([
