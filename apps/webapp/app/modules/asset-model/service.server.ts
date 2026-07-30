@@ -509,28 +509,74 @@ export async function propagateAssetModelImageToAssets({
     select: { id: true, mainImage: true },
   });
 
-  const inheritingAssetIds = candidates
-    .filter(
-      (asset) =>
-        asset.mainImage === null ||
-        isAssetModelImageUrl(asset.mainImage, assetModelId)
-    )
-    .map((asset) => asset.id);
+  const inheriting = candidates.filter(
+    (asset) =>
+      asset.mainImage === null ||
+      isAssetModelImageUrl(asset.mainImage, assetModelId)
+  );
 
-  if (inheritingAssetIds.length === 0) {
+  return writeGuardedByObservedImage(inheriting, organizationId, {
+    mainImage: image,
+    mainImageExpiration: imageExpiration,
+    thumbnailImage,
+  });
+}
+
+/**
+ * Applies an image write to assets, guarded on the `mainImage` each row was
+ * observed to have.
+ *
+ * The ownership decision ("is this asset inheriting, or does it have its own
+ * image?") happens in application code against a prior read, so a plain
+ * `updateMany` by id would clobber an image uploaded in the gap between that
+ * read and this write — the exact case the per-asset-image-wins contract must
+ * not lose. Carrying the observed value in the predicate makes each row's write
+ * conditional: a row that changed underneath simply matches zero rows and keeps
+ * whatever it now holds. Same optimistic-concurrency shape
+ * `refreshExpiredAssetImages` uses for its deferred re-signed URLs.
+ *
+ * Rows are grouped by observed value, so the common case (all null, or all
+ * showing the same model URL) is a single query.
+ *
+ * @param assets - Rows to write, each carrying the `mainImage` just read
+ * @param organizationId - Org scope for the write
+ * @param data - The image fields to set
+ * @returns Number of rows that actually changed
+ */
+async function writeGuardedByObservedImage(
+  assets: { id: string; mainImage: string | null }[],
+  organizationId: Organization["id"],
+  data: {
+    mainImage: string | null;
+    mainImageExpiration: Date | null;
+    thumbnailImage: string | null;
+  }
+) {
+  if (assets.length === 0) {
     return 0;
   }
 
-  const { count } = await db.asset.updateMany({
-    where: { id: { in: inheritingAssetIds }, organizationId },
-    data: {
-      mainImage: image,
-      mainImageExpiration: imageExpiration,
-      thumbnailImage,
-    },
+  /** observed `mainImage` → ids of the assets that had it */
+  const idsByObservedImage = new Map<string | null, string[]>();
+  assets.forEach((asset) => {
+    const ids = idsByObservedImage.get(asset.mainImage);
+    if (ids) {
+      ids.push(asset.id);
+      return;
+    }
+    idsByObservedImage.set(asset.mainImage, [asset.id]);
   });
 
-  return count;
+  const results = await Promise.all(
+    [...idsByObservedImage.entries()].map(([observedImage, ids]) =>
+      db.asset.updateMany({
+        where: { id: { in: ids }, organizationId, mainImage: observedImage },
+        data,
+      })
+    )
+  );
+
+  return results.reduce((total, result) => total + result.count, 0);
 }
 
 /**
@@ -564,26 +610,15 @@ export async function clearInheritedAssetModelImages({
     select: { id: true, mainImage: true, assetModelId: true },
   });
 
-  const inheritingAssetIds = candidates
-    .filter((asset) =>
-      isAssetModelImageUrl(asset.mainImage, asset.assetModelId ?? undefined)
-    )
-    .map((asset) => asset.id);
+  const inheriting = candidates.filter((asset) =>
+    isAssetModelImageUrl(asset.mainImage, asset.assetModelId ?? undefined)
+  );
 
-  if (inheritingAssetIds.length === 0) {
-    return 0;
-  }
-
-  const { count } = await db.asset.updateMany({
-    where: { id: { in: inheritingAssetIds }, organizationId },
-    data: {
-      mainImage: null,
-      mainImageExpiration: null,
-      thumbnailImage: null,
-    },
+  return writeGuardedByObservedImage(inheriting, organizationId, {
+    mainImage: null,
+    mainImageExpiration: null,
+    thumbnailImage: null,
   });
-
-  return count;
 }
 
 /**
@@ -635,10 +670,24 @@ export async function refreshExpiredAssetModelImages<
       });
       const imageExpiration = threeDaysFromNow();
 
-      await db.assetModel.update({
-        where: { id: model.id, organizationId: model.organizationId },
+      /**
+       * Guarded on the image we read, so a cover replaced (and propagated to
+       * this model's assets) between that read and this write is not overwritten
+       * with a re-signed URL for the superseded object. Zero rows matched means
+       * a newer cover won — drop this refresh and let the next load re-read.
+       */
+      const { count } = await db.assetModel.updateMany({
+        where: {
+          id: model.id,
+          organizationId: model.organizationId,
+          image: model.image,
+        },
         data: { image, imageExpiration },
       });
+
+      if (count === 0) {
+        return null;
+      }
 
       return { id: model.id, image, imageExpiration };
     })

@@ -11,6 +11,7 @@ import {
   getInheritableAssetModelImage,
   isAssetModelImageUrl,
   propagateAssetModelImageToAssets,
+  refreshExpiredAssetModelImages,
   updateAssetModel,
   deleteAssetModel,
   bulkDeleteAssetModels,
@@ -25,6 +26,7 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn(),
       findFirstOrThrow: vitest.fn(),
       update: vitest.fn(),
+      updateMany: vitest.fn(),
       deleteMany: vitest.fn(),
       count: vitest.fn(),
     },
@@ -559,7 +561,13 @@ describe("bulkDeleteAssetModels", () => {
     });
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-inheriting"] }, organizationId: "org-123" },
+      where: {
+        id: { in: ["asset-inheriting"] },
+        organizationId: "org-123",
+        // Guarded on the image the row was observed to have, so a concurrent
+        // per-asset upload is never clobbered.
+        mainImage: MODEL_IMAGE_URL,
+      },
       data: {
         mainImage: null,
         mainImageExpiration: null,
@@ -573,6 +581,63 @@ describe("bulkDeleteAssetModels", () => {
     ).toBeLessThan(
       vitest.mocked(db.assetModel.deleteMany).mock.invocationCallOrder[0]
     );
+  });
+});
+
+describe("refreshExpiredAssetModelImages", () => {
+  const expiredModel = {
+    id: "model-1",
+    organizationId: "org-123",
+    image: MODEL_IMAGE_URL,
+    imageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("leaves an unexpired image alone", async () => {
+    const fresh = {
+      ...expiredModel,
+      imageExpiration: new Date("2999-01-01T00:00:00.000Z"),
+    };
+
+    await expect(refreshExpiredAssetModelImages([fresh])).resolves.toEqual([
+      fresh,
+    ]);
+    expect(db.assetModel.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("re-signs an expired image, guarded on the image it read", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.updateMany.mockResolvedValue({ count: 1 });
+
+    const [refreshed] = await refreshExpiredAssetModelImages([expiredModel]);
+
+    expect(db.assetModel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "model-1",
+        organizationId: "org-123",
+        image: MODEL_IMAGE_URL,
+      },
+      data: {
+        image: expect.stringContaining("-models/model-1/"),
+        imageExpiration: expect.any(Date),
+      },
+    });
+    expect(refreshed.image).not.toBe(MODEL_IMAGE_URL);
+  });
+
+  // why: a cover replaced (and propagated to this model's assets) between the
+  // read and this write must not be overwritten with a re-signed URL for the
+  // superseded object.
+  it("discards the refresh when a newer cover already won", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.updateMany.mockResolvedValue({ count: 0 });
+
+    const [refreshed] = await refreshExpiredAssetModelImages([expiredModel]);
+
+    expect(refreshed.image).toBe(MODEL_IMAGE_URL);
   });
 });
 
@@ -605,7 +670,13 @@ describe("clearInheritedAssetModelImages", () => {
     });
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-inheriting"] }, organizationId: "org-123" },
+      where: {
+        id: { in: ["asset-inheriting"] },
+        organizationId: "org-123",
+        // Guarded on the image the row was observed to have, so a concurrent
+        // per-asset upload is never clobbered.
+        mainImage: MODEL_IMAGE_URL,
+      },
       data: {
         mainImage: null,
         mainImageExpiration: null,
@@ -767,8 +838,10 @@ describe("propagateAssetModelImageToAssets", () => {
       { id: "asset-inheriting", mainImage: MODEL_IMAGE_URL_RESIGNED },
       { id: "asset-own-image", mainImage: OWN_ASSET_IMAGE_URL },
     ]);
+    // The two inheriting rows have different observed images, so they land in
+    // two grouped, individually-guarded writes of one row each.
     // @ts-expect-error mock setup
-    db.asset.updateMany.mockResolvedValue({ count: 2 });
+    db.asset.updateMany.mockResolvedValue({ count: 1 });
 
     const count = await propagateAssetModelImageToAssets({
       assetModelId: "model-1",
@@ -782,10 +855,14 @@ describe("propagateAssetModelImageToAssets", () => {
       where: { assetModelId: "model-1", organizationId: "org-123" },
       select: { id: true, mainImage: true },
     });
+    // Two writes: the rows are grouped by the image each was observed to have,
+    // and every predicate carries that value so a concurrent per-asset upload
+    // can't be clobbered.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: {
-        id: { in: ["asset-no-image", "asset-inheriting"] },
+        id: { in: ["asset-no-image"] },
         organizationId: "org-123",
+        mainImage: null,
       },
       data: {
         mainImage: MODEL_IMAGE_URL,
@@ -796,6 +873,25 @@ describe("propagateAssetModelImageToAssets", () => {
         thumbnailImage: MODEL_THUMBNAIL_URL,
       },
     });
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["asset-inheriting"] },
+        organizationId: "org-123",
+        mainImage: MODEL_IMAGE_URL_RESIGNED,
+      },
+      data: {
+        mainImage: MODEL_IMAGE_URL,
+        mainImageExpiration: imageExpiration,
+        thumbnailImage: MODEL_THUMBNAIL_URL,
+      },
+    });
+    expect(db.asset.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining(["asset-own-image"]) },
+        }),
+      })
+    );
     expect(count).toBe(2);
   });
 
@@ -830,6 +926,34 @@ describe("propagateAssetModelImageToAssets", () => {
     });
 
     expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(count).toBe(0);
+  });
+
+  // why: the inheriting/own-image decision is made in app code against a prior
+  // read. Without the observed image in the predicate, an upload landing in that
+  // gap would be overwritten by the model cover.
+  it("reports no change for an asset whose image moved between the read and the write", async () => {
+    // @ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-racing", mainImage: null },
+    ]);
+    // Zero rows matched: the row no longer holds the image we observed.
+    // @ts-expect-error mock setup
+    db.asset.updateMany.mockResolvedValue({ count: 0 });
+
+    const count = await propagateAssetModelImageToAssets({
+      assetModelId: "model-1",
+      organizationId: "org-123",
+      image: MODEL_IMAGE_URL,
+      imageExpiration,
+      thumbnailImage: MODEL_THUMBNAIL_URL,
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ mainImage: null }),
+      })
+    );
     expect(count).toBe(0);
   });
 });

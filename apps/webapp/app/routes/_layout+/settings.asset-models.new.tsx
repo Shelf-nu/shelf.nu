@@ -14,6 +14,7 @@ import AssetModelForm, {
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   createAssetModel,
+  deleteAssetModel,
   updateAssetModelImage,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -103,13 +104,27 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     /**
      * Runs after the create so the image is stored under the new model's id.
      * No-ops when the user didn't pick a file.
+     *
+     * A failure here (file rejected, storage or signing error) would otherwise
+     * leave the model committed while the action reports an error — the user
+     * sees "creation failed", retries, and ends up with a duplicate. Roll the
+     * row back so the failure the user is told about is the truth.
      */
-    await updateAssetModelImage({
-      request,
-      assetModelId: assetModel.id,
-      userId: authSession.userId,
-      organizationId,
-    });
+    try {
+      await updateAssetModelImage({
+        request,
+        assetModelId: assetModel.id,
+        userId: authSession.userId,
+        organizationId,
+      });
+    } catch (cause) {
+      await deleteAssetModel({ id: assetModel.id, organizationId }).catch(
+        () => {
+          /* Best-effort rollback; the original failure is what matters. */
+        }
+      );
+      throw cause;
+    }
 
     sendNotification({
       title: "Asset model created",
