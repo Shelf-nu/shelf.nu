@@ -1,16 +1,19 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { parseQrCodesFromImportData } from "./service.server";
+import { claimQrCode, parseQrCodesFromImportData } from "./service.server";
 
 // why: parseQrCodesFromImportData reads QR rows from the database to detect
-// invalid imports; mock the client so the tests exercise the validation
-// branches without a real DB.
+// invalid imports, and claimQrCode reads (findUniqueOrThrow via getQr) then
+// atomically updates a single row; mock the client so the tests exercise the
+// validation/claim branches without a real DB.
 vitest.mock("~/database/db.server", () => ({
   db: {
     qr: {
       findMany: vitest.fn().mockResolvedValue([]),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findUniqueOrThrow: vitest.fn(),
+      update: vitest.fn(),
     },
   },
 }));
@@ -90,5 +93,99 @@ describe("parseQrCodesFromImportData — import validation errors", () => {
 
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+describe("claimQrCode", () => {
+  const claimArgs = { id: "qr-1", organizationId, userId };
+
+  /** An unclaimed, unlinked QR row as returned by the pre-check read. */
+  const unclaimedQr = {
+    id: "qr-1",
+    organizationId: null,
+    userId: null,
+    assetId: null,
+    kitId: null,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Runs claimQrCode and returns the thrown ShelfError, failing the test if
+   * it unexpectedly resolves.
+   */
+  async function captureClaimThrow() {
+    try {
+      await claimQrCode(claimArgs);
+      throw new Error("expected claimQrCode to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ShelfError);
+      return err as ShelfError;
+    }
+  }
+
+  it("rejects an already-claimed code with a 403 without writing", async () => {
+    // why: the pre-check read must see a row that already belongs to an org
+    // to exercise the early "already claimed" branch.
+    (db.qr.findUniqueOrThrow as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      { ...unclaimedQr, organizationId: "other-org" }
+    );
+
+    const err = await captureClaimThrow();
+
+    expect(err.status).toBe(403);
+    expect(err.message).toBe("Failed to claim qr code");
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("maps a lost claim race (P2025 on the atomic update) to a 403, not a 404", async () => {
+    // why: the pre-check must pass (unclaimed row) so the test drives the
+    // window AFTER the guard — a concurrent claim/link wins the atomic
+    // update and Prisma raises P2025 for the loser.
+    (db.qr.findUniqueOrThrow as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      unclaimedQr
+    );
+    // why: simulate the losing side of the race; Prisma signals "no row
+    // matched the constrained WHERE" as a P2025 known request error.
+    (db.qr.update as ReturnType<typeof vitest.fn>).mockRejectedValue({
+      code: "P2025",
+    });
+
+    const err = await captureClaimThrow();
+
+    // The lost race must surface as "already claimed" (403), never as a
+    // not-found (404) — makeShelfError would collapse a propagated P2025
+    // to a 404 if the mapping branch were removed.
+    expect(err.status).toBe(403);
+    expect(err.message).toBe("Failed to claim qr code");
+  });
+
+  it("claims atomically: the update WHERE requires the unclaimed AND unlinked state", async () => {
+    (db.qr.findUniqueOrThrow as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      unclaimedQr
+    );
+    const claimedQr = { ...unclaimedQr, organizationId, userId };
+    // why: resolve the write so the success branch returns the claimed row.
+    (db.qr.update as ReturnType<typeof vitest.fn>).mockResolvedValue(claimedQr);
+
+    const result = await claimQrCode(claimArgs);
+
+    expect(result).toEqual(claimedQr);
+    // Guard the atomicity constraint itself: dropping any of these WHERE
+    // conditions would let a lost race silently re-assign the code's org
+    // (or claim a code createAsset just linked to another org's asset).
+    expect(db.qr.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "qr-1",
+          organizationId: null,
+          assetId: null,
+          kitId: null,
+        },
+        data: { organizationId, userId },
+      })
+    );
   });
 });
