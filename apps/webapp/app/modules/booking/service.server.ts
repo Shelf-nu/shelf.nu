@@ -114,6 +114,7 @@ import {
   isBookingArchivable,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
+  outranksReservations,
 } from "./helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
@@ -5092,6 +5093,66 @@ function buildQtyPerAssetFragment(
 }
 
 /**
+ * A reservation that was outranked by an in-flight booking's check-out.
+ *
+ * @see {@link buildOverriddenReservationNotes}
+ */
+export type OverriddenReservation = {
+  /** The RESERVED booking that lost the asset(s) */
+  id: string;
+  /** Its user-supplied name — untrusted, must never be spliced raw */
+  name: string;
+  /** The assets it reserved that were just checked out elsewhere */
+  assets: Array<{ id: string; title: string }>;
+};
+
+/**
+ * Build the pair of system notes recording that an in-flight booking checked
+ * out an asset an overlapping RESERVED booking also held.
+ *
+ * Both sides get a note so the clash is never silent: the checking-out booking
+ * records what it overrode, and the reservation records that its asset is gone
+ * — the reservation's owner would otherwise not discover it until their own
+ * check-out failed.
+ *
+ * All user-supplied values (booking names, asset titles) go through the
+ * markdoc wrappers, which place them inside quoted, escaped tag attributes —
+ * never raw — so a booking named `{% link to="javascript:…" /%}` cannot inject
+ * a live tag into the rendered note feed.
+ *
+ * @param reservation - The outranked reservation and the assets it lost
+ * @param current - The in-flight booking that checked the assets out
+ * @returns Note content for the current booking and for the reservation
+ */
+export function buildOverriddenReservationNotes(
+  reservation: OverriddenReservation,
+  current: { id: string; name: string }
+): { currentBookingNote: string; reservedBookingNote: string } {
+  const assetsFragment = wrapAssetsWithDataForNote(
+    reservation.assets,
+    "checked out"
+  );
+  const isPlural = reservation.assets.length > 1;
+  const verb = isPlural ? "were" : "was";
+  const pronoun = isPlural ? "them" : "it";
+
+  const reservationLink = wrapLinkForNote(
+    `/bookings/${reservation.id}`,
+    reservation.name
+  );
+  const currentLink = wrapLinkForNote(`/bookings/${current.id}`, current.name);
+
+  return {
+    currentBookingNote:
+      `${assetsFragment} ${verb} also reserved by ${reservationLink} for an overlapping period. ` +
+      `This booking is already checked out, so it takes priority — that reservation may need ${pronoun} replaced.`,
+    reservedBookingNote:
+      `${assetsFragment} ${verb} checked out by ${currentLink}, which overlaps this reservation and is already in progress. ` +
+      `You may need to replace ${pronoun} before this booking starts.`,
+  };
+}
+
+/**
  * Build a markdoc fragment naming each qty-tracked slice checked OUT in this
  * session. Mirror of {@link buildQtyPerAssetFragment} but unidirectional —
  * checkout only carries one count per slice (no return/consume/loss/damage
@@ -6577,7 +6638,9 @@ export async function partialCheckoutBooking({
           }),
           select: {
             booking: {
-              select: { id: true, status: true },
+              // `name` powers the overridden-reservation note below — a
+              // conflict the user can act on has to name the other booking.
+              select: { id: true, status: true, name: true },
             },
           },
         },
@@ -6607,9 +6670,48 @@ export async function partialCheckoutBooking({
       });
     }
 
+    /**
+     * An already-in-flight booking outranks a not-yet-started reservation for
+     * the same asset, so overlapping RESERVED bookings do not block THIS
+     * check-out (see {@link outranksReservations}). A RESERVED booking checking
+     * out still hits the full guard — this only relaxes the ONGOING/OVERDUE
+     * direction, and only for reservations: an asset physically CHECKED_OUT on
+     * another in-flight booking is still a hard block.
+     */
+    const inFlight = outranksReservations(bookingFound.status);
+
+    /**
+     * Reservations we are overriding by checking out anyway, deduped by booking
+     * id. Drives the system notes written after the transaction commits so the
+     * clash is visible to both sides instead of silently resolving in favour of
+     * whoever clicked first.
+     */
+    const overriddenReservations = new Map<
+      string,
+      { id: string; name: string; assets: { id: string; title: string }[] }
+    >();
+    if (inFlight && bookingFound.from && bookingFound.to) {
+      for (const asset of scannedAssetsWithConflicts) {
+        // Only INDIVIDUAL assets can be starved this way — the helper leaves
+        // QUANTITY_TRACKED availability to the per-slice caps inside the tx.
+        if (isQuantityTracked(asset)) continue;
+        for (const { booking } of asset.bookingAssets) {
+          if (booking.id === id) continue;
+          if (booking.status !== BookingStatus.RESERVED) continue;
+          const entry = overriddenReservations.get(booking.id) ?? {
+            id: booking.id,
+            name: booking.name,
+            assets: [],
+          };
+          entry.assets.push({ id: asset.id, title: asset.title });
+          overriddenReservations.set(booking.id, entry);
+        }
+      }
+    }
+
     if (bookingFound.from && bookingFound.to) {
       const conflicted = scannedAssetsWithConflicts.filter((a) =>
-        hasAssetBookingConflicts(a, id)
+        hasAssetBookingConflicts(a, id, { ignoreReservedConflicts: inFlight })
       );
       if (conflicted.length > 0) {
         const names = conflicted
@@ -7368,6 +7470,42 @@ export async function partialCheckoutBooking({
           },
           tx
         );
+
+        /**
+         * Record every reservation this check-out outranked, on BOTH bookings.
+         * Written inside the tx so a rolled-back check-out can't leave a note
+         * claiming an asset was taken. Only populated when this booking is
+         * already in flight — see the guard above.
+         */
+        for (const reservation of overriddenReservations.values()) {
+          // An idempotent re-scan carries assets that were already out; only
+          // the ones this batch actually took belong in the note.
+          const takenNow = reservation.assets.filter((asset) =>
+            assetIdsToCheckOut.includes(asset.id)
+          );
+          if (takenNow.length === 0) continue;
+
+          const { currentBookingNote, reservedBookingNote } =
+            buildOverriddenReservationNotes(
+              { ...reservation, assets: takenNow },
+              { id, name: bookingFound.name }
+            );
+
+          // eslint-disable-next-line no-await-in-loop -- bounded by the number of distinct reservations overlapping this batch; sequential keeps the tx's statement order deterministic
+          await createSystemBookingNote(
+            { bookingId: id, organizationId, content: currentBookingNote },
+            tx
+          );
+          // eslint-disable-next-line no-await-in-loop -- see above
+          await createSystemBookingNote(
+            {
+              bookingId: reservation.id,
+              organizationId,
+              content: reservedBookingNote,
+            },
+            tx
+          );
+        }
 
         /**
          * Unit-level remaining count + completion. For each unique booking

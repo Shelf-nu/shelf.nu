@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import { BookingStatus, AssetStatus, AssetType } from "@prisma/client";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
@@ -7,6 +8,7 @@ import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { ShelfError } from "~/utils/error";
 import {
+  buildOverriddenReservationNotes,
   computeBookingAssetSliceRemainingToCheckOut,
   getRemainingCheckoutAssetIds,
   getRemainingCheckoutPayload,
@@ -774,6 +776,77 @@ describe("partialCheckoutBooking", () => {
 
     // No partial record written when conflict validation rejects.
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
+  it("lets an ONGOING booking check out an asset an overlapping RESERVED booking also holds", async () => {
+    expect.assertions(3);
+
+    // The reported bug. This booking is already ONGOING (an earlier asset was
+    // checked out), and while its remaining asset sat AVAILABLE another
+    // booking was allowed to reserve the same asset — precisely because an
+    // ONGOING booking does not "occupy" an asset it has not physically checked
+    // out yet. The reverse direction then blocked this booking from EVER
+    // checking that asset out ("Cannot check out. Some assets are already
+    // booked or checked out elsewhere"), with no way to resolve it in-product.
+    // An in-flight booking outranks a reservation that has taken nothing.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    // why: mirrors the default echo impl (see beforeEach) but hangs an
+    // overlapping RESERVED booking off asset-1, which is what the production
+    // conflict lookup returns for a double-booked asset.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids)
+            ? ids.map((assetId: string) => ({
+                id: assetId,
+                title: `Asset ${assetId}`,
+                status: AssetStatus.AVAILABLE,
+                assetKits: [],
+                bookingAssets:
+                  assetId === "asset-1"
+                    ? [
+                        {
+                          booking: {
+                            id: "other-booking",
+                            status: BookingStatus.RESERVED,
+                            name: "Forensic Event A",
+                          },
+                        },
+                      ]
+                    : [],
+              }))
+            : []
+        );
+      }
+    );
+
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).resolves.toBeTruthy();
+
+    const noteArgs = (
+      createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(([args]) => args);
+
+    // The override is recorded on THIS booking...
+    expect(noteArgs).toContainEqual(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        content: expect.stringContaining("Forensic Event A"),
+      })
+    );
+    // ...and on the reservation, so its owner learns the asset is gone rather
+    // than discovering it when their own check-out fails.
+    expect(noteArgs).toContainEqual(
+      expect.objectContaining({
+        bookingId: "other-booking",
+        content: expect.stringContaining("Test Booking"),
+      })
+    );
   });
 
   it("rejects (and writes nothing) when a scanned asset is not part of the booking", async () => {
@@ -2875,5 +2948,80 @@ describe("getRemainingCheckoutPayload", () => {
       ]),
       expect.anything()
     );
+  });
+});
+
+describe("buildOverriddenReservationNotes", () => {
+  const current = { id: "booking-1", name: "Loaning things to Carlos" };
+
+  it("names both bookings and the assets on each side of the clash", () => {
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: "Forensic Event A",
+        assets: [{ id: "asset-1", title: "Apple Mac Pro (2023)" }],
+      },
+      current
+    );
+
+    // The checking-out booking records WHAT it overrode...
+    expect(notes.currentBookingNote).toContain("Forensic Event A");
+    expect(notes.currentBookingNote).toContain("Apple Mac Pro (2023)");
+    // ...and the reservation records WHO took its asset.
+    expect(notes.reservedBookingNote).toContain("Loaning things to Carlos");
+  });
+
+  it("uses plural phrasing when more than one asset is taken", () => {
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: "Forensic Event A",
+        assets: [
+          { id: "asset-1", title: "Mac Pro" },
+          { id: "asset-2", title: "Tripod" },
+        ],
+      },
+      current
+    );
+
+    expect(notes.currentBookingNote).toContain("were");
+    expect(notes.currentBookingNote).toContain("them");
+  });
+
+  it("cannot be used to inject a live Markdoc tag via a booking name", () => {
+    // Booking names and asset titles are free-form user input, and the note
+    // feed renders stored content through Markdoc — so a raw `{% … %}` splice
+    // would be a stored XSS. Every user value must land inside a quoted,
+    // escaped tag attribute, never as a bare tag.
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: '{% link to="javascript:alert(document.cookie)" /%}',
+        assets: [
+          {
+            id: "asset-1",
+            title: '" /%}{% link to="javascript:alert(1)" text="pwned',
+          },
+        ],
+      },
+      current
+    );
+
+    for (const note of [notes.currentBookingNote, notes.reservedBookingNote]) {
+      // Parse the note exactly as the feed does: the injected `{% … %}` must
+      // survive as inert text inside an escaped attribute, never as a tag node.
+      const tags = [...Markdoc.parse(note).walk()].filter(
+        (node) => node.type === "tag"
+      );
+
+      // Only the tags WE emit exist...
+      expect(
+        tags.every((node) => node.tag === "link" || node.tag === "assets_list")
+      ).toBe(true);
+      // ...and none of them points anywhere the attacker chose.
+      for (const node of tags) {
+        expect(String(node.attributes?.to ?? "")).not.toMatch(/^javascript:/i);
+      }
+    }
   });
 });

@@ -422,6 +422,28 @@ export function isBookingArchivable({
 }
 
 /**
+ * Whether a booking in this status outranks an overlapping RESERVED booking
+ * when competing for the same asset.
+ *
+ * An ONGOING/OVERDUE booking is physically in flight: its custodian is holding
+ * (or collecting) the assets right now. A RESERVED booking has taken nothing —
+ * it is a claim on the future. So the in-flight booking wins, and the loser is
+ * told at ITS check-out, where `hasAssetBookingConflicts` correctly reports the
+ * asset as CHECKED_OUT on an in-flight booking.
+ *
+ * Without this asymmetry the priority inverts: because an ONGOING booking does
+ * not "occupy" an asset it has not yet checked out, anyone could reserve that
+ * asset afterwards — and that later reservation would then permanently block
+ * the in-flight booking from checking out an asset it already holds.
+ *
+ * @param status - The booking's current status
+ * @returns `true` when the booking is in flight (ONGOING or OVERDUE)
+ */
+export function outranksReservations(status: string): boolean {
+  return status === BookingStatus.ONGOING || status === BookingStatus.OVERDUE;
+}
+
+/**
  * Core logic for determining if an asset has booking conflicts.
  * Assets now reference bookings through the BookingAsset pivot table,
  * so we traverse `asset.bookingAssets[].booking` instead of the
@@ -435,6 +457,12 @@ export function isBookingArchivable({
  * `computeBookingAvailableQuantity()`.
  *
  * Used by both isAssetAlreadyBooked and kit-related functions.
+ *
+ * @param asset - Minimal asset shape (status, type, pivot rows to bookings)
+ * @param currentBookingId - Booking being evaluated; its own rows never conflict
+ * @param options.ignoreReservedConflicts - Drop the "RESERVED always conflicts"
+ *   rule. Pass this ONLY when the current booking is itself already in flight
+ *   (ONGOING/OVERDUE) — see {@link outranksReservations}.
  */
 export function hasAssetBookingConflicts(
   asset: {
@@ -442,7 +470,8 @@ export function hasAssetBookingConflicts(
     type?: string;
     bookingAssets?: { booking: { id: string; status: string } }[];
   },
-  currentBookingId: string
+  currentBookingId: string,
+  options?: { ignoreReservedConflicts?: boolean }
 ): boolean {
   /**
    * QUANTITY_TRACKED assets can appear in multiple concurrent bookings,
@@ -460,10 +489,13 @@ export function hasAssetBookingConflicts(
 
   if (conflictingBookings.length === 0) return false;
 
-  // Check if any conflicting booking is RESERVED (always conflicts)
-  const hasReservedConflict = conflictingBookings.some(
-    (b) => b.status === BookingStatus.RESERVED
-  );
+  // Check if any conflicting booking is RESERVED (always conflicts).
+  // `ignoreReservedConflicts` suppresses this rule for callers whose own
+  // booking already outranks a reservation — a reservation has taken nothing
+  // yet, so it must not block a booking that is physically in flight.
+  const hasReservedConflict =
+    !options?.ignoreReservedConflicts &&
+    conflictingBookings.some((b) => b.status === BookingStatus.RESERVED);
 
   if (hasReservedConflict) return true;
 
