@@ -352,6 +352,44 @@ assert_eq "0" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"COPILOT_QUOTA"')"
 assert_eq "1" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"ERROR"')" \
   "a rejected state write reports an ERROR event"
 
+# reviewedHead is what quiescence condition #1 is computed from. It was
+# defined and unit-tested but never populated by poll_once, leaving it {}
+# forever — the loop could never tell whether the bots had caught up.
+state_init 5006 "test-branch"
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+poll_once 5006 >/dev/null
+assert_eq "a3293f170e" "$(state_read 5006 | jq -r '.reviewedHead["chatgpt-codex-connector[bot]"]')" \
+  "poll_once populates reviewedHead from the codex Reviewed-commit marker"
+assert_eq "false" "$(state_read 5006 | jq -r '.reviewedHead == {}')" \
+  "reviewedHead is no longer permanently empty"
+
+# A decided finding re-posted under a NEW thread id must tick the counter that
+# the three-repost escape hatch reads. Same thread across polls must NOT.
+state_init 5007 "test-branch"
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+poll_once 5007 >/dev/null
+FP="$(state_read 5007 | jq -r '.pending[0].fingerprint')"
+TID="$(state_read 5007 | jq -r '.pending[0].threadId')"
+
+# Mark it decided, recording the thread it was decided on.
+state_read 5007 | jq --arg fp "$FP" --arg tid "$TID" \
+  '.seen[$fp] = {threadId:$tid, verdict:"FALSE_POSITIVE", decidedInRound:1, reposts:0}' \
+  | state_write 5007
+
+poll_once 5007 >/dev/null   # same thread still present
+assert_eq "0" "$(state_read 5007 | jq -r --arg fp "$FP" '.seen[$fp].reposts')" \
+  "a decided finding on the SAME thread does not tick the repost counter"
+
+# Simulate the bot closing that thread and re-posting the identical finding
+# under a new id — the exact case fingerprinting exists to catch.
+state_read 5007 | jq --arg fp "$FP" '.seen[$fp].threadId = "PRRT_previously_closed"' \
+  | state_write 5007
+poll_once 5007 >/dev/null
+assert_eq "1" "$(state_read 5007 | jq -r --arg fp "$FP" '.seen[$fp].reposts')" \
+  "a decided finding re-posted under a new thread id ticks the repost counter"
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+
 # A finding that is announced, never decided, disappears, and is re-posted
 # must speak again. `announced` outliving the finding was how the original
 # "actionable thing exists, no event emitted" bug got reintroduced by the

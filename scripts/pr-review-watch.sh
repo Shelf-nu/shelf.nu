@@ -333,7 +333,7 @@ detect_push() {
 # non-numeric value aborts the whole script with exit status 0, which a
 # supervisor reads as a clean shutdown.
 poll_once() {
-  local pr="$1" state findings fresh reviews ood checks sha pushed e
+  local pr="$1" state findings fresh reviews ood checks sha pushed pushed_at e
   local -a events=()
 
   state="$(state_read "$pr")" || {
@@ -362,9 +362,23 @@ poll_once() {
   # already-pushed branch does not announce a push that never happened.
   pushed="$(detect_push "$(printf '%s' "$state" | jq -r '.branch')" "$state")"
   if [[ -n "$pushed" ]]; then
-    state="$(printf '%s' "$state" | jq --arg sha "$pushed" '.lastPushedSha = $sha')"
+    # Record WHEN as well as WHAT: reviewed_head_map needs a timestamp to
+    # decide whether a bot's review post-dates the push, and CodeRabbit and
+    # Copilot publish no reviewed-SHA marker at all.
+    pushed_at="$(git show -s --format=%cI "$pushed" 2>/dev/null || printf '')"
+    state="$(printf '%s' "$state" \
+      | jq --arg sha "$pushed" --arg at "$pushed_at" \
+           '.lastPushedSha = $sha | .lastPushedAt = $at')"
     events+=("PUSHED|$(jq -c -n --arg sha "$pushed" '{sha:$sha}')")
   fi
+
+  # Which SHA each bot has reviewed. Quiescence condition #1 is computed from
+  # this map, so leaving it unwritten makes "have the bots caught up?"
+  # permanently unanswerable — the loop could never correctly report clean.
+  state="$(jq -n --argjson s "$state" \
+    --argjson rh "$(reviewed_head_map "$reviews" \
+      "$(printf '%s' "$state" | jq -r '.lastPushedAt // "1970-01-01T00:00:00Z"')")" \
+    '$s + {reviewedHead: $rh}')"
 
   # Findings — announce only fingerprints not already announced. `announced`
   # is separate from `seen`: `seen` holds DECIDED verdicts, `announced` holds
@@ -391,6 +405,20 @@ poll_once() {
   # finding speak again. Decided findings are suppressed by `seen`, upstream.
   state="$(jq -n --argjson s "$state" --argjson f "$fresh" \
     '$s + {announced: ([$f[] | {(.fingerprint): true}] | add // {})}')"
+
+  # A DECIDED finding re-posted by the bot under a NEW thread id. Same
+  # fingerprint + different thread = a genuine re-post; matching on thread id
+  # too is what stops this ticking up merely because one thread stays open
+  # across polls. The skill's three-repost escape hatch is the runaway guard
+  # that replaced the round cap, and it reads this counter — without it a
+  # re-posting bot gets auto-replied to forever.
+  state="$(jq -n --argjson s "$state" --argjson f "$findings" '
+    $s + {seen: (reduce ($f[]
+                 | select((($s.seen // {})[.fingerprint]) != null)
+                 | select(.threadId != ($s.seen[.fingerprint].threadId)))
+                 as $x (($s.seen // {});
+                   .[$x.fingerprint].reposts  = ((.[$x.fingerprint].reposts // 0) + 1)
+                 | .[$x.fingerprint].threadId = $x.threadId))}')"
 
   # Out-of-diff findings get their OWN event, deduped by review id.
   #
