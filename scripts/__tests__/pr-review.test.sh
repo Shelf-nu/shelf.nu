@@ -290,6 +290,71 @@ assert_json_eq "3" "$EV" '.count' "emit merges the payload"
 assert_eq "1" "$(emit NEW_FINDINGS '{"count":3}' | wc -l | tr -d ' ')" \
   "emit writes exactly one line — every line becomes a chat notification"
 
+describe "pr-review-watch: poll_once emission"
+
+# poll_once is the function the whole script exists to run, and it had no
+# coverage at all — `poll_once() { return 0; }` passed the entire suite. These
+# assertions drive MULTI-POLL sequences, because every defect this section
+# guards against is invisible to a single poll.
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+detect_push() { printf ''; }   # test seam: keep poll_once off git/network
+
+state_init 5001 "test-branch"
+POLL1="$(poll_once 5001)"
+POLL2="$(poll_once 5001)"
+POLL3="$(poll_once 5001)"
+
+assert_eq "1" "$(printf '%s\n' "$POLL1" | grep -c '"event":"NEW_FINDINGS"')" \
+  "NEW_FINDINGS is announced on the first poll"
+assert_eq "0" "$(printf '%s\n' "$POLL2" | grep -c '"event":"NEW_FINDINGS"')" \
+  "NEW_FINDINGS is not repeated while the same findings stay undecided"
+assert_eq "0" "$(printf '%s\n' "$POLL3" | grep -c '"event":"NEW_FINDINGS"')" \
+  "NEW_FINDINGS stays quiet on a third poll"
+assert_eq "0" "$(printf '%s\n' "$POLL1" | grep -c '"event":"PUSHED"')" \
+  "no PUSHED event is announced when nothing was pushed"
+
+# A PR whose threads are ALL resolved still carries out-of-diff findings, and
+# they have no thread to surface them. If this regresses, the loop goes quiet
+# while real findings sit unhandled — the failure this event exists to prevent.
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+state_init 5002 "test-branch"
+OOD1="$(poll_once 5002)"
+OOD2="$(poll_once 5002)"
+
+assert_eq "0" "$(printf '%s\n' "$OOD1" | grep -c '"event":"NEW_FINDINGS"')" \
+  "no NEW_FINDINGS when every thread is resolved"
+assert_eq "1" "$(printf '%s\n' "$OOD1" | grep -c '"event":"OUT_OF_DIFF"')" \
+  "out-of-diff findings are announced even with zero fresh bot threads"
+assert_eq "0" "$(printf '%s\n' "$OOD2" | grep -c '"event":"OUT_OF_DIFF"')" \
+  "out-of-diff findings are not re-announced on the next poll"
+
+# A persistently red check must notify once, not once per minute forever.
+collect_checks() { printf '{"red":2,"pending":1}'; }
+state_init 5003 "test-branch"
+RED1="$(poll_once 5003)"
+RED2="$(poll_once 5003)"
+
+assert_eq "1" "$(printf '%s\n' "$RED1" | grep -c '"event":"CHECKS_RED"')" \
+  "CHECKS_RED is announced when checks first go red"
+assert_eq "0" "$(printf '%s\n' "$RED2" | grep -c '"event":"CHECKS_RED"')" \
+  "CHECKS_RED is not repeated while checks stay red"
+
+# A rejected state write must withhold the buffered events. Announcing a
+# transition whose record failed to persist re-fires it on every later poll.
+WITHHELD="$(
+  state_write() { return 1; }
+  state_init 5004 "test-branch"
+  poll_once 5004
+)"
+assert_eq "0" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"COPILOT_QUOTA"')" \
+  "buffered events are withheld when the state write is rejected"
+assert_eq "1" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"ERROR"')" \
+  "a rejected state write reports an ERROR event"
+
+unset -f detect_push collect_checks
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+
 rm -rf "$TMP_STATE"
 
 # --- summary ----------------------------------------------------------------

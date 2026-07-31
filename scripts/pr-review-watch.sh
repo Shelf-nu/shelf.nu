@@ -299,65 +299,138 @@ detect_push() {
 
 # --- polling -------------------------------------------------------------------
 
-# One poll. Emits an event ONLY when the actionable set changes, so a quiet PR
-# produces zero notifications no matter how long the loop runs.
+# One poll.
+#
+# Two invariants make this safe to run unattended as a background monitor:
+#
+# 1. Events are BUFFERED and flushed only AFTER the state that suppresses
+#    them is durably written. Emitting first means a rejected state_write
+#    leaves one-shot transitions announced but unrecorded, so they re-fire on
+#    every later poll — a notification storm with no error anywhere.
+# 2. EVERY event is transition-guarded against the persisted state. A
+#    condition that merely persists (4 undecided findings, a red check) is
+#    announced once, not once per minute. Monitors that emit too much are
+#    killed automatically, so an unguarded event is a self-destruct.
+#
+# Numeric comparisons are done inside jq (`jq -e 'x > 0'`), never with bash
+# arithmetic on captured output: under `set -u`, `[[ "$(...)" -gt 0 ]]` on a
+# non-numeric value aborts the whole script with exit status 0, which a
+# supervisor reads as a clean shutdown.
 poll_once() {
-  local pr="$1" state findings fresh reviews ood checks sha pushed
-  state="$(state_read "$pr")"
+  local pr="$1" state findings fresh reviews ood checks sha pushed e
+  local -a events=()
+
+  state="$(state_read "$pr")" || {
+    emit ERROR '{"reason":"state unreadable"}'; return 1; }
 
   findings="$(collect_threads "$pr" | shape_findings)" || {
-    emit ERROR '{"reason":"collect_threads failed"}'; return 0; }
+    emit ERROR '{"reason":"collect_threads failed"}'; return 1; }
   fresh="$(unseen_findings "$findings" "$state")"
 
   reviews="$(collect_reviews "$pr")" || reviews="[]"
   ood="$(out_of_diff_reviews "$reviews")"
   sha="$(head_sha "$pr")"
-  checks="$(collect_checks "$sha")"
+  checks="$(collect_checks "$sha")" || checks='{"red":0,"pending":0}'
 
+  # Copilot quota — transition-guarded.
   if copilot_quota_exhausted "$reviews"; then
     if [[ "$(printf '%s' "$state" | jq -r '.copilotExpected')" == "true" ]]; then
       state="$(printf '%s' "$state" | jq '.copilotExpected = false')"
-      emit COPILOT_QUOTA '{"reason":"copilot reported a quota limit; not waiting on it"}'
+      events+=("COPILOT_QUOTA|{\"reason\":\"copilot reported a quota limit; not waiting on it\"}")
     fi
   else
     state="$(printf '%s' "$state" | jq '.copilotExpected = true')"
   fi
 
+  # Push — guarded by lastPushedSha, which main seeds so the first poll of an
+  # already-pushed branch does not announce a push that never happened.
   pushed="$(detect_push "$(printf '%s' "$state" | jq -r '.branch')" "$state")"
   if [[ -n "$pushed" ]]; then
     state="$(printf '%s' "$state" | jq --arg sha "$pushed" '.lastPushedSha = $sha')"
-    emit PUSHED "$(jq -n --arg sha "$pushed" '{sha:$sha}')"
+    events+=("PUSHED|$(jq -c -n --arg sha "$pushed" '{sha:$sha}')")
   fi
 
-  local botn humann
-  botn="$(printf '%s' "$fresh"  | jq '[.[]|select(.kind=="bot")]|length')"
-  humann="$(printf '%s' "$fresh" | jq '[.[]|select(.kind=="human")]|length')"
+  # Findings — announce only fingerprints not already announced. `announced`
+  # is separate from `seen`: `seen` holds DECIDED verdicts, `announced` holds
+  # "the human has been told", which is what stops re-notification while a
+  # finding sits undecided between rounds.
+  local newbot newhuman
+  newbot="$(jq -n --argjson f "$fresh" --argjson s "$state" \
+    '[$f[] | select(.kind=="bot") | select((($s.announced // {})[.fingerprint]) == null)]')"
+  newhuman="$(jq -n --argjson f "$fresh" --argjson s "$state" \
+    '[$f[] | select(.kind=="human") | select((($s.announced // {})[.fingerprint]) == null)]')"
+
+  if printf '%s' "$newbot" | jq -e 'length > 0' >/dev/null; then
+    events+=("NEW_FINDINGS|$(printf '%s' "$newbot" | jq -c '{threads: length}')")
+  fi
+  if printf '%s' "$newhuman" | jq -e 'length > 0' >/dev/null; then
+    events+=("HUMAN_COMMENT|$(printf '%s' "$newhuman" | jq -c '{count: length}')")
+  fi
+  state="$(jq -n --argjson s "$state" --argjson f "$fresh" \
+    '$s + {announced: (($s.announced // {})
+                       + ([$f[] | {(.fingerprint): true}] | add // {}))}')"
+
+  # Out-of-diff findings get their OWN event, deduped by review id.
+  #
+  # They must NOT ride inside NEW_FINDINGS: that event is gated on fresh bot
+  # threads, so on a PR whose threads are all resolved the out-of-diff set
+  # would be persisted and never announced. These findings have no thread at
+  # all — this event is the only way they ever reach the human.
+  local newood
+  newood="$(jq -n --argjson o "$ood" --argjson s "$state" \
+    '[$o[] | select((($s.announcedOutOfDiff // {})[(.reviewId|tostring)]) == null)]')"
+  if printf '%s' "$newood" | jq -e 'length > 0' >/dev/null; then
+    events+=("OUT_OF_DIFF|$(printf '%s' "$newood" | jq -c '{reviews: length}')")
+  fi
+  state="$(jq -n --argjson s "$state" --argjson o "$ood" \
+    '$s + {announcedOutOfDiff: (($s.announcedOutOfDiff // {})
+                                + ([$o[] | {(.reviewId|tostring): true}] | add // {}))}')"
+
+  # Checks — emit only when the classification CHANGES and is red.
+  if [[ "$(printf '%s' "$checks" | jq -cS '.')" \
+     != "$(printf '%s' "$state" | jq -cS '.checks // null')" ]] \
+     && printf '%s' "$checks" | jq -e '.red > 0' >/dev/null; then
+    events+=("CHECKS_RED|$(printf '%s' "$checks" | jq -c '.')")
+  fi
 
   state="$(jq -n --argjson s "$state" --argjson f "$fresh" --argjson o "$ood" \
     --argjson c "$checks" --arg sha "$sha" \
     '$s + {pending: $f, outOfDiff: $o, checks: $c, headSha: $sha}')"
 
-  if [[ "$botn" -gt 0 ]]; then
-    emit NEW_FINDINGS "$(jq -n --argjson n "$botn" \
-      --argjson ood "$(printf '%s' "$ood" | jq 'length')" \
-      '{threads:$n, outOfDiff:$ood}')"
-  fi
-  [[ "$humann" -gt 0 ]] && emit HUMAN_COMMENT "$(jq -n --argjson n "$humann" '{count:$n}')"
-  [[ "$(printf '%s' "$checks" | jq -r '.red')" -gt 0 ]] && \
-    emit CHECKS_RED "$(printf '%s' "$checks")"
+  printf '%s' "$state" | state_write "$pr" || {
+    emit ERROR '{"reason":"state write rejected; events withheld"}'; return 1; }
 
-  printf '%s' "$state" | state_write "$pr"
+  # Flush only now that the suppressing state is durable. The `${a[@]+...}`
+  # form is required: under `set -u`, bash 3.2 treats "${a[@]}" on an EMPTY
+  # array as an unbound variable and aborts.
+  for e in ${events[@]+"${events[@]}"}; do
+    emit "${e%%|*}" "${e#*|}"
+  done
 }
 
 # --- entrypoint ------------------------------------------------------------
 
 main() {
-  local pr="${1:-}"
+  local pr="${1:-}" branch seed
   [[ -z "$pr" ]] && { printf 'usage: pr-review-watch.sh <pr-number>\n' >&2; exit 2; }
-  state_init "$pr" "$(git rev-parse --abbrev-ref HEAD)"
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  state_init "$pr" "$branch"
+
+  # Seed lastPushedSha WITHOUT emitting. At loop start the branch is normally
+  # already pushed; leaving it null makes the first poll announce a PUSHED
+  # that never happened, which would drive the reply step to post
+  # "Fixed in <sha>" before any fix exists.
+  if [[ "$(state_read "$pr" | jq -r '.lastPushedSha')" == "null" ]]; then
+    seed="$(git rev-parse "origin/$branch" 2>/dev/null || true)"
+    [[ -n "$seed" ]] && state_read "$pr" \
+      | jq --arg s "$seed" '.lastPushedSha = $s' | state_write "$pr"
+  fi
+
   printf 'pr-review-watch: watching PR #%s every %ss\n' "$pr" "$POLL_INTERVAL" >&2
   while :; do
-    poll_once "$pr" || emit ERROR '{"reason":"poll failed"}'
+    # poll_once owns its own error reporting (it emits a specific ERROR event
+    # per failure path); a second generic ERROR here would double-notify.
+    poll_once "$pr" || true
     sleep "$POLL_INTERVAL"
   done
 }
