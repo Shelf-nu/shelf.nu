@@ -80,6 +80,16 @@ export const ImportUpdateContent = () => {
                   These columns are ignored on individually tracked assets.
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Heads up — the export isn't re-uploadable as-is here.</b>{" "}
+                  The Asset Index writes Quantity as <code>10 boxes</code> when
+                  the asset has a unit of measure, but this importer needs the
+                  cell to contain the number only (<code>10</code>) — leave the
+                  unit out or the row's quantity update fails. Min quantity,
+                  Unit of measure, and Consumption type aren't part of the
+                  export at all; add those columns yourself using exactly those
+                  header names.
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
                   <b>Not supported yet:</b> Description, Status, Kit, and
                   Custody can't be bulk-updated via CSV — Status and Custody
                   have their own workflows, and Description can lose formatting
@@ -103,9 +113,12 @@ export const ImportUpdateContent = () => {
                   If a field currently has a value and you leave the cell empty,
                   that value will be cleared. Fields that are already empty stay
                   unchanged. Name and boolean fields (Yes/No) cannot be cleared.
-                  <b> Asset model</b> can't be cleared this way either — an
-                  empty cell leaves the current model in place. Remove it from
-                  the asset directly instead.
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Exceptions:</b> Asset model, Quantity, Min quantity, Unit
+                  of measure, and Consumption type are never cleared by an empty
+                  cell — blanking them leaves the current value in place. Change
+                  these on the asset itself if you need to remove them.
                 </p>
               </div>
             </div>
