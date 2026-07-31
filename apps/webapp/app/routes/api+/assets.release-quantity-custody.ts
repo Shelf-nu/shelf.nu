@@ -15,6 +15,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { releaseQuantity } from "~/modules/asset/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -150,6 +151,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
+
+    // Releasing custody RAISES available stock and can move the asset back
+    // above its low-stock threshold. Run the debounced notifier so the
+    // `lowStockNotifiedAt` marker is cleared (and the "back in stock" notice
+    // sent) on recovery — otherwise a stale marker would suppress the next
+    // genuine low-stock alert. Mirrors the assign route's low-stock check.
+    await checkAndNotifyLowStock({ assetId, userId, organizationId });
 
     return data(payload({ success: true }));
   } catch (cause) {

@@ -1651,11 +1651,13 @@ describe("updateAsset stock-lowering guard", () => {
 });
 
 /**
- * Wiring for the low-stock notifier trigger on the asset-edit path. A quantity
- * DROP on a QUANTITY_TRACKED asset must run `checkAndNotifyLowStock` AFTER the
- * write commits; an increase (or a non-quantity edit) must not. The notifier's
- * own debounce/recipient logic lives in low-stock.server.test.ts — here we only
- * assert the call is made (and with which args).
+ * Wiring for the low-stock notifier trigger on the asset-edit path. ANY quantity
+ * change on a QUANTITY_TRACKED asset — a DROP or a RAISE — must run
+ * `checkAndNotifyLowStock` AFTER the write commits: a drop may cross INTO the
+ * low-stock band, and a raise (restock) may cross back OUT and must clear the
+ * debounce marker / send the recovery notice. Only a non-quantity edit (or a
+ * no-op) must not. The notifier's own debounce/recipient logic lives in
+ * low-stock.server.test.ts — here we only assert the call is made (with which args).
  */
 describe("updateAsset low-stock notifier wiring", () => {
   const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
@@ -1698,7 +1700,7 @@ describe("updateAsset low-stock notifier wiring", () => {
     });
   });
 
-  it("does NOT run checkAndNotifyLowStock when the quantity is INCREASED", async () => {
+  it("runs checkAndNotifyLowStock when a QUANTITY_TRACKED asset's quantity is RAISED (restock → clears the debounce marker / recovery notice)", async () => {
     (
       lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
@@ -1714,10 +1716,14 @@ describe("updateAsset low-stock notifier wiring", () => {
       id: "asset-1",
       userId: "user-1",
       organizationId: "org-1",
-      quantity: 15, // 15 > 10 → an increase, not a decrement surface
-    } as any);
+      quantity: 15, // 15 > 10 → a raise; must still run so a recovery clears
+    } as any); // the stale lowStockNotifiedAt marker (else the next alert is suppressed)
 
-    expect(mockLowStock).not.toHaveBeenCalled();
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
   });
 
   it("does NOT run checkAndNotifyLowStock when quantity is not part of the patch", async () => {

@@ -3163,11 +3163,16 @@ export async function updateAsset({
     }
 
     /**
-     * Low-stock check — only when this patch LOWERED a QUANTITY_TRACKED
-     * asset's total (a raise can only recover, and the notifier handles that
-     * transition itself; but we intentionally trigger the check only on a drop
-     * to match the decrement surfaces). Reuses the hoisted `quantityBeforeUpdate`
-     * / `lockedAssetType` signals: a decrease is `quantity < quantityBeforeUpdate`.
+     * Low-stock check — on ANY quantity change to a QUANTITY_TRACKED asset,
+     * both a drop AND a raise. A drop may cross INTO the low-stock band (fire
+     * the alert); a raise (e.g. a restock via the edit form / CSV update-import)
+     * may cross back OUT, which must clear the `lowStockNotifiedAt` debounce
+     * marker and send the "back in stock" notice. Gating on a drop only would
+     * leave a stale marker after a restock, silently suppressing the next
+     * genuine low-stock alert — the notifier only performs its recovery
+     * transition when it is actually called. Mirrors the adjust-quantity route,
+     * which calls the notifier unconditionally on both add and subtract.
+     * Reuses the hoisted `quantityBeforeUpdate` / `lockedAssetType` signals.
      * Runs OUTSIDE the committed transaction (best-effort — a notification
      * failure must never roll back a successful asset edit).
      */
@@ -3175,7 +3180,7 @@ export async function updateAsset({
       quantity != null &&
       lockedAssetType === AssetType.QUANTITY_TRACKED &&
       quantityBeforeUpdate != null &&
-      quantity < quantityBeforeUpdate
+      quantity !== quantityBeforeUpdate
     ) {
       try {
         await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
