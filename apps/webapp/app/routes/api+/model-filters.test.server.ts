@@ -11,7 +11,7 @@
  * @see {@link file://./model-filters.ts}
  * @see {@link file://./../../hooks/use-model-filters.ts}
  */
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,10 +76,15 @@ const clause = vi.hoisted(() => ({
   }),
 }));
 
+const bookingMocks = vi.hoisted(() => ({
+  resolveCustodianScope: vi.fn(),
+}));
+
 // why: service.server pulls in the whole booking domain (schedulers, emails);
 // the clause itself is pure, so a local equivalent keeps the test fast.
 vi.mock("~/modules/booking/service.server", () => ({
   bookingDraftVisibilityClause: clause.buildDraftVisibility,
+  resolveCustodianScope: bookingMocks.resolveCustodianScope,
 }));
 
 const ORG_ID = "org-1";
@@ -128,12 +133,18 @@ async function readFilters(response: Response) {
 /** The clause every booking read path AND-s in — drafts are creator-only. */
 const DRAFT_VISIBILITY = clause.buildDraftVisibility("user-1");
 
+/** Points the session at a workspace where the caller holds `role`. */
+function setRole(role: OrganizationRoles) {
+  orgMocks.getSelectedOrganization.mockResolvedValue({
+    organizationId: ORG_ID,
+    userOrganizations: [{ organization: { id: ORG_ID }, roles: [role] }],
+  });
+}
+
 describe("GET /api/model-filters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    orgMocks.getSelectedOrganization.mockResolvedValue({
-      organizationId: ORG_ID,
-    });
+    setRole(OrganizationRoles.OWNER);
   });
 
   describe("result shape", () => {
@@ -177,7 +188,8 @@ describe("GET /api/model-filters", () => {
       expect(filters[0].name).toBe("Ada Lovelace");
       expect(filters[0].color).toBe("#fff");
       expect(filters[0].metadata).toMatchObject({ id: "tm-1" });
-      // Same bug class: `renderItem` reads `item.metadata?.userId` here.
+      // The record's own columns are now top-level too, matching what a route
+      // loader hands the picker.
       expect(filters[0].userId).toBe("user-9");
     });
   });
@@ -252,6 +264,57 @@ describe("GET /api/model-filters", () => {
       await loader(buildArgs("name=kit&queryKey=name&queryValue=x"));
 
       expect(lastWhere().AND).toBeUndefined();
+    });
+  });
+
+  describe("scopeToCustodian", () => {
+    beforeEach(() => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+      bookingMocks.resolveCustodianScope.mockResolvedValue({
+        userId: "user-1",
+        teamMemberIds: ["tm-1"],
+      });
+    });
+
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "restricts %s callers that opt in to bookings they are custodian of",
+      async (role) => {
+        setRole(role);
+
+        await loader(
+          buildArgs("name=booking&queryKey=name&scopeToCustodian=true")
+        );
+
+        expect(lastWhere().AND).toEqual([
+          DRAFT_VISIBILITY,
+          {
+            OR: [
+              { custodianUserId: "user-1" },
+              { custodianTeamMemberId: { in: ["tm-1"] } },
+            ],
+          },
+        ]);
+      }
+    );
+
+    it("is a no-op for admins and owners", async () => {
+      setRole(OrganizationRoles.ADMIN);
+
+      await loader(
+        buildArgs("name=booking&queryKey=name&scopeToCustodian=true")
+      );
+
+      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+      expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
+    });
+
+    it("leaves callers that do not opt in unscoped (advanced filter)", async () => {
+      setRole(OrganizationRoles.SELF_SERVICE);
+
+      await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+
+      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+      expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
     });
   });
 });

@@ -286,6 +286,10 @@ export default function ExistingBooking() {
               // `loadBookingsData` seeds the list with — otherwise searching
               // returns bookings this dialog then refuses to render.
               status: ADDABLE_BOOKING_STATUSES.join(","),
+              // Keep the typed list inside the same custodian scope
+              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
+              // are not offered bookings that submit would then reject.
+              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"

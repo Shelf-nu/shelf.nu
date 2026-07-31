@@ -1,11 +1,19 @@
+import type { Prisma } from "@prisma/client";
 import { BookingStatus, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import {
+  isSelfServiceOrBaseRole,
+  resolveEffectiveRole,
+} from "~/utils/roles.server";
 
 /**
  * Booking statuses a booking search returns when the caller does not ask for a
@@ -81,6 +89,25 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
             ),
         { message: "Invalid booking status" }
       ),
+
+    /**
+     * Opt in to the same custodian restriction the seeding loader applies.
+     *
+     * Set by the "Add to existing booking" dialogs, whose loader runs
+     * `loadBookingsData` → `getBookings({ custodianScope })` for SELF_SERVICE /
+     * BASE callers. Without it, typing replaces their custodian-scoped list with
+     * bookings they do not own, which `validateBookingOwnership` then rejects on
+     * submit — a dead end.
+     *
+     * The asset-index advanced filter does NOT set it, so that surface keeps
+     * seeing the same rows before and after typing.
+     *
+     * This is a request-controlled *toggle*, never a request-controlled *value*:
+     * the ids it restricts to are resolved server-side from the session user, so
+     * it cannot be used to widen or retarget the scope (the hazard documented on
+     * `getMinimalBookings`). It is also a no-op for ADMIN / OWNER.
+     */
+    scopeToCustodian: z.coerce.boolean().optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
@@ -96,10 +123,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganization({
-      userId,
-      request,
-    });
+    const { organizationId, userOrganizations } = await getSelectedOrganization(
+      { userId, request }
+    );
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -181,6 +207,36 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * it back open.
        */
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
+
+      /**
+       * Callers that opted in get the seeding loader's custodian restriction,
+       * resolved here from the session — see the `scopeToCustodian` docs above.
+       */
+      if (
+        modelFilters.scopeToCustodian &&
+        isSelfServiceOrBaseRole(
+          resolveEffectiveRole({ userOrganizations, organizationId })
+        )
+      ) {
+        const custodianScope = await resolveCustodianScope({
+          userId,
+          organizationId,
+        });
+
+        const selfBranches: Prisma.BookingWhereInput[] = [
+          { custodianUserId: custodianScope.userId },
+        ];
+
+        if (custodianScope.teamMemberIds.length) {
+          selfBranches.push({
+            custodianTeamMemberId: { in: custodianScope.teamMemberIds },
+          });
+        }
+
+        where.AND.push(
+          selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches }
+        );
+      }
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {
@@ -226,11 +282,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
          * `renderItem`.
          *
          * Spreading the raw record first is what keeps those two shapes in
-         * agreement: without it a `renderItem` reading e.g. `item.status`
-         * (booking pickers) or `item.metadata.userId` (team-member pickers)
-         * silently got `undefined` the moment the user typed, and the row
-         * rendered as nothing at all. The explicit keys below still win, so the
-         * `id` / `name` / `color` / `metadata` / `user` contract is unchanged.
+         * agreement: without it a `renderItem` reading a plain column — e.g.
+         * `item.status` in the booking pickers — silently got `undefined` the
+         * moment the user typed, and the row rendered as nothing at all. The
+         * explicit keys below still win, so the `id` / `name` / `color` /
+         * `metadata` / `user` contract is unchanged.
          *
          * No new data is exposed: `metadata` already carried the whole record.
          */
