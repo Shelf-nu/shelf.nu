@@ -2237,6 +2237,28 @@ describe("bulkUpdateAssetModel", () => {
     expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
+  it("reports resolved 0 when the ids are not in this organization", async () => {
+    expect.assertions(2);
+    // why: the resolver returns a caller-supplied id list verbatim, so the
+    // org check is the org-scoped read. Foreign ids resolve to a non-empty
+    // list but match no rows, and the caller must be able to tell that apart
+    // from "these are already on the model".
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["foreign-asset-1", "foreign-asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({ resolved: 0, updated: 0 });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
   it("writes nothing when the selection resolves to no assets", async () => {
     expect.assertions(2);
 

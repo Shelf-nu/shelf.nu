@@ -6799,7 +6799,13 @@ export async function bulkUpdateAssetModel({
 
     return {
       linked,
-      resolved: resolvedIds.length,
+      /**
+       * The org-verified count, not `resolvedIds.length`. A caller-supplied id
+       * list comes back from the resolver verbatim, so counting it would report
+       * "already in this asset model" for ids that simply are not in this
+       * organization, when "matched no assets" is the truth.
+       */
+      resolved: assetsBeforeUpdate.length,
       updated: assetsThatChange.length,
       moved,
       /**
