@@ -1,4 +1,4 @@
-import type { BookingStatus, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -14,7 +14,10 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 
-import { ADDABLE_BOOKING_STATUSES } from "~/modules/booking/constants";
+import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
 import {
   assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
@@ -273,14 +276,7 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    return (
-      !!booking?.status &&
-      ADDABLE_BOOKING_STATUSES.includes(booking.status as BookingStatus)
-    );
-  }
+  const isValidBooking = isAddableBooking;
 
   return (
     <Form method="post">

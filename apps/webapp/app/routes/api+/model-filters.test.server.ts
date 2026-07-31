@@ -71,6 +71,12 @@ vi.mock("~/modules/booking/service.server", () => ({
 
 const ORG_ID = "org-1";
 
+/**
+ * Builds the loader args for a given query string.
+ *
+ * @param query - Raw query string, without the leading `?`.
+ * @returns Loader args carrying a session for `user-1`.
+ */
 function buildArgs(query: string): LoaderFunctionArgs {
   return {
     request: new Request(`http://localhost/api/model-filters?${query}`),
@@ -95,6 +101,12 @@ function lastWhere() {
   return dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.where;
 }
 
+/**
+ * Reads the `filters` array out of a loader response.
+ *
+ * @param response - Response produced by {@link callLoader}.
+ * @returns The filter items the picker would render.
+ */
 async function readFilters(response: Response) {
   const body = await response.json();
   return body.filters ?? body.payload?.filters ?? [];

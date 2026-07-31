@@ -21,6 +21,26 @@ export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.OVERDUE,
 ];
 
+/**
+ * Whether an asset or kit can still be added to this booking.
+ *
+ * Used by the "Add to existing booking" dialogs to decide whether to render a
+ * row for a booking the picker handed them. Accepts a loose shape because the
+ * pickers pass records from two sources (the route loader and
+ * `/api/model-filters`), neither of which is narrowed to `Booking` client-side.
+ *
+ * @param booking - Candidate booking; anything without a `status` is rejected.
+ * @returns `true` when the booking's status is in {@link ADDABLE_BOOKING_STATUSES}.
+ */
+export function isAddableBooking(
+  booking: { status?: string | null } | null | undefined
+): boolean {
+  return (
+    !!booking?.status &&
+    ADDABLE_BOOKING_STATUSES.includes(booking.status as BookingStatus)
+  );
+}
+
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
