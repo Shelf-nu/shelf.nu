@@ -141,10 +141,17 @@ assert_eq "0" "$WRITE_RC" "state_write returns success on valid JSON"
 assert_eq "7" "$(state_read 9999 | jq -r '.round')" "state_write round-trips valid JSON"
 
 # Regression (fix round 2): `jq empty` — and a bare -s size check — both
-# accept whitespace-only, `null`, and array payloads, which a dead or
-# typo'd upstream producer (e.g. `jq '.nonexistant'` emitting `null`) can
-# legitimately emit. Only requiring the parsed top-level type to be
-# "object" catches all three; each must be rejected with prior state intact.
+# accept zero-byte, whitespace-only, `null`, and array payloads, which a
+# dead or typo'd upstream producer (e.g. a filter that emits nothing, or
+# `jq '.nonexistant'` emitting `null`) can legitimately produce. Only
+# requiring the parsed top-level type to be "object" catches all four; each
+# must be rejected with prior state intact.
+printf '' | state_write 9999
+WRITE_RC=$?
+assert_eq "1" "$WRITE_RC" "state_write rejects an empty (zero-byte) payload"
+assert_eq "7" "$(state_read 9999 | jq -r '.round')" \
+  "state_write leaves prior state intact on an empty (zero-byte) payload"
+
 printf '   \n' | state_write 9999
 WRITE_RC=$?
 assert_eq "1" "$WRITE_RC" "state_write rejects a whitespace-only payload"
