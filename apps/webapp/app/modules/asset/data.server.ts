@@ -205,6 +205,8 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
     },
@@ -392,6 +394,13 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      /**
+       * Seeds the asset model picker in the bulk "Update asset model" dialog.
+       * Advanced mode already returned these; simple mode was querying them and
+       * throwing them away, so this adds no database work.
+       */
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
       currentUserTeamMember,

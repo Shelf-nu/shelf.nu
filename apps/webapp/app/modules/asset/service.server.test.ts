@@ -16,6 +16,7 @@ import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import {
   BULK_CREATE_MAX,
   bulkAssignAssetTags,
@@ -23,6 +24,7 @@ import {
   bulkCreateAssetsFromModel,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
+  bulkUpdateAssetModel,
   buildAssetKitCreateData,
   checkOutQuantity,
   createAsset,
@@ -67,6 +69,13 @@ vitest.mock("~/database/db.server", () => ({
     // why: bulkUpdateAssetCategory + updateAsset cross-org guards verify the
     // categoryId belongs to the caller's org
     category: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
+    // why: `~/utils/org-validation.server` is NOT mocked in this file, so
+    // `assertAssetModelBelongsToOrg` runs for real inside
+    // `bulkUpdateAssetModel` and hits this stub. Without the key the guard
+    // throws a TypeError instead of exercising the org check.
+    assetModel: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
     location: {
@@ -2032,6 +2041,223 @@ describe("bulkUpdateAssetCategory", () => {
         settings: {},
       })
     ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("bulkUpdateAssetModel", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: this file pins shared db mocks with sticky `mockReturnValue` in
+    // other suites and `clearAllMocks` does not undo those. Re-arm the two
+    // stubs this suite drives so it never reads a leaked value.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([]);
+    //@ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue({
+      id: "model-1",
+      name: "Panasonic PT-VZ580",
+    });
+  });
+
+  it("links the individually tracked assets and skips quantity-tracked ones", async () => {
+    expect.assertions(4);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "QUANTITY_TRACKED", assetModelId: null },
+      { id: "asset-3", type: "INDIVIDUAL", assetModelId: null },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      currentSearchParams: "assetModel=is:without-model",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "ADVANCED" },
+    });
+
+    expect(result).toEqual({
+      linked: true,
+      resolved: 3,
+      updated: 2,
+      moved: 0,
+      skippedQuantityTracked: 1,
+      modelName: "Panasonic PT-VZ580",
+    });
+    // The active filters and index mode must reach the resolver, or a
+    // cross-page "select all" silently operates on the wrong set.
+    expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      currentSearchParams: "assetModel=is:without-model",
+      settings: { mode: "ADVANCED" },
+    });
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
+      data: { assetModelId: "model-1" },
+    });
+    // The qty-tracked asset must never reach the write.
+    expect(
+      (db.asset.updateMany as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+        .where.id.in
+    ).not.toContain("asset-2");
+  });
+
+  it("counts assets moved off another model separately from first-time grouping", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: "model-other" },
+      // already on the target model → not a change at all
+      { id: "asset-3", type: "INDIVIDUAL", assetModelId: "model-1" },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({ updated: 2, moved: 1 });
+  });
+
+  it("removes the link when no model is given, without touching the model table", async () => {
+    expect.assertions(3);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: "model-1" },
+      // already unlinked → no write
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: null },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      // why: the dialog posts an EMPTY STRING for "remove from asset model",
+      // never null — this is the shape the route actually parses.
+      assetModelId: "",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({
+      linked: false,
+      updated: 1,
+      moved: 0,
+      modelName: null,
+    });
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+      data: { assetModelId: null },
+    });
+  });
+
+  it("does not error when unlinking a selection that is entirely quantity-tracked", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "QUANTITY_TRACKED", assetModelId: null },
+    ]);
+
+    // Removing a model from assets that can never have had one is a no-op,
+    // not a rule violation. Only the LINK direction rejects.
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      assetModelId: "",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({
+      linked: false,
+      updated: 0,
+      skippedQuantityTracked: 0,
+    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws a 400 when every selected asset is quantity-tracked", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "QUANTITY_TRACKED", assetModelId: null },
+    ]);
+
+    await expect(
+      bulkUpdateAssetModel({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        assetModelId: "model-1",
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+      // The status AND the message must survive the catch-all wrapper, or the
+      // dialog shows "Something went wrong" instead of the eligibility rule.
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("quantity-tracked"),
+    });
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws when the asset model belongs to a different organization", async () => {
+    expect.assertions(2);
+    // why: emulate a foreign-org model — the org-scoped guard finds nothing
+    //@ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      bulkUpdateAssetModel({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        assetModelId: "foreign-model",
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+      // Same reason as above: the guard's own 404 message has to reach the UI.
+    ).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining("workspace"),
+    });
+
+    // The guard must run before the assets are read or written.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the selection resolves to no assets", async () => {
+    expect.assertions(2);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: [],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toEqual({
+      linked: true,
+      resolved: 0,
+      updated: 0,
+      moved: 0,
+      skippedQuantityTracked: 0,
+      modelName: null,
+    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 });
 
