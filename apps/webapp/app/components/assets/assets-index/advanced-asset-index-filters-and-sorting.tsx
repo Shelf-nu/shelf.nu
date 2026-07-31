@@ -14,6 +14,7 @@ import {
 import { Reorder } from "framer-motion";
 import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
+import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -88,6 +89,30 @@ function AdvancedFilter() {
   const isApplyingInternally = useRef(false);
 
   const availableColumns = getAvailableColumns(columns, filters, "filter");
+
+  // "Low stock" quick filter — a standalone `lowStockOnly` URL param
+  // (QUANTITY_TRACKED assets at/below their reorder threshold). Surfaced INSIDE
+  // this Filter popover rather than as a separate top-bar button. It's
+  // independent of the column-filter apply model (toggles immediately) and
+  // counts toward the trigger's active badge so it's visible when collapsed.
+  const lowStockActive = searchParams.get("lowStockOnly") === "true";
+  const activeFilterCount = initialFilters.length + (lowStockActive ? 1 : 0);
+
+  function toggleLowStock() {
+    // Preserve any in-progress (unapplied) column-filter edits: skip the
+    // URL-sync effect's reset, exactly as `applyFilters` / `clearAllFilters` do.
+    isApplyingInternally.current = true;
+    setSearchParams((prev) => {
+      if (prev.get("lowStockOnly") === "true") {
+        prev.delete("lowStockOnly");
+      } else {
+        prev.set("lowStockOnly", "true");
+      }
+      // Re-run pagination from the top when the filter changes.
+      prev.delete("page");
+      return prev;
+    });
+  }
 
   // Create a stable string from search params excluding getAll parameter
   // This prevents filter resets when dropdown "show all" actions modify the URL
@@ -197,12 +222,12 @@ function AdvancedFilter() {
           <Button
             type="button"
             variant="secondary"
-            className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
+            className={getTriggerClasses(isPopoverOpen, activeFilterCount)}
             icon="filter"
           >
-            {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
-            {initialFilters.length > 0
-              ? `Filtered by ${initialFilters.length}`
+            {/* Count = server-active column filters + the low-stock quick filter */}
+            {activeFilterCount > 0
+              ? `Filtered by ${activeFilterCount}`
               : "Filter"}
           </Button>
         </PopoverTrigger>
@@ -339,6 +364,28 @@ function AdvancedFilter() {
                 </div>
               )}
             </div>
+
+            {/* Low-stock quick filter — deliberately small and de-emphasized so
+                it does not compete with the column filters above. Toggles the
+                `lowStockOnly` param immediately (independent of the Apply flow). */}
+            <button
+              type="button"
+              onClick={toggleLowStock}
+              aria-pressed={lowStockActive}
+              className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[12px] font-normal text-gray-500 hover:bg-gray-50"
+            >
+              <FakeCheckbox
+                checked={lowStockActive}
+                className={tw(
+                  "size-[14px]",
+                  lowStockActive ? "text-primary" : "text-white"
+                )}
+              />
+              Low stock only
+              <span className="text-gray-400">
+                — at or below reorder threshold
+              </span>
+            </button>
 
             <div className="flex items-center justify-between px-4 py-3">
               <div>
