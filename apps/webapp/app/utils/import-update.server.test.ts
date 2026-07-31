@@ -469,3 +469,66 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     expect(result.summary.updated).toBe(0);
   });
 });
+
+describe("applyBulkUpdatesFromImport — custom field clearing (SHELF-WEBAPP-21W)", () => {
+  it("clears a custom field by emitting `undefined`, never a `{ raw: '' }` value", async () => {
+    // why: give the org one TEXT custom field ("Notes") so the "Notes" CSV
+    // header resolves to a customField column instead of being ignored.
+    vi.mocked(db.customField.findMany).mockResolvedValue([
+      {
+        id: "cf-notes",
+        name: "Notes",
+        type: "TEXT",
+        helpText: null,
+        required: false,
+        active: true,
+        organizationId,
+        categoryId: null,
+        options: [],
+        deletedAt: null,
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.customField.findMany>>);
+
+    // why: the asset must already HAVE a "Notes" value so a blank cell is
+    // detected as a clear (detectClearing only fires on an existing non-empty
+    // value) — that's the branch that produced the invalid write.
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        customFields: [
+          {
+            customField: { id: "cf-notes", name: "Notes" },
+            value: { raw: "old note" },
+          },
+        ],
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Notes"],
+      ["SAM-0001", ""], // blank cell → clear the existing value
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    // Previously this row 500'd on the `ensure_value_structure_and_types`
+    // CHECK and landed in `failed`; now it applies as an update.
+    expect(result.summary.failed).toBe(0);
+    expect(result.summary.updated).toBe(1);
+    expect(updateAsset).toHaveBeenCalledTimes(1);
+
+    // The clearing signal must reach updateAsset as `undefined` (→ deleteMany),
+    // NOT the invalid `{ raw: "" }` shape that violated the CHECK constraint.
+    const payload = vi.mocked(updateAsset).mock.calls[0][0];
+    expect(payload.customFieldsValues).toHaveLength(1);
+    expect(payload.customFieldsValues?.[0]?.id).toBe("cf-notes");
+    expect(payload.customFieldsValues?.[0]?.value).toBeUndefined();
+    expect(JSON.stringify(payload.customFieldsValues)).not.toContain(
+      '"raw":""'
+    );
+  });
+});

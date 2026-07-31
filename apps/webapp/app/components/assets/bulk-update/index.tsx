@@ -63,16 +63,39 @@ export const ImportUpdateContent = () => {
               <div>
                 <h5 className="font-semibold">What you can update</h5>
                 <p className="text-[14px] text-gray-600">
-                  Name, Category, Location, Tags, Valuation, Available to book,
-                  and your custom fields (Text, Boolean, Date, Option, Number,
-                  Currency).
+                  Name, Category, Location, Tags, Value, Available to book,{" "}
+                  <b>Asset model</b>, and your custom fields (Text, Boolean,
+                  Date, Option, Number, Currency).
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Asset model</b> is matched by name (case-insensitive) and
+                  created automatically if it doesn't exist yet. It applies to{" "}
+                  <b>individually tracked assets only</b> — on a
+                  quantity-tracked asset the cell is skipped with a warning and
+                  the rest of the row still applies.
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  For <b>quantity-tracked</b> assets you can also update
+                  Quantity, Min quantity, Unit of measure, and Consumption type.
+                  These columns are ignored on individually tracked assets.
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Heads up — the export isn't re-uploadable as-is here.</b>{" "}
+                  The Asset Index writes Quantity as <code>10 boxes</code> when
+                  the asset has a unit of measure, but this importer needs the
+                  cell to contain the number only (<code>10</code>) — leave the
+                  unit out or the row's quantity update fails. Min quantity,
+                  Unit of measure, and Consumption type aren't part of the
+                  export at all; add those columns yourself using exactly those
+                  header names.
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
                   <b>Not supported yet:</b> Description, Status, Kit, and
                   Custody can't be bulk-updated via CSV — Status and Custody
                   have their own workflows, and Description can lose formatting
-                  during export. These columns will be safely skipped if present
-                  in your file.
+                  during export. Tracking method is fixed once an asset is
+                  created. These columns will be safely skipped if present in
+                  your file.
                 </p>
               </div>
             </div>
@@ -91,6 +114,12 @@ export const ImportUpdateContent = () => {
                   that value will be cleared. Fields that are already empty stay
                   unchanged. Name and boolean fields (Yes/No) cannot be cleared.
                 </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Exceptions:</b> Asset model, Quantity, Min quantity, Unit
+                  of measure, and Consumption type are never cleared by an empty
+                  cell — blanking them leaves the current value in place. Change
+                  these on the asset itself if you need to remove them.
+                </p>
               </div>
             </div>
 
@@ -105,8 +134,8 @@ export const ImportUpdateContent = () => {
                 <h5 className="font-semibold">How assets are matched</h5>
                 <p className="text-[14px] text-gray-600">
                   By <b>Asset ID</b> or <b>ID</b> — keep these columns as they
-                  are. Categories, locations, and tags that don't exist yet will
-                  be created for you.
+                  are. Categories, locations, tags, and asset models that don't
+                  exist yet will be created for you.
                 </p>
               </div>
             </div>

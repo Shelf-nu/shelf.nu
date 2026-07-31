@@ -583,6 +583,18 @@ The `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy
    Follow the testing conventions outlined in the Writing & Organizing Tests section to ensure consistent, behavior-driven testing and minimal mocking.
 5. **Pre-commit**: Always run `pnpm webapp:validate` to ensure code quality
 
+## Right-Sizing Execution Effort
+
+Match the weight of the process to the size of the change. For a **trivial,
+fully-understood mechanical edit** — move a function to a `*.server` module, fix
+an import path, rename a symbol, a one-line guard swap — just make the edit
+directly with the file tools and run only the one relevant test if needed. Do
+**not** spin up a subagent, review loop, or full `validate` for it: the
+orchestration overhead (re-reading files, running the whole suite, writing a
+report) can turn a 30-second edit into many minutes. Reserve subagent-driven
+execution and full review loops for **substantial** work — new modules,
+multi-file features, or anything genuinely needing an independent review.
+
 ## Git and Version control
 
 - **NEVER stage (`git add`) or commit files automatically.** Only stage or commit when the user explicitly asks you to do so.

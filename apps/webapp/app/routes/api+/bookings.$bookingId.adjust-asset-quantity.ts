@@ -2,20 +2,24 @@
  * API Route: Adjust Booking Asset Quantity
  *
  * Updates the booked quantity of a single QUANTITY_TRACKED asset inside
- * a booking. Validates availability (Total - InCustody - Reserved excluding
- * this booking) before applying the new quantity.
+ * a booking. Validates the new quantity via the shared directional,
+ * windowed availability guard (`assertAssetQuantityAvailable`) before
+ * applying it — a reduction always passes (even if the pool is already
+ * over-committed by other bookings, #2725); only an increase is measured
+ * against windowed availability over the booking's own `[from, to]`.
  *
  * @see {@link file://./../../components/booking/adjust-booking-asset-quantity-dialog.tsx}
+ * @see {@link file://./../../modules/asset/availability.server.ts}
  */
 
 import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
-import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -88,13 +92,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { organizationId },
       },
       include: {
-        asset: { select: { id: true, title: true, type: true } },
+        asset: {
+          select: { id: true, title: true, type: true, unitOfMeasure: true },
+        },
         booking: {
           select: {
             id: true,
             name: true,
             creatorId: true,
             custodianUserId: true,
+            from: true,
+            to: true,
           },
         },
       },
@@ -162,10 +170,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * snapshot, each pass their own guard, and both commit — oversubscribing
      * the pool.
      *
-     * `computeBookingAvailableQuantity` intentionally keeps its original
-     * signature and uses the default `db` client. The row lock held by
-     * this transaction blocks concurrent writers; read-committed isolation
-     * then returns correct values for the availability computation.
+     * `assertAssetQuantityAvailable` is the shared directional, windowed
+     * guard (see `~/modules/asset/availability.server`). It runs inside
+     * this transaction (behind the row lock above) so the read-then-decide
+     * is race-safe. Critically, it is *directional*: a submission that is
+     * `≤` the row's current quantity is always a reduction and always
+     * passes, even when the pool is already over-committed by other
+     * bookings — otherwise a booking that became over-reserved (e.g. the
+     * asset's total quantity was lowered elsewhere) could never be edited
+     * back down (#2725). Only the *increase* portion of a submission is
+     * measured against windowed availability, using the booking's own
+     * `[from, to]` so non-overlapping reservations don't compete.
      *
      * Exclude the current booking so its existing reservation isn't
      * double-counted.
@@ -173,20 +188,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     await db.$transaction(async (tx) => {
       await lockAssetForQuantityUpdate(tx, assetId);
 
-      const availability = await computeBookingAvailableQuantity(
+      await assertAssetQuantityAvailable({
         assetId,
-        bookingId
-      );
-
-      if (quantity > availability.available) {
-        throw new ShelfError({
-          cause: null,
-          message: `Cannot reserve ${quantity} units of "${bookingAsset.asset.title}". Only ${availability.available} available.`,
-          label: "Booking",
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
+        organizationId,
+        tx,
+        window:
+          bookingAsset.booking.from && bookingAsset.booking.to
+            ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
+            : null,
+        excludeBookingId: bookingId,
+        currentQuantity: bookingAsset.quantity,
+        requestedQuantity: quantity,
+        assetTitle: bookingAsset.asset.title,
+        unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
+      });
 
       previousQuantity = bookingAsset.quantity;
 

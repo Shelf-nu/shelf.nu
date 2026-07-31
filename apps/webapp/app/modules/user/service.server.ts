@@ -848,6 +848,65 @@ export async function createUser(
     const isUniqueViolation =
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
 
+    /**
+     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
+     * violation raised on the primary key means a `User` row already exists for
+     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
+     * stored email differs from the OTP email, so the route's email-keyed race
+     * guard missed it. The `user.create` and ALL its side-effects (personal
+     * org, org association, team member, asset index settings) run inside one
+     * `$transaction`, so the P2002 rolled the whole thing back. Return the
+     * pre-existing row (using the exact same select shape the create returns)
+     * instead of failing the signup.
+     *
+     * ONE piece of state still needs reconciling: for invite/SSO callers
+     * (`organizationId` present), the rolled-back transaction never created the
+     * requested org association, so a concurrent P2002 race would otherwise
+     * return the existing user un-attached to the org they were invited to. We
+     * re-attach that association idempotently below (only when they aren't
+     * already a member). The personal-org / OTP self-signup case has no
+     * `organizationId`, so there is nothing to reconcile there.
+     *
+     * We deliberately do NOT re-fire the `signup_completed` analytics event on
+     * this path: no new account was created. If the lookup unexpectedly finds
+     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
+     * this `id`), that is a genuine conflict — fall through and throw.
+     */
+    if (isUniqueViolation) {
+      const existingUser = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+          ...USER_WITH_SSO_DETAILS_SELECT,
+          organizations: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (existingUser) {
+        // The rolled-back transaction never created the org association. For
+        // invite/SSO callers (organizationId present), a concurrent P2002 race
+        // would otherwise leave the existing user un-attached to the requested
+        // org. Reconcile idempotently — only attach when not already a member
+        // (the membership check avoids re-pushing roles via the upsert's
+        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        if (
+          organizationId &&
+          !existingUser.organizations.some((org) => org.id === organizationId)
+        ) {
+          await createUserOrgAssociation(db, {
+            userId,
+            organizationIds: [organizationId],
+            roles: roles ?? [],
+          });
+          existingUser.organizations.push({ id: organizationId });
+        }
+        return existingUser;
+      }
+    }
+
     throw new ShelfError({
       cause,
       message: "We had trouble while creating your account. Please try again.",

@@ -7,7 +7,7 @@
  * via requireMobilePermission on every API call.
  */
 
-type PermissionEntity = "asset" | "booking" | "audit" | "kit";
+type PermissionEntity = "asset" | "booking" | "audit" | "kit" | "qr";
 type PermissionAction =
   | "read"
   | "create"
@@ -30,24 +30,33 @@ const ROLE_PERMISSIONS: Record<
     booking: ["read", "create", "update", "delete", "checkout", "checkin"],
     audit: ["read", "create", "update", "delete"],
     kit: ["read", "create", "update", "delete", "custody"],
+    // qr:update gates the native claim / link-existing flows. The server
+    // short-circuits ADMIN/OWNER to allow-all, so listing it here mirrors
+    // the effective server behaviour rather than the literal map.
+    qr: ["read", "update"],
   },
   ADMIN: {
     asset: ["read", "create", "update", "delete", "custody"],
     booking: ["read", "create", "update", "delete", "checkout", "checkin"],
     audit: ["read", "create", "update", "delete"],
     kit: ["read", "create", "update", "delete", "custody"],
+    qr: ["read", "update"],
   },
   SELF_SERVICE: {
     asset: ["read", "custody"],
     booking: ["read", "create", "update", "checkout", "checkin"],
     audit: ["read", "update"],
     kit: ["read", "custody"],
+    // Web's Role2PermissionMap grants BASE / SELF_SERVICE qr:read only —
+    // they never see the native claim / link actions.
+    qr: ["read"],
   },
   BASE: {
     asset: ["read"],
     booking: ["read"],
     audit: ["read"],
     kit: ["read"],
+    qr: ["read"],
   },
 };
 

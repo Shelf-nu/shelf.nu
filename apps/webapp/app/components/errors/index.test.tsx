@@ -73,6 +73,10 @@ vi.mock("./error-404-handler", () => ({
   default: mockError404Handler,
 }));
 
+// why: react-doctor flags this as no-barrel-import, but index.tsx DEFINES
+// ErrorContent (it is not a re-export barrel), so this is the only import path.
+// Extracting ErrorContent to its own module would turn index.tsx into a true
+// barrel and flag all ~44 route consumers instead. Advisory-only; left as-is.
 import { ErrorContent } from "./index";
 
 /** The Back-to-home/Reload link buttons need a router context to render */
@@ -322,11 +326,11 @@ describe("ErrorContent capturing route-error boundary failures to Sentry", () =>
     window.env = { SENTRY_DSN: "test-dsn" } as Window["env"];
   });
 
-  it("captures a 4xx route error with source=error-boundary and the on-screen trace id", async () => {
+  it("captures an unexpected 4xx route error (e.g. 409) with source=error-boundary and the on-screen trace id", async () => {
     mockRouteError = buildRouteError({
-      status: 403,
-      message: "You don't have permission to view this audit",
-      label: "Audit permission",
+      status: 409,
+      message: "This asset is already booked for that window",
+      label: "Booking conflict",
     });
     renderErrorContent();
 
@@ -336,14 +340,31 @@ describe("ErrorContent capturing route-error boundary failures to Sentry", () =>
       tags: {
         source: "error-boundary",
         shelf_trace_id: "trace_789",
-        label: "Audit permission",
-        status: "403",
+        label: "Booking conflict",
+        status: "409",
       },
       contexts: { route: { pathname: "/kits" } },
     });
   });
 
-  it("captures a genuine 404 (not-found screen) the same way as other 4xx", async () => {
+  it("does not capture an expected 403 terminal state (permission/expired claim — normal UX, not a bug)", async () => {
+    mockRouteError = buildRouteError({
+      status: 403,
+      message: "This scan can no longer be updated",
+      label: "Scan",
+    });
+    renderErrorContent();
+
+    // Give the capture effect a chance to run, then assert it did not fire
+    await waitFor(() =>
+      expect(
+        screen.getByText(/This scan can no longer be updated/)
+      ).toBeTruthy()
+    );
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("does not capture a genuine 404 (not-found screen — expected terminal state)", async () => {
     mockRouteError = buildNotFoundRouteError({
       message: "Audit asset not found",
       traceId: "trace_404",
@@ -351,31 +372,16 @@ describe("ErrorContent capturing route-error boundary failures to Sentry", () =>
     });
     renderErrorContent();
 
-    await waitFor(() => expect(mockCaptureException).toHaveBeenCalled());
-    const hint = mockCaptureException.mock.calls.at(-1)?.[1];
-    expect(hint).toMatchObject({
-      tags: {
-        source: "error-boundary",
-        shelf_trace_id: "trace_404",
-        label: "Audit",
-        status: "404",
-      },
-    });
+    await waitFor(() => expect(screen.getByText("Not found")).toBeTruthy());
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
-  it("captures a router-generated 404 (unmatched/stale URL) without a shelf_trace_id or label tag", async () => {
+  it("does not capture a router-generated 404 (unmatched/stale URL — expected terminal state)", async () => {
     mockRouteError = buildRouterNotFoundError();
     renderErrorContent();
 
-    await waitFor(() => expect(mockCaptureException).toHaveBeenCalled());
-    const hint = mockCaptureException.mock.calls.at(-1)?.[1];
-    expect(hint).toMatchObject({
-      tags: { source: "error-boundary", status: "404" },
-    });
-    // No Shelf payload means no traceId/label to report — both tags must be
-    // omitted entirely (not sent as the literal string "undefined")
-    expect(hint?.tags).not.toHaveProperty("shelf_trace_id");
-    expect(hint?.tags).not.toHaveProperty("label");
+    await waitFor(() => expect(screen.getByText("Not found")).toBeTruthy());
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
   it("does not capture the benign workspace-switcher 404 case", async () => {

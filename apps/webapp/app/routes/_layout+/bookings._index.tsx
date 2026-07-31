@@ -1,42 +1,24 @@
-import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   ShouldRevalidateFunction,
 } from "react-router";
-import {
-  data,
-  redirect,
-  Link,
-  Outlet,
-  useMatches,
-  useLoaderData,
-} from "react-router";
-import { AvailabilityBadge } from "~/components/booking/availability-label";
-import {
-  BookingAssetsSidebar,
-  type SidebarBookingAssets,
-} from "~/components/booking/booking-assets-sidebar";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import BookingFilters from "~/components/booking/booking-filters";
-import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 import { ExportBookingsButton } from "~/components/booking/export-bookings-button";
+import ListBookingsContent from "~/components/booking/list-bookings-content";
 import { ErrorContent } from "~/components/errors";
 
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
-import { DateS } from "~/components/shared/date";
-import { UserBadge } from "~/components/shared/user-badge";
-import { Td, Th } from "~/components/table";
-import { TeamMemberBadge } from "~/components/user/team-member-badge";
+import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -44,7 +26,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { hasCustody } from "~/modules/custody/utils";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -65,7 +47,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveUserDisplayName } from "~/utils/user";
 
 export const bookingsSearchFieldTooltipText = `
 Search bookings based on different fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
@@ -229,14 +210,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     /**
+     * One amber "Stock conflict" pill per booking that has >=1
+     * over-committed QUANTITY_TRACKED asset in its window (see
+     * `~/modules/booking/stock-conflicts.server`). Bounded to the current
+     * page's bookings — one fixed-cost query group per page.
+     */
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
+      organizationId,
+    });
+
+    /**
      * Page-scoped input for the "Includes unavailable assets" row
      * badge. The per-booking asset payload is no longer shipped by this
      * loader (`includeAssets: false` above — the drawer fetches it
-     * lazily, along with the qty-progress maps this loader used to
-     * compute page-wide), so the badge's signal is computed here as one
-     * bounded query: which bookings on this page have at least one
-     * asset that is not bookable or is in custody (mirrors the old
-     * per-row `!availableToBook || hasCustody(custody)` check).
+     * lazily, along with the qty-progress maps, from
+     * `/api/bookings/:bookingId/assets-sidebar` on expand), so the
+     * badge's signal is computed here as one bounded query: which
+     * bookings on this page have at least one asset that is not
+     * bookable or is in custody (mirrors the old per-row
+     * `!availableToBook || hasCustody(custody)` check).
      */
     const bookingIdsOnPage = bookings.map((b) => b.id);
     const bookingsWithUnavailableAssets =
@@ -278,7 +271,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       payload({
         header,
         currentOrganization,
-        items: bookings,
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,
@@ -446,190 +439,5 @@ export default function BookingsIndexPage({
     <Outlet />
   );
 }
-
-const ListBookingsContent = ({
-  item,
-}: {
-  item: Prisma.BookingGetPayload<{
-    include: {
-      // Trigger label for the assets drawer ("N assets") — the index
-      // loader ships the count instead of the pivots themselves.
-      _count: { select: { bookingAssets: true } };
-      creator: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          displayName: true;
-          profilePicture: true;
-        };
-      };
-      from: true;
-      to: true;
-      custodianUser: true;
-      custodianTeamMember: true;
-      tags: { select: { id: true; name: true; color: true } };
-      // Included via `extraInclude` in the loader above so the
-      // assets-sidebar drawer can show outstanding model reservations.
-      modelRequests: {
-        include: {
-          assetModel: {
-            select: { id: true; name: true };
-          };
-        };
-      };
-    };
-  }> & {
-    /**
-     * Full pivot payload — present only when the row is rendered by one
-     * of the child bookings pages (`assets.$assetId.bookings`,
-     * `me.bookings`, ...) whose loaders still ship assets eagerly. The
-     * bookings INDEX loader intentionally omits it (`includeAssets:
-     * false` — the drawer fetches on expand instead), which is also why
-     * every reader below treats it as optional.
-     */
-    bookingAssets?: SidebarBookingAssets;
-  };
-}) => {
-  const loaderData = useLoaderData<typeof loader>();
-
-  /**
-   * "Includes unavailable assets" badge input. The index loader ships a
-   * page-scoped id list (it no longer loads the pivots); the child
-   * bookings pages don't compute that list but still ship the full
-   * `bookingAssets` payload, so fall back to deriving the flag from it
-   * there — the exact per-row check the index used to run.
-   */
-  const hasUnavaiableAssets =
-    (loaderData?.bookingsWithUnavailableAssets
-      ? loaderData.bookingsWithUnavailableAssets.includes(item.id)
-      : (item.bookingAssets ?? []).some(
-          (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
-        )) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
-
-  return (
-    <>
-      {/* Item */}
-      <Td className="w-full min-w-52 whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                <Button
-                  to={`/bookings/${item.id}`}
-                  variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
-                >
-                  {item.name}
-                </Button>
-              </span>
-              <div className="">
-                <BookingStatusBadge
-                  status={item.status}
-                  custodianUserId={item.custodianUserId || undefined}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </Td>
-
-      {/**
-       * Optional label when the booking includes assets that are either:
-       * 1. Marked as not available for boooking
-       * 2. Have custody
-       * 3. Have other bookings with the same period - this I am not sure how to handle yet
-       * */}
-      <Td>
-        {hasUnavaiableAssets ? (
-          <AvailabilityBadge
-            badgeText={"Includes unavailable assets"}
-            tooltipTitle={"Booking includes unavailable assets"}
-            tooltipContent={
-              "There are some assets within this booking that are unavailable for reservation because they are checked-out, have custody assigned or are marked as not allowed to book"
-            }
-          />
-        ) : null}
-      </Td>
-
-      {/* Assets count */}
-      <Td>
-        <BookingAssetsSidebar booking={item} />
-      </Td>
-
-      <Td className="max-w-62">
-        {item.description ? <LineBreakText text={item.description} /> : null}
-      </Td>
-
-      {/* From */}
-      <Td>
-        {item.from ? (
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              <DateS date={item.from} />
-            </span>
-            <span className="block text-gray-600">
-              <DateS date={item.from} onlyTime />
-            </span>
-          </div>
-        ) : null}
-      </Td>
-
-      {/* To */}
-      <Td>
-        {item.to ? (
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              <DateS date={item.to} />
-            </span>
-            <span className="block text-gray-600">
-              <DateS date={item.to} onlyTime />
-            </span>
-          </div>
-        ) : null}
-      </Td>
-
-      <Td className="max-w-[auto]">
-        <ItemsWithViewMore
-          items={item.tags}
-          idKey="id"
-          labelKey="name"
-          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
-        />
-      </Td>
-
-      {/* Custodian */}
-
-      <Td>
-        <TeamMemberBadge
-          teamMember={{
-            name: item.custodianTeamMember
-              ? item.custodianTeamMember.name
-              : resolveUserDisplayName(item.custodianUser),
-            user: item?.custodianUser
-              ? {
-                  id: item?.custodianUser?.id,
-                  firstName: item?.custodianUser?.firstName,
-                  lastName: item?.custodianUser?.lastName,
-                  email: item?.custodianUser?.email,
-                  profilePicture: item?.custodianUser?.profilePicture,
-                }
-              : null,
-          }}
-        />
-      </Td>
-
-      {/* Created by */}
-      <Td>
-        <UserBadge
-          img={
-            item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
-          }
-          name={resolveUserDisplayName(item?.creator)}
-        />
-      </Td>
-    </>
-  );
-};
 
 export const ErrorBoundary = () => <ErrorContent />;

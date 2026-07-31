@@ -1,365 +1,266 @@
 /**
- * BookingAssetsSidebar — dual-mode (eager vs lazy) unit tests
+ * Tests for the QT stock-availability badges (`InsufficientStockBadge` /
+ * `PendingReturnBadge`) as wired into `BookingAssetsSidebar`. Mirrors the
+ * equivalent coverage in `list-asset-content.test.tsx` — the two surfaces
+ * share the same decision helper (`resolveQtyStockBadgeVariant`,
+ * `~/utils/booking-assets`), but each computes `contextStatus` /
+ * `effectiveStatus` independently, so a wiring bug in one would not be
+ * caught by the other's tests.
  *
- * The sidebar sources its rows two ways (see the component's file-level
- * doc): callers that ship `booking.bookingAssets` inline render eagerly
- * with zero fetching, while the bookings index omits the payload and the
- * sheet lazily fetches `/api/bookings/:bookingId/assets-sidebar` on open.
- * These tests pin the observable contract of both modes:
- *
- *  - Eager: rows render straight from the prop, no fetcher traffic.
- *  - Lazy: exactly one fetch per open, spinner while in flight, rows
- *    once the payload lands.
- *  - Lazy reopen: rows never duplicate; the previous payload renders
- *    immediately (no spinner flash) while the deliberate freshness
- *    re-fetch fires in the background.
- *  - Trigger state: a booking with zero concrete assets but outstanding
- *    model reservations is still openable (Book-by-Model), while a
- *    booking with nothing to show keeps an inert trigger.
- *
- * @see {@link file://./booking-assets-sidebar.tsx}
- * @see {@link file://./../../routes/api+/bookings.$bookingId.assets-sidebar.ts}
+ * The sidebar renders inside a Radix `Sheet` (closed by default), so tests
+ * open it first via the default trigger button.
  */
-
-import type { ComponentProps } from "react";
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import {
-  BookingAssetsSidebar,
-  type DispositionBreakdown,
-  type SidebarBookingAssets,
-  type SidebarModelRequest,
-} from "~/components/booking/booking-assets-sidebar";
+import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 
-/**
- * Shape of a successful `/api/bookings/:bookingId/assets-sidebar` response
- * as seen through `fetcher.data`. Mirrors `payload()` in the resource
- * route (`{ error: null, ...data }`), typed off the component's own
- * exports so the mock payload stays structurally in sync with what the
- * sidebar actually consumes.
- */
-type AssetsSidebarPayload = {
-  error: null;
-  bookingAssets: SidebarBookingAssets;
-  dispositionedByAsset: Record<string, number>;
-  dispositionBreakdownByAsset: Record<string, DispositionBreakdown>;
-  checkedOutByAsset: Record<string, number>;
-};
+// why: useCurrentOrganization calls useRouteLoaderData under the hood, which
+// throws outside a router context. Returning null short-circuits the
+// `resolveDisplayCode` call in `AssetTitleAndStatus` (guarded on truthiness)
+// so the asset-code chip is simply skipped — irrelevant to these tests.
+vi.mock("~/hooks/use-current-organization", () => ({
+  useCurrentOrganization: () => null,
+}));
 
-/**
- * Settled error payload, as produced by the resource route's catch
- * (`data(error(reason), { status })`) — `error` is the only key the
- * component reads on this branch.
- */
-type AssetsSidebarErrorPayload = { error: { message: string } };
-
-/** The slice of the fetcher API the sidebar actually touches. */
-type FetcherStub = {
-  state: "idle" | "loading" | "submitting";
-  data: AssetsSidebarPayload | AssetsSidebarErrorPayload | undefined;
-  load: ReturnType<typeof vi.fn>;
-  submit: ReturnType<typeof vi.fn>;
-};
-
-function createFetcherStub(): FetcherStub {
-  return {
-    state: "idle",
-    data: undefined,
-    // The component `void`s the returned promise, so resolve immediately.
-    load: vi.fn(() => Promise.resolve()),
-    submit: vi.fn(),
-  };
-}
-
-/**
- * Mutable per-test fetcher stub. Tests mutate `fetcherStub.data` to
- * simulate the fetch resolving, then re-render (the real fetcher triggers
- * that re-render itself when data lands).
- */
-let fetcherStub: FetcherStub = createFetcherStub();
-
-// why: the sidebar's lazy mode is driven by `useFetcher` — mocking it lets
-// tests assert "no request fired" / "exactly one request" and hand-feed
-// the resolved payload without spinning up a data router. `Link` is
-// swapped for a plain anchor for the same reason (the "Scan to assign"
-// link and the asset-title `Button to=` both need a router at runtime).
+// why: the sidebar is dual-mode and unconditionally calls `useFetcher` for
+// its lazy path, which throws outside a data router. These tests all pass
+// `bookingAssets` eagerly, so the fetcher is never driven — an inert stub
+// is enough. The lazy path itself is covered in
+// `booking-assets-sidebar-dual-mode.test.tsx`.
 vi.mock("react-router", async () => {
-  // Typed as a plain record: the module type can't be named here without a
-  // namespace import of react-router, which trips no-restricted-imports.
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
 
   return {
     ...actual,
-    useFetcher: () => fetcherStub,
-    Link: ({ to, children, ...rest }: ComponentProps<"a"> & { to: string }) => (
-      <a {...rest} href={to}>
-        {children}
-      </a>
-    ),
+    useFetcher: () => ({
+      state: "idle",
+      data: undefined,
+      load: vi.fn(),
+      submit: vi.fn(),
+    }),
   };
 });
 
-// why: useCurrentOrganization reads the `_layout` route's loader data via
-// useRouteLoaderData, which requires a data-router context these tests
-// don't mount. Returning undefined exercises the component's documented
-// no-org branch (display-code chips are skipped) — irrelevant to the
-// dual-mode behavior under test.
-vi.mock("~/hooks/use-current-organization", () => ({
-  useCurrentOrganization: () => undefined,
+// why: the real `Button` renders a react-router `Link` for `to=`, which
+// requires a Router context this component-only render doesn't provide.
+// A plain anchor keeps the DOM structure close enough for these tests
+// (none of which assert on navigation).
+vi.mock("~/components/shared/button", () => ({
+  Button: ({
+    children,
+    onClick,
+    type,
+    ...rest
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    type?: string;
+    [key: string]: unknown;
+  }) =>
+    onClick ? (
+      <button
+        type={(type as "button" | "submit") ?? "button"}
+        onClick={onClick}
+        {...rest}
+      >
+        {children}
+      </button>
+    ) : (
+      <a href="/test" {...rest}>
+        {children}
+      </a>
+    ),
 }));
 
-// why: the real AssetImage wires its own useFetcher for signed-URL refresh,
-// which would collide with the sidebar's mocked fetcher instance (both
-// callers would receive the same stub and AssetImage would misread the
-// sidebar payload). A bare <img> keeps each row's image slot inert.
-vi.mock("~/components/assets/asset-image", () => ({
-  AssetImage: ({ alt }: { alt: string }) => <img alt={alt} />,
+// why: isolating the sidebar's own badge-wiring logic from the real status
+// badge's rendering/tooltip internals, which have their own test coverage.
+vi.mock("../assets/asset-status-badge", () => ({
+  AssetStatusBadge: ({ status }: { status: string }) => (
+    <div data-testid="asset-status-badge">{status}</div>
+  ),
 }));
 
-type SidebarBooking = ComponentProps<typeof BookingAssetsSidebar>["booking"];
+// why: avoiding image-loading/fallback complexity during unit tests.
+vi.mock("../assets/asset-image", () => ({
+  AssetImage: () => <div data-testid="asset-image" />,
+}));
 
-/**
- * Minimal, type-correct `BookingAsset` pivot row: a standalone (no kit)
- * INDIVIDUAL asset — the simplest shape `groupAssets` renders as one
- * individual row.
- */
-function buildBookingAsset({
-  id,
-  title,
-}: {
-  id: string;
-  title: string;
-}): SidebarBookingAssets[number] {
-  return {
-    id: `ba-${id}`,
-    quantity: 1,
-    assetKitId: null,
-    asset: {
-      id,
-      title,
-      type: "INDIVIDUAL",
-      availableToBook: true,
-      custody: [],
-      status: "AVAILABLE",
-      mainImage: null,
-      thumbnailImage: null,
-      mainImageExpiration: null,
-      sequentialId: null,
-      preferredBarcodeId: null,
-      qrCodes: [],
-      barcodes: [],
-      category: null,
-      assetKits: [],
-    },
-  };
-}
+// why: category rendering is irrelevant to the stock-badge logic under test.
+vi.mock("../assets/category-badge", () => ({
+  CategoryBadge: () => <div data-testid="category-badge" />,
+}));
 
-/** Outstanding (unfulfilled) Book-by-Model reservation: 2 of 3 remaining. */
-function buildModelRequest(
-  overrides?: Partial<SidebarModelRequest>
-): SidebarModelRequest {
+// why: consumption-type pill is irrelevant to the stock-badge logic under test.
+vi.mock("../assets/consumption-type-badge", () => ({
+  ConsumptionTypeBadge: () => null,
+}));
+
+// why: avoiding native <img> loading/fallback complexity for kit rows.
+vi.mock("../kits/kit-image", () => ({
+  default: () => <div data-testid="kit-image" />,
+}));
+
+/** Minimal QT asset row satisfying `SidebarAssetBase` for these tests. */
+function makeQtAsset(overrides: Record<string, unknown> = {}) {
   return {
-    id: "mreq-1",
-    assetModelId: "model-1",
-    quantity: 3,
-    fulfilledQuantity: 1,
-    fulfilledAt: null,
-    assetModel: { id: "model-1", name: "Sony A7 IV" },
+    id: "asset-boards",
+    title: "Boards",
+    type: "QUANTITY_TRACKED",
+    consumptionType: null,
+    availableToBook: true,
+    custody: null,
+    status: "AVAILABLE",
+    mainImage: null,
+    thumbnailImage: null,
+    mainImageExpiration: null,
+    sequentialId: null,
+    preferredBarcodeId: null,
+    qrCodes: [],
+    barcodes: [],
+    category: null,
+    assetKits: [],
     ...overrides,
   };
 }
 
-function buildBooking(overrides?: Partial<SidebarBooking>): SidebarBooking {
+/** Minimal booking with a single standalone QT booking-asset row. */
+function makeBooking({
+  status,
+  asset,
+  bookedQuantity,
+}: {
+  status: string;
+  asset: ReturnType<typeof makeQtAsset>;
+  bookedQuantity: number;
+}) {
   return {
     id: "booking-1",
-    name: "Studio session",
-    status: "RESERVED",
-    ...overrides,
-  };
+    name: "Test booking",
+    status,
+    bookingAssets: [
+      { id: "ba-1", quantity: bookedQuantity, assetKitId: null, asset },
+    ],
+  } as unknown as Parameters<typeof BookingAssetsSidebar>[0]["booking"];
 }
 
-/** Successful lazy-fetch payload with empty qty-progress maps. */
-function buildPayload(
-  bookingAssets: SidebarBookingAssets
-): AssetsSidebarPayload {
-  return {
-    error: null,
-    bookingAssets,
-    dispositionedByAsset: {},
-    dispositionBreakdownByAsset: {},
-    checkedOutByAsset: {},
-  };
+/** Opens the sidebar sheet via its default trigger and returns once settled. */
+async function openSidebar() {
+  const user = userEvent.setup();
+  await user.click(screen.getByText(/assets?$/i));
 }
 
-/** The lazy path's loading indicator (shared `Spinner`, class-based). */
-function querySpinner() {
-  return document.querySelector(".spinner");
-}
+describe("BookingAssetsSidebar QT stock badges", () => {
+  it("renders the red InsufficientStockBadge when bookedQuantity exceeds bookable", async () => {
+    const asset = makeQtAsset();
+    const booking = makeBooking({
+      status: "ONGOING",
+      asset,
+      bookedQuantity: 10,
+    });
 
-describe("BookingAssetsSidebar", () => {
-  beforeEach(() => {
-    fetcherStub = createFetcherStub();
-  });
-
-  it("eager mode: renders rows from the inline payload without firing a fetch", async () => {
-    const user = userEvent.setup();
     render(
       <BookingAssetsSidebar
-        booking={buildBooking({
-          bookingAssets: [
-            buildBookingAsset({ id: "asset-1", title: "Camera A" }),
-            buildBookingAsset({ id: "asset-2", title: "Tripod B" }),
-          ],
-        })}
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 3, physicalNow: 3, reserved: 7 },
+        }}
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "2 assets" }));
+    await openSidebar();
 
-    expect(screen.getByText(/Assets in "Studio session"/)).toBeInTheDocument();
-    expect(screen.getByText("Camera A")).toBeInTheDocument();
-    expect(screen.getByText("Tripod B")).toBeInTheDocument();
-    expect(screen.getByText("2 items")).toBeInTheDocument();
-    // Eager data is instant: no spinner, and the lazy endpoint is never hit.
-    expect(querySpinner()).not.toBeInTheDocument();
-    expect(fetcherStub.load).not.toHaveBeenCalled();
+    const trigger = await screen.findByText("Insufficient stock");
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveClass("bg-red-50");
   });
 
-  it("lazy mode: fetches exactly once on open, shows a spinner, then renders rows", async () => {
-    const user = userEvent.setup();
-    // Bookings-index shape: `_count` for the trigger label, no pivots.
-    const booking = buildBooking({ _count: { bookingAssets: 2 } });
-    const { rerender } = render(<BookingAssetsSidebar booking={booking} />);
+  it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow, with an explanatory tooltip", async () => {
+    // "Boards" real case: 10 total, 7 needed; 7 return before this RESERVED
+    // booking's window opens (bookable=10) but only 3 are on the shelf
+    // right now (physicalNow=3).
+    const asset = makeQtAsset();
+    const booking = makeBooking({
+      status: "RESERVED",
+      asset,
+      bookedQuantity: 7,
+    });
 
-    await user.click(screen.getByRole("button", { name: "2 assets" }));
-
-    expect(fetcherStub.load).toHaveBeenCalledTimes(1);
-    expect(fetcherStub.load).toHaveBeenCalledWith(
-      "/api/bookings/booking-1/assets-sidebar"
-    );
-    // In flight: spinner shows, no rows yet.
-    expect(querySpinner()).toBeInTheDocument();
-    expect(screen.queryByText("Camera A")).not.toBeInTheDocument();
-
-    // Resolve the fetch. The real fetcher re-renders the component when
-    // data lands; with the stub we mutate + re-render explicitly.
-    fetcherStub.data = buildPayload([
-      buildBookingAsset({ id: "asset-1", title: "Camera A" }),
-      buildBookingAsset({ id: "asset-2", title: "Tripod B" }),
-    ]);
-    rerender(<BookingAssetsSidebar booking={booking} />);
-
-    expect(querySpinner()).not.toBeInTheDocument();
-    expect(screen.getByText("Camera A")).toBeInTheDocument();
-    expect(screen.getByText("Tripod B")).toBeInTheDocument();
-    expect(screen.getByText("2 items")).toBeInTheDocument();
-  });
-
-  it("lazy mode: closing and reopening renders each row once (refresh, not append)", async () => {
-    const user = userEvent.setup();
-    const booking = buildBooking({ _count: { bookingAssets: 1 } });
-    const { rerender } = render(<BookingAssetsSidebar booking={booking} />);
-
-    // First open + resolved fetch.
-    await user.click(screen.getByRole("button", { name: "1 assets" }));
-    fetcherStub.data = buildPayload([
-      buildBookingAsset({ id: "asset-1", title: "Camera A" }),
-    ]);
-    rerender(<BookingAssetsSidebar booking={booking} />);
-    expect(screen.getAllByText("Camera A")).toHaveLength(1);
-
-    // Close via the sheet's X — content unmounts.
-    await user.click(screen.getByRole("button", { name: /close/i }));
-    expect(screen.queryByText("Camera A")).not.toBeInTheDocument();
-
-    // Reopen: the retained payload renders immediately (no spinner flash)
-    // and rows are NOT duplicated. The component deliberately re-fetches
-    // on each open for freshness — pin that too.
-    await user.click(screen.getByRole("button", { name: "1 assets" }));
-    expect(screen.getAllByText("Camera A")).toHaveLength(1);
-    expect(querySpinner()).not.toBeInTheDocument();
-    expect(fetcherStub.load).toHaveBeenCalledTimes(2);
-  });
-
-  it("lazy mode: a settled error shows the error state with retry instead of an endless spinner", async () => {
-    const user = userEvent.setup();
-    const booking = buildBooking({ _count: { bookingAssets: 2 } });
-    const { rerender } = render(<BookingAssetsSidebar booking={booking} />);
-
-    await user.click(screen.getByRole("button", { name: "2 assets" }));
-    // Fetch settles with an error payload (booking deleted / permission
-    // lost between page load and drawer open).
-    fetcherStub.data = { error: { message: "Booking not found" } };
-    rerender(<BookingAssetsSidebar booking={booking} />);
-
-    expect(querySpinner()).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Failed to load the booking's assets.")
-    ).toBeInTheDocument();
-
-    // Retry re-fires the fetch: once on open, once from the button.
-    await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(fetcherStub.load).toHaveBeenCalledTimes(2);
-    expect(fetcherStub.load).toHaveBeenLastCalledWith(
-      "/api/bookings/booking-1/assets-sidebar"
-    );
-  });
-
-  it("zero concrete assets + outstanding model requests: trigger stays openable and renders the reservations section", async () => {
-    const user = userEvent.setup();
     render(
       <BookingAssetsSidebar
-        booking={buildBooking({
-          // Eager-empty payload (pure Book-by-Model booking).
-          bookingAssets: [],
-          modelRequests: [buildModelRequest()],
-        })}
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 10, physicalNow: 3, reserved: 0 },
+        }}
       />
     );
 
-    // 0 concrete assets, but the outstanding reservation keeps the
-    // trigger clickable (`hasItems` counts unfulfilled model requests).
-    await user.click(screen.getByRole("button", { name: "0 assets" }));
+    await openSidebar();
 
-    // quantity 3 − fulfilled 1 = 2 remaining across 1 model.
-    expect(
-      screen.getByText("Unassigned model reservations (2)")
-    ).toBeInTheDocument();
-    expect(screen.getByText("Sony A7 IV")).toBeInTheDocument();
-    expect(screen.getByText("2 remaining")).toBeInTheDocument();
-    // RESERVED is scan-to-assign eligible.
-    expect(
-      screen.getByRole("link", { name: "Scan to assign" })
-    ).toHaveAttribute("href", "/bookings/booking-1/overview/scan-assets");
-    // The empty-but-present eager payload means: no lazy fetch, no
-    // spinner, and an empty assets table below the reservations.
-    expect(screen.getByText("0 items")).toBeInTheDocument();
-    expect(querySpinner()).not.toBeInTheDocument();
-    expect(fetcherStub.load).not.toHaveBeenCalled();
+    expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+
+    const trigger = await screen.findByText("Checked out elsewhere");
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveClass("bg-warning-50");
+
+    await userEvent.hover(trigger);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.textContent).toMatch(/7 units/);
+    expect(tooltip.textContent).toMatch(/only 3/);
   });
 
-  it("zero assets + only fulfilled model requests: trigger is inert and the sheet never opens", async () => {
-    const user = userEvent.setup();
+  it("does NOT render any stock badge when bookedQuantity fits within physicalNow", async () => {
+    const asset = makeQtAsset();
+    const booking = makeBooking({
+      status: "RESERVED",
+      asset,
+      bookedQuantity: 2,
+    });
+
     render(
       <BookingAssetsSidebar
-        booking={buildBooking({
-          _count: { bookingAssets: 0 },
-          // Fully-fulfilled requests don't count toward `hasItems`.
-          modelRequests: [
-            buildModelRequest({
-              fulfilledQuantity: 3,
-              fulfilledAt: new Date("2026-07-01T00:00:00.000Z"),
-            }),
-          ],
-        })}
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 10, physicalNow: 5, reserved: 0 },
+        }}
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "0 assets" }));
+    await openSidebar();
+    // Wait for the sheet content to be present via a stable element first.
+    await screen.findByTestId("asset-status-badge");
 
-    expect(screen.queryByText(/Assets in/)).not.toBeInTheDocument();
-    expect(fetcherStub.load).not.toHaveBeenCalled();
+    expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
+  });
+
+  it("does NOT render any stock badge for an asset that is already CHECKED_OUT, even though bookedQuantity exceeds bookable", async () => {
+    // Global asset.status CHECKED_OUT (quick-checkout, all-at-once path) —
+    // `effectiveStatus` falls through to this raw status since none of the
+    // sidebar's own qty-progress branches apply (no checkedOutByAsset /
+    // dispositionedByAsset entries supplied).
+    const asset = makeQtAsset({ status: "CHECKED_OUT" });
+    const booking = makeBooking({
+      status: "ONGOING",
+      asset,
+      bookedQuantity: 22,
+    });
+
+    render(
+      <BookingAssetsSidebar
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 3, physicalNow: 3, reserved: 19 },
+        }}
+      />
+    );
+
+    await openSidebar();
+    await screen.findByTestId("asset-status-badge");
+
+    expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
   });
 });
