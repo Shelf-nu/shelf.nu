@@ -238,10 +238,19 @@ reviewed_head_map() {
 }
 
 # gh 2.32.1 has no `gh pr checks --json`, so use the REST check-runs endpoint.
+#
+# The red set must cover EVERY blocking conclusion GitHub emits, not just the
+# obvious three. `action_required` (workflow awaiting approval) and
+# `startup_failure` (bad workflow YAML) are both blocking and both routine;
+# omitting them makes a blocked PR read as clean and lets the loop settle on
+# it. `neutral` and `skipped` are deliberately NOT red — GitHub treats those
+# as non-blocking.
 collect_checks() {
   gh api "repos/$REPO/commits/$1/check-runs" | jq '{
     red: [.check_runs[] | select(.conclusion == "failure"
-        or .conclusion == "timed_out" or .conclusion == "cancelled")] | length,
+        or .conclusion == "timed_out" or .conclusion == "cancelled"
+        or .conclusion == "action_required"
+        or .conclusion == "startup_failure")] | length,
     pending: [.check_runs[] | select(.status != "completed")] | length
   }'
 }

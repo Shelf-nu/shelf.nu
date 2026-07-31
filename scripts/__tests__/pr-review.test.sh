@@ -235,6 +235,17 @@ CHECKS="$(collect_checks 15a4e0a58707a8db432eba9ac4e3b5e31d136b7c)"
 assert_json_eq "0" "$CHECKS" '.red'     "no red checks on the #2770 fixture"
 assert_json_eq "0" "$CHECKS" '.pending' "no pending checks on the #2770 fixture"
 
+# The #2770 payload is all-green, so the two assertions above would ALSO pass
+# against a collect_checks hardcoded to return {red:0,pending:0} — they prove
+# nothing about the counting logic. This fixture is the one that does.
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/checks-mixed"
+MIXED="$(collect_checks deadbeef)"
+assert_json_eq "2" "$MIXED" '.red' \
+  "red counts failure + action_required (not neutral/skipped/success)"
+assert_json_eq "1" "$MIXED" '.pending' \
+  "pending counts any run whose status is not completed"
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
