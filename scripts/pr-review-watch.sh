@@ -41,7 +41,10 @@ state_path() { printf '%s/pr-review-loop/%s.json' "$(git_common_dir)" "$1"; }
 state_init() {
   local p; p="$(state_path "$1")"
   mkdir -p "$(dirname "$p")"
-  [[ -f "$p" ]] && return 0
+  # Self-heal: an existing but unparseable file (truncated by a killed
+  # writer) must be rebuilt, not trusted. A bare -f test would hand back a
+  # corrupt file forever.
+  if [[ -f "$p" ]] && jq -e 'type == "object"' "$p" >/dev/null 2>&1; then return 0; fi
   jq -n --argjson pr "$1" --arg branch "$2" '{
     pr: $pr, branch: $branch, round: 0, lastPushedSha: null,
     copilotExpected: true, reviewedHead: {}, seen: {},
@@ -51,10 +54,24 @@ state_init() {
 
 state_read() { cat "$(state_path "$1")"; }
 
-# Atomic write: a killed monitor must never leave a half-written state file.
+# Atomic, VALIDATED write.
+#
+# `cat` exits 0 even when its upstream producer died having written zero
+# bytes, so an unguarded `cat > tmp && mv` promotes an EMPTY file over the
+# last-good state. That destroys the seen map, and the loop then re-triages
+# the whole PR and re-answers threads it already answered. Validate the
+# payload parses before letting it replace anything.
 state_write() {
-  local p; p="$(state_path "$1")"
-  cat > "$p.tmp" && mv "$p.tmp" "$p"
+  local p tmp
+  p="$(state_path "$1")"
+  tmp="$(mktemp "${p}.XXXXXX")" || return 1
+  cat > "$tmp"
+  # `jq empty` alone is NOT a guard: it exits 0 for zero-byte input,
+  # whitespace-only input, `null`, and arrays — every shape a dead upstream
+  # producer can leave behind. Require a real JSON OBJECT (verified
+  # empirically against all six cases) before this may replace the state.
+  jq -e 'type == "object"' "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$p"
 }
 
 # --- identity --------------------------------------------------------------
@@ -88,7 +105,7 @@ normalize_body() {
 
 # Prefer CodeRabbit's own stable marker when present — it survives rewording
 # that our normalization would not. Otherwise hash author + path + body.
-fingerprint() {
+finding_fingerprint() {
   local author="$1" path="$2" body="$3" cr
   cr="$(printf '%s' "$body" | grep -oE 'cr-comment:v1:[a-f0-9]+' | head -1)"
   if [[ -n "$cr" ]]; then printf '%s' "$cr"; return 0; fi

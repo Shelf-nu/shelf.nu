@@ -86,7 +86,7 @@ CR_BODY='Some finding.
 <!-- cr-comment:v1:13e186b6493174b53cbcc5ef -->
 Useful? React with 👍 / 👎.'
 assert_eq "cr-comment:v1:13e186b6493174b53cbcc5ef" \
-  "$(fingerprint "coderabbitai" "a.ts" "$CR_BODY")" \
+  "$(finding_fingerprint "coderabbitai" "a.ts" "$CR_BODY")" \
   "CodeRabbit cr-comment marker is used verbatim as the fingerprint"
 
 # Two renderings of the same Codex finding differing only in badge markup,
@@ -101,12 +101,12 @@ B='**![P1 Badge](https://img.shields.io/badge/P1-red)** Fix the guard
 around lines 61 - 83 the predicate is inclusive.
 
 Useful? React with 👍 / 👎.'
-assert_eq "$(fingerprint "chatgpt-codex-connector" "a.ts" "$A")" \
-          "$(fingerprint "chatgpt-codex-connector" "a.ts" "$B")" \
+assert_eq "$(finding_fingerprint "chatgpt-codex-connector" "a.ts" "$A")" \
+          "$(finding_fingerprint "chatgpt-codex-connector" "a.ts" "$B")" \
   "same finding re-rendered at different lines fingerprints identically"
 
 assert_eq "false" \
-  "$([[ "$(fingerprint "codex" "a.ts" "$A")" == "$(fingerprint "codex" "b.ts" "$A")" ]] \
+  "$([[ "$(finding_fingerprint "codex" "a.ts" "$A")" == "$(finding_fingerprint "codex" "b.ts" "$A")" ]] \
      && echo true || echo false)" \
   "same text on a different file fingerprints differently"
 
@@ -124,6 +124,59 @@ assert_eq "3" "$(state_read 9999 | jq -r '.round')" "state_write round-trips"
 
 state_init 9999 "test-branch"
 assert_eq "3" "$(state_read 9999 | jq -r '.round')" "state_init is idempotent, does not clobber"
+
+# Regression (fix round 1): state_write must reject invalid JSON instead of
+# letting a dead upstream producer's empty/garbage output clobber good state.
+printf 'not json' | state_write 9999
+WRITE_RC=$?
+assert_eq "1" "$WRITE_RC" "state_write returns non-zero on invalid JSON"
+assert_eq "3" "$(state_read 9999 | jq -r '.round')" \
+  "state_write leaves prior state intact when given invalid JSON"
+
+# Regression: valid JSON still round-trips — guards against the new
+# validation being too aggressive and rejecting well-formed writes.
+state_read 9999 | jq '.round = 7' | state_write 9999
+WRITE_RC=$?
+assert_eq "0" "$WRITE_RC" "state_write returns success on valid JSON"
+assert_eq "7" "$(state_read 9999 | jq -r '.round')" "state_write round-trips valid JSON"
+
+# Regression (fix round 2): `jq empty` — and a bare -s size check — both
+# accept whitespace-only, `null`, and array payloads, which a dead or
+# typo'd upstream producer (e.g. `jq '.nonexistant'` emitting `null`) can
+# legitimately emit. Only requiring the parsed top-level type to be
+# "object" catches all three; each must be rejected with prior state intact.
+printf '   \n' | state_write 9999
+WRITE_RC=$?
+assert_eq "1" "$WRITE_RC" "state_write rejects a whitespace-only payload"
+assert_eq "7" "$(state_read 9999 | jq -r '.round')" \
+  "state_write leaves prior state intact on a whitespace-only payload"
+
+printf 'null' | state_write 9999
+WRITE_RC=$?
+assert_eq "1" "$WRITE_RC" "state_write rejects a null payload"
+assert_eq "7" "$(state_read 9999 | jq -r '.round')" \
+  "state_write leaves prior state intact on a null payload"
+
+printf '[1,2,3]' | state_write 9999
+WRITE_RC=$?
+assert_eq "1" "$WRITE_RC" "state_write rejects an array payload"
+assert_eq "7" "$(state_read 9999 | jq -r '.round')" \
+  "state_write leaves prior state intact on an array payload"
+
+# Regression: state_init must self-heal a file that exists but is empty or
+# corrupt (e.g. truncated by a killed writer), not trust it forever.
+printf '' > "$(state_path 9999)"
+state_init 9999 "test-branch"
+assert_eq "9999" "$(state_read 9999 | jq -r '.pr')" \
+  "state_init rebuilds an existing but empty state file"
+assert_eq "0" "$(state_read 9999 | jq -r '.round')" \
+  "state_init's rebuild restores default fields (round back to 0)"
+
+printf 'not json' > "$(state_path 9999)"
+state_init 9999 "test-branch"
+assert_eq "9999" "$(state_read 9999 | jq -r '.pr')" \
+  "state_init rebuilds an existing but corrupt (non-JSON) state file"
+
 rm -rf "$TMP_STATE"
 
 # --- summary ----------------------------------------------------------------
