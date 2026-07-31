@@ -63,16 +63,29 @@ export const ImportUpdateContent = () => {
               <div>
                 <h5 className="font-semibold">What you can update</h5>
                 <p className="text-[14px] text-gray-600">
-                  Name, Category, Location, Tags, Valuation, Available to book,
-                  and your custom fields (Text, Boolean, Date, Option, Number,
-                  Currency).
+                  Name, Category, Location, Tags, Value, Available to book,{" "}
+                  <b>Asset model</b>, and your custom fields (Text, Boolean,
+                  Date, Option, Number, Currency).
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  <b>Asset model</b> is matched by name (case-insensitive) and
+                  created automatically if it doesn't exist yet. It applies to{" "}
+                  <b>individually tracked assets only</b> — on a
+                  quantity-tracked asset the cell is skipped with a warning and
+                  the rest of the row still applies.
+                </p>
+                <p className="mt-1 text-[14px] text-gray-600">
+                  For <b>quantity-tracked</b> assets you can also update
+                  Quantity, Min quantity, Unit of measure, and Consumption type.
+                  These columns are ignored on individually tracked assets.
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
                   <b>Not supported yet:</b> Description, Status, Kit, and
                   Custody can't be bulk-updated via CSV — Status and Custody
                   have their own workflows, and Description can lose formatting
-                  during export. These columns will be safely skipped if present
-                  in your file.
+                  during export. Tracking method is fixed once an asset is
+                  created. These columns will be safely skipped if present in
+                  your file.
                 </p>
               </div>
             </div>
@@ -90,6 +103,9 @@ export const ImportUpdateContent = () => {
                   If a field currently has a value and you leave the cell empty,
                   that value will be cleared. Fields that are already empty stay
                   unchanged. Name and boolean fields (Yes/No) cannot be cleared.
+                  <b> Asset model</b> can't be cleared this way either — an
+                  empty cell leaves the current model in place. Remove it from
+                  the asset directly instead.
                 </p>
               </div>
             </div>
@@ -105,8 +121,8 @@ export const ImportUpdateContent = () => {
                 <h5 className="font-semibold">How assets are matched</h5>
                 <p className="text-[14px] text-gray-600">
                   By <b>Asset ID</b> or <b>ID</b> — keep these columns as they
-                  are. Categories, locations, and tags that don't exist yet will
-                  be created for you.
+                  are. Categories, locations, tags, and asset models that don't
+                  exist yet will be created for you.
                 </p>
               </div>
             </div>
