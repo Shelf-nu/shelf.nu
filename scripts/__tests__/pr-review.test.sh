@@ -391,6 +391,16 @@ rm -rf "$TMP_STATE"
 describe "pr-review-respond"
 
 TMP_D="$(mktemp -d)"
+
+# EXPORT, not a plain assignment: pr-review-respond.sh runs as a SUBPROCESS,
+# so it only sees the isolated git dir if the variable is in its environment.
+# Without this the idempotency ledger is written into the real repository's
+# .git, which (a) mutates the developer's checkout from a test run and (b)
+# makes the suite non-re-runnable — the second run finds the previous run's
+# ledger entries and suppresses every reply, failing "one reply mutation per
+# decision" with 0 instead of 3.
+export GIT_COMMON_DIR="$TMP_D/git"
+mkdir -p "$GIT_COMMON_DIR"
 cat > "$TMP_D/decisions.json" <<'JSON'
 [
   {"threadId":"PRRT_aaa","replyBody":"Fixed in abc1234 — tightened the guard.","resolve":true},
@@ -420,7 +430,7 @@ assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" 
   "re-running the same decisions posts nothing (idempotent)"
 
 rm -rf "$TMP_D"
-unset GH_MUTATION_LOG
+unset GH_MUTATION_LOG GIT_COMMON_DIR
 
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
