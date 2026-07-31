@@ -75,6 +75,7 @@ export function getUIFieldType({
       fieldType = "number";
       break;
     case "availableToBook":
+    case "qrLabelApplied":
       fieldType = "boolean";
       break;
     case "createdAt":

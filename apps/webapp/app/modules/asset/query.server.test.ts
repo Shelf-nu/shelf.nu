@@ -233,6 +233,13 @@ describe("parseSortingOptions", () => {
       expect(orderByClause).toContain("LPAD(SPLIT_PART");
     });
 
+    it("sorts QR label assignment by the applied timestamp", () => {
+      const { orderByClause } = parseSortingOptions(["qrLabelApplied:desc"]);
+      expect(orderByClause).toContain(
+        '"assetQrLabelAppliedAt" desc NULLS LAST'
+      );
+    });
+
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
       // Regression (custody-sort no-op): the `custody` column is a jsonb
@@ -309,6 +316,20 @@ function getSqlString(sql: ReturnType<typeof generateWhereClause>): string {
 
 describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
+
+  it("filters Has ID Assigned using the QR label timestamp", () => {
+    const filter: Filter = {
+      name: "qrLabelApplied",
+      type: "boolean",
+      operator: "is",
+      value: true,
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+    const sql = getSqlString(result);
+
+    expect(sql).toContain('a."qrLabelAppliedAt" IS NOT NULL');
+  });
 
   describe("custody filter with special values", () => {
     it("handles 'in-custody' with is operator (includes active bookings)", () => {
@@ -1134,6 +1155,18 @@ describe("buildAdvancedAssetsQuery", () => {
     expect(cheap({ sortBy: ["kit:asc"] })).toContain('k.name AS "kitName"');
     expect(cheap({ sortBy: ["location:asc"] })).toContain(
       'l.name AS "locationName"'
+    );
+  });
+
+  it("selects the QR label timestamp in the cheap phase for advanced sorting", () => {
+    const sql = getQuerySqlString(build({ sortBy: ["qrLabelApplied:desc"] }));
+    const cheapPhase = sql.slice(0, sql.indexOf("sorted_asset_query"));
+
+    expect(cheapPhase).toContain(
+      'a."qrLabelAppliedAt" AS "assetQrLabelAppliedAt"'
+    );
+    expect(sql).toContain(
+      'ROW_NUMBER() OVER (ORDER BY "assetQrLabelAppliedAt" desc NULLS LAST, "assetId" ASC)'
     );
   });
 

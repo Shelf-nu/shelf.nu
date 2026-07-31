@@ -565,6 +565,11 @@ export const buildCsvExportDataFromAssets = ({
           case "qrId":
             value = asset.qrId;
             break;
+          case "qrLabelApplied":
+            value = asset.qrLabelAppliedAt
+              ? new Date(asset.qrLabelAppliedAt).toISOString()
+              : "";
+            break;
           case "name":
             value = asset.title;
             break;

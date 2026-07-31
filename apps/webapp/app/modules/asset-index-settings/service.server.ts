@@ -10,6 +10,7 @@ import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
 import {
+  appendMissingDefaultFields,
   barcodeFields,
   defaultFields,
   fixedFields,
@@ -460,10 +461,10 @@ async function validateColumns({
 
     // If default fields are missing, add them from our static defaults
     if (missingDefaultFields.length > 0) {
-      const fieldsToAdd = defaultFields.filter((field) =>
-        missingDefaultFields.includes(field.name)
+      updatedColumns = appendMissingDefaultFields(
+        updatedColumns,
+        missingDefaultFields
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
       needsUpdate = true;
     }
 

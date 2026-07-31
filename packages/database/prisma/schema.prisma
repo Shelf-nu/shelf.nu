@@ -209,6 +209,7 @@ model Asset {
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  qrLabelAppliedAt    DateTime? // Set when a physical QR label is linked to the asset
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)
@@ -287,6 +288,7 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([assetModelId, organizationId], name: "Asset_assetModelId_organizationId_idx")
   @@index([sequentialId], name: "Asset_sequentialId_idx")
+  @@index([organizationId, qrLabelAppliedAt], name: "Asset_organizationId_qrLabelAppliedAt_idx")
   // Index for foreign key
   @@index([userId])
 }

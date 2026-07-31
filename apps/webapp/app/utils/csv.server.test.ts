@@ -280,6 +280,7 @@ describe("buildCsvExportDataFromAssets", () => {
         tags: [{ name: "photo" }, { name: "dslr" }],
         valuation: 1234.5,
         availableToBook: true,
+        qrLabelAppliedAt: new Date("2024-01-03T04:05:06Z"),
         createdAt: new Date("2024-01-02T03:04:05Z"),
         custody: [
           {
@@ -300,7 +301,10 @@ describe("buildCsvExportDataFromAssets", () => {
           },
           {
             customField: { name: "purchaseDate" },
-            value: { raw: "2024-02-10", valueDate: "2024-02-10" },
+            value: {
+              raw: "2024-02-10",
+              valueDate: "2024-02-10T12:00:00.000Z",
+            },
           },
           {
             customField: { name: "amount" },
@@ -324,41 +328,42 @@ describe("buildCsvExportDataFromAssets", () => {
       { name: "tags", visible: true, position: 2 },
       { name: "valuation", visible: true, position: 3 },
       { name: "availableToBook", visible: true, position: 4 },
-      { name: "createdAt", visible: true, position: 5 },
-      { name: "custody", visible: true, position: 6 },
+      { name: "qrLabelApplied", visible: true, position: 5 },
+      { name: "createdAt", visible: true, position: 6 },
+      { name: "custody", visible: true, position: 7 },
       {
         name: "cf_isInsured",
         visible: true,
-        position: 7,
+        position: 8,
         cfType: CustomFieldType.BOOLEAN,
       },
       {
         name: "cf_notes",
         visible: true,
-        position: 8,
+        position: 9,
         cfType: CustomFieldType.MULTILINE_TEXT,
       },
       {
         name: "cf_purchaseDate",
         visible: true,
-        position: 9,
+        position: 10,
         cfType: CustomFieldType.DATE,
       },
       {
         name: "cf_amount",
         visible: true,
-        position: 10,
+        position: 11,
         cfType: CustomFieldType.AMOUNT,
       },
-      { name: "cf_misc", visible: true, position: 11 },
+      { name: "cf_misc", visible: true, position: 12 },
       {
         name: "cf_empty",
         visible: true,
-        position: 12,
+        position: 13,
         cfType: CustomFieldType.TEXT,
       },
-      { name: "actions", visible: true, position: 13 },
-      { name: "location", visible: false, position: 14 },
+      { name: "actions", visible: true, position: 14 },
+      { name: "location", visible: false, position: 15 },
     ];
 
     const [headers, row] = buildCsvExportDataFromAssets({
@@ -378,6 +383,7 @@ describe("buildCsvExportDataFromAssets", () => {
       '"Tags"',
       '"Value"',
       '"Available to book"',
+      '"Has ID Assigned"',
       '"Created at"',
       '"Custody"',
       '"isInsured"',
@@ -394,6 +400,7 @@ describe("buildCsvExportDataFromAssets", () => {
       '"photo, dslr"',
       '"$1,234.50"',
       '"Yes"',
+      '"2024-01-03T04:05:06.000Z"',
       '"2024-01-02T03:04:05.000Z"',
       '"Jane Doe"',
       '"Yes"',

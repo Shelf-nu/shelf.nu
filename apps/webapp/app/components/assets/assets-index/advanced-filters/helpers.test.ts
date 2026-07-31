@@ -5,6 +5,19 @@ import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getUIFieldType } from "./helpers";
 
 describe("getUIFieldType", () => {
+  it("treats qrLabelApplied as a boolean field", () => {
+    const qrLabelColumn = {
+      name: "qrLabelApplied",
+      visible: true,
+      position: 0,
+    } as unknown as Column;
+
+    expect(getUIFieldType({ column: qrLabelColumn })).toBe("boolean");
+    expect(getUIFieldType({ column: qrLabelColumn, friendlyName: true })).toBe(
+      "Yes/No"
+    );
+  });
+
   it("treats updatedAt as a date field", () => {
     const updatedColumn = {
       name: "updatedAt",

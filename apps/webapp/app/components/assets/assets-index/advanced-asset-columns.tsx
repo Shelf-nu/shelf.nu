@@ -219,6 +219,9 @@ export function AdvancedIndexColumn({
         />
       );
 
+    case "qrLabelApplied":
+      return <QrLabelAppliedColumn appliedAt={item.qrLabelAppliedAt} />;
+
     case "status":
       return (
         <StatusColumn
@@ -418,6 +421,18 @@ function StatusColumn({
         availableToBook={availableToBook ?? true}
         asset={asset}
       />
+    </Td>
+  );
+}
+
+function QrLabelAppliedColumn({
+  appliedAt,
+}: {
+  appliedAt: AdvancedIndexAsset["qrLabelAppliedAt"];
+}) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {appliedAt ? <DateS date={appliedAt} includeTime /> : <EmptyTableValue />}
     </Td>
   );
 }

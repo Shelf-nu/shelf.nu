@@ -12,6 +12,7 @@ export const fixedFields = [
   "id",
   "sequentialId",
   "qrId",
+  "qrLabelApplied",
   "status",
   "description",
   "valuation",
@@ -67,6 +68,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
   sequentialId: "Asset ID",
   qrId: "QR ID",
+  qrLabelApplied: "Has ID Assigned",
   name: "Name",
   status: "Status",
   description: "Description",
@@ -98,24 +100,39 @@ export const defaultFields: Column[] = [
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },
-  { name: "status", visible: true, position: 3 },
-  { name: "description", visible: true, position: 4 },
-  { name: "valuation", visible: true, position: 5 },
-  { name: "availableToBook", visible: true, position: 6 },
-  { name: "createdAt", visible: true, position: 7 },
-  { name: "updatedAt", visible: true, position: 8 },
-  { name: "category", visible: true, position: 9 },
-  { name: "tags", visible: true, position: 10 },
-  { name: "location", visible: true, position: 11 },
-  { name: "kit", visible: true, position: 12 },
-  { name: "custody", visible: true, position: 13 },
-  { name: "upcomingReminder", visible: true, position: 14 },
-  { name: "actions", visible: true, position: 15 },
-  { name: "upcomingBookings", visible: true, position: 16 },
-  { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
+  { name: "qrLabelApplied", visible: false, position: 3 },
+  { name: "status", visible: true, position: 4 },
+  { name: "description", visible: true, position: 5 },
+  { name: "valuation", visible: true, position: 6 },
+  { name: "availableToBook", visible: true, position: 7 },
+  { name: "createdAt", visible: true, position: 8 },
+  { name: "updatedAt", visible: true, position: 9 },
+  { name: "category", visible: true, position: 10 },
+  { name: "tags", visible: true, position: 11 },
+  { name: "location", visible: true, position: 12 },
+  { name: "kit", visible: true, position: 13 },
+  { name: "custody", visible: true, position: 14 },
+  { name: "upcomingReminder", visible: true, position: 15 },
+  { name: "actions", visible: true, position: 16 },
+  { name: "upcomingBookings", visible: true, position: 17 },
+  { name: "quantity", visible: false, position: 18 },
+  { name: "type", visible: false, position: 19 },
+  { name: "assetModel", visible: false, position: 20 },
 ];
+
+export function appendMissingDefaultFields(
+  columns: Column[],
+  missingFields: ColumnLabelKey[]
+) {
+  let nextPosition =
+    Math.max(-1, ...columns.map((column) => column.position)) + 1;
+
+  const fieldsToAdd = defaultFields
+    .filter((field) => missingFields.includes(field.name))
+    .map((field) => ({ ...field, position: nextPosition++ }));
+
+  return [...columns, ...fieldsToAdd];
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>
