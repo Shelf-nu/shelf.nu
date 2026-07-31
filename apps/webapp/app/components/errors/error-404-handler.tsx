@@ -1,8 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { useFetcher } from "react-router";
+import { Form } from "react-router";
 import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
-import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import type { Error404AdditionalData } from "./utils";
 import { getModelLabelForEnumValue } from "./utils";
@@ -26,8 +25,16 @@ export default function Error404Handler({
   style,
   additionalData,
 }: Error404HandlerProps) {
-  const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
+  /**
+   * The workspace-switch forms below submit as native document submissions
+   * (`reloadDocument`), for the same reason as the sidebar workspace selector:
+   * the whole tenant changes, so the document is rebuilt rather than patched by
+   * router revalidation. That means no fetcher state to read — we track the
+   * in-flight submission locally so the button can't be double-submitted.
+   *
+   * @see {@link file://./../layout/sidebar/organization-selector.tsx}
+   */
+  const [disabled, setDisabled] = useState(false);
 
   const content = useMemo(() => {
     switch (additionalData.model) {
@@ -54,9 +61,11 @@ export default function Error404Handler({
                 </span>{" "}
                 to view the {modelLabel}?
               </p>
-              <fetcher.Form
+              <Form
                 action={CHANGE_CURRENT_ORGANIZATION_ACTION}
                 method="POST"
+                reloadDocument
+                onSubmit={() => setDisabled(true)}
               >
                 <input
                   type="hidden"
@@ -71,7 +80,7 @@ export default function Error404Handler({
                 <Button type="submit" disabled={disabled}>
                   Switch workspace
                 </Button>
-              </fetcher.Form>
+              </Form>
             </div>
           </div>
         );
@@ -94,9 +103,11 @@ export default function Error404Handler({
                 your different workspace you are part of. Would you like to
                 switch to workspace to view the team member?
               </p>
-              <fetcher.Form
+              <Form
                 action={CHANGE_CURRENT_ORGANIZATION_ACTION}
                 method="POST"
+                reloadDocument
+                onSubmit={() => setDisabled(true)}
                 className="flex flex-col items-center"
               >
                 <Select name="organizationId" disabled={disabled}>
@@ -127,7 +138,7 @@ export default function Error404Handler({
                 <Button type="submit" disabled={disabled}>
                   Switch workspace
                 </Button>
-              </fetcher.Form>
+              </Form>
             </div>
           </div>
         );
@@ -137,7 +148,7 @@ export default function Error404Handler({
         return null;
       }
     }
-  }, [additionalData, disabled, fetcher]);
+  }, [additionalData, disabled]);
 
   return (
     <div
