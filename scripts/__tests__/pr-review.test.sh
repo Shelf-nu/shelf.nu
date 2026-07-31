@@ -246,6 +246,52 @@ assert_json_eq "1" "$MIXED" '.pending' \
   "pending counts any run whose status is not completed"
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
+describe "pr-review-watch: dedup and events"
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+TMP_STATE="$(mktemp -d)"; GIT_COMMON_DIR="$TMP_STATE"
+state_init 2770 "test-branch"
+
+FINDINGS="$(collect_threads 2770 | shape_findings)"
+FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
+assert_json_eq "4" "$FRESH" 'length' "all four findings are unseen on a fresh state"
+
+# Record a verdict for the first fingerprint, then re-run.
+FP="$(printf '%s' "$FINDINGS" | jq -r '.[0].fingerprint')"
+state_read 2770 | jq --arg fp "$FP" \
+  '.seen[$fp] = {verdict:"FALSE_POSITIVE", decidedInRound:1, reposts:1}' \
+  | state_write 2770
+FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
+assert_json_eq "3" "$FRESH" 'length' "a decided fingerprint is not re-triaged"
+
+# A VALID (already-fixed) verdict must ALSO suppress re-triage — a bot
+# re-flagging fixed work is at least as common as one re-flagging a rejection.
+FP2="$(printf '%s' "$FINDINGS" | jq -r '.[1].fingerprint')"
+state_read 2770 | jq --arg fp "$FP2" \
+  '.seen[$fp] = {verdict:"VALID", decidedInRound:1, reposts:1, resolvedSha:"abc1234"}' \
+  | state_write 2770
+FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
+assert_json_eq "2" "$FRESH" 'length' "an already-fixed fingerprint is not re-triaged"
+
+assert_eq "1" "$(repost_count "$FP" "$(state_read 2770)")" "repost_count reads the counter"
+assert_eq "0" "$(repost_count "nonexistent" "$(state_read 2770)")" \
+  "repost_count is 0 for an unknown fingerprint"
+
+describe "pr-review-watch: event emission"
+
+EV="$(emit NEW_FINDINGS '{"count":3}')"
+assert_json_eq "NEW_FINDINGS" "$EV" '.event' "emit sets the event name"
+assert_json_eq "3" "$EV" '.count' "emit merges the payload"
+# Pipe emit's output directly to wc -l rather than routing it through a
+# captured variable first: command substitution strips the trailing newline,
+# so counting newlines in a re-captured variable only counts EMBEDDED
+# newlines (0 for correct single-line output, 1 for a two-line bug) — the
+# inverse of what we want to assert.
+assert_eq "1" "$(emit NEW_FINDINGS '{"count":3}' | wc -l | tr -d ' ')" \
+  "emit writes exactly one line — every line becomes a chat notification"
+
+rm -rf "$TMP_STATE"
+
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

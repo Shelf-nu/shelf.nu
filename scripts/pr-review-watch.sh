@@ -255,6 +255,100 @@ collect_checks() {
   }'
 }
 
+# --- dedup -------------------------------------------------------------------
+
+# Findings with no decided verdict in state.
+#
+# Suppression covers EVERY decided verdict, not just rejections. A bot
+# re-flagging something already fixed is at least as common as one re-flagging
+# something rejected, and re-triaging it burns a whole round to reach the same
+# answer. This is what stops the fix -> re-review -> re-post cycle.
+unseen_findings() {
+  jq -n --argjson f "$1" --argjson s "$2" \
+    '[$f[] | select(($s.seen[.fingerprint] // null) == null)]'
+}
+
+repost_count() {
+  printf '%s' "$2" | jq -r --arg fp "$1" '.seen[$fp].reposts // 0'
+}
+
+# --- events ------------------------------------------------------------------
+
+# One line of JSON per event. Stdout is the Monitor's notification stream, so
+# this stays terse by contract: the payload belongs in the state file.
+emit() {
+  # Note: `${2:-{}}` cannot be written directly — the inner `}` closes the
+  # parameter expansion — and escaping it as `\{\}` yields the literal
+  # `\{}`, which jq rejects. Default explicitly instead.
+  local payload="${2:-}"
+  [[ -z "$payload" ]] && payload='{}'
+  jq -c -n --arg event "$1" --argjson payload "$payload" '{event:$event} + $payload'
+}
+
+# The remote SHA, once origin/<branch> contains local HEAD. Replies must cite a
+# commit that actually exists on the remote, so RESPOND waits on this.
+detect_push() {
+  local branch="$1" state="$2" remote last
+  git fetch origin "$branch" --quiet 2>/dev/null
+  remote="$(git rev-parse "origin/$branch" 2>/dev/null)" || return 0
+  last="$(printf '%s' "$state" | jq -r '.lastPushedSha // ""')"
+  [[ "$remote" == "$last" ]] && return 0
+  git merge-base --is-ancestor HEAD "$remote" 2>/dev/null || return 0
+  printf '%s' "$remote"
+}
+
+# --- polling -------------------------------------------------------------------
+
+# One poll. Emits an event ONLY when the actionable set changes, so a quiet PR
+# produces zero notifications no matter how long the loop runs.
+poll_once() {
+  local pr="$1" state findings fresh reviews ood checks sha pushed
+  state="$(state_read "$pr")"
+
+  findings="$(collect_threads "$pr" | shape_findings)" || {
+    emit ERROR '{"reason":"collect_threads failed"}'; return 0; }
+  fresh="$(unseen_findings "$findings" "$state")"
+
+  reviews="$(collect_reviews "$pr")" || reviews="[]"
+  ood="$(out_of_diff_reviews "$reviews")"
+  sha="$(head_sha "$pr")"
+  checks="$(collect_checks "$sha")"
+
+  if copilot_quota_exhausted "$reviews"; then
+    if [[ "$(printf '%s' "$state" | jq -r '.copilotExpected')" == "true" ]]; then
+      state="$(printf '%s' "$state" | jq '.copilotExpected = false')"
+      emit COPILOT_QUOTA '{"reason":"copilot reported a quota limit; not waiting on it"}'
+    fi
+  else
+    state="$(printf '%s' "$state" | jq '.copilotExpected = true')"
+  fi
+
+  pushed="$(detect_push "$(printf '%s' "$state" | jq -r '.branch')" "$state")"
+  if [[ -n "$pushed" ]]; then
+    state="$(printf '%s' "$state" | jq --arg sha "$pushed" '.lastPushedSha = $sha')"
+    emit PUSHED "$(jq -n --arg sha "$pushed" '{sha:$sha}')"
+  fi
+
+  local botn humann
+  botn="$(printf '%s' "$fresh"  | jq '[.[]|select(.kind=="bot")]|length')"
+  humann="$(printf '%s' "$fresh" | jq '[.[]|select(.kind=="human")]|length')"
+
+  state="$(jq -n --argjson s "$state" --argjson f "$fresh" --argjson o "$ood" \
+    --argjson c "$checks" --arg sha "$sha" \
+    '$s + {pending: $f, outOfDiff: $o, checks: $c, headSha: $sha}')"
+
+  if [[ "$botn" -gt 0 ]]; then
+    emit NEW_FINDINGS "$(jq -n --argjson n "$botn" \
+      --argjson ood "$(printf '%s' "$ood" | jq 'length')" \
+      '{threads:$n, outOfDiff:$ood}')"
+  fi
+  [[ "$humann" -gt 0 ]] && emit HUMAN_COMMENT "$(jq -n --argjson n "$humann" '{count:$n}')"
+  [[ "$(printf '%s' "$checks" | jq -r '.red')" -gt 0 ]] && \
+    emit CHECKS_RED "$(printf '%s' "$checks")"
+
+  printf '%s' "$state" | state_write "$pr"
+}
+
 # --- entrypoint ------------------------------------------------------------
 
 main() {
@@ -262,6 +356,10 @@ main() {
   [[ -z "$pr" ]] && { printf 'usage: pr-review-watch.sh <pr-number>\n' >&2; exit 2; }
   state_init "$pr" "$(git rev-parse --abbrev-ref HEAD)"
   printf 'pr-review-watch: watching PR #%s every %ss\n' "$pr" "$POLL_INTERVAL" >&2
+  while :; do
+    poll_once "$pr" || emit ERROR '{"reason":"poll failed"}'
+    sleep "$POLL_INTERVAL"
+  done
 }
 
 if [[ "${PR_REVIEW_WATCH_LIB_ONLY:-0}" != "1" ]]; then
