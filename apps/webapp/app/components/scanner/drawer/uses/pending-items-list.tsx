@@ -179,7 +179,7 @@ function PendingKitGroup({
 }: {
   kit: { id: string; name: string; mainImage: string | null };
   assets: BookingExpectedAsset[];
-  onQuickAction: (asset: QtyExpectedAsset) => void;
+  onQuickAction: (asset: BookingExpectedAsset) => void;
   copy: ModeCopy;
 }) {
   // Collapsed by default — a pending kit is N rows of noise while the
@@ -268,7 +268,7 @@ function PendingKitGroup({
                   {/* Indented child row. Left border + padding mirrors
                       the booking-overview kit grouping so it's visually
                       obvious these assets belong to the kit above. */}
-                  <div className="flex items-center justify-between gap-3 border-l-2 border-gray-200 p-4 pl-8 md:px-6 md:pl-10">
+                  <div className="flex flex-col gap-3 border-l-2 border-gray-200 p-4 pl-8 sm:flex-row sm:items-center sm:justify-between md:px-6 md:pl-10">
                     <div className="flex items-center gap-2">
                       <ImageWithPreview
                         thumbnailUrl={asset.thumbnailImage || asset.mainImage}
@@ -284,6 +284,16 @@ function PendingKitGroup({
                         </div>
                       </div>
                     </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      onClick={() => onQuickAction(asset)}
+                      title="Skip scan — select this asset."
+                      className="w-full sm:w-auto sm:shrink-0"
+                    >
+                      {copy.quickActionButton}
+                    </Button>
                   </div>
                 </td>
                 <td>
@@ -379,26 +389,25 @@ function PendingKitQtyChild({
 }
 
 /**
- * Render a pending (not-yet-scanned) INDIVIDUAL asset row. No action
- * buttons — operator must scan the QR code. Mirrors the audit drawer's
- * `renderPendingAsset` layout.
+ * Render a pending (not-yet-scanned) INDIVIDUAL asset row.
  */
 function renderPendingIndividualAsset(
   asset: IndividualExpectedAsset,
   kit: { id: string; name: string } | undefined,
+  onQuickAction: () => void,
   copy: ModeCopy
 ): ReactNode {
   return (
     <Tr key={`${copy.keyPrefix}-${asset.bookingAssetId}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
-        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <ImageWithPreview
               thumbnailUrl={asset.thumbnailImage || asset.mainImage}
               alt={asset.title || "Asset"}
               className="size-[54px] rounded-[2px]"
             />
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               <span className="word-break whitespace-break-spaces font-medium text-gray-800">
                 {asset.title}
               </span>
@@ -418,10 +427,20 @@ function renderPendingIndividualAsset(
               </div>
             </div>
           </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            onClick={onQuickAction}
+            title="Skip scan — select this asset."
+            className="w-full sm:w-auto sm:shrink-0"
+          >
+            {copy.quickActionButton}
+          </Button>
         </div>
       </td>
       <td>
-        {/* No remove button for pending items */}
         <div className="w-[52px]" />
       </td>
     </Tr>
@@ -554,10 +573,9 @@ export type PendingItemsListProps = {
   >;
   /**
    * Called when the operator clicks the "Check N without scanning"
-   * button on a qty row. The caller wires the synthetic-entry dispatch
-   * + any per-mode focus management.
+   * button on a qty row or individual row.
    */
-  onQuickAction: (asset: QtyExpectedAsset) => void;
+  onQuickAction: (asset: BookingExpectedAsset) => void;
   /**
    * Total pending count (`pendingIndividuals.length +
    * pendingQtyTracked.length`). Used to gate the muted section header.
@@ -635,7 +653,12 @@ export function PendingItemsList({
         />
       ))}
       {looseIndividuals.map((asset) =>
-        renderPendingIndividualAsset(asset, undefined, copy)
+        renderPendingIndividualAsset(
+          asset,
+          undefined,
+          () => onQuickAction(asset),
+          copy
+        )
       )}
       {looseQty.map((asset) =>
         renderPendingQtyAsset(

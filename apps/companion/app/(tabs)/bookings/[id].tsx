@@ -1372,42 +1372,73 @@ export default function BookingDetailScreen() {
                 after the booking has gone ONGOING (canPartialCheckout, not
                 canCheckout) so the user can keep taking the rest. */}
             {canPartialCheckout && (
-              <TouchableOpacity
-                style={[
-                  styles.actionButtonOutline,
-                  selectMode === "checkout" && styles.actionButtonOutlineActive,
-                ]}
-                onPress={() => {
-                  setSelectMode(selectMode === "checkout" ? null : "checkout");
-                  setSelectedAssetIds(new Set());
-                }}
-                accessibilityLabel={
-                  selectMode === "checkout"
-                    ? "Cancel selection"
-                    : "Select assets to check out"
-                }
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={
-                    selectMode === "checkout" ? "close" : "checkbox-outline"
+              <>
+                <TouchableOpacity
+                  style={styles.actionButtonOutline}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/scanner?bookingId=${
+                        booking.id
+                      }&bookingName=${encodeURIComponent(
+                        booking.name
+                      )}&bookingAction=checkout`
+                    )
                   }
-                  size={18}
-                  color={
-                    selectMode === "checkout"
-                      ? colors.error
-                      : colors.buttonSecondaryText
-                  }
-                />
-                <Text
-                  style={[
-                    styles.actionButtonOutlineText,
-                    selectMode === "checkout" && { color: colors.error },
-                  ]}
+                  accessibilityLabel="Scan assets to check out"
+                  accessibilityRole="button"
                 >
-                  {selectMode === "checkout" ? "Cancel" : "Select to Check Out"}
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons
+                    name="scan"
+                    size={18}
+                    color={colors.buttonSecondaryText}
+                  />
+                  <Text style={styles.actionButtonOutlineText}>
+                    Scan to Check Out
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.actionButtonOutline,
+                    selectMode === "checkout" &&
+                      styles.actionButtonOutlineActive,
+                  ]}
+                  onPress={() => {
+                    setSelectMode(
+                      selectMode === "checkout" ? null : "checkout"
+                    );
+                    setSelectedAssetIds(new Set());
+                  }}
+                  accessibilityLabel={
+                    selectMode === "checkout"
+                      ? "Cancel selection"
+                      : "Select assets to check out"
+                  }
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name={
+                      selectMode === "checkout" ? "close" : "checkbox-outline"
+                    }
+                    size={18}
+                    color={
+                      selectMode === "checkout"
+                        ? colors.error
+                        : colors.buttonSecondaryText
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.actionButtonOutlineText,
+                      selectMode === "checkout" && { color: colors.error },
+                    ]}
+                  >
+                    {selectMode === "checkout"
+                      ? "Cancel"
+                      : "Select to Check Out"}
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations

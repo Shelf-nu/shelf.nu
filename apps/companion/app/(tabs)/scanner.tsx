@@ -204,6 +204,7 @@ function ScannerContent() {
   // all the add-mode scan capture / blockers / list rendering apply to both.
   const isBookingAddMode =
     isBookingMode && (bookingAction === "add" || bookingAction === "fulfil");
+  const isBookingCheckoutMode = isBookingMode && bookingAction === "checkout";
 
   // Filter scanner actions based on the user's role in the current org
   const availableActions = useMemo(
@@ -1272,30 +1273,59 @@ function ScannerContent() {
             return;
           }
 
-          if (bookingCtx.checkedInAssetIds.has(asset.id)) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            setScanResult({
-              type: "error",
-              title: "Already Checked In",
-              message: `"${asset.title}" has already been checked in for this booking.`,
-            });
-            finalizeScan();
-            return;
-          }
+          if (isBookingCheckoutMode) {
+            if (asset.status === "CHECKED_OUT") {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: "Already Checked Out",
+                message: `"${asset.title}" is already checked out.`,
+              });
+              finalizeScan();
+              return;
+            }
+            if (asset.status === "IN_CUSTODY") {
+              flashFrame("error");
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              setScanResult({
+                type: "error",
+                title: "In Custody",
+                message: `"${asset.title}" is currently in custody.`,
+              });
+              finalizeScan();
+              return;
+            }
+          } else {
+            if (bookingCtx.checkedInAssetIds.has(asset.id)) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: "Already Checked In",
+                message: `"${asset.title}" has already been checked in for this booking.`,
+              });
+              finalizeScan();
+              return;
+            }
 
-          if (asset.status !== "CHECKED_OUT") {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            setScanResult({
-              type: "error",
-              title: "Not Checked Out",
-              message: `"${asset.title}" is ${asset.status
-                .replace(/_/g, " ")
-                .toLowerCase()}, not checked out.`,
-            });
-            finalizeScan();
-            return;
+            if (asset.status !== "CHECKED_OUT") {
+              flashFrame("error");
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              setScanResult({
+                type: "error",
+                title: "Not Checked Out",
+                message: `"${asset.title}" is ${asset.status
+                  .replace(/_/g, " ")
+                  .toLowerCase()}, not checked out.`,
+              });
+              finalizeScan();
+              return;
+            }
           }
 
           setBookingCheckinItems((prev) => [newItem, ...prev]);
@@ -1305,9 +1335,9 @@ function ScannerContent() {
           setScanResult({
             type: "success",
             title: asset.title,
-            message: `Added to check-in (${
-              bookingCheckinItems.length + 1
-            } items)`,
+            message: isBookingCheckoutMode
+              ? `Added to check-out (${bookingCheckinItems.length + 1} items)`
+              : `Added to check-in (${bookingCheckinItems.length + 1} items)`,
           });
 
           setTimeout(() => setScanResult(null), 1200);
@@ -2000,6 +2030,76 @@ function ScannerContent() {
     );
   };
 
+  const handleBookingCheckout = () => {
+    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+
+    const count = bookingCheckinItems.length;
+    Alert.alert(
+      "Check Out Assets",
+      `Check out ${count} ${count === 1 ? "asset" : "assets"} for "${
+        bookingName || "this booking"
+      }"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Check Out",
+          onPress: async () => {
+            setIsBookingSubmitting(true);
+            const assetIds = bookingCheckinItems.map((i) => i.targetId);
+            const timeZone = (() => {
+              try {
+                return (
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+                );
+              } catch {
+                return "UTC";
+              }
+            })();
+
+            const { data: result, error } = await api.partialCheckoutBooking(
+              currentOrg.id,
+              bookingId,
+              assetIds,
+              timeZone
+            );
+            setIsBookingSubmitting(false);
+
+            if (error) {
+              Alert.alert("Error", error);
+              return;
+            }
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            const msg = result?.isComplete
+              ? `All assets checked out! "${
+                  bookingName || "Booking"
+                }" is now ongoing.`
+              : `${
+                  result?.checkedOutCount ?? bookingCheckinItems.length
+                } checked out, ${result?.remainingCount ?? "some"} remaining.`;
+            Alert.alert("Checked Out", msg, [
+              {
+                text: "OK",
+                onPress: () => {
+                  setBookingCheckinItems([]);
+                  lastScanRef.current = "";
+                  markBookingDirty(bookingId);
+                  InteractionManager.runAfterInteractions(() => {
+                    pushIntoTab(
+                      "/(tabs)/bookings",
+                      `/(tabs)/bookings/${bookingId}`
+                    );
+                  });
+                },
+              },
+            ]);
+          },
+        },
+      ]
+    );
+  };
+
   // ── Permission states ───────────────────────────────
 
   if (!permission) {
@@ -2126,10 +2226,15 @@ function ScannerContent() {
                       ? "Fulfil & Check Out"
                       : isBookingAddMode
                       ? "Add to Booking"
+                      : isBookingCheckoutMode
+                      ? "Booking Check-Out"
                       : "Booking Check-In"}
                   </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
-                    {bookingName || "Scan assets to check in"}
+                    {bookingName ||
+                      (isBookingCheckoutMode
+                        ? "Scan assets to check out"
+                        : "Scan assets to check in")}
                   </Text>
                   {isBookingFulfilMode &&
                     bookingCtx &&
@@ -2222,6 +2327,8 @@ function ScannerContent() {
                     ? "Scan the reserved units to assign"
                     : isBookingAddMode
                     ? "Scan assets or kits to add"
+                    : isBookingCheckoutMode
+                    ? "Scan assets to check out"
                     : "Scan assets to check in"
                   : instructionMap[action]}
               </Text>
@@ -2383,7 +2490,7 @@ function ScannerContent() {
             />
           )}
 
-          {/* ── Booking Drawer (check-in / scan-to-add) ── */}
+          {/* ── Booking Drawer (check-in / check-out / scan-to-add) ── */}
           {showBookingDrawer && (
             <BatchDrawer
               items={bookingCheckinItems}
@@ -2393,6 +2500,10 @@ function ScannerContent() {
                   ? `${bookingCheckinItems.length} unit${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } scanned`
+                  : isBookingCheckoutMode
+                  ? `${bookingCheckinItems.length} asset${
+                      bookingCheckinItems.length > 1 ? "s" : ""
+                    } to check out`
                   : `${bookingCheckinItems.length} asset${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } to check in`
@@ -2412,6 +2523,10 @@ function ScannerContent() {
                       } more to assign`
                   : isBookingAddMode
                   ? "Add to Booking"
+                  : isBookingCheckoutMode
+                  ? `Check Out ${bookingCheckinItems.length} ${
+                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
+                    }`
                   : `Check In ${bookingCheckinItems.length} ${
                       bookingCheckinItems.length === 1 ? "Asset" : "Assets"
                     }`
@@ -2421,6 +2536,8 @@ function ScannerContent() {
                   ? "log-out-outline"
                   : isBookingAddMode
                   ? "add-circle-outline"
+                  : isBookingCheckoutMode
+                  ? "log-out-outline"
                   : "log-in-outline"
               }
               isSubmitting={isBookingSubmitting}
@@ -2431,6 +2548,8 @@ function ScannerContent() {
                   ? handleBookingFulfil
                   : isBookingAddMode
                   ? handleBookingAdd
+                  : isBookingCheckoutMode
+                  ? handleBookingCheckout
                   : handleBookingCheckin
               }
               showStatus={isBookingAddMode}
