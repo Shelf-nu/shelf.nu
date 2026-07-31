@@ -210,6 +210,31 @@ export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 assert_json_eq "0" "$(collect_threads 2770 | shape_findings)" 'length' \
   "a fully-resolved PR yields zero findings"
 
+describe "pr-review-watch: auxiliary sources"
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+REVIEWS="$(collect_reviews 2770)"
+assert_json_eq "20" "$REVIEWS" 'length' "collect_reviews returns all 20 reviews"
+
+copilot_quota_exhausted "$REVIEWS" && r=exhausted || r=ok
+assert_eq "exhausted" "$r" "Copilot quota-limit body is detected on #2770"
+
+OOD="$(out_of_diff_reviews "$REVIEWS")"
+assert_json_eq "3" "$OOD" 'length' \
+  "three reviews carry out-of-diff findings invisible to thread polling"
+
+# Codex publishes its reviewed SHA; CodeRabbit does not and falls back to a
+# timestamp marker. Both must appear in the map.
+RH="$(reviewed_head_map "$REVIEWS" "2026-07-30T00:00:00Z")"
+assert_json_eq "a3293f170e" "$RH" '."chatgpt-codex-connector[bot]"' \
+  "codex reviewed-SHA is parsed from its review body"
+assert_json_eq "timestamp" "$RH" '."coderabbitai[bot]"' \
+  "coderabbit has no SHA marker and falls back to timestamp matching"
+
+CHECKS="$(collect_checks 15a4e0a58707a8db432eba9ac4e3b5e31d136b7c)"
+assert_json_eq "0" "$CHECKS" '.red'     "no red checks on the #2770 fixture"
+assert_json_eq "0" "$CHECKS" '.pending' "no pending checks on the #2770 fixture"
+
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

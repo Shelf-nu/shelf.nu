@@ -191,6 +191,61 @@ shape_findings() {
   printf '%s' "$out"
 }
 
+collect_reviews() {
+  gh api "repos/$REPO/pulls/$1/reviews"
+}
+
+collect_issue_comments() {
+  gh api "repos/$REPO/issues/$1/comments"
+}
+
+# Copilot regularly reports "unable to review ... quota limit" instead of a
+# real review. When that is the latest word from Copilot the loop must stop
+# expecting it — otherwise quiescence never arrives. Absence of a Copilot
+# review is NOT the same as "nothing to fix".
+copilot_quota_exhausted() {
+  local latest
+  latest="$(printf '%s' "$1" | jq -r '
+    [.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")]
+    | last | .body // ""')"
+  [[ "$latest" =~ [Uu]nable\ to\ review.*quota\ limit ]]
+}
+
+# CodeRabbit posts findings it cannot attach inline into the review BODY,
+# behind a "> [!CAUTION] Some comments are outside the diff" banner. These
+# have no thread, so a thread-only poller silently drops them.
+out_of_diff_reviews() {
+  printf '%s' "$1" | jq '[
+    .[]
+    | select(.body | test("outside the diff"))
+    | {reviewId: .id, author: .user.login, body: .body}
+  ]'
+}
+
+# Which commit each bot has reviewed. Mechanism differs per bot (verified
+# against #2770): Codex publishes "**Reviewed commit:** `<sha>`"; CodeRabbit
+# and Copilot publish nothing and fall back to submitted_at > push time.
+reviewed_head_map() {
+  local reviews="$1" since="$2"
+  printf '%s' "$reviews" | jq --arg since "$since" '
+    reduce (.[] | select(.user.login | endswith("[bot]"))) as $r ({};
+      . + {
+        ($r.user.login):
+          (($r.body // "") | capture("\\*\\*Reviewed commit:\\*\\* `(?<sha>[0-9a-f]+)`").sha
+           // (if $r.submitted_at > $since then "timestamp" else .[$r.user.login] end))
+      })
+    | with_entries(select(.value != null))'
+}
+
+# gh 2.32.1 has no `gh pr checks --json`, so use the REST check-runs endpoint.
+collect_checks() {
+  gh api "repos/$REPO/commits/$1/check-runs" | jq '{
+    red: [.check_runs[] | select(.conclusion == "failure"
+        or .conclusion == "timed_out" or .conclusion == "cancelled")] | length,
+    pending: [.check_runs[] | select(.status != "completed")] | length
+  }'
+}
+
 # --- entrypoint ------------------------------------------------------------
 
 main() {
