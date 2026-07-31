@@ -29,6 +29,14 @@ DRY_RUN="${3:-}"
 }
 [[ -f "$DECISIONS" ]] || { printf 'no such file: %s\n' "$DECISIONS" >&2; exit 2; }
 
+# Reject anything else in $3 rather than ignoring it. A typo like --dryrun or
+# -n would otherwise fall through to the live-mutation path and post to a real
+# PR — this is the one flag that must never fail open.
+if [[ -n "$DRY_RUN" && "$DRY_RUN" != "--dry-run" ]]; then
+  printf 'unrecognized argument: %s (did you mean --dry-run?)\n' "$DRY_RUN" >&2
+  exit 2
+fi
+
 git_common_dir() {
   if [[ -n "${GIT_COMMON_DIR:-}" ]]; then printf '%s' "$GIT_COMMON_DIR"; return 0; fi
   git rev-parse --git-common-dir 2>/dev/null || printf '.git'
@@ -56,6 +64,7 @@ resolve_mutation() {
 }
 
 n="$(jq 'length' "$DECISIONS")"
+failures=0
 for ((i = 0; i < n; i++)); do
   thread="$(jq -r ".[$i].threadId" "$DECISIONS")"
   body="$(jq -r ".[$i].replyBody" "$DECISIONS")"
@@ -71,13 +80,31 @@ for ((i = 0; i < n; i++)); do
     continue
   fi
 
+  replied=0
   if posted "$key"; then
     printf 'skip (already replied): %s\n' "$thread" >&2
+    replied=1
+  elif reply_mutation "$thread" "$body"; then
+    record "$key"
+    replied=1
   else
-    reply_mutation "$thread" "$body" && record "$key"
+    printf 'reply FAILED, not resolving: %s\n' "$thread" >&2
+    failures=$((failures + 1))
   fi
 
-  [[ "$do_resolve" == "true" ]] && resolve_mutation "$thread"
+  # Resolve ONLY when this thread carries a reply — posted just now, or
+  # confirmed posted by an earlier run via the ledger. Resolving a thread
+  # whose reply never landed marks it "addressed" on a live PR that
+  # colleagues and bots read, with no explanation anywhere on it. That is
+  # strictly worse than leaving it open.
+  if [[ "$replied" -eq 1 && "$do_resolve" == "true" ]]; then
+    resolve_mutation "$thread"
+  fi
 done
 
-printf 'pr-review-respond: processed %s decision(s) for PR #%s\n' "$n" "$PR" >&2
+printf 'pr-review-respond: processed %s decision(s) for PR #%s (%s failed)\n' \
+  "$n" "$PR" "$failures" >&2
+
+# Non-zero when any reply failed, so the caller can tell a clean run from one
+# that silently posted nothing.
+[[ "$failures" -eq 0 ]]

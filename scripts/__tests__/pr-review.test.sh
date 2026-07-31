@@ -429,6 +429,45 @@ bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" >/dev/nul
 assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
   "re-running the same decisions posts nothing (idempotent)"
 
+# The asymmetry is the whole point and must be pinned, not just described:
+# the reply is suppressed on a re-run, but the resolve still fires. Without
+# this assertion a refactor that moved resolve_mutation inside the else
+# branch would pass the suite while quietly leaving threads open forever.
+assert_eq "2" "$(grep -c 'resolveReviewThread' "$GH_MUTATION_LOG")" \
+  "re-running still resolves (harmless no-op) even though it posts no reply"
+
+# A reply that FAILS must not leave the thread resolved. Resolving without a
+# reply marks a live PR thread "addressed" with no explanation on it.
+: > "$GH_MUTATION_LOG"
+FAILDIR="$TMP_D/failbin"; mkdir -p "$FAILDIR"
+cat > "$FAILDIR/gh" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+args="$*"
+[[ -n "${GH_MUTATION_LOG:-}" ]] && printf '%s\n' "$args" >> "$GH_MUTATION_LOG"
+case "$args" in
+  *addPullRequestReviewThreadReply*) exit 1 ;;   # simulate a failed reply
+  *) printf '{"data":{"ok":true}}\n' ;;
+esac
+STUB
+chmod +x "$FAILDIR/gh"
+cat > "$TMP_D/one.json" <<'JSON'
+[{"threadId":"PRRT_zzz","replyBody":"Fixed in deadbee — tightened the guard.","resolve":true}]
+JSON
+FAIL_RC=0
+PATH="$FAILDIR:$PATH" bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/one.json" \
+  >/dev/null 2>&1 || FAIL_RC=$?
+
+assert_eq "1" "$FAIL_RC" "a failed reply makes the script exit non-zero"
+assert_eq "0" "$(grep -c 'resolveReviewThread' "$GH_MUTATION_LOG")" \
+  "a thread whose reply failed is NOT resolved"
+
+# An unrecognized third argument must abort, never fall through to a live run.
+BAD_RC=0
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" --dryrun \
+  >/dev/null 2>&1 || BAD_RC=$?
+assert_eq "2" "$BAD_RC" "a mistyped --dry-run flag aborts instead of running live"
+
 rm -rf "$TMP_D"
 unset GH_MUTATION_LOG GIT_COMMON_DIR
 
