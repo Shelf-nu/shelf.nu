@@ -402,6 +402,52 @@ describe("buildCsvExportDataFromAssets", () => {
     ]);
   });
 
+  it("renders a custom-field DATE from `raw`, not the UTC-midnight `valueDate` (no tz shift)", () => {
+    // `valueDate` is deliberately a DIFFERENT day than `raw` so this guard is
+    // tz-independent: the correct path formats `raw` (2026-07-06). If the export
+    // ever reads `valueDate` again — a UTC-midnight ISO that localeOnly parses to
+    // a UTC instant and then reads in the SERVER's local zone, shifting a day
+    // west of UTC — the cell renders 2026-07-05 and this fails on every machine.
+    const assets = [
+      {
+        id: "asset-d",
+        title: "Dated",
+        tags: [],
+        custody: [],
+        customFields: [
+          {
+            customField: { name: "purchaseDate" },
+            value: { raw: "2026-07-06", valueDate: "2026-07-05T00:00:00.000Z" },
+          },
+        ],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      {
+        name: "cf_purchaseDate",
+        visible: true,
+        position: 1,
+        cfType: CustomFieldType.DATE,
+      },
+    ];
+
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    // MM_DD_YYYY default prefs: July 6 from `raw`, never July 5 from `valueDate`.
+    expect(row[1]).toBe('"07/06/2026"');
+  });
+
   it("emits per-unit valuation and qty-aware total_value side by side", () => {
     // QT asset: 100 boxes at €1/each. `valuation` column stays per-unit
     // (CSV round-trip safe — re-import won't inflate it), while the new

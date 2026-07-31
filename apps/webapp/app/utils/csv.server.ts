@@ -818,8 +818,13 @@ const formatCustomFieldForCsv = (
       try {
         // Standard export is display-only (re-import uses the Import-ready
         // export), so custom-field dates render in the user's date format.
-        // localeOnly: a calendar date with no instant — no tz conversion.
-        return formatDate(fieldValue.valueDate, prefs, { localeOnly: true });
+        // Format the bare `raw` calendar date ("YYYY-MM-DD"), NOT `valueDate`
+        // (a UTC-midnight ISO like "2026-07-06T00:00:00.000Z"): passing the ISO
+        // through localeOnly parses it to a UTC instant and then reads the
+        // SERVER's local components, shifting a day west of UTC on a non-UTC
+        // host. `raw` takes formatDate's no-shift date-only path and matches the
+        // UI, which also renders `raw`.
+        return formatDate(String(fieldValue.raw), prefs, { localeOnly: true });
       } catch {
         return String(fieldValue.raw);
       }
