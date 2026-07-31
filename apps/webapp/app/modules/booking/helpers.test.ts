@@ -4,6 +4,7 @@ import {
   countRemainingCheckoutAssets,
   filterBookingAssets,
   groupAndSortAssetsByKit,
+  hasAssetBookingConflicts,
   isAssetCheckoutEligible,
   isBookingArchivable,
   shouldPromptEarlyCheckout,
@@ -552,5 +553,88 @@ describe("shouldPromptEarlyCheckout", () => {
     expect(shouldPromptEarlyCheckout(BookingStatus.RESERVED, past())).toBe(
       false
     );
+  });
+});
+
+describe("hasAssetBookingConflicts", () => {
+  /** Builds the minimal asset shape the helper reads. */
+  const assetWith = (
+    status: string,
+    bookings: Array<{ id: string; status: string }>,
+    type = "INDIVIDUAL"
+  ) => ({
+    status,
+    type,
+    bookingAssets: bookings.map((booking) => ({ booking })),
+  });
+
+  const CURRENT = "booking-current";
+
+  it("treats an overlapping RESERVED booking as a conflict by default", () => {
+    const asset = assetWith(AssetStatus.AVAILABLE, [
+      { id: "other", status: BookingStatus.RESERVED },
+    ]);
+    expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(true);
+  });
+
+  it("ignores an ONGOING booking while the asset is not physically checked out", () => {
+    const asset = assetWith(AssetStatus.AVAILABLE, [
+      { id: "other", status: BookingStatus.ONGOING },
+    ]);
+    expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(false);
+  });
+
+  it("treats an ONGOING booking as a conflict once the asset is CHECKED_OUT", () => {
+    const asset = assetWith(AssetStatus.CHECKED_OUT, [
+      { id: "other", status: BookingStatus.ONGOING },
+    ]);
+    expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(true);
+  });
+
+  it("never conflicts on the current booking's own rows", () => {
+    const asset = assetWith(AssetStatus.CHECKED_OUT, [
+      { id: CURRENT, status: BookingStatus.ONGOING },
+    ]);
+    expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(false);
+  });
+
+  describe("ignoreReservedConflicts", () => {
+    // The reported bug: a booking that is already ONGOING could never check out
+    // its remaining assets once ANY overlapping RESERVED booking held them —
+    // and that reservation was itself allowed precisely because this booking
+    // had not physically checked the asset out yet. An in-flight booking
+    // outranks a reservation that has taken nothing.
+    it("does NOT conflict on a RESERVED booking when reserved conflicts are ignored", () => {
+      const asset = assetWith(AssetStatus.AVAILABLE, [
+        { id: "other", status: BookingStatus.RESERVED },
+      ]);
+      expect(
+        hasAssetBookingConflicts(asset, CURRENT, {
+          ignoreReservedConflicts: true,
+        })
+      ).toBe(false);
+    });
+
+    it("still conflicts when the asset is physically CHECKED_OUT elsewhere", () => {
+      // The flag must not disarm the guard wholesale — an asset genuinely out
+      // on another in-flight booking is not on the shelf to be handed over.
+      const asset = assetWith(AssetStatus.CHECKED_OUT, [
+        { id: "other", status: BookingStatus.OVERDUE },
+      ]);
+      expect(
+        hasAssetBookingConflicts(asset, CURRENT, {
+          ignoreReservedConflicts: true,
+        })
+      ).toBe(true);
+    });
+
+    it("leaves QUANTITY_TRACKED assets to the service-layer quantity guards", () => {
+      const asset = assetWith(
+        AssetStatus.AVAILABLE,
+        [{ id: "other", status: BookingStatus.RESERVED }],
+        "QUANTITY_TRACKED"
+      );
+      expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(false);
+    });
   });
 });
