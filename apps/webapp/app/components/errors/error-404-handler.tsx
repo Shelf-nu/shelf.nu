@@ -36,6 +36,16 @@ export default function Error404Handler({
    */
   const [disabled, setDisabled] = useState(false);
 
+  /**
+   * The team-member branch lets the user pick which of their workspaces to
+   * switch to, and starts with nothing selected. A document submission cannot
+   * fail softly the way a fetcher did: the action rejects a missing
+   * `organizationId`, and because it is a component-less resource route the
+   * browser would replace this page with the raw error response. So the submit
+   * stays disabled until a workspace is actually chosen.
+   */
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
+
   const content = useMemo(() => {
     switch (additionalData.model) {
       case "asset":
@@ -110,7 +120,12 @@ export default function Error404Handler({
                 onSubmit={() => setDisabled(true)}
                 className="flex flex-col items-center"
               >
-                <Select name="organizationId" disabled={disabled}>
+                <Select
+                  name="organizationId"
+                  disabled={disabled}
+                  value={selectedOrganizationId}
+                  onValueChange={setSelectedOrganizationId}
+                >
                   <SelectTrigger className="mb-4 max-w-80 px-3.5 py-2 text-left text-gray-500">
                     <SelectValue placeholder="Select workspace to switch" />
                   </SelectTrigger>
@@ -135,7 +150,10 @@ export default function Error404Handler({
                   name="redirectTo"
                   value={additionalData.redirectTo}
                 />
-                <Button type="submit" disabled={disabled}>
+                <Button
+                  type="submit"
+                  disabled={disabled || !selectedOrganizationId}
+                >
                   Switch workspace
                 </Button>
               </Form>
@@ -148,7 +166,7 @@ export default function Error404Handler({
         return null;
       }
     }
-  }, [additionalData, disabled]);
+  }, [additionalData, disabled, selectedOrganizationId]);
 
   return (
     <div

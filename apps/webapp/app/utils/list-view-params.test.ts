@@ -23,6 +23,14 @@ describe("isClientViewOnlyNavigation", () => {
     expect(isClientViewOnlyNavigation(url(""), url(""))).toBe(false);
   });
 
+  it("is true when only the fragment differs", () => {
+    // Fragments are client-only, so a hash change is still a view change and
+    // must not drag the app shell into a refetch.
+    expect(isClientViewOnlyNavigation(url("?s=a"), url("?s=a#row-3"))).toBe(
+      true
+    );
+  });
+
   it("is false when the pathname differs", () => {
     const current = new URL("https://app.test/bookings/b1/overview");
     const next = new URL("https://app.test/bookings/b1/activity");
