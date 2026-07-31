@@ -290,6 +290,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/quantity-control':
+        specifier: workspace:*
+        version: link:../../packages/quantity-control
       '@supabase/supabase-js':
         specifier: ^2.103.0
         version: 2.105.1

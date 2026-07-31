@@ -63,6 +63,7 @@
     "@sentry/react-router": "^10.47.0",
     "@shelf/database": "workspace:*",
     "@shelf/labels": "workspace:*",
+    "@shelf/quantity-control": "workspace:*",
     "@supabase/supabase-js": "^2.103.0",
     "@tanstack/react-table": "^8.21.3",
     "@tremor/react": "^3.18.7",
