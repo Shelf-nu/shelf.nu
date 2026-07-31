@@ -8,10 +8,10 @@
  * and the row silently renders as nothing — a blank dropdown with a non-zero
  * "Showing N out of M" footer.
  *
- * @see {@link file://./../../../app/routes/api+/model-filters.ts}
- * @see {@link file://./../../../app/hooks/use-model-filters.ts}
+ * @see {@link file://./model-filters.ts}
+ * @see {@link file://./../../hooks/use-model-filters.ts}
  */
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -44,6 +44,7 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: { dynamicFindMany: dbMocks.dynamicFindMany },
     teamMember: { dynamicFindMany: dbMocks.dynamicFindMany },
+    kit: { dynamicFindMany: dbMocks.dynamicFindMany },
   },
 }));
 
@@ -56,13 +57,16 @@ vi.mock("~/modules/organization/context.server", () => ({
   getSelectedOrganization: orgMocks.getSelectedOrganization,
 }));
 
-const bookingMocks = vi.hoisted(() => ({
-  resolveCustodianScope: vi.fn(),
-}));
-
-// why: service.server pulls in the whole booking domain (schedulers, emails)
+// why: service.server pulls in the whole booking domain (schedulers, emails);
+// the clause itself is pure, so the real implementation is re-stated here and
+// asserted against, keeping the test honest about the shape it expects.
 vi.mock("~/modules/booking/service.server", () => ({
-  resolveCustodianScope: bookingMocks.resolveCustodianScope,
+  bookingDraftVisibilityClause: (userId: string) => ({
+    OR: [
+      { status: { not: "DRAFT" } },
+      { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
+    ],
+  }),
 }));
 
 const ORG_ID = "org-1";
@@ -96,20 +100,19 @@ async function readFilters(response: Response) {
   return body.filters ?? body.payload?.filters ?? [];
 }
 
-function setRole(role: OrganizationRoles) {
-  orgMocks.getSelectedOrganization.mockResolvedValue({
-    organizationId: ORG_ID,
-    userOrganizations: [{ organization: { id: ORG_ID }, roles: [role] }],
-  });
-}
+/** The clause every booking read path AND-s in — drafts are creator-only. */
+const DRAFT_VISIBILITY = {
+  OR: [
+    { status: { not: "DRAFT" } },
+    { AND: [{ status: "DRAFT" }, { creatorId: "user-1" }] },
+  ],
+};
 
 describe("GET /api/model-filters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setRole(OrganizationRoles.OWNER);
-    bookingMocks.resolveCustodianScope.mockResolvedValue({
-      userId: "user-1",
-      teamMemberIds: ["tm-1"],
+    orgMocks.getSelectedOrganization.mockResolvedValue({
+      organizationId: ORG_ID,
     });
   });
 
@@ -201,37 +204,34 @@ describe("GET /api/model-filters", () => {
     });
   });
 
-  describe("self-service booking visibility", () => {
+  describe("draft visibility", () => {
     beforeEach(() => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
     });
 
-    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-      "restricts %s users to bookings they are custodian of",
-      async (role) => {
-        setRole(role);
+    it("restricts drafts to their creator, regardless of caller role", async () => {
+      await loader(
+        buildArgs(
+          `name=booking&queryKey=name&status=${ADDABLE_BOOKING_STATUSES.join(
+            ","
+          )}`
+        )
+      );
 
-        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+      // Nested in AND so the search OR cannot widen it back open.
+      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+    });
 
-        // Nested in AND so the search OR cannot widen it back open.
-        expect(lastWhere().AND).toEqual([
-          {
-            OR: [
-              { custodianUserId: "user-1" },
-              { custodianTeamMemberId: { in: ["tm-1"] } },
-            ],
-          },
-        ]);
-      }
-    );
-
-    it("does not restrict admins and owners", async () => {
-      setRole(OrganizationRoles.ADMIN);
-
+    it("applies even when the caller does not ask for DRAFT", async () => {
       await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
 
+      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+    });
+
+    it("does not add the clause to non-booking searches", async () => {
+      await loader(buildArgs("name=kit&queryKey=name&queryValue=x"));
+
       expect(lastWhere().AND).toBeUndefined();
-      expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,8 +1,8 @@
-import { BookingStatus, OrganizationRoles, TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { resolveCustodianScope } from "~/modules/booking/service.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -96,12 +96,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, userOrganizations } = await getSelectedOrganization(
-      {
-        userId,
-        request,
-      }
-    );
+    const { organizationId } = await getSelectedOrganization({
+      userId,
+      request,
+    });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -172,42 +170,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       };
 
       /**
-       * Self-service / base users may only work with their own bookings. The
-       * route loaders that seed these pickers apply this restriction via
-       * `loadBookingsData` → `getBookings({ custodianScope })`; without the
-       * same restriction here, typing in the search box would surface every
-       * booking in the organization.
+       * A DRAFT booking is visible only to its creator. Every other booking
+       * read path enforces this — `getBookings`, `getMinimalBookings`, the CSV
+       * export and the mobile booking APIs all AND in the same clause — so a
+       * search that can now return DRAFT rows has to enforce it too, or typing
+       * would surface drafts the seeding loader deliberately hides.
+       *
+       * Server-derived from the session `userId`, never from a request param,
+       * and nested in a single AND member so the search `OR` above cannot widen
+       * it back open.
        */
-      const role =
-        userOrganizations.find((o) => o.organization.id === organizationId)
-          ?.roles?.[0] ?? OrganizationRoles.BASE;
-
-      if (
-        role === OrganizationRoles.SELF_SERVICE ||
-        role === OrganizationRoles.BASE
-      ) {
-        const custodianScope = await resolveCustodianScope({
-          userId,
-          organizationId,
-        });
-
-        const selfBranches: Array<Record<string, unknown>> = [
-          { custodianUserId: custodianScope.userId },
-        ];
-
-        if (custodianScope.teamMemberIds.length) {
-          selfBranches.push({
-            custodianTeamMemberId: { in: custodianScope.teamMemberIds },
-          });
-        }
-
-        // Nested inside a single AND member so the search `OR` above cannot
-        // widen it back open.
-        where.AND = [
-          ...(where.AND ?? []),
-          selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches },
-        ];
-      }
+      where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {
