@@ -113,6 +113,84 @@ finding_fingerprint() {
     | shasum -a 256 | cut -c1-16
 }
 
+# --- collection ------------------------------------------------------------
+
+THREADS_QUERY='query($owner:String!,$name:String!,$pr:Int!,$cursor:String){
+  repository(owner:$owner,name:$name){ pullRequest(number:$pr){
+    headRefOid
+    reviewThreads(first:100, after:$cursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{ id isResolved isOutdated path line
+        comments(first:20){nodes{id databaseId author{login} body createdAt}} } } } } }'
+
+# One page of review threads. The cursor variable is omitted rather than sent
+# empty — GraphQL rejects after:"" but accepts a null/absent cursor.
+gql_threads_page() {
+  local pr="$1" cursor="${2:-}"
+  if [[ -n "$cursor" ]]; then
+    gh api graphql -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$pr" \
+      -f cursor="$cursor" -f query="$THREADS_QUERY"
+  else
+    gh api graphql -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$pr" \
+      -f query="$THREADS_QUERY"
+  fi
+}
+
+head_sha() {
+  gql_threads_page "$1" | jq -r '.data.repository.pullRequest.headRefOid'
+}
+
+# All review threads, following pagination. Returns a raw node array.
+collect_threads() {
+  local pr="$1" cursor="" page all="[]" has
+  while :; do
+    page="$(gql_threads_page "$pr" "$cursor")" || return 1
+    all="$(jq -n --argjson a "$all" \
+      --argjson b "$(printf '%s' "$page" \
+        | jq '.data.repository.pullRequest.reviewThreads.nodes')" \
+      '$a + $b')"
+    has="$(printf '%s' "$page" \
+      | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+    [[ "$has" != "true" ]] && break
+    cursor="$(printf '%s' "$page" \
+      | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
+  done
+  printf '%s' "$all"
+}
+
+# Raw thread nodes (stdin) -> findings array (stdout).
+#
+# Resolved threads are dropped. OUTDATED threads are kept but flagged: an
+# outdated thread only means the code moved under it, not that the finding
+# died — deciding that is the triager's job, and it returns STALE when so.
+shape_findings() {
+  local raw n i out="[]"
+  raw="$(cat)"
+  n="$(printf '%s' "$raw" | jq 'length')"
+  for ((i = 0; i < n; i++)); do
+    local t resolved outdated author path line body kind fp
+    t="$(printf '%s' "$raw" | jq -c ".[$i]")"
+    resolved="$(printf '%s' "$t" | jq -r '.isResolved')"
+    [[ "$resolved" == "true" ]] && continue
+    outdated="$(printf '%s' "$t" | jq -r '.isOutdated')"
+    author="$(printf '%s' "$t" | jq -r '.comments.nodes[0].author.login // "unknown"')"
+    path="$(printf '%s' "$t" | jq -r '.path // ""')"
+    line="$(printf '%s' "$t" | jq -r '.line // 0')"
+    body="$(printf '%s' "$t" | jq -r '.comments.nodes[0].body // ""')"
+    if is_bot "$author"; then kind="bot"; else kind="human"; fi
+    fp="$(finding_fingerprint "$author" "$path" "$body")"
+    out="$(jq -n --argjson acc "$out" \
+      --arg fp "$fp" \
+      --arg id "$(printf '%s' "$t" | jq -r '.id')" \
+      --arg author "$author" --arg path "$path" --arg kind "$kind" \
+      --arg body "$body" \
+      --argjson line "$line" --argjson outdated "$outdated" \
+      '$acc + [{fingerprint:$fp, threadId:$id, author:$author, path:$path,
+                line:$line, kind:$kind, outdated:$outdated, body:$body}]')"
+  done
+  printf '%s' "$out"
+}
+
 # --- entrypoint ------------------------------------------------------------
 
 main() {

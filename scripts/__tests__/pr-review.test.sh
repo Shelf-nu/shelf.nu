@@ -186,6 +186,30 @@ assert_eq "9999" "$(state_read 9999 | jq -r '.pr')" \
 
 rm -rf "$TMP_STATE"
 
+describe "pr-review-watch: thread collection"
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+
+RAW="$(collect_threads 2770)"
+assert_json_eq "14" "$RAW" 'length' "collect_threads returns all 14 threads"
+
+FINDINGS="$(printf '%s' "$RAW" | shape_findings)"
+assert_json_eq "4" "$FINDINGS" 'length' "shape_findings keeps only unresolved threads"
+assert_json_eq "4" "$FINDINGS" '[.[]|select(.kind=="bot")]|length' \
+  "all four unresolved threads are classified as bot"
+assert_json_eq "0" "$FINDINGS" '[.[]|select(.fingerprint=="")]|length' \
+  "every finding gets a non-empty fingerprint"
+assert_json_eq "0" "$FINDINGS" '[.[]|select(.threadId|startswith("PRRT_")|not)]|length' \
+  "every finding carries a PRRT_ thread id"
+
+assert_eq "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c" "$(head_sha 2770)" \
+  "head_sha reads headRefOid from the GraphQL response"
+
+# Resolved threads must never surface, or the loop re-answers closed threads.
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+assert_json_eq "0" "$(collect_threads 2770 | shape_findings)" 'length' \
+  "a fully-resolved PR yields zero findings"
+
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
