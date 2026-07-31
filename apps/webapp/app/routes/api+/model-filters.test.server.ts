@@ -57,16 +57,29 @@ vi.mock("~/modules/organization/context.server", () => ({
   getSelectedOrganization: orgMocks.getSelectedOrganization,
 }));
 
-// why: service.server pulls in the whole booking domain (schedulers, emails);
-// the clause itself is pure, so the real implementation is re-stated here and
-// asserted against, keeping the test honest about the shape it expects.
-vi.mock("~/modules/booking/service.server", () => ({
-  bookingDraftVisibilityClause: (userId: string) => ({
+/**
+ * Single definition of the draft-visibility clause, shared by the mock below
+ * and by the assertions, so the two can never drift apart.
+ *
+ * Hoisted because `vi.mock` factories are lifted above module scope.
+ *
+ * The real implementation's shape is pinned by its own test in
+ * `modules/booking/service.server.test.ts`, so restating it here cannot mask a
+ * production change — that test fails first.
+ */
+const clause = vi.hoisted(() => ({
+  buildDraftVisibility: (userId: string) => ({
     OR: [
       { status: { not: "DRAFT" } },
       { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
     ],
   }),
+}));
+
+// why: service.server pulls in the whole booking domain (schedulers, emails);
+// the clause itself is pure, so a local equivalent keeps the test fast.
+vi.mock("~/modules/booking/service.server", () => ({
+  bookingDraftVisibilityClause: clause.buildDraftVisibility,
 }));
 
 const ORG_ID = "org-1";
@@ -113,12 +126,7 @@ async function readFilters(response: Response) {
 }
 
 /** The clause every booking read path AND-s in — drafts are creator-only. */
-const DRAFT_VISIBILITY = {
-  OR: [
-    { status: { not: "DRAFT" } },
-    { AND: [{ status: "DRAFT" }, { creatorId: "user-1" }] },
-  ],
-};
+const DRAFT_VISIBILITY = clause.buildDraftVisibility("user-1");
 
 describe("GET /api/model-filters", () => {
   beforeEach(() => {
