@@ -220,6 +220,10 @@ model Asset {
   minQuantity     Int? // Low-stock alert threshold
   consumptionType ConsumptionType? // How consumption is tracked
   unitOfMeasure   String? // e.g., "pcs", "boxes", "liters"
+  // Debounce marker for low-stock alerting: set when available first crosses
+  // to/below minQuantity (alert sent), cleared when it recovers above. Prevents
+  // re-alerting on every subsequent decrement while already low.
+  lowStockNotifiedAt DateTime?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -2365,6 +2369,8 @@ enum ActivityAction {
   ASSET_TAGS_CHANGED
   ASSET_STATUS_CHANGED
   ASSET_VALUATION_CHANGED
+  ASSET_QUANTITY_CHANGED
+  ASSET_MIN_QUANTITY_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED
