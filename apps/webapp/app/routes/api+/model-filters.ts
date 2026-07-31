@@ -1,10 +1,23 @@
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, OrganizationRoles, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { resolveCustodianScope } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+
+/**
+ * Booking statuses a booking search returns when the caller does not ask for a
+ * specific set. Matches the historical behaviour of this endpoint: "upcoming"
+ * bookings only, which is what the asset-index advanced filter means by
+ * "Has upcoming bookings".
+ */
+const DEFAULT_BOOKING_SEARCH_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
 
 const BasicModelFilters = z.object({
   /** key of field for which we have to filter values */
@@ -46,6 +59,28 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
+    /**
+     * Comma-separated `BookingStatus` values the caller wants to search across.
+     *
+     * Different surfaces need different sets: the asset/kit "Add to existing
+     * booking" dialogs also offer DRAFT bookings, while the asset-index
+     * advanced filter is about *upcoming* bookings and deliberately excludes
+     * them. Defaults to the upcoming-only set so existing callers are
+     * unaffected.
+     */
+    status: z
+      .string()
+      .optional()
+      .refine(
+        (val) =>
+          val === undefined ||
+          val
+            .split(",")
+            .every((s) =>
+              Object.values(BookingStatus).includes(s.trim() as BookingStatus)
+            ),
+        { message: "Invalid booking status" }
+      ),
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
@@ -61,10 +96,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganization({
-      userId,
-      request,
-    });
+    const { organizationId, userOrganizations } = await getSelectedOrganization(
+      {
+        userId,
+        request,
+      }
+    );
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -126,7 +163,51 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (modelFilters.name === "booking") {
-      where.status = { in: ["RESERVED", "ONGOING", "OVERDUE"] };
+      where.status = {
+        in: modelFilters.status
+          ? (modelFilters.status
+              .split(",")
+              .map((s) => s.trim()) as BookingStatus[])
+          : DEFAULT_BOOKING_SEARCH_STATUSES,
+      };
+
+      /**
+       * Self-service / base users may only work with their own bookings. The
+       * route loaders that seed these pickers apply this restriction via
+       * `loadBookingsData` → `getBookings({ custodianScope })`; without the
+       * same restriction here, typing in the search box would surface every
+       * booking in the organization.
+       */
+      const role =
+        userOrganizations.find((o) => o.organization.id === organizationId)
+          ?.roles?.[0] ?? OrganizationRoles.BASE;
+
+      if (
+        role === OrganizationRoles.SELF_SERVICE ||
+        role === OrganizationRoles.BASE
+      ) {
+        const custodianScope = await resolveCustodianScope({
+          userId,
+          organizationId,
+        });
+
+        const selfBranches: Array<Record<string, unknown>> = [
+          { custodianUserId: custodianScope.userId },
+        ];
+
+        if (custodianScope.teamMemberIds.length) {
+          selfBranches.push({
+            custodianTeamMemberId: { in: custodianScope.teamMemberIds },
+          });
+        }
+
+        // Nested inside a single AND member so the search `OR` above cannot
+        // widen it back open.
+        where.AND = [
+          ...(where.AND ?? []),
+          selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches },
+        ];
+      }
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {
@@ -165,12 +246,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     return data(
       payload({
+        /**
+         * Search results must carry the SAME top-level fields as the records a
+         * route loader seeds the picker with, because `DynamicSelect` /
+         * `DynamicDropdown` hand whichever list is active to the very same
+         * `renderItem`.
+         *
+         * Spreading the raw record first is what keeps those two shapes in
+         * agreement: without it a `renderItem` reading e.g. `item.status`
+         * (booking pickers) or `item.metadata.userId` (team-member pickers)
+         * silently got `undefined` the moment the user typed, and the row
+         * rendered as nothing at all. The explicit keys below still win, so the
+         * `id` / `name` / `color` / `metadata` / `user` contract is unchanged.
+         *
+         * No new data is exposed: `metadata` already carried the whole record.
+         */
         filters: queryData.map((item) => ({
+          ...item,
           id: item.id,
           name: item[queryKey],
           color: item?.color,
           metadata: item,
-          user: item?.user as any,
+          user: item?.user,
         })),
       })
     );

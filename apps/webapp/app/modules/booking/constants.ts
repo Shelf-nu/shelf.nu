@@ -1,5 +1,25 @@
-import type { Prisma } from "@prisma/client";
+import { BookingStatus, type Prisma } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+
+/**
+ * Booking statuses an asset or kit can still be added to.
+ *
+ * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
+ * to an active booking stay AVAILABLE until purposefully checked out
+ * (progressive checkout).
+ *
+ * This single list has to drive all three layers of the "Add to existing
+ * booking" dialogs, or they disagree and rows vanish:
+ *   1. the loader that seeds the picker (`loadBookingsData`),
+ *   2. the `/api/model-filters` search the picker fires once you type,
+ *   3. the client-side `renderItem` guard in the dialog itself.
+ */
+export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
 
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {

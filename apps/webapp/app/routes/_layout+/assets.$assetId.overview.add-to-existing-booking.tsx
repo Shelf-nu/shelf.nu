@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { BookingStatus, Prisma } from "@prisma/client";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -18,6 +18,7 @@ import { db } from "~/database/db.server";
 
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { ADDABLE_BOOKING_STATUSES } from "~/modules/booking/constants";
 import {
   loadBookingsData,
   processBooking,
@@ -253,12 +254,9 @@ export default function ExistingBooking() {
   function isValidBooking(
     booking: { status?: string | null } | null | undefined
   ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
-    // active booking keeps the asset AVAILABLE until it is purposefully checked
-    // out (progressive checkout).
     return (
       !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
+      ADDABLE_BOOKING_STATUSES.includes(booking.status as BookingStatus)
     );
   }
 
@@ -290,8 +288,10 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // we can achieve it using this also. currently it is accepting only one status value.
-              // status: ['DRAFT', 'RESERVED']
+              // Must mirror `isValidBooking` above and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"
