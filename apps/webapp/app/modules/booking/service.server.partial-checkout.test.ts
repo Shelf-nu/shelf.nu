@@ -1,12 +1,17 @@
+import Markdoc from "@markdoc/markdoc";
 import { BookingStatus, AssetStatus, AssetType } from "@prisma/client";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
-import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import {
+  createSystemBookingNote,
+  createSystemBookingNotes,
+} from "~/modules/booking-note/service.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { ShelfError } from "~/utils/error";
 import {
+  buildOverriddenReservationNotes,
   computeBookingAssetSliceRemainingToCheckOut,
   getRemainingCheckoutAssetIds,
   getRemainingCheckoutPayload,
@@ -86,7 +91,7 @@ vitest.mock("~/database/db.server", () => {
         // call db.asset.findMany. Default to echoing the requested ids with no
         // conflicts/custody so the happy path passes; individual tests override.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        findMany: vitest.fn().mockImplementation((args?: any) => {
+        findMany: vitest.fn().mockImplementation((args?: IdInArgs) => {
           const ids = args?.where?.id?.in;
           return Promise.resolve(
             Array.isArray(ids)
@@ -102,7 +107,16 @@ vitest.mock("~/database/db.server", () => {
               : []
           );
         }),
-        updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: the INDIVIDUAL flip is guarded by `count === ids.length` to
+        // detect an asset taken by a concurrent check-out, so the mock must
+        // report the realistic "every targeted row matched" count rather than
+        // a fixed 0 (which would read as "all taken" and abort every batch).
+        updateMany: vitest.fn().mockImplementation((args?: IdInArgs) => {
+          const ids = args?.where?.id?.in;
+          return Promise.resolve({
+            count: Array.isArray(ids) ? ids.length : 0,
+          });
+        }),
         // why: the qty-path per-asset status flip uses singular `update` (the
         // assetId comes from the validated qtySummaries set, so `updateMany`
         // would be overkill). The mock just needs to resolve.
@@ -250,9 +264,21 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn().mockResolvedValue(undefined),
 }));
 
+/**
+ * The exact slice of a Prisma `findMany` / `updateMany` argument these db mocks
+ * read: the `{ where: { id: { in: [...] } } }` filter they echo back.
+ *
+ * Deliberately NOT `Prisma.AssetFindManyArgs` — that type's `where.id` is
+ * `string | StringFilter<"Asset">`, so `args.where.id.in` needs narrowing at
+ * every call site. Naming only what the mocks depend on keeps them honest
+ * without `any`.
+ */
+type IdInArgs = { where?: { id?: { in?: string[] } } };
+
 // why: testing the service without writing real booking notes.
 vitest.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vitest.fn().mockResolvedValue({}),
+  createSystemBookingNotes: vitest.fn().mockResolvedValue(undefined),
   createStatusTransitionNote: vitest.fn().mockResolvedValue({}),
 }));
 
@@ -353,7 +379,7 @@ describe("partialCheckoutBooking", () => {
     // set by a prior test. Restore the default "echo requested ids, no conflicts"
     // implementation so each test starts from a clean happy-path baseline.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
-      (args?: any) => {
+      (args?: IdInArgs) => {
         const ids = args?.where?.id?.in;
         return Promise.resolve(
           Array.isArray(ids)
@@ -367,6 +393,17 @@ describe("partialCheckoutBooking", () => {
               }))
             : []
         );
+      }
+    );
+    // why: same reasoning as `asset.findMany` above — a prior test's
+    // `mockResolvedValue({ count: 0 })` (the concurrent-takeover case) would
+    // otherwise persist and read as "every asset was taken" in later tests.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: IdInArgs) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve({
+          count: Array.isArray(ids) ? ids.length : 0,
+        });
       }
     );
     // why: `computeBookingAssetsRemainingToCheckOut` reads the BookingAsset
@@ -450,9 +487,17 @@ describe("partialCheckoutBooking", () => {
       assetIds: ["asset-1", "asset-2"],
     });
 
-    // Scanned assets flipped to CHECKED_OUT, org-scoped.
+    // Scanned assets flipped to CHECKED_OUT, org-scoped. The status
+    // precondition is what makes the flip safe against a concurrent
+    // check-out claiming the same asset mid-transaction.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["asset-1", "asset-2"] },
+        organizationId: "org-1",
+        status: {
+          notIn: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+        },
+      },
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
@@ -583,7 +628,7 @@ describe("partialCheckoutBooking", () => {
     // kit-member asset whose kit isn't fully checked out. Pivot shape: kit
     // membership lives under `asset.assetKits[0].kit`, not `asset.kit`.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
-      (args?: any) => {
+      (args?: IdInArgs) => {
         const ids = args?.where?.id?.in;
         return Promise.resolve(
           Array.isArray(ids)
@@ -773,6 +818,109 @@ describe("partialCheckoutBooking", () => {
     ).rejects.toThrow(ShelfError);
 
     // No partial record written when conflict validation rejects.
+    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
+  it("lets an ONGOING booking check out an asset an overlapping RESERVED booking also holds", async () => {
+    expect.assertions(4);
+
+    // The reported bug. This booking is already ONGOING (an earlier asset was
+    // checked out), and while its remaining asset sat AVAILABLE another
+    // booking was allowed to reserve the same asset — precisely because an
+    // ONGOING booking does not "occupy" an asset it has not physically checked
+    // out yet. The reverse direction then blocked this booking from EVER
+    // checking that asset out ("Cannot check out. Some assets are already
+    // booked or checked out elsewhere"), with no way to resolve it in-product.
+    // An in-flight booking outranks a reservation that has taken nothing.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    // why: mirrors the default echo impl (see beforeEach) but hangs an
+    // overlapping RESERVED booking off asset-1, which is what the production
+    // conflict lookup returns for a double-booked asset.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: IdInArgs) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids)
+            ? ids.map((assetId: string) => ({
+                id: assetId,
+                title: `Asset ${assetId}`,
+                status: AssetStatus.AVAILABLE,
+                assetKits: [],
+                bookingAssets:
+                  assetId === "asset-1"
+                    ? [
+                        {
+                          booking: {
+                            id: "other-booking",
+                            status: BookingStatus.RESERVED,
+                            name: "Forensic Event A",
+                          },
+                        },
+                      ]
+                    : [],
+              }))
+            : []
+        );
+      }
+    );
+
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).resolves.toBeTruthy();
+
+    // Override notes go through the BATCHED helper — one call regardless of
+    // how many reservations were overridden, so a large batch can't spend the
+    // transaction's timeout budget writing audit notes.
+    const batched = (createSystemBookingNotes as ReturnType<typeof vitest.fn>)
+      .mock.calls;
+    expect(batched).toHaveLength(1);
+    const notes = batched[0][0].notes;
+
+    // The override is recorded on THIS booking...
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        content: expect.stringContaining("Forensic Event A"),
+      })
+    );
+    // ...and on the reservation, so its owner learns the asset is gone rather
+    // than discovering it when their own check-out fails.
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        bookingId: "other-booking",
+        content: expect.stringContaining("Test Booking"),
+      })
+    );
+  });
+
+  it("aborts the batch when an asset is checked out elsewhere mid-transaction", async () => {
+    expect.assertions(2);
+
+    // The window the in-flight override opens: the conflict guard reads a
+    // PRE-transaction snapshot, so a booking that merely looked RESERVED there
+    // can check the asset out before this transaction writes. Without a
+    // precondition on the flip, both bookings would record a check-out of the
+    // same physical asset.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    // why: stands in for Postgres re-evaluating the guarded `where` after the
+    // competing transaction commits — the row no longer matches, so the update
+    // reports fewer rows than we targeted. Only `updateMany` is overridden so
+    // the pre-transaction conflict lookup keeps its realistic shape.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).rejects.toThrow("while this check-out was being processed");
+
+    // The whole batch rolls back — no partial-checkout record is written.
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
 
@@ -1710,16 +1858,24 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
 
     // INDIVIDUAL row goes through the assetIds → individualToFlip updateMany
-    // (always flips on a partial-checkout batch).
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-ind-1"] }, organizationId: "org-1" },
+    // (always flips on a partial-checkout batch), guarded against a
+    // concurrent check-out having claimed it mid-transaction.
+    const individualFlip = {
+      where: {
+        id: { in: ["asset-ind-1"] },
+        organizationId: "org-1",
+        status: {
+          notIn: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+        },
+      },
       data: { status: AssetStatus.CHECKED_OUT },
-    });
+    };
+    expect(db.asset.updateMany).toHaveBeenCalledWith(individualFlip);
 
     // QTY row did NOT flip (10 of 50 = partial claim).
     expect(db.asset.updateMany).not.toHaveBeenCalledWith({
-      where: { id: { in: ["asset-qty-1"] }, organizationId: "org-1" },
-      data: { status: AssetStatus.CHECKED_OUT },
+      ...individualFlip,
+      where: { ...individualFlip.where, id: { in: ["asset-qty-1"] } },
     });
 
     // Session row records both rows positionally: qty disposition first
@@ -2875,5 +3031,80 @@ describe("getRemainingCheckoutPayload", () => {
       ]),
       expect.anything()
     );
+  });
+});
+
+describe("buildOverriddenReservationNotes", () => {
+  const current = { id: "booking-1", name: "Loaning things to Carlos" };
+
+  it("names both bookings and the assets on each side of the clash", () => {
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: "Forensic Event A",
+        assets: [{ id: "asset-1", title: "Apple Mac Pro (2023)" }],
+      },
+      current
+    );
+
+    // The checking-out booking records WHAT it overrode...
+    expect(notes.currentBookingNote).toContain("Forensic Event A");
+    expect(notes.currentBookingNote).toContain("Apple Mac Pro (2023)");
+    // ...and the reservation records WHO took its asset.
+    expect(notes.reservedBookingNote).toContain("Loaning things to Carlos");
+  });
+
+  it("uses plural phrasing when more than one asset is taken", () => {
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: "Forensic Event A",
+        assets: [
+          { id: "asset-1", title: "Mac Pro" },
+          { id: "asset-2", title: "Tripod" },
+        ],
+      },
+      current
+    );
+
+    expect(notes.currentBookingNote).toContain("were");
+    expect(notes.currentBookingNote).toContain("them");
+  });
+
+  it("cannot be used to inject a live Markdoc tag via a booking name", () => {
+    // Booking names and asset titles are free-form user input, and the note
+    // feed renders stored content through Markdoc — so a raw `{% … %}` splice
+    // would be a stored XSS. Every user value must land inside a quoted,
+    // escaped tag attribute, never as a bare tag.
+    const notes = buildOverriddenReservationNotes(
+      {
+        id: "other-booking",
+        name: '{% link to="javascript:alert(document.cookie)" /%}',
+        assets: [
+          {
+            id: "asset-1",
+            title: '" /%}{% link to="javascript:alert(1)" text="pwned',
+          },
+        ],
+      },
+      current
+    );
+
+    for (const note of [notes.currentBookingNote, notes.reservedBookingNote]) {
+      // Parse the note exactly as the feed does: the injected `{% … %}` must
+      // survive as inert text inside an escaped attribute, never as a tag node.
+      const tags = [...Markdoc.parse(note).walk()].filter(
+        (node) => node.type === "tag"
+      );
+
+      // Only the tags WE emit exist...
+      expect(
+        tags.every((node) => node.tag === "link" || node.tag === "assets_list")
+      ).toBe(true);
+      // ...and none of them points anywhere the attacker chose.
+      for (const node of tags) {
+        expect(String(node.attributes?.to ?? "")).not.toMatch(/^javascript:/i);
+      }
+    }
   });
 });
