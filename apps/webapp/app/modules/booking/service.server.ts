@@ -131,7 +131,10 @@ import {
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
-import { createSystemBookingNote } from "../booking-note/service.server";
+import {
+  createSystemBookingNote,
+  createSystemBookingNotes,
+} from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -7114,10 +7117,60 @@ export async function partialCheckoutBooking({
           (assetId) => assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED
         );
         if (individualToFlip.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: individualToFlip }, organizationId },
+          /**
+           * The conflict + custody guards above ran on a PRE-transaction
+           * snapshot. An overlapping booking can check one of these assets out
+           * (or take custody) in the window between that read and this write —
+           * the in-flight override widens that window, because a booking that
+           * merely looked RESERVED at read time no longer blocks us. Without a
+           * precondition both bookings would record a check-out of the same
+           * physical asset.
+           *
+           * Constraining the UPDATE itself makes the re-check atomic: Postgres
+           * blocks on any row a concurrent transaction is updating, then
+           * re-evaluates this `where` against the committed row. A row taken
+           * meanwhile no longer matches, so `count` comes up short and we abort
+           * the whole batch rather than double-claiming it.
+           */
+          const flipped = await tx.asset.updateMany({
+            where: {
+              id: { in: individualToFlip },
+              organizationId,
+              status: {
+                notIn: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+              },
+            },
             data: { status: AssetStatus.CHECKED_OUT },
           });
+
+          if (flipped.count !== individualToFlip.length) {
+            // Error path only — resolve the titles for a message that names
+            // what was lost instead of failing anonymously.
+            const taken = await tx.asset.findMany({
+              where: {
+                id: { in: individualToFlip },
+                organizationId,
+                status: {
+                  in: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+                },
+              },
+              select: { title: true },
+            });
+            const names = taken
+              .slice(0, 3)
+              .map((a) => a.title)
+              .join(", ");
+            const more =
+              taken.length > 3 ? ` and ${taken.length - 3} more` : "";
+            throw new ShelfError({
+              cause: null,
+              status: 409,
+              label,
+              title: "Booking conflict",
+              message: `Cannot check out. Some assets were checked out or taken into custody elsewhere while this check-out was being processed: ${names}${more}. Refresh and try again.`,
+              shouldBeCaptured: false,
+            });
+          }
         }
 
         /**
@@ -7476,7 +7529,13 @@ export async function partialCheckoutBooking({
          * Written inside the tx so a rolled-back check-out can't leave a note
          * claiming an asset was taken. Only populated when this booking is
          * already in flight — see the guard above.
+         *
+         * Collected first and written in ONE batch: a large batch can override
+         * many distinct reservations, and two singular note writes each (a
+         * check + an insert apiece) would spend the transaction's 15s budget on
+         * audit notes and roll the check-out back.
          */
+        const overrideNotes: Array<{ content: string; bookingId: string }> = [];
         for (const reservation of overriddenReservations.values()) {
           // An idempotent re-scan carries assets that were already out; only
           // the ones this batch actually took belong in the note.
@@ -7491,21 +7550,15 @@ export async function partialCheckoutBooking({
               { id, name: bookingFound.name }
             );
 
-          // eslint-disable-next-line no-await-in-loop -- bounded by the number of distinct reservations overlapping this batch; sequential keeps the tx's statement order deterministic
-          await createSystemBookingNote(
-            { bookingId: id, organizationId, content: currentBookingNote },
-            tx
-          );
-          // eslint-disable-next-line no-await-in-loop -- see above
-          await createSystemBookingNote(
-            {
-              bookingId: reservation.id,
-              organizationId,
-              content: reservedBookingNote,
-            },
-            tx
+          overrideNotes.push(
+            { bookingId: id, content: currentBookingNote },
+            { bookingId: reservation.id, content: reservedBookingNote }
           );
         }
+        await createSystemBookingNotes(
+          { notes: overrideNotes, organizationId },
+          tx
+        );
 
         /**
          * Unit-level remaining count + completion. For each unique booking
