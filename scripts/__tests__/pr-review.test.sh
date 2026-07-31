@@ -388,6 +388,40 @@ export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
 rm -rf "$TMP_STATE"
 
+describe "pr-review-respond"
+
+TMP_D="$(mktemp -d)"
+cat > "$TMP_D/decisions.json" <<'JSON'
+[
+  {"threadId":"PRRT_aaa","replyBody":"Fixed in abc1234 — tightened the guard.","resolve":true},
+  {"threadId":"PRRT_bbb","replyBody":"Not applying — conflicts with a lint rule.","resolve":true},
+  {"threadId":"PRRT_ccc","replyBody":"Fixed in abc1234 — see above.","resolve":false}
+]
+JSON
+
+DRY="$(bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" --dry-run)"
+assert_contains "$DRY" "PRRT_aaa" "dry run reports the first thread"
+assert_contains "$DRY" "reply+resolve" "dry run labels a reply+resolve decision"
+assert_contains "$DRY" "reply-only"    "dry run labels a reply-only decision"
+
+export GH_MUTATION_LOG="$TMP_D/mutations.log"
+: > "$GH_MUTATION_LOG"
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" >/dev/null
+
+assert_eq "3" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
+  "one reply mutation per decision"
+assert_eq "2" "$(grep -c 'resolveReviewThread' "$GH_MUTATION_LOG")" \
+  "resolve only for decisions with resolve:true"
+
+# Re-running must not double-post: replies are the outward-facing side effect.
+: > "$GH_MUTATION_LOG"
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" >/dev/null
+assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
+  "re-running the same decisions posts nothing (idempotent)"
+
+rm -rf "$TMP_D"
+unset GH_MUTATION_LOG
+
 # --- summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
