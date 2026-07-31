@@ -539,9 +539,6 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 
 export async function validateSession(token: string) {
   try {
-    if (process.env.NODE_ENV !== "production" && token === "DEV_BYPASS") {
-      return true;
-    }
     // const t0 = performance.now();
     const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
       SELECT id, revoked FROM auth.refresh_tokens 

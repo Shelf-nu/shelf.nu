@@ -245,8 +245,6 @@ export default createHonoServer<ServerEnv>({
           // route only — cookie-authed routes like /api/calendar-subscription
           // stay OUT of this prefix.
           "/api/calendar/feed/*path",
-          // why: dev-only bypass route for local development without Supabase
-          ...(process.env.NODE_ENV !== "production" ? ["/dev-login"] : []),
         ],
       })
     );
