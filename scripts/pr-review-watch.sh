@@ -274,6 +274,22 @@ repost_count() {
 
 # --- events ------------------------------------------------------------------
 
+# Last error reason emitted, for de-duplication. A process-lifetime shell
+# variable rather than state, because the failure that most needs suppressing
+# is a REJECTED STATE WRITE — which by definition cannot persist a guard.
+LAST_ERROR=""
+
+# Emit an ERROR only on transition. A persistent fault (revoked gh auth, a
+# read-only git dir) would otherwise emit one line per poll forever — the same
+# self-destruct the per-event transition guards exist to prevent, since
+# monitors that emit too much are killed automatically.
+emit_error_once() {
+  local reason="$1"
+  [[ "$reason" == "$LAST_ERROR" ]] && return 0
+  LAST_ERROR="$reason"
+  emit ERROR "$(jq -c -n --arg r "$reason" '{reason:$r}')"
+}
+
 # One line of JSON per event. Stdout is the Monitor's notification stream, so
 # this stays terse by contract: the payload belongs in the state file.
 emit() {
@@ -321,10 +337,10 @@ poll_once() {
   local -a events=()
 
   state="$(state_read "$pr")" || {
-    emit ERROR '{"reason":"state unreadable"}'; return 1; }
+    emit_error_once "state unreadable"; return 1; }
 
   findings="$(collect_threads "$pr" | shape_findings)" || {
-    emit ERROR '{"reason":"collect_threads failed"}'; return 1; }
+    emit_error_once "collect_threads failed"; return 1; }
   fresh="$(unseen_findings "$findings" "$state")"
 
   reviews="$(collect_reviews "$pr")" || reviews="[]"
@@ -366,9 +382,15 @@ poll_once() {
   if printf '%s' "$newhuman" | jq -e 'length > 0' >/dev/null; then
     events+=("HUMAN_COMMENT|$(printf '%s' "$newhuman" | jq -c '{count: length}')")
   fi
+  # `announced` is the set currently OUTSTANDING, deliberately NOT a growing
+  # union. A union outlives the finding: announced -> never decided ->
+  # bot resolves its own thread -> bot re-posts the same finding (same
+  # fingerprint, by design) would stay silent forever while `seen` is still
+  # empty, i.e. while nothing has actually been judged. Rebuilding it each
+  # poll keeps still-pending findings quiet and lets a vanished-and-returned
+  # finding speak again. Decided findings are suppressed by `seen`, upstream.
   state="$(jq -n --argjson s "$state" --argjson f "$fresh" \
-    '$s + {announced: (($s.announced // {})
-                       + ([$f[] | {(.fingerprint): true}] | add // {}))}')"
+    '$s + {announced: ([$f[] | {(.fingerprint): true}] | add // {})}')"
 
   # Out-of-diff findings get their OWN event, deduped by review id.
   #
@@ -398,7 +420,10 @@ poll_once() {
     '$s + {pending: $f, outOfDiff: $o, checks: $c, headSha: $sha}')"
 
   printf '%s' "$state" | state_write "$pr" || {
-    emit ERROR '{"reason":"state write rejected; events withheld"}'; return 1; }
+    emit_error_once "state write rejected; events withheld"; return 1; }
+
+  # A poll got all the way through: the next distinct fault is newsworthy again.
+  LAST_ERROR=""
 
   # Flush only now that the suppressing state is durable. The `${a[@]+...}`
   # form is required: under `set -u`, bash 3.2 treats "${a[@]}" on an EMPTY
@@ -421,7 +446,12 @@ main() {
   # that never happened, which would drive the reply step to post
   # "Fixed in <sha>" before any fix exists.
   if [[ "$(state_read "$pr" | jq -r '.lastPushedSha')" == "null" ]]; then
-    seed="$(git rev-parse "origin/$branch" 2>/dev/null || true)"
+    # --verify --quiet is required: a bare `git rev-parse origin/<branch>`
+    # ECHOES ITS UNRESOLVED ARGUMENT on stdout when the ref is missing (the
+    # normal case for a branch not yet pushed), so `seed` would be the string
+    # "origin/<branch>" and that non-SHA would be written into the very field
+    # this seeding exists to make trustworthy.
+    seed="$(git rev-parse --verify --quiet "origin/$branch" 2>/dev/null || true)"
     [[ -n "$seed" ]] && state_read "$pr" \
       | jq --arg s "$seed" '.lastPushedSha = $s' | state_write "$pr"
   fi

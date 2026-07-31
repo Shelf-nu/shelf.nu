@@ -352,6 +352,37 @@ assert_eq "0" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"COPILOT_QUOTA"')"
 assert_eq "1" "$(printf '%s\n' "$WITHHELD" | grep -c '"event":"ERROR"')" \
   "a rejected state write reports an ERROR event"
 
+# A finding that is announced, never decided, disappears, and is re-posted
+# must speak again. `announced` outliving the finding was how the original
+# "actionable thing exists, no event emitted" bug got reintroduced by the
+# very guard added to stop repeat notifications.
+state_init 5005 "test-branch"
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+GONE1="$(poll_once 5005)"                                   # 4 findings arrive
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+GONE2="$(poll_once 5005)"                                   # bot resolves them
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
+GONE3="$(poll_once 5005)"                                   # bot re-posts them
+
+assert_eq "1" "$(printf '%s\n' "$GONE1" | grep -c '"event":"NEW_FINDINGS"')" \
+  "findings are announced when they first appear"
+assert_eq "0" "$(printf '%s\n' "$GONE2" | grep -c '"event":"NEW_FINDINGS"')" \
+  "nothing announced when the findings disappear"
+assert_eq "1" "$(printf '%s\n' "$GONE3" | grep -c '"event":"NEW_FINDINGS"')" \
+  "an undecided finding that vanished and returned is announced again"
+
+assert_eq "0" "$(state_read 5005 | jq '.seen | length')" \
+  "the vanish/return cycle never wrote a verdict — these are still unjudged"
+
+# A persistent fault must report once, not once per poll.
+LAST_ERROR=""
+emit_error_once "boom" >/dev/null
+assert_eq "0" "$(emit_error_once "boom" | wc -c | tr -d ' ')" \
+  "a repeated identical error is not re-emitted"
+assert_eq "1" "$(emit_error_once "different" | wc -l | tr -d ' ')" \
+  "a distinct error is still reported"
+LAST_ERROR=""
+
 unset -f detect_push collect_checks
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
