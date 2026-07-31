@@ -1457,7 +1457,8 @@ type DirectAssetField =
   | "updatedAt"
   | "availableToBook"
   | "type"
-  | "quantity";
+  | "quantity"
+  | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1471,6 +1472,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  minQuantity: "assetMinQuantity",
 };
 
 /**
@@ -2836,6 +2838,7 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
+          a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",
           a.status AS "assetStatus",

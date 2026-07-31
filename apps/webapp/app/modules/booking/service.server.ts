@@ -4018,6 +4018,68 @@ export async function isBookingFullyCheckedIn(
   return true;
 }
 
+/**
+ * Runs the best-effort low-stock check for every quantity-tracked asset whose
+ * pool dropped during a check-in. Only CONSUME / LOSS / DAMAGE reduce the pool;
+ * RETURN restores units and cannot cross a threshold downward, so it is skipped
+ * (predicate: `consumed + lost + damaged > 0`). Asset ids are de-duplicated so
+ * an asset with several dispositions is checked once.
+ *
+ * MUST be called AFTER the mutation transaction commits — it reads committed
+ * state, and its failures are logged and never propagated, so a notification
+ * problem cannot fail a committed check-in.
+ *
+ * Shared by {@link checkinBooking} and {@link partialCheckinBooking} so the
+ * predicate and error handling can't drift between the two flows.
+ *
+ * @param params.summaries - Per-asset disposition summaries from the transaction
+ * @param params.organizationId - Organization that owns the assets
+ * @param params.bookingId - Booking the check-in belongs to (log context)
+ * @param params.userId - Acting user, when one exists (may be undefined)
+ * @param params.context - Short label naming the calling flow, used in the log
+ */
+async function notifyLowStockForDecrementedAssets({
+  summaries,
+  organizationId,
+  bookingId,
+  userId,
+  context,
+}: {
+  summaries: Array<{
+    assetId: string;
+    consumed: number;
+    lost: number;
+    damaged: number;
+  }>;
+  organizationId: string;
+  bookingId: string;
+  userId?: string;
+  context: string;
+}): Promise<void> {
+  const decrementedAssetIds = [
+    ...new Set(
+      summaries
+        .filter((s) => s.consumed + s.lost + s.damaged > 0)
+        .map((s) => s.assetId)
+    ),
+  ];
+
+  for (const assetId of decrementedAssetIds) {
+    try {
+      await checkAndNotifyLowStock({ assetId, userId, organizationId });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: `Failed to run low-stock check after ${context}`,
+          label,
+          additionalData: { assetId, bookingId, organizationId },
+        })
+      );
+    }
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 
 export async function checkinBooking({
@@ -4979,35 +5041,13 @@ export async function checkinBooking({
      * (legacy signature); the notifier emails owner+admins regardless and
      * only skips the in-app sender when there is no acting user.
      */
-    const decrementedAssetIds = [
-      ...new Set(
-        qtySummariesRef.value
-          .filter((s) => s.consumed + s.lost + s.damaged > 0)
-          .map((s) => s.assetId)
-      ),
-    ];
-    for (const decrementedAssetId of decrementedAssetIds) {
-      try {
-        await checkAndNotifyLowStock({
-          assetId: decrementedAssetId,
-          userId,
-          organizationId,
-        });
-      } catch (lowStockError) {
-        Logger.error(
-          new ShelfError({
-            cause: lowStockError,
-            message: "Failed to run low-stock check after booking check-in",
-            label,
-            additionalData: {
-              assetId: decrementedAssetId,
-              bookingId: id,
-              organizationId,
-            },
-          })
-        );
-      }
-    }
+    await notifyLowStockForDecrementedAssets({
+      summaries: qtySummariesRef.value,
+      organizationId,
+      bookingId: id,
+      userId,
+      context: "booking check-in",
+    });
 
     return updatedBooking;
   } catch (cause) {
@@ -6240,36 +6280,13 @@ export async function partialCheckinBooking({
      * Runs OUTSIDE the committed transaction (best-effort — a notification
      * failure must never roll back a successful check-in).
      */
-    const decrementedAssetIds = [
-      ...new Set(
-        txResult.qtySummaries
-          .filter((s) => s.consumed + s.lost + s.damaged > 0)
-          .map((s) => s.assetId)
-      ),
-    ];
-    for (const decrementedAssetId of decrementedAssetIds) {
-      try {
-        await checkAndNotifyLowStock({
-          assetId: decrementedAssetId,
-          userId,
-          organizationId,
-        });
-      } catch (lowStockError) {
-        Logger.error(
-          new ShelfError({
-            cause: lowStockError,
-            message:
-              "Failed to run low-stock check after partial booking check-in",
-            label,
-            additionalData: {
-              assetId: decrementedAssetId,
-              bookingId: id,
-              organizationId,
-            },
-          })
-        );
-      }
-    }
+    await notifyLowStockForDecrementedAssets({
+      summaries: txResult.qtySummaries,
+      organizationId,
+      bookingId: id,
+      userId,
+      context: "partial booking check-in",
+    });
 
     return {
       booking: txResult.booking,

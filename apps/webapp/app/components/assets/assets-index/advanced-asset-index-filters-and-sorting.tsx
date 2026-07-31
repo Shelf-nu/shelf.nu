@@ -136,8 +136,8 @@ function AdvancedFilter() {
 
   function clearAllFilters() {
     setFilters([]);
-    /** If there are already filters, clear them from the search params */
-    if (filters.length > 0) {
+    /** Clear the column filter params AND the low-stock quick filter. */
+    if (filters.length > 0 || lowStockActive) {
       isApplyingInternally.current = true;
       setSearchParams((prev) => {
         // Clear existing filter params
@@ -146,6 +146,8 @@ function AdvancedFilter() {
             prev.delete(column.name);
           }
         });
+        // The low-stock quick filter is not a column param — clear it too.
+        prev.delete("lowStockOnly");
         return prev;
       });
     }
@@ -239,7 +241,7 @@ function AdvancedFilter() {
             )}
           >
             <div className="border-b p-4 pb-5">
-              {filters.length === 0 ? (
+              {filters.length === 0 && !lowStockActive ? (
                 <div>
                   <h5>No filters applied to this view</h5>
                   <p>Add a column below to filter the view</p>
@@ -382,7 +384,7 @@ function AdvancedFilter() {
                 )}
               />
               Low stock only
-              <span className="text-gray-400">
+              <span className="text-gray-500">
                 — at or below reorder threshold
               </span>
             </button>
@@ -419,7 +421,7 @@ function AdvancedFilter() {
                 </Button>
               </div>
               <div className="ml-8 flex items-center justify-between gap-2">
-                {filters.length > 0 && (
+                {(filters.length > 0 || lowStockActive) && (
                   <Button
                     type="button"
                     variant="block-link"

@@ -318,6 +318,14 @@ export async function checkAndNotifyLowStock({
           label: "Notification",
         })
       );
+      /**
+       * The marker is still set. Skip the recovered notice: a later call will
+       * retry the clear and notify once. Sending it now would re-send on every
+       * subsequent mutation (each sees `!isLow && marker != null`) until a write
+       * succeeds — the exact unbounded repeat the debounce marker exists to
+       * prevent. A single delayed notice is safer than an email storm.
+       */
+      return;
     }
 
     /** In-app notification for the acting user (skipped when none). */
