@@ -35,6 +35,8 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
+ * @param availableToBookOnly - Restrict to assets with `availableToBook = true`
+ * @param lowStockOnly - Restrict to low-stock QUANTITY_TRACKED assets (see below)
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -42,12 +44,21 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false
+  availableToBookOnly = false,
+  lowStockOnly = false
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
   if (availableToBookOnly) {
     whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  }
+
+  if (lowStockOnly) {
+    // Low stock = a QUANTITY_TRACKED asset whose stock is at/below its
+    // reorder threshold. Deliberately stock-vs-threshold only, NOT
+    // custody-aware (a one-line change could add a custody-aware variant
+    // later if that's ever wanted) — keeps this fast and simple.
+    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND a."quantity" <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided

@@ -18,6 +18,7 @@ import {
   AssetStatus,
   AssetType,
   BookingStatus,
+  ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
   OrganizationRoles,
@@ -176,6 +177,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -1170,6 +1172,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  /** "Low stock" quick filter toggle — a `lowStockOnly=true` URL param set
+   * via the assets-index UI toggle, not a `settings.columns` field. See
+   * {@link generateWhereClause}'s `lowStockOnly` param for the predicate. */
+  const lowStockOnly = searchParams.get("lowStockOnly") === "true";
+
   const settingColumns = settings?.columns as Column[];
 
   const isUpcomingBookingsColumnVisible =
@@ -1194,7 +1201,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      lowStockOnly
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -2169,10 +2177,12 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
-      // Quantity-tracked fields (type is immutable, never updated here)
-      // TODO(Phase 2): Route quantity changes through an audited adjustment
-      // path that writes to ConsumptionLog. Direct mutation here bypasses
-      // the full-attribution audit trail required by the PRD.
+      // Quantity-tracked fields (type is immutable, never updated here).
+      // The direct `quantity` write is audited below: the quantity/placement
+      // transaction writes a `ConsumptionLog` ADJUSTMENT for the stock delta
+      // and the `fieldChangeEvents` block emits `ASSET_QUANTITY_CHANGED` /
+      // `ASSET_MIN_QUANTITY_CHANGED`, so the full-attribution trail the PRD
+      // requires is preserved.
       quantity,
       minQuantity,
       consumptionType,
@@ -2523,6 +2533,14 @@ export async function updateAsset({
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
+    // Captured from the locked pre-update row so the post-update
+    // ConsumptionLog ADJUSTMENT (below) can compute the stock delta, AND so
+    // the post-transaction low-stock check can tell whether this patch LOWERED
+    // a QUANTITY_TRACKED asset's total. Hoisted out of the tx callback so both
+    // signals survive past the commit. Only populated when a quantity write is
+    // actually part of this patch.
+    let quantityBeforeUpdate: number | null = null;
+    let lockedAssetType: AssetType | null = null;
     const asset = await db.$transaction(async (tx) => {
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
@@ -2530,7 +2548,9 @@ export async function updateAsset({
       // `adjustQuantity` and the booking write guards). Also covers the CSV
       // update-existing import, which routes through `updateAsset`.
       if (quantity != null) {
-        const locked = await lockAssetForQuantityUpdate(tx, id);
+        const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        quantityBeforeUpdate = locked.quantity ?? 0;
+        lockedAssetType = locked.type;
         if (
           locked.type === AssetType.QUANTITY_TRACKED &&
           quantity < (locked.quantity ?? 0)
@@ -2556,6 +2576,32 @@ export async function updateAsset({
           organization: true,
         },
       });
+
+      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
+      // through the asset-edit form. The form has no consumption-category
+      // input, so a manual total correction is an `ADJUSTMENT` (schema
+      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
+      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
+      // IN this tx (not via `adjustQuantity`, which opens its own tx and
+      // re-locks the row we already hold). Skipped for a no-op edit
+      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
+      if (
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+      ) {
+        const delta = Math.abs(quantity - quantityBeforeUpdate);
+        if (delta > 0) {
+          await createConsumptionLog({
+            assetId: id,
+            category: ConsumptionCategory.ADJUSTMENT,
+            quantity: delta,
+            userId,
+            note: "Quantity adjusted via asset edit",
+            tx,
+          });
+        }
+      }
 
       if (shouldUpdatePlacement) {
         if (newLocationId) {
@@ -2972,6 +3018,42 @@ export async function updateAsset({
           toValue: asset.valuation ?? null,
         });
       }
+      // Quantity is stock; minQuantity is the reorder threshold. Each emits
+      // its own event so reports can aggregate them independently. The stock
+      // ConsumptionLog ADJUSTMENT is written in the tx above; minQuantity is a
+      // threshold (not stock), so it never writes a ConsumptionLog.
+      if (
+        typeof quantity !== "undefined" &&
+        (assetBeforeUpdate.quantity ?? null) !== (asset.quantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "quantity",
+          fromValue: assetBeforeUpdate.quantity ?? null,
+          toValue: asset.quantity ?? null,
+        });
+      }
+      if (
+        typeof minQuantity !== "undefined" &&
+        (assetBeforeUpdate.minQuantity ?? null) !== (asset.minQuantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: assetBeforeUpdate.minQuantity ?? null,
+          toValue: asset.minQuantity ?? null,
+        });
+      }
       if (fieldChangeEvents.length > 0) {
         await recordEvents(fieldChangeEvents);
       }
@@ -3077,6 +3159,35 @@ export async function updateAsset({
             }))
           );
         }
+      }
+    }
+
+    /**
+     * Low-stock check — only when this patch LOWERED a QUANTITY_TRACKED
+     * asset's total (a raise can only recover, and the notifier handles that
+     * transition itself; but we intentionally trigger the check only on a drop
+     * to match the decrement surfaces). Reuses the hoisted `quantityBeforeUpdate`
+     * / `lockedAssetType` signals: a decrease is `quantity < quantityBeforeUpdate`.
+     * Runs OUTSIDE the committed transaction (best-effort — a notification
+     * failure must never roll back a successful asset edit).
+     */
+    if (
+      quantity != null &&
+      lockedAssetType === AssetType.QUANTITY_TRACKED &&
+      quantityBeforeUpdate != null &&
+      quantity < quantityBeforeUpdate
+    ) {
+      try {
+        await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
+      } catch (lowStockError) {
+        Logger.error(
+          new ShelfError({
+            cause: lowStockError,
+            message: "Failed to run low-stock check after asset quantity edit",
+            label: "Assets",
+            additionalData: { assetId: id, organizationId },
+          })
+        );
       }
     }
 
@@ -7339,7 +7450,11 @@ export async function checkOutQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7574,7 +7689,11 @@ export async function releaseQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7825,14 +7944,19 @@ export async function moveAssetLocationUnits(
       );
 
       /** Step 2: Lock the asset row so concurrent placement edits serialize. */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
-       * Step 3: Defense-in-depth org check. The `assertAssetsBelongToOrg`
-       * above already guards request input, but `lockAssetForQuantityUpdate`
-       * does NOT scope by org — so we re-check the locked row's
-       * `organizationId` to make absolutely sure we're not mutating
-       * another tenant's data.
+       * Step 3: Defense-in-depth org check. Both `assertAssetsBelongToOrg`
+       * above AND the org-scoped `lockAssetForQuantityUpdate` (which now
+       * filters `FOR UPDATE` on `organizationId`) already guarantee the row
+       * belongs to this org — a foreign-org id would have 404'd at the lock.
+       * We keep this re-check as belt-and-braces to make absolutely sure we're
+       * not mutating another tenant's data.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -8201,7 +8325,11 @@ export async function placeUnplacedUnits(
         tx
       );
 
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({

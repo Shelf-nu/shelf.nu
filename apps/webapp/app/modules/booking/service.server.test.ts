@@ -10,6 +10,7 @@ import {
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
+import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
@@ -319,6 +320,14 @@ vitest.mock(
 vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vitest.fn().mockResolvedValue(undefined),
   recordEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: wiring-only — the check-in decrement paths call the low-stock notifier
+// after their transaction commits. Stub it so we assert the call (and its
+// args) without running the real debounce/email logic (covered in
+// low-stock.server.test.ts).
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: preventing actual email sending during tests
@@ -4162,6 +4171,97 @@ describe("checkinBooking", () => {
       expect.any(Date)
     );
   });
+
+  it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {
+    expect.assertions(1);
+
+    // Single QT asset (Pens) booked 10 units on a pool of 100. An explicit
+    // LOSS of 4 units decrements the pool 100 → 96 — the audit event must
+    // capture that stock drop.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-pens",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: null,
+            consumptionType: ConsumptionType.ONE_WAY,
+            title: "Pens",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-pens",
+          quantity: 10,
+          id: "ba-q1",
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(mockBooking);
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    // Locked pool = 100; the event's fromValue is read off this.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pens",
+      title: "Pens",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 100,
+      unitOfMeasure: null,
+    });
+    // computeBookingAssetRemaining reads findMany({ where:{ assetId }}); the
+    // by-bookingId-only shape is used by isBookingFullyCheckedIn — keep it
+    // empty so completion resolution stays simple.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args: { where?: { assetId?: string } }) =>
+      args?.where?.assetId
+        ? Promise.resolve([{ quantity: 10 }])
+        : Promise.resolve([])
+    );
+    // computeBookingAssetSliceRemaining reads findUnique → booked 10.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // No logs yet → full 10 remaining; no custody held.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await checkinBooking({
+      ...mockCheckinParams,
+      userId: "user-1",
+      checkins: [{ assetId: "asset-pens", bookingAssetId: "ba-q1", lost: 4 }],
+    });
+
+    const emittedQuantityChange = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls.some(([events]) =>
+      (events as Array<Record<string, unknown>>).some(
+        (e) =>
+          e.action === "ASSET_QUANTITY_CHANGED" &&
+          e.assetId === "asset-pens" &&
+          e.field === "quantity" &&
+          e.fromValue === 100 &&
+          e.toValue === 96
+      )
+    );
+    expect(emittedQuantityChange).toBe(true);
+  });
 });
 
 describe("archiveBooking", () => {
@@ -7089,6 +7189,35 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("emits an ASSET_QUANTITY_CHANGED event for the pool decrement (from pool → pool − decrement)", async () => {
+    expect.assertions(1);
+
+    // pool = 100 (lock stub). lost(3) + damaged(2) = 5 units leave the pool,
+    // so the audit event must capture 100 → 95.
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    // recordEvents is called more than once in this flow (pool decrements +
+    // BOOKING_PARTIAL_CHECKIN); assert one call carried the quantity event.
+    const emittedQuantityChange = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls.some(([events]) =>
+      (events as Array<Record<string, unknown>>).some(
+        (e) =>
+          e.action === "ASSET_QUANTITY_CHANGED" &&
+          e.assetId === mockQtyAssetId &&
+          e.field === "quantity" &&
+          e.fromValue === 100 &&
+          e.toValue === 95
+      )
+    );
+    expect(emittedQuantityChange).toBe(true);
+  });
+
   it("keeps booking ONGOING when the payload leaves units pending", async () => {
     expect.assertions(3);
 
@@ -7163,6 +7292,40 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("runs the low-stock notifier for the asset whose pool a CONSUME decremented", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    // Decrement happened (consumed 10) → notifier fires post-tx with the
+    // acting user + org so it can debounce + email owner/admins.
+    expect(lowStockService.checkAndNotifyLowStock).toHaveBeenCalledWith({
+      assetId: mockQtyAssetId,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("does NOT run the low-stock notifier for a RETURN-only check-in (no pool decrement)", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    // RETURN puts units back in the pool — availability can only go UP, so the
+    // decrement-triggered low-stock check must not fire.
+    expect(lowStockService.checkAndNotifyLowStock).not.toHaveBeenCalled();
   });
 
   it("rejects over-return when claimed exceeds remaining", async () => {

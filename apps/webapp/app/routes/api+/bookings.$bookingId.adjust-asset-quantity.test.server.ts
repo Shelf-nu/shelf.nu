@@ -121,17 +121,25 @@ type ReservedRowFixture = {
 /**
  * Builds the `tx` mock passed into `db.$transaction`'s callback. Shaped
  * like `PrismaClientOrTx` (`~/modules/asset/availability.server`) plus
- * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock) and
- * `bookingAsset.update` (the route's own write), so the REAL
- * `assertAssetQuantityAvailable` → `getAssetAvailability` composition runs
- * unmodified against the reservation rows supplied per test.
+ * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock),
+ * `bookingAsset.findUnique` (the route's TOCTOU re-read of the booked
+ * quantity UNDER the lock) and `bookingAsset.update` (the route's own
+ * write), so the REAL `assertAssetQuantityAvailable` → `getAssetAvailability`
+ * composition runs unmodified against the reservation rows supplied per test.
+ *
+ * `currentQuantity` is the value the locked re-read observes — the directional
+ * guard measures increases against THIS, not the outside-tx snapshot. Defaults
+ * to the fixture's own quantity for the common no-race case; tests modelling a
+ * concurrent change set it to the post-race value.
  */
 function createTxMock({
   inKits = 0,
   reservedRows = [],
+  currentQuantity = 0,
 }: {
   inKits?: number;
   reservedRows?: ReservedRowFixture[];
+  currentQuantity?: number;
 } = {}) {
   return {
     $queryRaw: vitest.fn().mockResolvedValue([{ id: ASSET_ID }]),
@@ -140,6 +148,7 @@ function createTxMock({
     },
     bookingAsset: {
       findMany: vitest.fn().mockResolvedValue(reservedRows),
+      findUnique: vitest.fn().mockResolvedValue({ quantity: currentQuantity }),
       update: vitest.fn().mockResolvedValue({}),
     },
     consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
@@ -245,6 +254,7 @@ describe("action (adjust-asset-quantity)", () => {
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
     const tx = createTxMock({
+      currentQuantity: 8,
       reservedRows: [
         {
           bookingId: "other-booking-1",
@@ -304,6 +314,7 @@ describe("action (adjust-asset-quantity)", () => {
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
     const tx = createTxMock({
+      currentQuantity: 2,
       reservedRows: [
         {
           bookingId: "other-booking-1",
@@ -342,7 +353,7 @@ describe("action (adjust-asset-quantity)", () => {
     // @ts-expect-error mocked
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
-    const tx = createTxMock();
+    const tx = createTxMock({ currentQuantity: 5 });
     // @ts-expect-error mocked
     db.$transaction.mockImplementation((callback: (tx: unknown) => unknown) =>
       callback(tx)
@@ -363,5 +374,55 @@ describe("action (adjust-asset-quantity)", () => {
     // increase = 5 - 5 = 0 → the directional guard's "reductions & no-ops
     // always allowed" early return; no availability read should occur.
     expect(tx.bookingAsset.findMany).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the booked quantity under the lock so a stale-high snapshot can't slip an increase past the guard (TOCTOU)", async () => {
+    // Outside-tx snapshot reports 8 units, but a concurrent request already
+    // reduced the real booked qty to 2 before this request took the lock.
+    // Submitting 6 looks like a REDUCTION against the stale 8 (6 <= 8, which
+    // the directional guard would wave through), but is actually a +4 INCREASE
+    // against the committed 2. With one other booking reserving 7 of the 10,
+    // bookable = 3, so the real increase (4) must be REJECTED. Before the
+    // re-read fix, the stale snapshot let this oversubscribe the pool.
+    const bookingAsset = buildBookingAssetFixture({ quantity: 8 });
+    // @ts-expect-error mocked
+    db.bookingAsset.findFirst.mockResolvedValue(bookingAsset);
+    // @ts-expect-error mocked
+    computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
+
+    const tx = createTxMock({
+      currentQuantity: 2, // the FRESH value observed under the lock
+      reservedRows: [
+        {
+          bookingId: "other-booking-1",
+          quantity: 7,
+          booking: {
+            from: new Date("2026-08-01T09:00:00.000Z"),
+            to: new Date("2026-08-05T09:00:00.000Z"),
+          },
+        },
+      ],
+    });
+    // @ts-expect-error mocked
+    db.$transaction.mockImplementation((callback: (tx: unknown) => unknown) =>
+      callback(tx)
+    );
+
+    const response = await action(
+      buildActionArgs({ assetId: ASSET_ID, quantity: "6" })
+    );
+
+    // Measured against the fresh 2, the +4 increase exceeds bookable (3).
+    expect(response.data.error).not.toBeNull();
+    if (response.data.error === null) throw new Error("expected a 400 error");
+    expect(response.init?.status).toBe(400);
+    // The re-read ran, the availability guard ran (not short-circuited as a
+    // reduction against the stale 8), and the write did NOT happen.
+    expect(tx.bookingAsset.findUnique).toHaveBeenCalledWith({
+      where: { id: BOOKING_ASSET_ID },
+      select: { quantity: true },
+    });
+    expect(tx.bookingAsset.findMany).toHaveBeenCalled();
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
   });
 });

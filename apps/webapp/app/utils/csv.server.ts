@@ -680,6 +680,13 @@ export const buildCsvExportDataFromAssets = ({
                   }`
                 : "";
             break;
+          case "minQuantity":
+            // Low-stock reorder threshold — plain number, mirrors "quantity" above.
+            value =
+              isQuantityTracked(asset) && asset.minQuantity != null
+                ? `${asset.minQuantity}`
+                : "";
+            break;
           case "type":
             // Handled by default column logic — asset.type is a direct string field
             value = isQuantityTracked(asset)

@@ -19,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { LowStockFilterToggle } from "./low-stock-filter-toggle";
 import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
@@ -184,6 +185,7 @@ function AdvancedAssetIndexFilters() {
         "left-of-search": <AdvancedFilteringAndSorting />,
         "right-of-search": (
           <div className="flex items-center gap-2">
+            <LowStockFilterToggle />
             <AvailabilityViewToggle modeIsSimple={false} />
           </div>
         ),
