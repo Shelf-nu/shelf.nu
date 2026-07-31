@@ -276,8 +276,6 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const isValidBooking = isAddableBooking;
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -301,7 +299,7 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // Must mirror `isValidBooking` above and the statuses
+              // Must mirror `isAddableBooking` and the statuses
               // `loadBookingsData` seeds the list with — otherwise searching
               // returns bookings this dialog then refuses to render.
               status: ADDABLE_BOOKING_STATUSES.join(","),
@@ -315,7 +313,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}
