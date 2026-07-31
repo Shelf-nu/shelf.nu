@@ -4,12 +4,12 @@
   "private": true,
   "description": "Pure, dependency-free quantity/availability domain for QUANTITY_TRACKED assets, shared by the webapp and the companion app so their availability math never drifts.",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
     }
   },
   "files": [
