@@ -110,7 +110,9 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
         )}
 
         <div className="prose prose-gray max-w-none text-[15px] leading-relaxed text-gray-700">
-          <MarkdownViewer content={update.content} />
+          {/* Changelog entries are authored behind `requireAdmin`, same as
+              announcements — external links are intended here. */}
+          <MarkdownViewer content={update.content} allowExternalLinks />
         </div>
 
         {update.url && (

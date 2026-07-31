@@ -102,6 +102,7 @@ import {
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
@@ -722,7 +723,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
-          .map((a) => `**${a.title}** (x${newQuantities[a.id]})`)
+          // Asset titles are user input rendered as literal text here.
+          .map(
+            (a) =>
+              `**${stripMarkdocDelimiters(a.title)}** (x${newQuantities[a.id]})`
+          )
           .join(", ");
         const qtySuffix = qtyAnnotations
           ? ` with quantities: ${qtyAnnotations}`
@@ -857,11 +862,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const bookingAdjustSummary = adjustments
           .map(
             (adj) =>
-              `{% link to="/assets/${
-                adj.asset!.id
-              }" text="${adj.asset!.title.replace(/"/g, "&quot;")}" /%} (**${
-                adj.from
-              }** → **${adj.to}**)`
+              // Use the shared wrapper rather than hand-rolling the tag: it is
+              // the one place that guarantees the title lands inside a quoted,
+              // escaped attribute.
+              `${wrapLinkForNote(
+                `/assets/${adj.asset!.id}`,
+                adj.asset!.title
+              )} (**${adj.from}** → **${adj.to}**)`
           )
           .join(", ");
         await createSystemBookingNote({

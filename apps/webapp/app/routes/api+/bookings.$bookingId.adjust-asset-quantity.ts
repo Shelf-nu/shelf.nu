@@ -33,6 +33,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -257,7 +258,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           createSystemBookingNote({
             bookingId,
             organizationId,
-            content: `${actor} adjusted booked quantity for **${bookingAsset.asset.title}** from **${previousQuantity}** to **${quantity}**.`,
+            content: `${actor} adjusted booked quantity for **${stripMarkdocDelimiters(
+              bookingAsset.asset.title
+            )}** from **${previousQuantity}** to **${quantity}**.`,
           }),
         ]);
       } catch (noteError) {

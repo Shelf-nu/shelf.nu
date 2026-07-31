@@ -1217,7 +1217,9 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
-        content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
+        content: `${userLink} changed booking name from **${stripMarkdocDelimiters(
+          booking.name
+        )}** to **${stripMarkdocDelimiters(name)}**.`,
       });
       changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
@@ -1396,15 +1398,21 @@ export async function updateBasicBooking({
 
     if (JSON.stringify(oldTagIds) !== JSON.stringify(newTagIds)) {
       // Get tag names for better readability
+      // Tag names are free-form user input and land in Markdoc-rendered note
+      // content as literal text, so strip tag delimiters from each.
       const oldTagNames =
-        booking.tags.map((tag) => tag.name).join(", ") || "(none)";
+        booking.tags
+          .map((tag) => stripMarkdocDelimiters(tag.name))
+          .join(", ") || "(none)";
 
       // Get new tag names - we need to fetch them since we only have IDs
       const newTags = await db.tag.findMany({
         where: { id: { in: newTagIds }, organizationId },
         select: { name: true },
       });
-      const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
+      const newTagNames =
+        newTags.map((tag) => stripMarkdocDelimiters(tag.name)).join(", ") ||
+        "(none)";
 
       await createSystemBookingNote({
         bookingId: booking.id,
@@ -10926,9 +10934,9 @@ export async function bulkDeleteBookings({
           booking.bookingAssets.map((ba) => ({
             userId,
             assetId: ba.asset.id,
-            content: `**${resolveUserDisplayName(user)}** deleted booking **${
-              booking.name
-            }**.`,
+            content: `**${stripMarkdocDelimiters(
+              resolveUserDisplayName(user)
+            )}** deleted booking **${stripMarkdocDelimiters(booking.name)}**.`,
             type: "UPDATE" as const,
           }))
         )

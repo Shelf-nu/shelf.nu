@@ -113,6 +113,7 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
@@ -5930,7 +5931,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -6128,14 +6130,20 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
+          // Actor name, custodian name and asset title are all user-supplied
+          // and render as literal text in this Markdoc note.
+          const actorName = stripMarkdocDelimiters(
+            `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
+          );
+          const custodianName = stripMarkdocDelimiters(
+            primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
+              : "Unknown Custodian"
+          );
           return {
-            content: `**${user.firstName?.trim()} ${
-              user.lastName
-            }** has released **${
-              primaryCustody
-                ? resolveTeamMemberName(primaryCustody.custodian)
-                : "Unknown Custodian"
-            }'s** custody over **${asset.title?.trim()}**`,
+            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
+              asset.title ?? ""
+            )}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
