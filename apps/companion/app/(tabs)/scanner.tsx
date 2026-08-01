@@ -892,32 +892,49 @@ function ScannerContent() {
               return;
             }
 
-            // Only assets currently checked out for this booking are eligible
-            // to check in — mirror the single-asset gate (line ~933). A kit
-            // member that was never checked out (e.g. skipped during a
-            // progressive check-out) would otherwise be submitted and
-            // 400-rejected by partialCheckinBooking's progressive-checkout
-            // guard, failing the entire batch including its checked-out peers.
+            // For check-in: Only assets currently checked out for this booking are eligible
+            // to check in. For check-out: Exclude members that are CHECKED_OUT or IN_CUSTODY.
             const checkedOutMembers = members.filter(
               (a) => a.status === "CHECKED_OUT"
             );
-            const eligible = checkedOutMembers.filter(
-              (a) =>
-                !bookingCtx.checkedInAssetIds.has(a.id) &&
-                !bookingCheckinItems.some((item) => item.targetId === a.id)
+            const checkoutEligibleMembers = members.filter(
+              (a) => a.status !== "CHECKED_OUT" && a.status !== "IN_CUSTODY"
             );
+            const eligible = isBookingCheckoutMode
+              ? checkoutEligibleMembers.filter(
+                  (a) =>
+                    !bookingCheckinItems.some((item) => item.targetId === a.id)
+                )
+              : checkedOutMembers.filter(
+                  (a) =>
+                    !bookingCtx.checkedInAssetIds.has(a.id) &&
+                    !bookingCheckinItems.some((item) => item.targetId === a.id)
+                );
             if (eligible.length === 0) {
-              // Distinguish "none are checked out" from "all already covered".
-              const reason =
-                checkedOutMembers.length === 0
-                  ? {
-                      title: "Not Checked Out",
-                      message: `None of "${kit.name}"'s assets in this booking are checked out.`,
-                    }
-                  : {
-                      title: "Already Covered",
-                      message: `All of "${kit.name}"'s checked-out assets are already checked in or scanned.`,
-                    };
+              let reason;
+              if (isBookingCheckoutMode) {
+                reason =
+                  checkoutEligibleMembers.length === 0
+                    ? {
+                        title: "Already Checked Out",
+                        message: `None of "${kit.name}"'s assets in this booking are eligible for checkout (already checked out or in custody).`,
+                      }
+                    : {
+                        title: "Already Covered",
+                        message: `All of "${kit.name}"'s eligible assets are already scanned.`,
+                      };
+              } else {
+                reason =
+                  checkedOutMembers.length === 0
+                    ? {
+                        title: "Not Checked Out",
+                        message: `None of "${kit.name}"'s assets in this booking are checked out.`,
+                      }
+                    : {
+                        title: "Already Covered",
+                        message: `All of "${kit.name}"'s checked-out assets are already checked in or scanned.`,
+                      };
+              }
               flashFrame("error");
               Haptics.notificationAsync(
                 Haptics.NotificationFeedbackType.Warning
@@ -2085,12 +2102,16 @@ function ScannerContent() {
                   setBookingCheckinItems([]);
                   lastScanRef.current = "";
                   markBookingDirty(bookingId);
-                  InteractionManager.runAfterInteractions(() => {
-                    pushIntoTab(
-                      "/(tabs)/bookings",
-                      `/(tabs)/bookings/${bookingId}`
-                    );
-                  });
+                  if (result?.isComplete) {
+                    InteractionManager.runAfterInteractions(() => {
+                      pushIntoTab(
+                        "/(tabs)/bookings",
+                        `/(tabs)/bookings/${bookingId}`
+                      );
+                    });
+                  } else {
+                    fetchBookingCtx();
+                  }
                 },
               },
             ]);
