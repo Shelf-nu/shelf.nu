@@ -140,8 +140,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
+        /**
+         * PERF: the index table renders only booking-level fields plus
+         * an asset COUNT — the heavy per-booking `bookingAssets`
+         * payload (assets + QR/barcodes + kits + categories) existed
+         * solely for the assets drawer, which now fetches it lazily
+         * from `/api/bookings/:bookingId/assets-sidebar` on expand.
+         * Shipping it here was ~99% dead payload and the dominant
+         * serialization/SSR cost of this route.
+         */
+        includeAssets: false,
         extraInclude: {
           tags: TAG_WITH_COLOR_SELECT,
+          // Asset count for the row's drawer trigger ("N assets") —
+          // replaces `bookingAssets.length` now that the pivots are no
+          // longer loaded.
+          _count: { select: { bookingAssets: true } },
           // Include outstanding model-level reservations so the
           // assets-sidebar drawer can render the "Unassigned model
           // reservations (N)" section — and so the drawer trigger opens
@@ -196,11 +210,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     /**
-     * One amber "Stock conflict" pill per booking that has ≥1 over-committed
-     * QUANTITY_TRACKED asset in its window (see
+     * One amber "Stock conflict" pill per booking that has >=1
+     * over-committed QUANTITY_TRACKED asset in its window (see
      * `~/modules/booking/stock-conflicts.server`). Bounded to the current
-     * page's bookings — same batching contract as the disposition/checkout
-     * maps below, just one more fixed-cost query group.
+     * page's bookings — one fixed-cost query group per page.
      */
     const decoratedBookings = await decorateBookingsWithStockConflicts({
       bookings,
@@ -208,111 +221,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     /**
-     * Compute a per-booking map of `assetId → dispositionedQty` (sum
-     * of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
-     * every qty-tracked asset currently visible on this page. Feeds
-     * the `BookingAssetsSidebar` so it can render the same qty
-     * progress indicator and "Partially checked in" badge the
-     * overview page uses.
-     *
-     * Strategy: one aggregate query scoped to the bookingIds on this
-     * page (at most `perPage` bookings, so bounded). Then we bucket the
-     * rows by bookingId and store a Map<string, Record<string, number>>
-     * keyed by bookingId. Empty record for bookings with no activity.
+     * Page-scoped input for the "Includes unavailable assets" row
+     * badge. The per-booking asset payload is no longer shipped by this
+     * loader (`includeAssets: false` above — the drawer fetches it
+     * lazily, along with the qty-progress maps, from
+     * `/api/bookings/:bookingId/assets-sidebar` on expand), so the
+     * badge's signal is computed here as one bounded query: which
+     * bookings on this page have at least one asset that is not
+     * bookable or is in custody (mirrors the old per-row
+     * `!availableToBook || hasCustody(custody)` check).
      */
     const bookingIdsOnPage = bookings.map((b) => b.id);
-    const dispositionRows =
+    const bookingsWithUnavailableAssets =
       bookingIdsOnPage.length > 0
-        ? await db.consumptionLog.groupBy({
-            by: ["bookingId", "assetId", "category"],
-            where: {
-              bookingId: { in: bookingIdsOnPage },
-              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
-            },
-            _sum: { quantity: true },
-          })
+        ? (
+            await db.booking.findMany({
+              where: {
+                // `bookingIdsOnPage` already comes from the org-scoped
+                // getBookings call; the explicit scope keeps this query
+                // safe on its own terms regardless.
+                id: { in: bookingIdsOnPage },
+                organizationId,
+                bookingAssets: {
+                  some: {
+                    asset: {
+                      OR: [
+                        { availableToBook: false },
+                        // Mirrors `hasCustody`: any custody row counts.
+                        { custody: { some: {} } },
+                      ],
+                    },
+                  },
+                },
+              },
+              select: { id: true },
+            })
+          ).map((b) => b.id)
         : [];
-    /**
-     * Per-booking → per-asset disposition totals AND a per-category
-     * breakdown. The sidebar tooltip uses the breakdown to show
-     * Returned / Consumed / Lost / Damaged separately (lost and
-     * damaged units are conceptually different from returned ones).
-     * Both derivations come from the same single groupBy — no extra
-     * DB round-trip.
-     */
-    const dispositionedByBooking: Record<string, Record<string, number>> = {};
-    const dispositionBreakdownByBooking: Record<
-      string,
-      Record<
-        string,
-        { returned: number; consumed: number; lost: number; damaged: number }
-      >
-    > = {};
-    for (const row of dispositionRows) {
-      if (!row.bookingId) continue;
-      const qty = row._sum.quantity ?? 0;
-
-      if (!dispositionedByBooking[row.bookingId]) {
-        dispositionedByBooking[row.bookingId] = {};
-      }
-      dispositionedByBooking[row.bookingId][row.assetId] =
-        (dispositionedByBooking[row.bookingId][row.assetId] ?? 0) + qty;
-
-      if (!dispositionBreakdownByBooking[row.bookingId]) {
-        dispositionBreakdownByBooking[row.bookingId] = {};
-      }
-      const bucket =
-        dispositionBreakdownByBooking[row.bookingId][row.assetId] ??
-        ({
-          returned: 0,
-          consumed: 0,
-          lost: 0,
-          damaged: 0,
-        } as const);
-      const next = { ...bucket };
-      if (row.category === "RETURN") next.returned += qty;
-      else if (row.category === "CONSUME") next.consumed += qty;
-      else if (row.category === "LOSS") next.lost += qty;
-      else if (row.category === "DAMAGE") next.damaged += qty;
-      dispositionBreakdownByBooking[row.bookingId][row.assetId] = next;
-    }
-
-    /**
-     * Per-booking → per-asset progressively-checked-out total. Sums
-     * `PartialBookingCheckout.quantities[i]` across every checkout
-     * session for the bookings on this page, bucketed by
-     * `(bookingId, assetIds[i])`. Feeds the sidebar's new amber
-     * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge: an asset with
-     * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an
-     * active booking is "partly out, no returns yet".
-     *
-     * Legacy fallback: pre-progressive-checkout rows have
-     * `quantities[].length !== assetIds[].length` (often empty). We
-     * count one unit per occurrence in that case, matching the
-     * service-layer read convention (`countCheckedOutUnitsForAsset` in
-     * `apps/webapp/app/modules/booking/service.server.ts`).
-     */
-    const checkoutSessionRows =
-      bookingIdsOnPage.length > 0
-        ? await db.partialBookingCheckout.findMany({
-            where: { bookingId: { in: bookingIdsOnPage } },
-            select: { bookingId: true, assetIds: true, quantities: true },
-          })
-        : [];
-    const checkedOutByBooking: Record<string, Record<string, number>> = {};
-    for (const session of checkoutSessionRows) {
-      const ids = session.assetIds ?? [];
-      const qtys = session.quantities ?? [];
-      const aligned = qtys.length === ids.length;
-      const bucket =
-        checkedOutByBooking[session.bookingId] ??
-        (checkedOutByBooking[session.bookingId] = {});
-      for (let i = 0; i < ids.length; i += 1) {
-        const assetId = ids[i];
-        const quantity = aligned ? qtys[i] ?? 1 : 1;
-        bucket[assetId] = (bucket[assetId] ?? 0) + quantity;
-      }
-    }
 
     const header: HeaderData = {
       title: "Bookings",
@@ -334,9 +279,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         hasActiveFilters,
-        dispositionedByBooking,
-        dispositionBreakdownByBooking,
-        checkedOutByBooking,
+        bookingsWithUnavailableAssets,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members

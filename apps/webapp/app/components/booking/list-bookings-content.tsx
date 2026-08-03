@@ -20,7 +20,10 @@ import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index"
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
-import { BookingAssetsSidebar } from "./booking-assets-sidebar";
+import {
+  BookingAssetsSidebar,
+  type SidebarBookingAssets,
+} from "./booking-assets-sidebar";
 import { BookingStatusBadge } from "./booking-status-badge";
 import LineBreakText from "../layout/line-break-text";
 import ItemsWithViewMore from "../list/items-with-view-more";
@@ -86,57 +89,68 @@ function StockConflictPill() {
   );
 }
 
-/** Props for {@link ListBookingsContent}. */
+/**
+ * Props for {@link ListBookingsContent}.
+ *
+ * The `bookingAssets` payload is EAGER on the child bookings surfaces
+ * (asset / kit / user / me tabs) and ABSENT on the main bookings index,
+ * which ships `_count.bookingAssets` instead and lets the drawer fetch
+ * the pivots on open (see `BookingAssetsSidebar`). The row therefore
+ * treats it as optional and must preserve `undefined` — an empty array
+ * would read as "eager with zero assets" and suppress the fetch.
+ */
 type ListBookingsContentProps = {
-  item: Prisma.BookingGetPayload<{
-    include: {
-      bookingAssets: {
-        select: {
-          id: true;
-          quantity: true;
-          // Surfaces the kit-source discriminator the sidebar groups
-          // by. Without this field on the index loader's type, the
-          // sidebar's `BookingWithAssets` type check rejects the data.
-          assetKitId: true;
-          asset: {
-            select: {
-              id: true;
-              title: true;
-              type: true;
-              consumptionType: true;
-              availableToBook: true;
-              custody: true;
-              status: true;
-              mainImage: true;
-              thumbnailImage: true;
-              mainImageExpiration: true;
-              // Code-resolution fields - mirror of getBookings' assets select
-              sequentialId: true;
-              preferredBarcodeId: true;
-              qrCodes: { take: 1; select: { id: true } };
-              barcodes: { select: { id: true; type: true; value: true } };
-              category: {
-                select: {
-                  id: true;
-                  name: true;
-                  color: true;
+  item: Omit<
+    Prisma.BookingGetPayload<{
+      include: {
+        bookingAssets: {
+          select: {
+            id: true;
+            quantity: true;
+            // Surfaces the kit-source discriminator the sidebar groups
+            // by. Without this field on the index loader's type, the
+            // sidebar's `BookingWithAssets` type check rejects the data.
+            assetKitId: true;
+            asset: {
+              select: {
+                id: true;
+                title: true;
+                type: true;
+                consumptionType: true;
+                availableToBook: true;
+                custody: true;
+                status: true;
+                mainImage: true;
+                thumbnailImage: true;
+                mainImageExpiration: true;
+                // Code-resolution fields - mirror of getBookings' assets select
+                sequentialId: true;
+                preferredBarcodeId: true;
+                qrCodes: { take: 1; select: { id: true } };
+                barcodes: { select: { id: true; type: true; value: true } };
+                category: {
+                  select: {
+                    id: true;
+                    name: true;
+                    color: true;
+                  };
                 };
-              };
-              assetKits: {
-                select: {
-                  id: true;
-                  kitId: true;
-                  kit: {
-                    select: {
-                      id: true;
-                      name: true;
-                      image: true;
-                      imageExpiration: true;
-                      category: {
-                        select: {
-                          id: true;
-                          name: true;
-                          color: true;
+                assetKits: {
+                  select: {
+                    id: true;
+                    kitId: true;
+                    kit: {
+                      select: {
+                        id: true;
+                        name: true;
+                        image: true;
+                        imageExpiration: true;
+                        category: {
+                          select: {
+                            id: true;
+                            name: true;
+                            color: true;
+                          };
                         };
                       };
                     };
@@ -146,30 +160,42 @@ type ListBookingsContentProps = {
             };
           };
         };
-      };
-      creator: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          displayName: true;
-          profilePicture: true;
+        creator: {
+          select: {
+            id: true;
+            firstName: true;
+            lastName: true;
+            displayName: true;
+            profilePicture: true;
+          };
         };
-      };
-      custodianUser: true;
-      custodianTeamMember: true;
-      tags: { select: { id: true; name: true; color: true } };
-      // Included via `extraInclude` in the bookings-index loader so the
-      // assets-sidebar drawer can show outstanding model reservations.
-      modelRequests: {
-        include: {
-          assetModel: {
-            select: { id: true; name: true };
+        custodianUser: true;
+        custodianTeamMember: true;
+        tags: { select: { id: true; name: true; color: true } };
+        // Included via `extraInclude` in the bookings-index loader so the
+        // assets-sidebar drawer can show outstanding model reservations.
+        modelRequests: {
+          include: {
+            assetModel: {
+              select: { id: true; name: true };
+            };
           };
         };
       };
-    };
-  }> & {
+    }>,
+    "bookingAssets"
+  > & {
+    /**
+     * Eager pivots on the child bookings surfaces; absent on the main
+     * index, where the drawer fetches them on open. Never normalise a
+     * missing value to `[]` — see the type-level note above.
+     */
+    bookingAssets?: SidebarBookingAssets;
+    /**
+     * Drawer trigger label ("N assets") on the lazy path, where
+     * `bookingAssets.length` is unavailable.
+     */
+    _count?: { bookingAssets: number } | null;
     /**
      * Set by both bookings-list loaders (`bookings._index.tsx` and
      * `assets.$assetId.bookings.tsx`, which share this component) via
@@ -188,49 +214,33 @@ type ListBookingsContentProps = {
  *   flag. See {@link ListBookingsContentProps}.
  */
 export default function ListBookingsContent({
-  item: rawItem,
+  item,
 }: ListBookingsContentProps) {
-  // Defensive normalisation against a Sentry-observed crash
-  // (SHELF-WEBAPP-1NW): a single client-side render hit
-  // `item.bookingAssets` as undefined and tripped `.some(...)`, breaking
-  // the row through the error boundary. The component's prop type
-  // declares `bookingAssets` as required and the loader always selects
-  // it, so the undefined was either a stale-bundle / hydration mismatch
-  // in the deploy window or an as-yet unidentified loader edge case.
-  //
-  // Normalise once at the top so EVERY downstream reader gets a safe
-  // array — the badge calc below, `<BookingAssetsSidebar />` (which
-  // calls `groupAssets(booking.bookingAssets)` + reads
-  // `booking.bookingAssets.length` in multiple places), and any future
-  // additions. A scoped `?? []` on each reader would be brittle.
-  const item = {
-    ...rawItem,
-    bookingAssets: rawItem.bookingAssets ?? [],
-  };
-
-  const hasUnavaiableAssets =
-    item.bookingAssets.some(
-      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
-    ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
-
-  /**
-   * Pull this booking's slice of the page-wide dispositioned-quantity
-   * map so the sidebar can render qty progress + partial-checkin badge.
-   * Reading from loader data here (instead of threading a prop through
-   * `<List ItemComponent=…>`) keeps the list plumbing unchanged.
-   */
   const loaderData = useLoaderData<BookingsIndexLoaderData>();
-  const dispositionedByAsset =
-    loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
-  const dispositionBreakdownByAsset =
-    loaderData?.dispositionBreakdownByBooking?.[item.id] ?? undefined;
+
   /**
-   * Per-asset progressive-checkout totals for this booking. Drives the
-   * sidebar's new amber "partially checked out, no returns yet" badge
-   * + the `{checkedOut}/{booked}` qty display.
+   * The "Includes unavailable assets" signal has two sources, matching
+   * the two data modes:
+   * - EAGER (child bookings tabs): derive it from the pivots in hand —
+   *   the original `!availableToBook || hasCustody` per-row check.
+   * - LAZY (bookings index): the pivots aren't loaded, so the loader
+   *   computes the same predicate in one bounded query and ships the
+   *   ids (`bookingsWithUnavailableAssets`).
+   *
+   * `bookingAssets` may legitimately be `undefined` here (lazy mode) —
+   * it is deliberately NOT normalised to `[]`, which the sidebar would
+   * read as "eager with zero assets" and never fetch. The optional
+   * chaining also preserves the guard added for the Sentry-observed
+   * undefined-payload crash (SHELF-WEBAPP-1NW).
    */
-  const checkedOutByAsset =
-    loaderData?.checkedOutByBooking?.[item.id] ?? undefined;
+  const hasUnavailableAssetsFromPivots = item.bookingAssets?.some(
+    (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
+  );
+  const hasUnavaiableAssets =
+    (hasUnavailableAssetsFromPivots ??
+      loaderData?.bookingsWithUnavailableAssets?.includes(item.id) ??
+      false) &&
+    !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
   return (
     <>
@@ -280,12 +290,10 @@ export default function ListBookingsContent({
       {/* Assets count */}
       <Td>
         <div className="flex items-center gap-2">
-          <BookingAssetsSidebar
-            booking={item}
-            dispositionedByAsset={dispositionedByAsset}
-            dispositionBreakdownByAsset={dispositionBreakdownByAsset}
-            checkedOutByAsset={checkedOutByAsset}
-          />
+          {/* No qty-progress maps here: both bookings-list surfaces let
+              the drawer fetch them with the pivots on open, so the
+              page-wide aggregates stayed off these loaders. */}
+          <BookingAssetsSidebar booking={item} />
           {item.hasStockConflict ? <StockConflictPill /> : null}
         </div>
       </Td>

@@ -103,6 +103,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       locationDistribution,
       locationsCount,
       categoriesCount,
+      // Onboarding checklist booleans
+      checklistData,
       // Cookie
       cookieResult,
     ] = await Promise.all([
@@ -198,12 +200,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // 1d. Ongoing + overdue bookings for custodian merge
+      // Widgets only read booking scalars + custodian + `_count.bookingAssets`,
+      // so all four calls skip the heavy per-asset include.
       getBookings({
         organizationId,
         userId,
         page: 1,
-        perPage: 1000,
+        // `perPage` clamps to 20; `takeCap` is the bounded escape hatch so
+        // the custodian merge sees every ONGOING/OVERDUE booking, not the
+        // first page of them.
+        takeCap: 1000,
         statuses: ["ONGOING", "OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -221,6 +229,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["RESERVED"],
         bookingFrom: new Date(),
         bookingTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -235,6 +244,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -249,6 +259,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["ONGOING"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -300,27 +311,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // Location distribution (top 5)
-      db.location
-        .findMany({
+      // Count pivot rows (one per asset placed at this location). groupBy-first
+      // so Postgres aggregates the pivot once instead of counting per location.
+      db.assetLocation
+        .groupBy({
+          by: ["locationId"],
           where: { organizationId },
-          select: {
-            id: true,
-            name: true,
-            // Count pivot rows (one per asset placed at this location).
-            _count: { select: { assetLocations: true } },
-          },
-          orderBy: { assetLocations: { _count: "desc" } },
+          _count: { locationId: true },
+          orderBy: { _count: { locationId: "desc" } },
           take: 5,
         })
-        .then((locs) =>
-          locs
-            .filter((l) => l._count.assetLocations > 0)
-            .map((l) => ({
-              locationId: l.id,
-              locationName: l.name,
-              assetCount: l._count.assetLocations,
-            }))
-        ),
+        .then(async (groups) => {
+          if (groups.length === 0) return [];
+
+          const locations = await db.location.findMany({
+            where: {
+              id: { in: groups.map((g) => g.locationId) },
+              organizationId,
+            },
+            select: { id: true, name: true },
+          });
+          const nameById = new Map(locations.map((l) => [l.id, l.name]));
+
+          return groups.flatMap((g) => {
+            const locationName = nameById.get(g.locationId);
+            // Location deleted between the two queries — drop the row,
+            // matching the old single-query behavior.
+            if (!locationName) return [];
+
+            return [
+              {
+                locationId: g.locationId,
+                locationName,
+                assetCount: g._count.locationId,
+              },
+            ];
+          });
+        }),
 
       // KPI: total locations
       db.location.count({
@@ -331,6 +358,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       db.category.count({
         where: { organizationId },
       }),
+
+      // Onboarding checklist booleans
+      checklistOptions({ organizationId }),
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
@@ -375,10 +405,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: await checklistOptions({
+      checklistOptions: {
         hasAssets: totalAssets > 0,
-        organizationId,
-      }),
+        // Same where-clause as the `directCustodians` query above, so a
+        // separate custodies count would be redundant.
+        hasCustodies: directCustodians.length > 0,
+        ...checklistData,
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

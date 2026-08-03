@@ -25,6 +25,25 @@ vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => null,
 }));
 
+// why: the sidebar is dual-mode and unconditionally calls `useFetcher` for
+// its lazy path, which throws outside a data router. These tests all pass
+// `bookingAssets` eagerly, so the fetcher is never driven — an inert stub
+// is enough. The lazy path itself is covered in
+// `booking-assets-sidebar-dual-mode.test.tsx`.
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("react-router");
+
+  return {
+    ...actual,
+    useFetcher: () => ({
+      state: "idle",
+      data: undefined,
+      load: vi.fn(),
+      submit: vi.fn(),
+    }),
+  };
+});
+
 // why: the real `Button` renders a react-router `Link` for `to=`, which
 // requires a Router context this component-only render doesn't provide.
 // A plain anchor keeps the DOM structure close enough for these tests
