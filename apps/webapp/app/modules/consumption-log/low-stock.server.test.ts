@@ -141,6 +141,32 @@ describe("checkAndNotifyLowStock — debounce (enter-low fires once)", () => {
     });
   });
 
+  it("does NOT throw when the in-app notification fails — best-effort (email + marker still proceed)", async () => {
+    // Enter-low scenario, but the SSE emitter is down: sendNotification
+    // re-throws a ShelfError. The notifier must swallow it — it runs AFTER a
+    // committed stock mutation and some callers invoke it without their own
+    // try/catch, so a notification failure must never bubble up.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 5, minQuantity: 5 }));
+    sendNotificationMock.mockImplementation(() => {
+      throw new Error("emitter down");
+    });
+
+    await expect(
+      checkAndNotifyLowStock({
+        assetId: ASSET_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toBeUndefined();
+
+    // The failed in-app send must not abort the rest of the flow.
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(assetUpdateMock).toHaveBeenCalledWith({
+      where: { id: ASSET_ID, organizationId: ORG_ID },
+      data: { lowStockNotifiedAt: expect.any(Date) },
+    });
+  });
+
   it("does NOT re-fire while already-notified and still low (marker already set)", async () => {
     // available 3 <= min 5 → low, but marker already set → NO-OP.
     findFirstMock.mockResolvedValue(

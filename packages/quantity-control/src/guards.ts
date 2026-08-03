@@ -26,9 +26,11 @@ import type { AvailabilityInputs } from "./types.js";
 /* -------------------------------------------------------------------------- */
 
 /**
- * The outcome of a pure quantity check. `ok: true` means "allowed"; `ok:
- * false` carries the `shortfall` (units over the pool) and a ready-to-surface
- * `message`.
+ * The outcome of a pure quantity check. `ok: true` means "allowed"; `ok: false`
+ * carries the `shortfall` — the requested units beyond the available capacity,
+ * computed as `requested − max(0, bookable)`. `bookable` is clamped to 0 first,
+ * so an already-over-committed pool (negative `bookable`) does not inflate the
+ * number past what was actually requested. Plus a ready-to-surface `message`.
  */
 export type QuantityVerdict =
   | { ok: true }

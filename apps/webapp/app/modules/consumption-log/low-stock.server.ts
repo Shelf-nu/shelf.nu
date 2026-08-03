@@ -23,10 +23,10 @@
  * THRESHOLD SEMANTICS: a threshold exists iff `minQuantity != null`, and the
  * asset is low iff `available <= minQuantity`. This intentionally treats
  * `minQuantity === 0` as a valid out-of-stock threshold (alert when nothing is
- * available). We do NOT adopt the `@shelf` package's `isLowStock` refinement
- * (`min <= 0 → not low`) here — that lives in the mobile lane where before/after
- * are computed in memory. Using it here would silently stop alerting for
- * assets configured with a `0` threshold.
+ * available). The shared `@shelf/quantity-control` `isLowStock` predicate uses
+ * the same rule (only `null` disables the threshold), so this server path and
+ * the package agree — the companion app can adopt the package predicate without
+ * diverging from these alerts.
  *
  * The debounce is BEST-EFFORT and non-transactional: two truly-concurrent
  * decrements could each read a `null` marker and double-fire the alert. That is
@@ -162,6 +162,33 @@ async function sendLowStockEmails({
 }
 
 /**
+ * Best-effort in-app notification for the low-stock notifier.
+ *
+ * `sendNotification` re-throws SSE-emitter failures as a `ShelfError`. Since
+ * {@link checkAndNotifyLowStock} runs AFTER a committed stock mutation and
+ * several callers invoke it WITHOUT their own try/catch (e.g.
+ * `api+/assets.adjust-quantity`), a notification failure must never bubble up
+ * and turn a successful mutation into an error response. Mirrors the
+ * already-best-effort email path in {@link sendLowStockEmails}.
+ */
+function notifyInAppBestEffort(
+  notification: Parameters<typeof sendNotification>[0]
+) {
+  try {
+    sendNotification(notification);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to send low-stock in-app notification",
+        additionalData: { title: notification.title },
+        label: "Notification",
+      })
+    );
+  }
+}
+
+/**
  * Debounced, state-transition low-stock notifier for a quantity-tracked asset.
  *
  * Reads the asset's committed state, computes availability, and — depending on
@@ -259,7 +286,7 @@ export async function checkAndNotifyLowStock({
 
     /** In-app notification for the acting user (skipped when none). */
     if (userId) {
-      sendNotification({
+      notifyInAppBestEffort({
         title: "Low stock alert",
         message: `${asset.title} has ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
         icon: { name: "coins", variant: "error" },
@@ -330,7 +357,7 @@ export async function checkAndNotifyLowStock({
 
     /** In-app notification for the acting user (skipped when none). */
     if (userId) {
-      sendNotification({
+      notifyInAppBestEffort({
         title: "Back in stock",
         message: `${asset.title} is back above its threshold: ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
         icon: { name: "success", variant: "success" },
