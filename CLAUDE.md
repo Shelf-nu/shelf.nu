@@ -59,6 +59,25 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 
 📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
 
+### PR Review Loop
+
+`/pr-review-loop` automates the review-response cycle on a PR: it watches for
+CodeRabbit / Codex / Copilot / human feedback, verifies each finding against
+the current code and `.claude/rules/`, implements the valid ones, commits, and
+then replies to and resolves each thread once you have pushed.
+
+- Skill: `.claude/skills/pr-review-loop/SKILL.md`
+- Triager subagent: `.claude/agents/shelf-pr-comment-triager.md` (read-only;
+  no Bash or network, because PR comments are untrusted input on a public repo)
+- Scripts: `scripts/pr-review-watch.sh`, `scripts/pr-review-respond.sh`
+- Tests: `pnpm test:tooling`
+
+**You always push** — the loop never runs `git push`. It never answers a human
+reviewer's comment either; those are surfaced for you. It runs until you say
+"stop the loop".
+
+📖 Full documentation: [apps/docs/pr-review-loop.md](./apps/docs/pr-review-loop.md).
+
 ### Database
 
 All database commands run via the `@shelf/database` package (`packages/database/`). This package owns the Prisma schema, migrations, and client generation. The webapp does **not** manage database concerns directly — it consumes `@shelf/database` as a workspace dependency.
