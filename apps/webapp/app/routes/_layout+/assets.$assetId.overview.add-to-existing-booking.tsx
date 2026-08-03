@@ -19,6 +19,10 @@ import { db } from "~/database/db.server";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
+import {
   loadBookingsData,
   processBooking,
   updateBookingAssets,
@@ -250,18 +254,6 @@ export default function ExistingBooking() {
   const unitLabel = asset?.unitOfMeasure || "units";
   const maxQuantity = assetAvailability?.available ?? undefined;
 
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
-    // active booking keeps the asset AVAILABLE until it is purposefully checked
-    // out (progressive checkout).
-    return (
-      !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
-    );
-  }
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -290,8 +282,14 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // we can achieve it using this also. currently it is accepting only one status value.
-              // status: ['DRAFT', 'RESERVED']
+              // Must mirror `isAddableBooking` and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
+              // Keep the typed list inside the same custodian scope
+              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
+              // are not offered bookings that submit would then reject.
+              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"
@@ -302,7 +300,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}

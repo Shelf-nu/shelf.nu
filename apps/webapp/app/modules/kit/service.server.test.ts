@@ -150,6 +150,11 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest
         .fn()
         .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
+      // why: `bulkRemoveAssetsFromKits` resolves the acting user's timezone via
+      // resolveUserFormatPrefsById (→ db.user.findFirst) to truncate date
+      // filters in the user's tz on the select-all path. null → the resolver
+      // falls back to default prefs.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
   },
 }));

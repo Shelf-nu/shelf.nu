@@ -19,6 +19,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import type { DetectedFormatPrefs } from "~/utils/date-format";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
@@ -315,7 +316,12 @@ export async function updateInviteStatus({
   id,
   status,
   password,
-}: Pick<Invite, "id" | "status"> & { password: string }) {
+  formatPrefs,
+}: Pick<Invite, "id" | "status"> & {
+  password: string;
+  /** Browser-detected prefs from the accept-invite action; stamped on new users. */
+  formatPrefs?: DetectedFormatPrefs;
+}) {
   try {
     const invite = await db.invite.findFirst({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; `id` comes from a JWT verified with INVITE_TOKEN_SECRET in the accept-invite action and the user is not yet a member of the org, so there is no caller organizationId to scope by — the invite record establishes the org relationship
@@ -373,6 +379,7 @@ export async function updateInviteStatus({
         firstName,
         lastName,
         createdWithInvite: true,
+        formatPrefs,
       });
 
       Object.assign(data, {
