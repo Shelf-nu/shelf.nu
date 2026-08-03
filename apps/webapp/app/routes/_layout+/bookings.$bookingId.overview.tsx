@@ -2012,9 +2012,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
+        // The selection can hold assets, kits, or both — the old hardcoded
+        // "Kit removed" toast was wrong for every selection that wasn't a
+        // lone kit, which read as "the assets weren't removed".
+        const removedCount = standaloneAssets.length + kits.length;
         sendNotification({
-          title: "Kit removed",
-          message: "Your kit has been removed from the booking",
+          title: removedCount === 1 ? "Item removed" : "Items removed",
+          message:
+            removedCount === 1
+              ? "The selected item has been removed from the booking"
+              : `${removedCount} items have been removed from the booking`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

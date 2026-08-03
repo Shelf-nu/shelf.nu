@@ -173,6 +173,18 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const attachedAssetIds = assets.map((asset) => asset.id);
 
+    // `assets` drives the booking-note phrasing only ("… removed {kits} and
+    // {assets} from booking"), NOT what gets detached — the service derives
+    // that from `assetIds` + `kitIds`. Members of the kits being removed are
+    // already covered by the kit half of the note, so listing them again here
+    // duplicates them (and turns a kit-only removal into a note naming every
+    // member). Mirrors the web bulk-remove handler, which passes only the
+    // genuinely standalone assets.
+    const kitAssetIdSet = new Set(kitAssetIds);
+    const standaloneAssets = assets.filter(
+      (asset) => !kitAssetIdSet.has(asset.id)
+    );
+
     const updated = await removeAssets({
       booking: { id: bookingId, assetIds: attachedAssetIds },
       kitIds,
@@ -180,7 +192,7 @@ export async function action({ request }: ActionFunctionArgs) {
       firstName: user.firstName ?? "",
       lastName: user.lastName ?? "",
       userId: user.id,
-      assets,
+      assets: standaloneAssets,
       organizationId,
     });
 

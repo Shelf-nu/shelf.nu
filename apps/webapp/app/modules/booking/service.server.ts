@@ -9852,28 +9852,62 @@ export async function removeAssets({
         });
       }
 
-      // When the caller is the manage-kits flow removing one or more
-      // kits, scope the deletion to the kit-driven BookingAsset rows for
-      // those kits' AssetKits. Otherwise removing a kit would also blow
-      // away any standalone slice the user added separately for the
-      // same asset (e.g. Gloves booked standalone at qty 22 alongside
-      // the kit's slice of 87 — only the 87 should disappear).
+      // When the caller removes one or more kits, scope the kit half of the
+      // deletion to the kit-driven BookingAsset rows for those kits'
+      // AssetKits. Otherwise removing a kit would also blow away any
+      // standalone slice the user added separately for the same asset
+      // (e.g. Gloves booked standalone at qty 22 alongside the kit's slice
+      // of 87 — only the 87 should disappear).
+      //
+      // `assetIds` can ALSO carry genuinely standalone assets in the same
+      // call — the booking-overview bulk "Remove assets/kits" action and the
+      // mobile remove-assets endpoint both send kits and loose assets
+      // together. Those need the second, `assetKitId: null`-scoped clause;
+      // without it the kit scope matched none of their rows and the loose
+      // assets silently stayed on the booking.
       //
       // When `kitIds` is empty, the call comes from the manage-assets
-      // picker or asset-bulk remove flow, where the intent is to remove
+      // picker or single-asset remove flow, where the intent is to remove
       // ALL slices of the asset from the booking (legacy behaviour).
       let rowsToDeleteWhere: Prisma.BookingAssetWhereInput;
       if (kitIds.length > 0) {
-        const kitDrivenAssetKitIds = await tx.assetKit.findMany({
+        const kitDrivenAssetKits = await tx.assetKit.findMany({
           where: { kitId: { in: kitIds }, assetId: { in: assetIds } },
-          select: { id: true },
+          select: { id: true, assetId: true },
         });
-        rowsToDeleteWhere = {
-          bookingId: id,
-          assetKitId: {
-            in: kitDrivenAssetKitIds.map((ak: { id: string }) => ak.id),
+
+        // Derived rather than taken as a param so no caller can forget to
+        // pass it: anything in `assetIds` that is NOT a member of a kit
+        // being removed is, by definition, a loose asset the caller wants
+        // gone. Members of the removed kits are covered by the kit clause.
+        const kitMemberAssetIds = new Set(
+          kitDrivenAssetKits.map((ak: { assetId: string }) => ak.assetId)
+        );
+        const standaloneAssetIds = assetIds.filter(
+          (assetId) => !kitMemberAssetIds.has(assetId)
+        );
+
+        const orClauses: Prisma.BookingAssetWhereInput[] = [
+          {
+            assetKitId: {
+              in: kitDrivenAssetKits.map((ak: { id: string }) => ak.id),
+            },
           },
-        };
+        ];
+        if (standaloneAssetIds.length > 0) {
+          // `assetKitId: null` preserves the protection above in the other
+          // direction: a loose asset's own slice goes, but slices it holds
+          // via kits the caller did NOT select stay put.
+          orClauses.push({
+            assetId: { in: standaloneAssetIds },
+            assetKitId: null,
+          });
+        }
+
+        rowsToDeleteWhere =
+          orClauses.length === 1
+            ? { bookingId: id, ...orClauses[0] }
+            : { bookingId: id, OR: orClauses };
       } else {
         rowsToDeleteWhere = { bookingId: id, assetId: { in: assetIds } };
       }
