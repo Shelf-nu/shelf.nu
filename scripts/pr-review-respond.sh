@@ -29,6 +29,16 @@ DRY_RUN="${3:-}"
 }
 [[ -f "$DECISIONS" ]] || { printf 'no such file: %s\n' "$DECISIONS" >&2; exit 2; }
 
+# The skill owns a SAME-NAMED-PATTERN object file beside this one — its own
+# `<pr>.decisions.json` ledger, shaped `{seen:{...}, escalated:[...]}`. That
+# is not this script's input shape. Passing it here would make `jq 'length'`
+# below return a KEY COUNT instead of an element count, and every reply
+# would fail against a malformed index. Fail loudly instead.
+jq -e 'type == "array"' "$DECISIONS" >/dev/null 2>&1 || {
+  printf 'decisions file is not a JSON array (got an object?): %s\n' "$DECISIONS" >&2
+  exit 2
+}
+
 # Reject anything else in $3 rather than ignoring it. A typo like --dryrun or
 # -n would otherwise fall through to the live-mutation path and post to a real
 # PR — this is the one flag that must never fail open.
@@ -69,6 +79,17 @@ for ((i = 0; i < n; i++)); do
   thread="$(jq -r ".[$i].threadId" "$DECISIONS")"
   body="$(jq -r ".[$i].replyBody" "$DECISIONS")"
   do_resolve="$(jq -r ".[$i].resolve" "$DECISIONS")"
+
+  # `jq -r` prints the literal string "null" for a missing or JSON-null
+  # replyBody — without this check that string gets posted verbatim to a
+  # public PR thread instead of the actual reply prose. Reject in both dry
+  # and live mode; it is a data problem, not a live-mutation concern.
+  if [[ -z "$body" || "$body" == "null" ]]; then
+    printf 'skip (missing replyBody): %s\n' "$thread" >&2
+    failures=$((failures + 1))
+    continue
+  fi
+
   key="$thread:$(printf '%s' "$body" | shasum -a 256 | cut -c1-16)"
 
   if [[ "$DRY_RUN" == "--dry-run" ]]; then
@@ -98,7 +119,10 @@ for ((i = 0; i < n; i++)); do
   # colleagues and bots read, with no explanation anywhere on it. That is
   # strictly worse than leaving it open.
   if [[ "$replied" -eq 1 && "$do_resolve" == "true" ]]; then
-    resolve_mutation "$thread"
+    if ! resolve_mutation "$thread"; then
+      printf 'resolve FAILED (reply posted, thread stays open): %s\n' "$thread" >&2
+      failures=$((failures + 1))
+    fi
   fi
 done
 

@@ -352,6 +352,75 @@ RC5="$(advance_repost_counts "$(jq -n --argjson rc "$RC4" '{repostCounts:$rc}')"
 assert_eq "1" "$(printf '%s' "$RC5" | jq -r '.fpX.count')" \
   "repeated polls of a now-settled repost do not keep incrementing the counter"
 
+describe "pr-review-watch: expected_bots (I5)"
+
+assert_eq '["coderabbitai[bot]","chatgpt-codex-connector[bot]","copilot-pull-request-reviewer[bot]"]' \
+  "$(expected_bots "true" | jq -c '.')" \
+  "expected_bots includes all three review bots when Copilot is expected"
+assert_eq '["coderabbitai[bot]","chatgpt-codex-connector[bot]"]' \
+  "$(expected_bots "false" | jq -c '.')" \
+  "expected_bots excludes Copilot once copilotExpected is false"
+assert_eq "0" "$(expected_bots "true" | jq '[.[] | select(. == "github-actions[bot]")] | length')" \
+  "expected_bots never includes github-actions — it posts no PR review"
+
+describe "pr-review-watch: compute_quiescent (C2)"
+
+# Every condition satisfied: both expected bots caught up, no pending bot
+# findings, every decided finding replied, no open re-post, every
+# out-of-diff finding addressed, checks clean.
+QSTATE='{"expectedBots":["coderabbitai[bot]","chatgpt-codex-connector[bot]"],
+"reviewedHead":{"coderabbitai[bot]":"timestamp","chatgpt-codex-connector[bot]":"a3293f1"},
+"headSha":"a3293f170e0000000000000000000000000000",
+"headShaFirstSeenAt":"2026-08-03T00:00:00Z","reposted":[]}'
+QCHECKS='{"red":0,"pending":0}'
+QDECISIONS='{"seen":{},"addressedOutOfDiff":{}}'
+QNOW="2026-08-03T00:05:00Z"
+
+assert_eq "true" "$(compute_quiescent "$QSTATE" "$QCHECKS" '[]' '[]' "$QDECISIONS" "$QNOW")" \
+  "compute_quiescent is true when every condition holds"
+
+NOT_CAUGHT_UP='{"expectedBots":["coderabbitai[bot]"], "reviewedHead":{},
+"headSha":"abc","headShaFirstSeenAt":"2026-08-03T00:00:00Z","reposted":[]}'
+assert_eq "false" \
+  "$(compute_quiescent "$NOT_CAUGHT_UP" "$QCHECKS" '[]' '[]' "$QDECISIONS" "$QNOW")" \
+  "condition #1 blocks quiescence when an expected bot has not caught up"
+assert_eq "true" \
+  "$(compute_quiescent "$NOT_CAUGHT_UP" "$QCHECKS" '[]' '[]' "$QDECISIONS" "2026-08-03T00:21:00Z")" \
+  "the 20-minute stale-bot waiver lets quiescence proceed regardless"
+
+assert_eq "false" \
+  "$(compute_quiescent "$QSTATE" "$QCHECKS" '[{"kind":"bot"}]' '[]' "$QDECISIONS" "$QNOW")" \
+  "condition #2 blocks quiescence on an undecided pending BOT finding"
+assert_eq "true" \
+  "$(compute_quiescent "$QSTATE" "$QCHECKS" '[{"kind":"human"}]' '[]' "$QDECISIONS" "$QNOW")" \
+  "an open HUMAN thread never blocks quiescence — reported, not resolved"
+
+DEC_UNREPLIED='{"seen":{"fp1":{"replied":false}},"addressedOutOfDiff":{}}'
+assert_eq "false" \
+  "$(compute_quiescent "$QSTATE" "$QCHECKS" '[]' '[]' "$DEC_UNREPLIED" "$QNOW")" \
+  "condition #2 blocks quiescence on a decided-but-not-yet-replied finding — not merely '.pending empty'"
+
+STATE_REPOSTED='{"expectedBots":[], "reviewedHead":{}, "headSha":"abc",
+"headShaFirstSeenAt":"2026-08-03T00:00:00Z","reposted":[{"fingerprint":"x"}]}'
+assert_eq "false" \
+  "$(compute_quiescent "$STATE_REPOSTED" "$QCHECKS" '[]' '[]' "$QDECISIONS" "$QNOW")" \
+  "condition #2 blocks quiescence on an open re-post (C1's reposted set)"
+
+assert_eq "false" \
+  "$(compute_quiescent "$QSTATE" "$QCHECKS" '[]' '[{"reviewId":123}]' "$QDECISIONS" "$QNOW")" \
+  "condition #3 blocks quiescence on an unaddressed out-of-diff finding"
+DEC_OOD_DONE='{"seen":{},"addressedOutOfDiff":{"123":true}}'
+assert_eq "true" \
+  "$(compute_quiescent "$QSTATE" "$QCHECKS" '[]' '[{"reviewId":123}]' "$DEC_OOD_DONE" "$QNOW")" \
+  "an addressed out-of-diff finding no longer blocks quiescence"
+
+assert_eq "false" \
+  "$(compute_quiescent "$QSTATE" '{"red":1,"pending":0}' '[]' '[]' "$QDECISIONS" "$QNOW")" \
+  "condition #4 blocks quiescence on a red check"
+assert_eq "false" \
+  "$(compute_quiescent "$QSTATE" '{"red":0,"pending":1}' '[]' '[]' "$QDECISIONS" "$QNOW")" \
+  "condition #4 blocks quiescence on a still-pending check"
+
 describe "pr-review-watch: UTC-normalized timestamp comparison"
 
 # git emits the COMMITTER'S OWN offset, never "Z" — jq's fromdateiso8601
@@ -446,6 +515,26 @@ assert_eq "1" "$(printf '%s\n' "$RED1" | grep -c '"event":"CHECKS_RED"')" \
 assert_eq "0" "$(printf '%s\n' "$RED2" | grep -c '"event":"CHECKS_RED"')" \
   "CHECKS_RED is not repeated while checks stay red"
 
+# CHECKS_CLEAR (C2) — the counterpart notification for when checks stop
+# being red. On the dominant path (push -> CI pending -> ... -> green) this
+# is one of the only two events (with QUIESCENT) the watcher emits again, so
+# a regression here means the loop goes silent right when checks resolve.
+collect_checks() { printf '{"red":0,"pending":0}'; }
+CLEAR1="$(poll_once 5003)"
+CLEAR2="$(poll_once 5003)"
+assert_eq "1" "$(printf '%s\n' "$CLEAR1" | grep -c '"event":"CHECKS_CLEAR"')" \
+  "CHECKS_CLEAR is announced when checks stop being red"
+assert_eq "0" "$(printf '%s\n' "$CLEAR2" | grep -c '"event":"CHECKS_CLEAR"')" \
+  "CHECKS_CLEAR is not repeated while checks stay green"
+
+# A PR polled for the first time with already-clean checks must not
+# spuriously announce CHECKS_CLEAR — there was no red state to clear FROM.
+state_init 5009 "test-branch"
+NEVERRED="$(poll_once 5009)"
+assert_eq "0" "$(printf '%s\n' "$NEVERRED" | grep -c '"event":"CHECKS_CLEAR"')" \
+  "CHECKS_CLEAR does not fire for a PR that was never observed red"
+collect_checks() { printf '{"red":2,"pending":1}'; }
+
 # A rejected state write must withhold the buffered events. Announcing a
 # transition whose record failed to persist re-fires it on every later poll.
 WITHHELD="$(
@@ -483,17 +572,39 @@ jq -n --arg fp "$FP" --arg tid "$TID" \
   '{seen: {($fp): {threadId:$tid, verdict:"FALSE_POSITIVE", decidedInRound:1}}}' \
   | decisions_write 5007
 
-poll_once 5007 >/dev/null   # same thread still present
+SAME_THREAD="$(poll_once 5007)"   # same thread still present
 assert_eq "0" "$(repost_count "$FP" "$(state_read 5007)")" \
   "a decided finding on the SAME thread does not tick the repost counter"
+assert_eq "0" "$(printf '%s\n' "$SAME_THREAD" | grep -c '"event":"REPOST"')" \
+  "a decided finding on the SAME thread does not emit REPOST either (C1)"
 
 # Simulate the bot closing that thread and re-posting the identical finding
-# under a new id — the exact case fingerprinting exists to catch.
+# under a new id — the exact case fingerprinting exists to catch, and the
+# case C1 exists for: unseen_findings drops this from `.pending` by
+# fingerprint alone, so without REPOST this thread would never be answered.
 decisions_read 5007 | jq --arg fp "$FP" '.seen[$fp].threadId = "PRRT_previously_closed"' \
   | decisions_write 5007
-poll_once 5007 >/dev/null
+REPOSTED="$(poll_once 5007)"
 assert_eq "1" "$(repost_count "$FP" "$(state_read 5007)")" \
   "a decided finding re-posted under a new thread id ticks the repost counter"
+assert_eq "1" "$(printf '%s\n' "$REPOSTED" | grep -c '"event":"REPOST"')" \
+  "the same re-post emits REPOST exactly once (C1)"
+assert_eq "1" "$(state_read 5007 | jq '.reposted | length')" \
+  "state.reposted carries the currently-open re-post for the skill to read"
+
+# Not re-announced while the mismatch persists unchanged across polls.
+REPOSTED2="$(poll_once 5007)"
+assert_eq "0" "$(printf '%s\n' "$REPOSTED2" | grep -c '"event":"REPOST"')" \
+  "REPOST is not re-emitted while the same re-post persists"
+
+# The skill answers it (records a fresh decision on the new thread) — REPOST
+# must clear and, on the NEXT distinct mismatch, fire again rather than
+# staying silent forever.
+decisions_read 5007 | jq --arg fp "$FP" '.seen[$fp].threadId = "PRRT_previously_closed_2"' \
+  | decisions_write 5007
+REPOSTED3="$(poll_once 5007)"
+assert_eq "1" "$(printf '%s\n' "$REPOSTED3" | grep -c '"event":"REPOST"')" \
+  "a distinct re-post (different priorThreadId) fires REPOST again"
 
 # Top-level PR comments. Review threads carry only INLINE comments, so without
 # this a teammate writing in the conversation box is never surfaced at all —
@@ -544,6 +655,117 @@ assert_eq "1" "$(printf '%s\n' "$GONE3" | grep -c '"event":"NEW_FINDINGS"')" \
 
 assert_eq "0" "$(decisions_read 5005 | jq '.seen // {} | length')" \
   "the vanish/return cycle never wrote a verdict — these are still unjudged"
+
+describe "pr-review-watch: QUIESCENT integration (C2)"
+
+# A synthetic "everything caught up" scenario built on the fully-resolved
+# pr2770 fixture (0 pending bot findings): its 3 out-of-diff reviews are
+# marked addressed in decisions, checks are forced clean, and head_sha is
+# overridden to a value codex's own "Reviewed commit" marker
+# ("a3293f170e") is a genuine prefix of — the real pr2770 fixture's
+# headRefOid predates that marker and would never satisfy condition #1.
+#
+# Each override below runs INSIDE a `$( ... )` subshell — matching the
+# WITHHELD seam earlier in this file — rather than redefining the function
+# in this shell and later `unset -f`-ing it. Bash has no way to "restore"
+# a function once a redefinition has shadowed the one this file sourced
+# from pr-review-watch.sh; `unset -f` removes it outright, permanently
+# breaking every LATER poll_once call that needs the real implementation.
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+state_init 5016 "test-branch"
+jq -n '{addressedOutOfDiff: {"4816835588":true,"4817446544":true,"4818550423":true}}' \
+  | decisions_write 5016
+
+Q1="$(
+  head_sha() { printf 'a3293f170e0000000000000000000000000000'; }
+  collect_checks() { printf '{"red":0,"pending":0}'; }
+  poll_once 5016
+)"
+assert_eq "1" "$(printf '%s\n' "$Q1" | grep -c '"event":"QUIESCENT"')" \
+  "QUIESCENT fires once every condition is satisfied"
+assert_eq "true" "$(state_read 5016 | jq -r '.quiescent')" \
+  "state.quiescent is persisted true"
+
+Q2="$(
+  head_sha() { printf 'a3293f170e0000000000000000000000000000'; }
+  collect_checks() { printf '{"red":0,"pending":0}'; }
+  poll_once 5016
+)"
+assert_eq "0" "$(printf '%s\n' "$Q2" | grep -c '"event":"QUIESCENT"')" \
+  "QUIESCENT does not repeat while the PR stays clean"
+
+# New activity — an out-of-diff finding becomes unaddressed again — must
+# leave the quiescent state, and returning to clean must re-announce.
+decisions_read 5016 | jq '.addressedOutOfDiff = {}' | decisions_write 5016
+Q3="$(
+  head_sha() { printf 'a3293f170e0000000000000000000000000000'; }
+  collect_checks() { printf '{"red":0,"pending":0}'; }
+  poll_once 5016
+)"
+assert_eq "0" "$(printf '%s\n' "$Q3" | grep -c '"event":"QUIESCENT"')" \
+  "un-addressing an out-of-diff finding does not itself re-announce QUIESCENT"
+assert_eq "false" "$(state_read 5016 | jq -r '.quiescent')" \
+  "state.quiescent reflects the regression out of the clean state"
+
+decisions_read 5016 \
+  | jq '.addressedOutOfDiff = {"4816835588":true,"4817446544":true,"4818550423":true}' \
+  | decisions_write 5016
+Q4="$(
+  head_sha() { printf 'a3293f170e0000000000000000000000000000'; }
+  collect_checks() { printf '{"red":0,"pending":0}'; }
+  poll_once 5016
+)"
+assert_eq "1" "$(printf '%s\n' "$Q4" | grep -c '"event":"QUIESCENT"')" \
+  "QUIESCENT re-announces on the next transition back to clean"
+
+describe "pr-review-watch: degraded collection preserves prior payload (I2)"
+
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+state_init 5017 "test-branch"
+poll_once 5017 >/dev/null   # good poll (real functions): populates .doctor
+DOCTOR_BEFORE="$(state_read 5017 | jq -c '.doctor')"
+assert_eq "1" "$(printf '%s' "$DOCTOR_BEFORE" | jq 'length')" \
+  "doctor payload is populated before the simulated failure"
+
+DEGRADED_ISSUES="$(
+  collect_issue_comments() { return 1; }
+  poll_once 5017
+)"
+assert_eq "$DOCTOR_BEFORE" "$(state_read 5017 | jq -c '.doctor')" \
+  "a failed collect_issue_comments keeps .doctor at its prior value, not []"
+assert_eq "1" "$(printf '%s\n' "$DEGRADED_ISSUES" | grep -c '"event":"ERROR"')" \
+  "a failed collect_issue_comments reports an ERROR event"
+assert_eq "0" "$(printf '%s\n' "$DEGRADED_ISSUES" | grep -c '"event":"DOCTOR"')" \
+  "the preserved (unchanged) doctor payload is not spuriously re-announced"
+
+state_init 5018 "test-branch"
+poll_once 5018 >/dev/null   # good poll (real functions): populates .outOfDiff
+OOD_BEFORE="$(state_read 5018 | jq -c '.outOfDiff')"
+assert_eq "3" "$(printf '%s' "$OOD_BEFORE" | jq 'length')" \
+  "out-of-diff payload is populated before the simulated failure"
+
+DEGRADED_REVIEWS="$(
+  collect_reviews() { return 1; }
+  poll_once 5018
+)"
+assert_eq "$OOD_BEFORE" "$(state_read 5018 | jq -c '.outOfDiff')" \
+  "a failed collect_reviews keeps .outOfDiff at its prior value, not []"
+assert_eq "1" "$(printf '%s\n' "$DEGRADED_REVIEWS" | grep -c '"event":"ERROR"')" \
+  "a failed collect_reviews reports an ERROR event"
+
+describe "pr-review-watch: checks fallback is never green-by-default (I2)"
+
+state_init 5019 "test-branch"
+(
+  collect_checks() { return 1; }
+  poll_once 5019
+) >/dev/null
+assert_eq "1" "$(state_read 5019 | jq -r '.checks.pending')" \
+  "a failed collect_checks falls back to pending:1, never green-by-default"
+assert_eq "0" "$(state_read 5019 | jq -r '.checks.red')" \
+  "the failure fallback still reports red:0 — not a false red either"
+assert_eq "false" "$(state_read 5019 | jq -r '.quiescent')" \
+  "a degraded checks collection cannot read as quiescent"
 
 # A persistent fault must report once, not once per poll.
 LAST_ERROR=""
@@ -679,6 +901,63 @@ BAD_RC=0
 bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/decisions.json" --dryrun \
   >/dev/null 2>&1 || BAD_RC=$?
 assert_eq "2" "$BAD_RC" "a mistyped --dry-run flag aborts instead of running live"
+
+# The skill owns a SAME-DIRECTORY object-shaped ledger (`<pr>.decisions.json`,
+# `{seen:{...}, escalated:[...]}`). Passing it here by mistake must fail
+# loudly, not silently read `jq 'length'` as a key count and mangle every
+# reply against a malformed index.
+cat > "$TMP_D/object.json" <<'JSON'
+{"seen":{},"escalated":[],"addressedOutOfDiff":{}}
+JSON
+OBJ_RC=0
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/object.json" --dry-run \
+  >/dev/null 2>&1 || OBJ_RC=$?
+assert_eq "2" "$OBJ_RC" \
+  "an object-shaped decisions file (the skill's own ledger) is rejected"
+
+# A missing replyBody must never reach `gh` at all — not even as the literal
+# string "null", which `jq -r` would otherwise print for a null/absent field.
+: > "$GH_MUTATION_LOG"
+cat > "$TMP_D/missing-body.json" <<'JSON'
+[{"threadId":"PRRT_missing","resolve":true}]
+JSON
+MISSING_RC=0
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/missing-body.json" \
+  >/dev/null 2>&1 || MISSING_RC=$?
+assert_eq "1" "$MISSING_RC" \
+  "a decision with a missing replyBody makes the script exit non-zero"
+assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
+  "a missing replyBody is never posted — not even the literal string null"
+assert_eq "0" "$(grep -c 'resolveReviewThread' "$GH_MUTATION_LOG")" \
+  "a decision with a missing replyBody is not resolved either"
+
+# A resolve that fails AFTER a successful reply must still be counted, so the
+# script's exit status means "everything landed" — not just "every reply
+# posted". The reply itself must still have gone out; only resolve failed.
+: > "$GH_MUTATION_LOG"
+RESOLVEFAILDIR="$TMP_D/resolvefailbin"; mkdir -p "$RESOLVEFAILDIR"
+cat > "$RESOLVEFAILDIR/gh" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+args="$*"
+[[ -n "${GH_MUTATION_LOG:-}" ]] && printf '%s\n' "$args" >> "$GH_MUTATION_LOG"
+case "$args" in
+  *resolveReviewThread*) exit 1 ;;   # simulate a failed resolve
+  *) printf '{"data":{"ok":true}}\n' ;;
+esac
+STUB
+chmod +x "$RESOLVEFAILDIR/gh"
+cat > "$TMP_D/resolve-fail.json" <<'JSON'
+[{"threadId":"PRRT_yyy","replyBody":"Fixed in deadbee — tightened the guard.","resolve":true}]
+JSON
+RESOLVE_FAIL_RC=0
+PATH="$RESOLVEFAILDIR:$PATH" bash "$ROOT/scripts/pr-review-respond.sh" 2770 \
+  "$TMP_D/resolve-fail.json" >/dev/null 2>&1 || RESOLVE_FAIL_RC=$?
+
+assert_eq "1" "$RESOLVE_FAIL_RC" \
+  "a failed resolve_mutation makes the script's exit status non-zero"
+assert_eq "1" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
+  "the reply itself still posted despite the resolve failing"
 
 rm -rf "$TMP_D"
 unset GH_MUTATION_LOG GIT_COMMON_DIR

@@ -34,6 +34,13 @@ POLL_INTERVAL="${PR_REVIEW_POLL_INTERVAL:-60}"
 # or every bot thread is misclassified as a human comment.
 BOT_LOGINS="coderabbitai chatgpt-codex-connector copilot-pull-request-reviewer github-actions"
 
+# The subset of BOT_LOGINS that actually posts a PR REVIEW (as opposed to a
+# thread comment or, for github-actions, React Doctor's sticky ISSUE
+# comment). Quiescence condition #1 needs to know which bots to wait on for
+# `.reviewedHead` — including github-actions there would make that condition
+# permanently unsatisfiable, since it never appears in the reviews endpoint.
+REVIEW_BOT_LOGINS="coderabbitai chatgpt-codex-connector copilot-pull-request-reviewer"
+
 # --- state -----------------------------------------------------------------
 
 # Resolve the shared git dir so state is keyed per-PR across worktrees.
@@ -121,6 +128,11 @@ is_bot() {
 }
 
 # --- time --------------------------------------------------------------------
+
+# Current instant, Z-suffixed. Used both for headShaFirstSeenAt (§6.7's
+# 20-minute silent-bot clock) and for stamping a just-detected push — NOT for
+# main()'s seed, which deliberately keeps the commit date (see seed_push_state).
+now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Normalize an ISO 8601 timestamp — already Z-suffixed, or carrying a numeric
 # offset — to a Z-suffixed UTC string.
@@ -399,6 +411,70 @@ advance_repost_counts() {
             end)'
 }
 
+# The bots this poll expects a review from, suffixed to match `.reviewedHead`
+# keys (REST's `user.login` carries "[bot]"; REVIEW_BOT_LOGINS deliberately
+# does not, matching BOT_LOGINS's convention). Written to state every poll so
+# the skill can tell "a bot that never ran" (missing key here too — nothing
+# to wait on) from "a bot this repo doesn't use" (BOT_LOGINS lives only in
+# this script, so the skill has no other way to know the difference).
+expected_bots() {
+  local copilot_expected="$1" bot out="[]"
+  for bot in $REVIEW_BOT_LOGINS; do
+    if [[ "$bot" == "copilot-pull-request-reviewer" && "$copilot_expected" != "true" ]]; then
+      continue
+    fi
+    out="$(jq -c -n --argjson a "$out" --arg b "${bot}[bot]" '$a + [$b]')"
+  done
+  printf '%s' "$out"
+}
+
+# The four SKILL.md §Quiescence conditions, computed from state + decisions
+# exactly as documented there (this script already reads decisions_read, so
+# it can reproduce them without the skill re-deriving anything):
+#
+#  1. every expected bot caught up to headSha — a reviewedHead value that is
+#     "timestamp" (CodeRabbit/Copilot's post-push fallback) or a hex prefix
+#     of headSha (Codex's own marker) counts as caught up. Waived once
+#     headShaFirstSeenAt is >= 20 minutes old: a hung or rate-limited bot
+#     must not suppress quiescence forever (§6.7's stale-bot fallback).
+#  2. zero unresolved bot threads: no undecided pending bot finding, every
+#     decided finding's `.seen[fp].replied` is true, and no open re-post
+#     (state.reposted, populated by C1 above — a decided finding invisible
+#     to `.pending` by construction is still an open, unanswered thread).
+#  3. every out-of-diff finding has a matching decisions.addressedOutOfDiff
+#     key.
+#  4. checks are neither red nor pending.
+#
+# Escalated findings and human threads are deliberately absent from every
+# condition here — SKILL.md is explicit that they are reported, not
+# resolved, and must never block quiescence.
+compute_quiescent() {
+  local state="$1" checks="$2" fresh="$3" ood="$4" decisions="$5" now="$6"
+  jq -n --argjson s "$state" --argjson c "$checks" --argjson f "$fresh" \
+        --argjson o "$ood" --argjson d "$decisions" --arg now "$now" '
+    def caught_up($v; $sha):
+      $v != null and ($v == "timestamp" or ($sha | startswith($v)));
+    (
+      ( ($s.expectedBots // []) as $bots
+        | ($s.reviewedHead // {}) as $rh
+        | ($s.headSha // "") as $sha
+        | all($bots[]; caught_up($rh[.]; $sha))
+      )
+      or
+      ( ($s.headShaFirstSeenAt // null) as $t
+        | $t != null
+          and ((($now | fromdateiso8601) - ($t | fromdateiso8601)) >= 1200)
+      )
+    )
+    and ([$f[] | select(.kind == "bot")] | length == 0)
+    and ([($d.seen // {}) | to_entries[] | select(.value.replied != true)] | length == 0)
+    and (($s.reposted // []) | length == 0)
+    and ([$o[] | select((($d.addressedOutOfDiff // {})[(.reviewId|tostring)]) != true)]
+         | length == 0)
+    and ($c.red == 0 and $c.pending == 0)
+  '
+}
+
 # --- events ------------------------------------------------------------------
 
 # Last error reason emitted, for de-duplication. A process-lifetime shell
@@ -460,32 +536,79 @@ detect_push() {
 # non-numeric value aborts the whole script with exit status 0, which a
 # supervisor reads as a clean shutdown.
 poll_once() {
-  local pr="$1" state decisions findings fresh reviews issues ood checks sha pushed pushed_at e
+  local pr="$1" state state_before decisions findings fresh reviews issues ood checks sha
+  local pushed pushed_at e reviews_ok issues_ok
   local -a events=()
 
   state="$(state_read "$pr")" || {
     emit_error_once "state unreadable"; return 1; }
+  # Snapshot of exactly what was last persisted, BEFORE this poll mutates
+  # `state` — every transition guard below (REPOST, QUIESCENT, CHECKS_CLEAR)
+  # compares against this, not against `state` mid-mutation.
+  state_before="$state"
 
   findings="$(collect_threads "$pr" | shape_findings)" || {
     emit_error_once "collect_threads failed"; return 1; }
   decisions="$(decisions_read "$pr")"
   fresh="$(unseen_findings "$findings" "$decisions")"
 
-  reviews="$(collect_reviews "$pr")" || reviews="[]"
-  issues="$(collect_issue_comments "$pr")" || issues="[]"
-  ood="$(out_of_diff_reviews "$reviews")"
-  sha="$(head_sha "$pr")"
-  checks="$(collect_checks "$sha")" || checks='{"red":0,"pending":0}'
+  reviews_ok=1
+  issues_ok=1
+  reviews="$(collect_reviews "$pr")" || {
+    emit_error_once "collect_reviews failed; prior payload kept"
+    reviews=""; reviews_ok=0; }
+  issues="$(collect_issue_comments "$pr")" || {
+    emit_error_once "collect_issue_comments failed; prior payload kept"
+    issues=""; issues_ok=0; }
 
-  # Copilot quota — transition-guarded.
-  if copilot_quota_exhausted "$reviews"; then
-    if [[ "$(printf '%s' "$state" | jq -r '.copilotExpected')" == "true" ]]; then
-      state="$(printf '%s' "$state" | jq '.copilotExpected = false')"
-      events+=("COPILOT_QUOTA|{\"reason\":\"copilot reported a quota limit; not waiting on it\"}")
-    fi
+  if [[ "$reviews_ok" -eq 1 ]]; then
+    ood="$(out_of_diff_reviews "$reviews")"
   else
-    state="$(printf '%s' "$state" | jq '.copilotExpected = true')"
+    # Keep whatever this script last persisted instead of blanking it.
+    # `announcedOutOfDiff` is a growing union keyed off THIS value, so an
+    # erased `.outOfDiff` here is never re-announced once a later poll
+    # recovers — one transient `gh` failure would permanently lose it.
+    ood="$(printf '%s' "$state" | jq '.outOfDiff // []')"
   fi
+
+  sha="$(head_sha "$pr")"
+  # Never green-by-default: compute_quiescent's condition #4 reads `.red`
+  # and `.pending`, so a transient `gh` failure must not make a blocked PR
+  # look clean. `pending: 1` keeps quiescence false until the next
+  # successful collection resolves it one way or the other.
+  checks="$(collect_checks "$sha")" || checks='{"red":0,"pending":1}'
+
+  # Record when THIS head SHA was first observed — the clock
+  # compute_quiescent's 20-minute silent-bot fallback reads. Only stamped on
+  # an actual change, not every poll, or "how long has this bot been
+  # silent" could never advance.
+  if [[ "$(printf '%s' "$state" | jq -r '.headSha // ""')" != "$sha" ]]; then
+    state="$(printf '%s' "$state" | jq --arg s "$sha" --arg t "$(now_utc)" \
+      '.headSha = $s | .headShaFirstSeenAt = $t')"
+  fi
+
+  # Copilot quota — transition-guarded. Skipped when this poll's review
+  # fetch failed: no fresh data to judge the LATEST review from, and
+  # deriving a verdict off stale data risks flipping copilotExpected on a
+  # fluke poll.
+  if [[ "$reviews_ok" -eq 1 ]]; then
+    if copilot_quota_exhausted "$reviews"; then
+      if [[ "$(printf '%s' "$state" | jq -r '.copilotExpected')" == "true" ]]; then
+        state="$(printf '%s' "$state" | jq '.copilotExpected = false')"
+        events+=("COPILOT_QUOTA|{\"reason\":\"copilot reported a quota limit; not waiting on it\"}")
+      fi
+    else
+      state="$(printf '%s' "$state" | jq '.copilotExpected = true')"
+    fi
+  fi
+
+  # The bots this poll expects a review from — written every poll (I5) so
+  # the skill can tell a silent-but-expected bot from one this repo simply
+  # doesn't run, and so compute_quiescent below has something to check
+  # `.reviewedHead` against.
+  state="$(jq -n --argjson s "$state" \
+    --argjson eb "$(expected_bots "$(printf '%s' "$state" | jq -r '.copilotExpected')")" \
+    '$s + {expectedBots: $eb}')"
 
   # Push — guarded by lastPushedSha, which seed_push_state seeds so the first
   # poll of an already-pushed branch does not announce a push that never
@@ -495,7 +618,17 @@ poll_once() {
     # Record WHEN as well as WHAT: reviewed_head_map needs a timestamp to
     # decide whether a bot's review post-dates the push, and CodeRabbit and
     # Copilot publish no reviewed-SHA marker at all.
-    pushed_at="$(git_commit_iso_utc "$pushed")"
+    #
+    # now_utc() — the moment THIS POLL observed the push — not the commit's
+    # own committer date. CodeRabbit/Copilot have no reviewed-SHA marker and
+    # rely entirely on `submitted_at > lastPushedAt`, so a straggler review
+    # landing between the loop's commit and the user's `git push` would read
+    # as "caught up" if stamped with the (earlier) commit date instead of
+    # when the push actually became visible. Contrast seed_push_state, which
+    # deliberately keeps the commit date — there the branch was pushed at
+    # some unknown past time, so the commit date is the correct permissive
+    # floor, not a moment being newly observed.
+    pushed_at="$(now_utc)"
     state="$(printf '%s' "$state" \
       | jq --arg sha "$pushed" --arg at "$pushed_at" \
            '.lastPushedSha = $sha | .lastPushedAt = $at')"
@@ -505,10 +638,15 @@ poll_once() {
   # Which SHA each bot has reviewed. Quiescence condition #1 is computed from
   # this map, so leaving it unwritten makes "have the bots caught up?"
   # permanently unanswerable — the loop could never correctly report clean.
-  state="$(jq -n --argjson s "$state" \
-    --argjson rh "$(reviewed_head_map "$reviews" \
-      "$(printf '%s' "$state" | jq -r '.lastPushedAt // "1970-01-01T00:00:00Z"')")" \
-    '$s + {reviewedHead: $rh}')"
+  # Skipped on a failed review fetch: keeps the PRIOR map rather than
+  # deriving one from an empty review list, which would read every bot as
+  # freshly "not caught up" on a transient blip.
+  if [[ "$reviews_ok" -eq 1 ]]; then
+    state="$(jq -n --argjson s "$state" \
+      --argjson rh "$(reviewed_head_map "$reviews" \
+        "$(printf '%s' "$state" | jq -r '.lastPushedAt // "1970-01-01T00:00:00Z"')")" \
+      '$s + {reviewedHead: $rh}')"
+  fi
 
   # Findings — announce only fingerprints not already announced. `announced`
   # (in THIS script's state) is separate from `seen` (in the skill's
@@ -548,6 +686,34 @@ poll_once() {
     --argjson rc "$(advance_repost_counts "$state" "$findings" "$decisions")" \
     '$s + {repostCounts: $rc}')"
 
+  # A decided finding now living on a DIFFERENT, still-open thread. It is
+  # invisible to `.pending` by construction — unseen_findings filters by
+  # fingerprint alone, so the new thread never appears there — so without
+  # this it is never answered and never counted (C1): a bot closes a thread
+  # and re-posts, quiescence reads `replied: true` off the OLD decision and
+  # reports "0 open bot threads" while the new thread sits open forever.
+  #
+  # Compared against `$findings` (this poll's FULL set, not just `$fresh`) —
+  # a decided finding must still be seen to detect that it moved threads —
+  # and read for compute_quiescent's condition #2, above `advance_repost_counts`'s
+  # notion of a "genuine" repost: two open threads sharing a fingerprint,
+  # one decided, is already an unanswered thread even before the decided one
+  # closes, so this deliberately fires on that coexistence too, not only
+  # once repostCounts ticks.
+  local reposted
+  reposted="$(jq -n --argjson f "$findings" --argjson d "$decisions" --argjson s "$state" '
+    [$f[] | . as $x | ($d.seen // {})[$x.fingerprint] as $prior
+     | select($prior != null) | select($prior.threadId != $x.threadId)
+     | {fingerprint: $x.fingerprint, threadId: $x.threadId,
+        priorThreadId: $prior.threadId, priorVerdict: $prior.verdict,
+        count: (($s.repostCounts // {})[$x.fingerprint].count // 0)}]')"
+  state="$(jq -n --argjson s "$state" --argjson r "$reposted" '$s + {reposted: $r}')"
+  if printf '%s' "$reposted" | jq -e 'length > 0' >/dev/null \
+     && [[ "$(printf '%s' "$reposted" | jq -cS '.')" \
+        != "$(printf '%s' "$state_before" | jq -cS '.reposted // []')" ]]; then
+    events+=("REPOST|$(printf '%s' "$reposted" | jq -c '{count: length}')")
+  fi
+
   # Out-of-diff findings get their OWN event, deduped by review id.
   #
   # They must NOT ride inside NEW_FINDINGS: that event is gated on fresh bot
@@ -570,42 +736,49 @@ poll_once() {
   # conversation box — the common way people comment — is invisible without
   # this, and so is React Doctor, whose findings arrive as a sticky bot
   # comment rather than a thread.
-  local allhumanc newhumanc alldoctor newdoctor
-  allhumanc="$(printf '%s' "$issues" | jq '[.[]
-    | select((.user.login | endswith("[bot]")) | not)
-    | {id, author: .user.login, body, createdAt: .created_at}]')"
-  newhumanc="$(jq -n --argjson c "$allhumanc" --argjson s "$state" \
-    '[$c[] | select((($s.announcedComments // {})[(.id|tostring)]) == null)]')"
+  # Skipped entirely on a failed issue-comments fetch (I2): `.humanComments`
+  # and `.doctor` keep their PRIOR values instead of being blanked to `[]`.
+  # `announcedComments` is a growing union keyed off THOSE values, so an
+  # erased payload is never re-announced once a later poll recovers — one
+  # transient `gh` failure would permanently lose React Doctor's findings.
+  if [[ "$issues_ok" -eq 1 ]]; then
+    local allhumanc newhumanc alldoctor newdoctor
+    allhumanc="$(printf '%s' "$issues" | jq '[.[]
+      | select((.user.login | endswith("[bot]")) | not)
+      | {id, author: .user.login, body, createdAt: .created_at}]')"
+    newhumanc="$(jq -n --argjson c "$allhumanc" --argjson s "$state" \
+      '[$c[] | select((($s.announcedComments // {})[(.id|tostring)]) == null)]')"
 
-  alldoctor="$(printf '%s' "$issues" | jq '[.[]
-    | select(.user.login == "github-actions[bot]")
-    | select(.body | test("React Doctor"))
-    | {id, author: .user.login, body, updatedAt: .updated_at}]')"
-  # Keyed by id AND updated_at, because React Doctor REWRITES its sticky
-  # comment in place. Id-only dedup would announce the first version and
-  # silence every later one — including newly-introduced errors, which is the
-  # only part of its output that fails a PR.
-  newdoctor="$(jq -n --argjson c "$alldoctor" --argjson s "$state" \
-    '[$c[] | select((($s.announcedComments // {})[((.id|tostring) + ":" + (.updatedAt // ""))]) == null)]')"
+    alldoctor="$(printf '%s' "$issues" | jq '[.[]
+      | select(.user.login == "github-actions[bot]")
+      | select(.body | test("React Doctor"))
+      | {id, author: .user.login, body, updatedAt: .updated_at}]')"
+    # Keyed by id AND updated_at, because React Doctor REWRITES its sticky
+    # comment in place. Id-only dedup would announce the first version and
+    # silence every later one — including newly-introduced errors, which is
+    # the only part of its output that fails a PR.
+    newdoctor="$(jq -n --argjson c "$alldoctor" --argjson s "$state" \
+      '[$c[] | select((($s.announcedComments // {})[((.id|tostring) + ":" + (.updatedAt // ""))]) == null)]')"
 
-  if printf '%s' "$newhumanc" | jq -e 'length > 0' >/dev/null; then
-    events+=("HUMAN_COMMENT|$(printf '%s' "$newhumanc" | jq -c '{count: length, source: "pr-comment"}')")
+    if printf '%s' "$newhumanc" | jq -e 'length > 0' >/dev/null; then
+      events+=("HUMAN_COMMENT|$(printf '%s' "$newhumanc" | jq -c '{count: length, source: "pr-comment"}')")
+    fi
+    if printf '%s' "$newdoctor" | jq -e 'length > 0' >/dev/null; then
+      events+=("DOCTOR|$(printf '%s' "$newdoctor" | jq -c '{comments: length}')")
+    fi
+
+    # NOTE: `announcedComments` IS a growing union, deliberately unlike
+    # `announced`. A comment id cannot vanish and return the way a re-posted
+    # finding can, and the doctor key already carries its content version —
+    # so there is nothing here for a rebuild-each-poll to recover, and a
+    # union avoids re-announcing a comment that is simply still there.
+    state="$(jq -n --argjson s "$state" --argjson h "$allhumanc" --argjson d "$alldoctor" \
+      --argjson nh "$newhumanc" --argjson nd "$newdoctor" '
+      $s + {humanComments: $h, doctor: $d,
+            announcedComments: (($s.announcedComments // {})
+              + ([$nh[] | {(.id|tostring): true}] | add // {})
+              + ([$nd[] | {((.id|tostring) + ":" + (.updatedAt // "")): true}] | add // {}))}')"
   fi
-  if printf '%s' "$newdoctor" | jq -e 'length > 0' >/dev/null; then
-    events+=("DOCTOR|$(printf '%s' "$newdoctor" | jq -c '{comments: length}')")
-  fi
-
-  # NOTE: `announcedComments` IS a growing union, deliberately unlike
-  # `announced`. A comment id cannot vanish and return the way a re-posted
-  # finding can, and the doctor key already carries its content version — so
-  # there is nothing here for a rebuild-each-poll to recover, and a union
-  # avoids re-announcing a comment that is simply still there.
-  state="$(jq -n --argjson s "$state" --argjson h "$allhumanc" --argjson d "$alldoctor" \
-    --argjson nh "$newhumanc" --argjson nd "$newdoctor" '
-    $s + {humanComments: $h, doctor: $d,
-          announcedComments: (($s.announcedComments // {})
-            + ([$nh[] | {(.id|tostring): true}] | add // {})
-            + ([$nd[] | {((.id|tostring) + ":" + (.updatedAt // "")): true}] | add // {}))}')"
 
   # Checks — emit only when the classification CHANGES and is red.
   if [[ "$(printf '%s' "$checks" | jq -cS '.')" \
@@ -614,9 +787,32 @@ poll_once() {
     events+=("CHECKS_RED|$(printf '%s' "$checks" | jq -c '.')")
   fi
 
+  # CHECKS_CLEAR — emit once when checks stop being red, comparing against
+  # the PRE-POLL snapshot so a checks payload this poll already rewrote (via
+  # a prior CHECKS_RED transition, above) cannot mask itself. On the
+  # dominant path (push -> CI pending -> ... -> green) this and QUIESCENT,
+  # below, are the ONLY events the watcher emits again — without them the
+  # loop goes silent exactly when checks resolve.
+  if printf '%s' "$checks" | jq -e \
+       --argjson prev "$(printf '%s' "$state_before" | jq '.checks.red // 0')" \
+       '.red == 0 and $prev > 0' >/dev/null; then
+    events+=("CHECKS_CLEAR|$(printf '%s' "$checks" | jq -c '.')")
+  fi
+
+  # QUIESCENT — the four SKILL.md §Quiescence conditions, transition-guarded
+  # against the PRE-POLL snapshot. A QUIESCENT emitted every poll would get
+  # this Monitor auto-killed for excessive output, so `.quiescent` is
+  # persisted below and compared, not recomputed from nothing each time.
+  local quiescent_now was_quiescent
+  quiescent_now="$(compute_quiescent "$state" "$checks" "$fresh" "$ood" "$decisions" "$(now_utc)")"
+  was_quiescent="$(printf '%s' "$state_before" | jq -r '.quiescent // false')"
+  if [[ "$quiescent_now" == "true" && "$was_quiescent" != "true" ]]; then
+    events+=("QUIESCENT|$(jq -c -n --arg sha "$sha" '{headSha: $sha}')")
+  fi
+
   state="$(jq -n --argjson s "$state" --argjson f "$fresh" --argjson o "$ood" \
-    --argjson c "$checks" --arg sha "$sha" \
-    '$s + {pending: $f, outOfDiff: $o, checks: $c, headSha: $sha}')"
+    --argjson c "$checks" --arg sha "$sha" --argjson q "$quiescent_now" \
+    '$s + {pending: $f, outOfDiff: $o, checks: $c, headSha: $sha, quiescent: $q}')"
 
   printf '%s' "$state" | state_write "$pr" || {
     emit_error_once "state write rejected; events withheld"; return 1; }
