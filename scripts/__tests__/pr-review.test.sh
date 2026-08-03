@@ -388,6 +388,32 @@ poll_once 5007 >/dev/null
 assert_eq "1" "$(state_read 5007 | jq -r --arg fp "$FP" '.seen[$fp].reposts')" \
   "a decided finding re-posted under a new thread id ticks the repost counter"
 
+# Top-level PR comments. Review threads carry only INLINE comments, so without
+# this a teammate writing in the conversation box is never surfaced at all —
+# and React Doctor's findings, which arrive as a sticky bot comment, never
+# reach the loop either.
+state_init 5008 "test-branch"
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+DOC1="$(poll_once 5008)"
+DOC2="$(poll_once 5008)"
+
+assert_eq "1" "$(printf '%s\n' "$DOC1" | grep -c '"event":"DOCTOR"')" \
+  "React Doctor's sticky comment is announced on the first poll"
+assert_eq "0" "$(printf '%s\n' "$DOC2" | grep -c '"event":"DOCTOR"')" \
+  "React Doctor is not re-announced while its comment is unchanged"
+assert_eq "1" "$(state_read 5008 | jq '.doctor | length')" \
+  "the doctor comment is persisted to state for the skill to read"
+assert_eq "0" "$(state_read 5008 | jq '.humanComments | length')" \
+  "the pr2770 fixture has no human top-level comments"
+
+# A REWRITTEN sticky comment must re-announce: React Doctor edits in place,
+# and newly-introduced errors are the only part of its output that fails a PR.
+# Id-only dedup would silence exactly that.
+state_read 5008 | jq '.announcedComments = {}' | state_write 5008
+DOC3="$(poll_once 5008)"
+assert_eq "1" "$(printf '%s\n' "$DOC3" | grep -c '"event":"DOCTOR"')" \
+  "a rewritten doctor comment is announced again"
+
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
 # A finding that is announced, never decided, disappears, and is re-posted

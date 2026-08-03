@@ -333,7 +333,7 @@ detect_push() {
 # non-numeric value aborts the whole script with exit status 0, which a
 # supervisor reads as a clean shutdown.
 poll_once() {
-  local pr="$1" state findings fresh reviews ood checks sha pushed pushed_at e
+  local pr="$1" state findings fresh reviews issues ood checks sha pushed pushed_at e
   local -a events=()
 
   state="$(state_read "$pr")" || {
@@ -344,6 +344,7 @@ poll_once() {
   fresh="$(unseen_findings "$findings" "$state")"
 
   reviews="$(collect_reviews "$pr")" || reviews="[]"
+  issues="$(collect_issue_comments "$pr")" || issues="[]"
   ood="$(out_of_diff_reviews "$reviews")"
   sha="$(head_sha "$pr")"
   checks="$(collect_checks "$sha")" || checks='{"red":0,"pending":0}'
@@ -435,6 +436,49 @@ poll_once() {
   state="$(jq -n --argjson s "$state" --argjson o "$ood" \
     '$s + {announcedOutOfDiff: (($s.announcedOutOfDiff // {})
                                 + ([$o[] | {(.reviewId|tostring): true}] | add // {}))}')"
+
+  # --- top-level PR comments ------------------------------------------------
+  #
+  # Review threads carry only INLINE comments. A teammate writing in the PR's
+  # conversation box — the common way people comment — is invisible without
+  # this, and so is React Doctor, whose findings arrive as a sticky bot
+  # comment rather than a thread.
+  local allhumanc newhumanc alldoctor newdoctor
+  allhumanc="$(printf '%s' "$issues" | jq '[.[]
+    | select((.user.login | endswith("[bot]")) | not)
+    | {id, author: .user.login, body, createdAt: .created_at}]')"
+  newhumanc="$(jq -n --argjson c "$allhumanc" --argjson s "$state" \
+    '[$c[] | select((($s.announcedComments // {})[(.id|tostring)]) == null)]')"
+
+  alldoctor="$(printf '%s' "$issues" | jq '[.[]
+    | select(.user.login == "github-actions[bot]")
+    | select(.body | test("React Doctor"))
+    | {id, author: .user.login, body, updatedAt: .updated_at}]')"
+  # Keyed by id AND updated_at, because React Doctor REWRITES its sticky
+  # comment in place. Id-only dedup would announce the first version and
+  # silence every later one — including newly-introduced errors, which is the
+  # only part of its output that fails a PR.
+  newdoctor="$(jq -n --argjson c "$alldoctor" --argjson s "$state" \
+    '[$c[] | select((($s.announcedComments // {})[((.id|tostring) + ":" + (.updatedAt // ""))]) == null)]')"
+
+  if printf '%s' "$newhumanc" | jq -e 'length > 0' >/dev/null; then
+    events+=("HUMAN_COMMENT|$(printf '%s' "$newhumanc" | jq -c '{count: length, source: "pr-comment"}')")
+  fi
+  if printf '%s' "$newdoctor" | jq -e 'length > 0' >/dev/null; then
+    events+=("DOCTOR|$(printf '%s' "$newdoctor" | jq -c '{comments: length}')")
+  fi
+
+  # NOTE: `announcedComments` IS a growing union, deliberately unlike
+  # `announced`. A comment id cannot vanish and return the way a re-posted
+  # finding can, and the doctor key already carries its content version — so
+  # there is nothing here for a rebuild-each-poll to recover, and a union
+  # avoids re-announcing a comment that is simply still there.
+  state="$(jq -n --argjson s "$state" --argjson h "$allhumanc" --argjson d "$alldoctor" \
+    --argjson nh "$newhumanc" --argjson nd "$newdoctor" '
+    $s + {humanComments: $h, doctor: $d,
+          announcedComments: (($s.announcedComments // {})
+            + ([$nh[] | {(.id|tostring): true}] | add // {})
+            + ([$nd[] | {((.id|tostring) + ":" + (.updatedAt // "")): true}] | add // {}))}')"
 
   # Checks — emit only when the classification CHANGES and is red.
   if [[ "$(printf '%s' "$checks" | jq -cS '.')" \
