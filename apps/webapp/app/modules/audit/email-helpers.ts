@@ -2,7 +2,13 @@ import type { AuditForEmail } from "~/emails/audit-updates-template";
 import { auditUpdatesTemplateString } from "~/emails/audit-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import {
+  formatDate,
+  resolveFormatPrefs,
+  type RawFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -14,7 +20,11 @@ type BasicAuditEmailContentArgs = {
   creatorName: string;
   description?: string | null;
   dueDate?: Date | null;
-  hints: ClientHint;
+  /**
+   * Fully-resolved formatting preferences of the RECIPIENT of this email —
+   * used to render the due/completed dates in their locale/timezone.
+   */
+  prefs: ResolvedFormatPrefs;
   auditId: string;
   organizationId?: string;
   customEmailFooter?: string | null;
@@ -30,17 +40,14 @@ export const baseAuditTextEmailContent = ({
   assetsCount,
   description,
   dueDate,
-  hints,
+  prefs,
   auditId,
   organizationId,
   customEmailFooter,
   emailContent,
 }: BasicAuditEmailContentArgs & { emailContent: string }) => {
   const dueDateText = dueDate
-    ? `Due date: ${getDateTimeFormatFromHints(hints, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(dueDate)}\n`
+    ? `Due date: ${formatDate(dueDate, prefs, { includeTime: true })}\n`
     : "";
   const orgQuery = organizationId ? `?orgId=${organizationId}` : "";
 
@@ -101,16 +108,12 @@ export const auditCompletedEmailContent = (
 ) => {
   const orgQuery = args.organizationId ? `?orgId=${args.organizationId}` : "";
   const receiptQuery = orgQuery ? `${orgQuery}&receipt=1` : "?receipt=1";
-  const completedDateText = getDateTimeFormatFromHints(args.hints, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(args.completedAt);
+  const completedDateText = formatDate(args.completedAt, args.prefs, {
+    includeTime: true,
+  });
 
   const dueDateText = args.dueDate
-    ? getDateTimeFormatFromHints(args.hints, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(args.dueDate)
+    ? formatDate(args.dueDate, args.prefs, { includeTime: true })
     : null;
 
   let statusMessage = `The audit "${args.auditName}" has been completed on ${completedDateText}.`;
@@ -160,21 +163,31 @@ export async function sendAuditAssignedEmail({
   audit,
   assigneeEmail,
   assigneeName,
+  assigneeUserId,
   hints,
 }: {
   audit: AuditForEmail;
   assigneeEmail: string;
   assigneeName: string;
+  /** The assignee (recipient) user id — used to resolve their format prefs. */
+  assigneeUserId: string;
   hints: ClientHint;
 }) {
   const creatorName = resolveUserDisplayName(audit.createdBy);
   const assetCount = audit._count.assets;
 
   try {
+    // Recipient-specific prefs. Only a userId is available here (no assignee row
+    // is passed to this singular sender), so a single fetch is acceptable — one
+    // email, one lookup. hints is the null-field fallback. Resolved INSIDE the
+    // try so a DB rejection is caught and logged here rather than surfacing as
+    // an unhandled rejection in the fire-and-forget caller.
+    const prefs = await resolveUserFormatPrefsById(assigneeUserId, hints);
+
     const html = await auditUpdatesTemplateString({
       audit,
       heading: `🔍 You've been assigned to audit: "${audit.name}"`,
-      hints,
+      prefs,
       assetCount,
     });
 
@@ -187,7 +200,7 @@ export async function sendAuditAssignedEmail({
         creatorName,
         description: audit.description,
         dueDate: audit.dueDate,
-        hints,
+        prefs,
         auditId: audit.id,
         customEmailFooter: audit.organization.customEmailFooter,
       }),
@@ -231,7 +244,8 @@ export async function sendAuditAssignedEmail({
  * @param args.cancelledByName - Display name of the acting canceller. May
  *   differ from `audit.createdBy` when an admin/owner cancels someone
  *   else's audit; recipients see this name in the body, not the creator's.
- * @param args.hints - Client hints used to localise dates in the email.
+ * @param args.hints - Client hints used as the null-field fallback when a
+ *   recipient row is missing one of the four raw format-preference columns.
  * @returns void. Per-recipient send errors are logged, not thrown.
  */
 export function sendAuditCancelledEmails({
@@ -243,12 +257,15 @@ export function sendAuditCancelledEmails({
   audit: AuditForEmail;
   assigneesToNotify: Array<{
     userId: string;
+    // The four raw format-preference columns (via RawFormatPrefs) travel on
+    // each recipient row so per-recipient prefs resolve from the loaded row —
+    // no per-recipient DB fetch (avoids an N+1 in the bulk fan-out).
     user: {
       email: string;
       firstName: string | null;
       lastName: string | null;
       displayName?: string | null;
-    };
+    } & RawFormatPrefs;
   }>;
   /**
    * Display name of the user who actually cancelled the audit. May differ
@@ -267,10 +284,15 @@ export function sendAuditCancelledEmails({
 
   assigneesToNotify.forEach(async (assignment) => {
     try {
+      // Pure resolve from the already-loaded assignee row; hints is the
+      // null-field fallback only. resolveFormatPrefs reads the four raw pref
+      // fields off user.
+      const prefs = resolveFormatPrefs(assignment.user, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading: `❌ Audit cancelled: "${audit.name}"`,
-        hints,
+        prefs,
         assetCount,
       });
 
@@ -284,7 +306,7 @@ export function sendAuditCancelledEmails({
           cancelledByName,
           description: audit.description,
           dueDate: audit.dueDate,
-          hints,
+          prefs,
           auditId: audit.id,
           customEmailFooter: audit.organization.customEmailFooter,
         }),
@@ -326,12 +348,14 @@ export function sendAuditCompletedEmail({
   audit: AuditForEmail;
   assigneesToNotify: Array<{
     userId: string;
+    // Raw format-preference columns travel on each recipient row so prefs
+    // resolve from the loaded row — no per-recipient DB fetch (no N+1).
     user: {
       email: string;
       firstName: string | null;
       lastName: string | null;
       displayName?: string | null;
-    };
+    } & RawFormatPrefs;
   }>;
   hints: ClientHint;
   completedAt: Date;
@@ -346,10 +370,14 @@ export function sendAuditCompletedEmail({
 
   assigneesToNotify.forEach(async (assignment) => {
     try {
+      // Pure resolve from the already-loaded assignee row; hints is the
+      // null-field fallback only.
+      const prefs = resolveFormatPrefs(assignment.user, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading: `✅ Audit completed: "${audit.name}"`,
-        hints,
+        prefs,
         assetCount,
         completedAt,
         wasOverdue,
@@ -364,7 +392,7 @@ export function sendAuditCompletedEmail({
           creatorName,
           description: audit.description,
           dueDate: audit.dueDate,
-          hints,
+          prefs,
           auditId: audit.id,
           organizationId: audit.organizationId,
           customEmailFooter: audit.organization.customEmailFooter,
@@ -427,10 +455,19 @@ export function sendAuditReminderEmail({
 
   assignees.forEach(async (assignment) => {
     try {
+      // Resolve THIS recipient's stored formatting prefs (their own
+      // dateFormat/timeFormat/timeZone), not the scheduler-captured creator
+      // hints — otherwise every reminder recipient sees the creator's
+      // format/timezone. The scheduler's assignee rows (AUDIT_INCLUDE_FOR_EMAIL)
+      // don't carry the raw preference columns, so a per-recipient lookup is
+      // required; `hints` is the null-field fallback only. Audits have few
+      // assignees, so the per-recipient fetch is cheap.
+      const prefs = await resolveUserFormatPrefsById(assignment.userId, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading,
-        hints,
+        prefs,
         assetCount,
       });
 
@@ -443,7 +480,7 @@ export function sendAuditReminderEmail({
           creatorName,
           description: audit.description,
           dueDate: audit.dueDate,
-          hints,
+          prefs,
           auditId: audit.id,
           customEmailFooter: audit.organization.customEmailFooter,
           timeframe,
@@ -474,7 +511,12 @@ export function sendAuditReminderEmail({
 }
 
 /**
- * Send overdue notice email to both creator and assignees
+ * Send overdue notice email to both creator and assignees.
+ *
+ * Each recipient's dates are rendered in THEIR OWN stored formatting prefs
+ * (dateFormat/timeFormat/timeZone). Pass the recipient's `userId` so their
+ * prefs can be resolved per recipient; when it is absent the render falls back
+ * to the scheduler-captured request `hints`.
  */
 export function sendAuditOverdueEmail({
   audit,
@@ -483,6 +525,13 @@ export function sendAuditOverdueEmail({
 }: {
   audit: AuditForEmail;
   recipients: Array<{
+    /**
+     * Recipient user id — used to resolve their stored formatting prefs so the
+     * dates render in the recipient's own format/timezone rather than the
+     * creator's. Optional because some callers only have the email row; those
+     * recipients fall back to the request `hints` for formatting.
+     */
+    userId?: string;
     email: string;
     firstName: string | null;
     lastName: string | null;
@@ -495,10 +544,18 @@ export function sendAuditOverdueEmail({
 
   recipients.forEach(async (recipient) => {
     try {
+      // Resolve THIS recipient's stored formatting prefs, not the
+      // scheduler-captured creator hints. When the recipient's userId is
+      // available we look up their own dateFormat/timeFormat/timeZone;
+      // otherwise `hints` is the null-field fallback (previous behavior).
+      const prefs = recipient.userId
+        ? await resolveUserFormatPrefsById(recipient.userId, hints)
+        : resolveFormatPrefs(null, hints);
+
       const html = await auditUpdatesTemplateString({
         audit,
         heading: `⚠️ Audit overdue: "${audit.name}"`,
-        hints,
+        prefs,
         assetCount,
       });
 
@@ -511,7 +568,7 @@ export function sendAuditOverdueEmail({
           creatorName,
           description: audit.description,
           dueDate: audit.dueDate,
-          hints,
+          prefs,
           auditId: audit.id,
           customEmailFooter: audit.organization.customEmailFooter,
         }),

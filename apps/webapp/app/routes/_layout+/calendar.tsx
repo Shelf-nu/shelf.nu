@@ -1,6 +1,12 @@
 import { useState, useRef, useMemo } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
+// Named-timezone support for FullCalendar. v6 only understands "local"/"UTC"
+// out of the box; a named IANA `timeZone` (e.g. "Asia/Tokyo") silently falls
+// back to UTC — rendering every non-UTC user's events at the wrong local time —
+// UNLESS this Luxon connector is registered in the plugins array below. luxon
+// is already a project dependency, so this connector is lightweight.
+import luxonPlugin from "@fullcalendar/luxon3";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { type BookingStatus, type Tag } from "@prisma/client";
@@ -22,6 +28,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -209,7 +216,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 export default function Calendar() {
   const { isMd } = useViewportHeight();
-  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+  const { prefs } = useDateFormatter();
+  // Drive FullCalendar's clock (12h vs 24h) from the user's time-format pref.
+  const hour12 = prefs.timeFormat === "H12";
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+    new Date(),
+    prefs
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [subscribeOpen, setSubscribeOpen] = useState(false);
@@ -242,7 +255,9 @@ export default function Calendar() {
   function updateTitle(viewType = calendarView) {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
+      setCalendarHeader(
+        getCalendarTitleAndSubtitle({ viewType, calendarApi, prefs })
+      );
     }
   }
 
@@ -333,13 +348,18 @@ export default function Calendar() {
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
+              // luxonPlugin registers named-IANA-timezone resolution so
+              // `timeZone={prefs.timeZone}` below renders events in the user's
+              // chosen zone instead of falling back to UTC (see import note).
+              plugins={[dayGridPlugin, listPlugin, timeGridPlugin, luxonPlugin]}
               initialView={calendarView}
               initialDate={initialDate}
               expandRows={true}
               height="auto"
-              firstDay={1}
-              timeZone="local"
+              // Week start, display timezone, and 12/24h clock all follow the
+              // acting user's resolved formatting prefs (see useDateFormatter).
+              firstDay={prefs.weekStartsOn}
+              timeZone={prefs.timeZone}
               nowIndicator
               headerToolbar={false}
               events={events}
@@ -356,6 +376,15 @@ export default function Calendar() {
                 hour: "numeric",
                 minute: "2-digit",
                 meridiem: "short",
+                hour12,
+              }}
+              // Slot labels (timeGrid Week/Day axis) also honor the 12/24h pref.
+              slotLabelFormat={{
+                hour: "numeric",
+                minute: "2-digit",
+                omitZeroMinute: true,
+                meridiem: "short",
+                hour12,
               }}
               viewDidMount={(args) => {
                 const calendarContainer = args.el;

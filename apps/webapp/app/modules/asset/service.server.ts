@@ -1148,6 +1148,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   canUseBarcodes = false,
   availableToBookOnly = false,
   preParsedFilters,
+  timeZone = "UTC",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1160,6 +1161,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly?: boolean;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
+  /**
+   * IANA timezone the acting user displays dates in. Threaded into
+   * `generateWhereClause` so built-in date-column filters truncate the day in
+   * the user's tz (avoids an off-by-one for non-UTC users). Defaults to "UTC"
+   * for callers that don't resolve the acting user's prefs.
+   */
+  timeZone?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1194,7 +1202,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -5640,12 +5649,19 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5654,6 +5670,7 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5766,6 +5783,7 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -5782,6 +5800,12 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5790,6 +5814,7 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5995,6 +6020,7 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -6008,6 +6034,12 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6016,6 +6048,7 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -6189,6 +6222,7 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -6196,6 +6230,12 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6204,6 +6244,7 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /** We have to create notes for all the assets so we have make this query */
@@ -6495,6 +6536,7 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6502,6 +6544,12 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6510,6 +6558,7 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6620,6 +6669,7 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6628,6 +6678,12 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6636,6 +6692,7 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6786,12 +6843,19 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6800,6 +6864,7 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     // Simple, consistent where clause

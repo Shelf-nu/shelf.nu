@@ -8,6 +8,7 @@ import {
   getOrganizationTierLimit,
   updateUserTierId,
 } from "~/modules/tier/service.server";
+import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { SERVER_URL, STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -783,10 +784,13 @@ export async function getInvoiceNotificationData({
   customerId,
   invoice,
   user,
+  prefs,
 }: {
   customerId: string;
   invoice: Stripe.Invoice;
   user: { email: string; firstName: string | null };
+  /** Resolved formatting prefs of the billed (recipient) user. */
+  prefs: ResolvedFormatPrefs;
 }) {
   const { emailsToNotify, customerName } = await getCustomerNotificationData({
     customerId,
@@ -800,7 +804,7 @@ export async function getInvoiceNotificationData({
     currency: invoice.currency,
   }).format(invoice.amount_due / 100);
   const dueDate = invoice.due_date
-    ? new Date(invoice.due_date * 1000).toLocaleDateString("en-US", {
+    ? formatDate(new Date(invoice.due_date * 1000), prefs, {
         year: "numeric",
         month: "long",
         day: "numeric",
