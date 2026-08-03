@@ -82,6 +82,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/permissions':
+        specifier: workspace:*
+        version: link:../../packages/permissions
       '@supabase/supabase-js':
         specifier: ^2.49.1
         version: 2.98.0
@@ -293,6 +296,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/permissions':
+        specifier: workspace:*
+        version: link:../../packages/permissions
       '@supabase/supabase-js':
         specifier: ^2.103.0
         version: 2.105.1
@@ -720,6 +726,15 @@ importers:
         version: 6.0.3
 
   packages/labels: {}
+
+  packages/permissions:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
 
   tooling/typescript: {}
 
