@@ -25,8 +25,21 @@
 
 set -uo pipefail
 
+# Never let a bare `git` subprocess block the poll loop on an interactive
+# credential prompt. This runs unattended as a background monitor with no
+# tty attached, so an unanswered prompt would hang forever — silently, like
+# every other failure mode this file guards against. Covers every git
+# invocation below (detect_push's fetch, git_commit_iso_utc's show, etc.),
+# not just the one wrapped with a timeout below.
+export GIT_TERMINAL_PROMPT=0
+
 REPO="${PR_REVIEW_REPO:-Shelf-nu/shelf.nu}"
 POLL_INTERVAL="${PR_REVIEW_POLL_INTERVAL:-60}"
+
+# collect_threads gives up after this many pages rather than looping
+# forever. 100 threads/page (THREADS_QUERY's page size, below) * 20 pages is
+# far beyond any real PR's thread count.
+COLLECT_THREADS_MAX_PAGES="${PR_REVIEW_MAX_THREAD_PAGES:-20}"
 
 # Bot logins WITHOUT the "[bot]" suffix. GraphQL's author.login omits the
 # suffix that REST's user.login includes ("coderabbitai" vs
@@ -72,6 +85,20 @@ state_init() {
 }
 
 state_read() { cat "$(state_path "$1")"; }
+
+# Refresh `.branch` to the CURRENT branch — every invocation, unlike
+# state_init, which deliberately never touches an existing file. Without
+# this, a state file left over from watching this PR number on a DIFFERENT
+# branch keeps its stale `.branch` forever (state_init only fills in a
+# missing file, so resuming never corrects it). detect_push reads `.branch`
+# every poll, so a stale value makes it watch the wrong ref: a real push is
+# never seen, PUSHED never fires, RESPOND never runs, and every thread sits
+# unanswered — completely silently, same as every other failure this round
+# closes. main() calls this unconditionally, after state_init.
+state_refresh_branch() {
+  local pr="$1" branch="$2"
+  state_read "$pr" | jq --arg b "$branch" '.branch = $b' | state_write "$pr"
+}
 
 # Atomic, VALIDATED write.
 #
@@ -216,18 +243,47 @@ head_sha() {
   gql_threads_page "$1" | jq -r '.data.repository.pullRequest.headRefOid'
 }
 
+# True for a resolvable 40-char lowercase-hex SHA, false for anything else —
+# including the literal string "null", which is exactly what head_sha's `-r`
+# renders for a bad PR number: GitHub's GraphQL API returns
+# `repository.pullRequest: null` with HTTP 200 and `gh` exits 0, so nothing
+# upstream of this ever fails loudly. Isolated from main() so both the
+# accept and reject paths are unit-testable without entering main's poll
+# loop.
+validate_head_sha() {
+  local sha="$1"
+  [[ "${#sha}" -eq 40 && "$sha" =~ ^[0-9a-f]+$ ]]
+}
+
 # All review threads, following pagination. Returns a raw node array.
+#
+# Bounded to COLLECT_THREADS_MAX_PAGES pages. A misbehaving API returning
+# hasNextPage:true with a repeating cursor would otherwise spin the poll loop
+# forever, emitting nothing on every iteration — the exact silent-hang
+# failure mode this whole file exists to avoid.
+#
+# Exit codes distinguish two different failures: 1 is an outright gql
+# failure (existing behavior, unchanged — the caller has nothing usable and
+# must bail). 2 is "the page cap fired" — $all still holds every page
+# collected before the limit, so stdout carries real (if incomplete) data;
+# the caller (poll_once) decides whether to still use it rather than this
+# function silently discarding a partial result.
 collect_threads() {
-  local pr="$1" cursor="" page all="[]" has
+  local pr="$1" cursor="" page all="[]" has pages=0
   while :; do
     page="$(gql_threads_page "$pr" "$cursor")" || return 1
     all="$(jq -n --argjson a "$all" \
       --argjson b "$(printf '%s' "$page" \
         | jq '.data.repository.pullRequest.reviewThreads.nodes')" \
       '$a + $b')"
+    pages=$((pages + 1))
     has="$(printf '%s' "$page" \
       | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
     [[ "$has" != "true" ]] && break
+    if [[ "$pages" -ge "$COLLECT_THREADS_MAX_PAGES" ]]; then
+      printf '%s' "$all"
+      return 2
+    fi
     cursor="$(printf '%s' "$page" \
       | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
   done
@@ -504,11 +560,67 @@ emit() {
   jq -c -n --arg event "$1" --argjson payload "$payload" '{event:$event} + $payload'
 }
 
+# Kill $1 and every descendant of it, not just $1 itself. A plain
+# `kill "$pid"` only reaches the direct child — any subprocess IT forked
+# (git spawns a transport helper like git-remote-https, or ssh, for the
+# actual network I/O) survives as an untracked orphan that keeps running
+# after run_with_timeout has already "returned". Verified empirically: a
+# fake `git fetch` that forked a hung child left that child alive well
+# after a plain single-PID kill claimed success — see task-5-report.md for
+# the before/after transcripts. macOS has no `setsid`, and giving the
+# backgrounded job its own process group via `set -m` turned out to depend
+# on how many process layers sit between run_with_timeout and the actual
+# hang (verified NOT reliable across that variation) — so this walks the
+# process tree explicitly with `pgrep -P` instead of trusting group
+# semantics.
+kill_tree() {
+  local pid="$1" sig="${2:-TERM}" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child" "$sig"
+  done
+  kill "-$sig" "$pid" 2>/dev/null
+}
+
+# Portable timeout wrapper: macOS ships no `timeout(1)` by default (GNU
+# coreutils' `gtimeout` is opt-in via Homebrew), so this backgrounds the
+# command and polls `kill -0` on its pid instead of assuming a `timeout`
+# binary exists. Verified to actually return on a hang, not just in theory:
+# `run_with_timeout 1 sleep 30` returns (killing the sleep) in ~1-2s with
+# exit 124, and the whole process tree — including a fake `git fetch` that
+# itself forked a hung child — is confirmed gone afterward, not just the
+# direct child. See task-5-report.md for the transcripts. `wait "$pid"`
+# after the loop exits normally picks up the command's real exit status on
+# the non-timeout path.
+run_with_timeout() {
+  local secs="$1"; shift
+  "$@" &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$waited" -ge "$secs" ]]; then
+      kill_tree "$pid" TERM
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+}
+
+GIT_FETCH_TIMEOUT_SECS="${PR_REVIEW_GIT_FETCH_TIMEOUT:-15}"
+
 # The remote SHA, once origin/<branch> contains local HEAD. Replies must cite a
 # commit that actually exists on the remote, so RESPOND waits on this.
 detect_push() {
   local branch="$1" state="$2" remote last
-  git fetch origin "$branch" --quiet 2>/dev/null
+  # GIT_TERMINAL_PROMPT=0 (exported near the top of this file) stops a
+  # missing-credential prompt; this timeout is defense-in-depth against a
+  # plain network hang (dead TCP connection, black-holed route) that has
+  # nothing to do with credentials. Exit status is deliberately ignored, same
+  # as before this wrapper existed — a failed/timed-out fetch just means
+  # `git rev-parse origin/$branch` below reflects whatever the last
+  # successful fetch left behind, not a hard error.
+  run_with_timeout "$GIT_FETCH_TIMEOUT_SECS" git fetch origin "$branch" --quiet 2>/dev/null
   remote="$(git rev-parse "origin/$branch" 2>/dev/null)" || return 0
   last="$(printf '%s' "$state" | jq -r '.lastPushedSha // ""')"
   [[ "$remote" == "$last" ]] && return 0
@@ -537,7 +649,7 @@ detect_push() {
 # supervisor reads as a clean shutdown.
 poll_once() {
   local pr="$1" state state_before decisions findings fresh reviews issues ood checks sha
-  local pushed pushed_at e reviews_ok issues_ok
+  local pushed pushed_at e reviews_ok issues_ok collect_threads_rc
   local -a events=()
 
   state="$(state_read "$pr")" || {
@@ -547,8 +659,20 @@ poll_once() {
   # compares against this, not against `state` mid-mutation.
   state_before="$state"
 
-  findings="$(collect_threads "$pr" | shape_findings)" || {
-    emit_error_once "collect_threads failed"; return 1; }
+  # `set -uo pipefail` makes this pipeline's status the collect_threads exit
+  # code whenever shape_findings itself succeeds (verified against bash
+  # 3.2.57 — pipefail surfaces the one non-zero stage even when it's not the
+  # rightmost). rc 1 = outright failure, nothing usable. rc 2 = the page cap
+  # fired; $findings is still a valid (if incomplete) parse of whatever
+  # collect_threads managed to gather, so this poll continues rather than
+  # discarding real data — see collect_threads.
+  findings="$(collect_threads "$pr" | shape_findings)"
+  collect_threads_rc=$?
+  if [[ "$collect_threads_rc" -eq 1 ]]; then
+    emit_error_once "collect_threads failed"; return 1
+  elif [[ "$collect_threads_rc" -ge 2 ]]; then
+    emit_error_once "collect_threads: pagination limit ($COLLECT_THREADS_MAX_PAGES pages) exceeded; returning partial results"
+  fi
   decisions="$(decisions_read "$pr")"
   fresh="$(unseen_findings "$findings" "$decisions")"
 
@@ -780,9 +904,16 @@ poll_once() {
               + ([$nd[] | {((.id|tostring) + ":" + (.updatedAt // "")): true}] | add // {}))}')"
   fi
 
-  # Checks — emit only when the classification CHANGES and is red.
-  if [[ "$(printf '%s' "$checks" | jq -cS '.')" \
-     != "$(printf '%s' "$state" | jq -cS '.checks // null')" ]] \
+  # Checks — emit only when `.red` itself changes, not the whole
+  # {red,pending} tuple. `.pending` legitimately counts down on its own
+  # (5->4->3->0) while a single failing check stays failing throughout —
+  # comparing the full tuple read each of those as a distinct transition,
+  # measured at 4 identical notifications for one unchanged failure during
+  # an ordinary CI run. `$state` still holds the PRE-POLL `.checks` here:
+  # nothing above this line writes it (the write is further down), matching
+  # CHECKS_CLEAR's use of `$state_before.checks.red` just below.
+  if [[ "$(printf '%s' "$checks" | jq -r '.red')" \
+     != "$(printf '%s' "$state" | jq -r '.checks.red // 0')" ]] \
      && printf '%s' "$checks" | jq -e '.red > 0' >/dev/null; then
     events+=("CHECKS_RED|$(printf '%s' "$checks" | jq -c '.')")
   fi
@@ -864,10 +995,26 @@ seed_push_state() {
 }
 
 main() {
-  local pr="${1:-}" branch
+  local pr="${1:-}" branch sha
   [[ -z "$pr" ]] && { printf 'usage: pr-review-watch.sh <pr-number>\n' >&2; exit 2; }
   branch="$(git rev-parse --abbrev-ref HEAD)"
+
+  # A bad PR number (typo, wrong repo, closed/deleted PR) comes back from
+  # GitHub as `repository.pullRequest: null` with HTTP 200 and `gh` exit 0 —
+  # nothing here fails loudly. Left unchecked, head_sha's `-r` on that null
+  # yields the literal string "null", the loop below polls a PR that will
+  # never produce threads/reviews/checks for, and NOTHING is ever emitted:
+  # a silently idling monitor indistinguishable from a quiet, healthy PR.
+  # Fail loudly here instead, before a single background poll is armed.
+  sha="$(head_sha "$pr")"
+  if ! validate_head_sha "$sha"; then
+    printf 'pr-review-watch: PR #%s has no resolvable head SHA (got %s) — check the PR number and `gh auth status`\n' \
+      "$pr" "$sha" >&2
+    exit 2
+  fi
+
   state_init "$pr" "$branch"
+  state_refresh_branch "$pr" "$branch"
   seed_push_state "$pr" "$branch"
 
   printf 'pr-review-watch: watching PR #%s every %ss\n' "$pr" "$POLL_INTERVAL" >&2

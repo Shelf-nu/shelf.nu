@@ -776,6 +776,200 @@ assert_eq "1" "$(emit_error_once "different" | wc -l | tr -d ' ')" \
   "a distinct error is still reported"
 LAST_ERROR=""
 
+# ============================================================================
+# Round A2 hardening — items 1-5 from the follow-up review. Each of these
+# five is a SILENT failure mode: the watcher is a background monitor whose
+# stdout is a chat notification stream, so a hang or a missed transition
+# emits nothing and is indistinguishable from a quiet, healthy PR.
+#
+# Every override below is scoped inside its own `$( … )` subshell, matching
+# the WITHHELD pattern above — never a bare top-level redefinition followed
+# by `unset -f`, which cannot "restore" a shadowed function (it deletes it
+# outright, breaking every LATER call that needs the real implementation).
+# ============================================================================
+
+describe "pr-review-watch: collect_threads pagination guard (item 1)"
+
+# A misbehaving API returning hasNextPage:true with a repeating cursor must
+# not spin collect_threads — and so the whole poll loop — forever. Every
+# call returns exactly one thread and claims another page always follows.
+gql_threads_page_infinite() {
+  jq -n '{
+    data: { repository: { pullRequest: { headRefOid: "deadbeef",
+      reviewThreads: {
+        pageInfo: { hasNextPage: true, endCursor: "same-cursor-always" },
+        nodes: [ { id: "PRRT_infinite", isResolved: false, isOutdated: false,
+                   path: "a.ts", line: 1,
+                   comments: { nodes: [ { id: "c1", databaseId: 1,
+                     author: { login: "chatgpt-codex-connector" },
+                     body: "x", createdAt: "2026-01-01T00:00:00Z" } ] } } ]
+      } } } }
+  }'
+}
+
+# Wrapped in run_with_timeout (item 2's own primitive) so a REGRESSION of
+# the page cap fails this test loudly (exit 124) instead of hanging the
+# whole suite.
+PAGINATION_JSON="$(
+  COLLECT_THREADS_MAX_PAGES=3
+  gql_threads_page() { gql_threads_page_infinite; }
+  run_with_timeout 5 collect_threads 9001
+)"
+PAGINATION_RC=$?
+
+assert_eq "2" "$PAGINATION_RC" \
+  "collect_threads returns exit code 2 (not 0, not 124/timeout) when the page cap fires"
+assert_json_eq "3" "$PAGINATION_JSON" 'length' \
+  "collect_threads returns exactly the 3 pages collected before giving up — proves it stopped AT the cap"
+
+# poll_once integration: the truncation must not be silently swallowed
+# (an ERROR is emitted) NOR discard the partial data it already has (the
+# findings collected before the cap still get processed as NEW_FINDINGS).
+POLL_PAGINATION="$(
+  COLLECT_THREADS_MAX_PAGES=2
+  gql_threads_page() { gql_threads_page_infinite; }
+  detect_push() { printf ''; }
+  export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+  state_init 5020 "test-branch"
+  run_with_timeout 5 poll_once 5020
+)"
+assert_eq "1" "$(printf '%s\n' "$POLL_PAGINATION" | grep -c '"event":"ERROR"')" \
+  "poll_once emits exactly one ERROR event when the pagination cap fires"
+assert_contains "$POLL_PAGINATION" "pagination limit" \
+  "the ERROR event names the pagination limit, not a generic/unexplained failure"
+assert_eq "1" "$(printf '%s\n' "$POLL_PAGINATION" | grep -c '"event":"NEW_FINDINGS"')" \
+  "poll_once still processes the partial findings collected before the cap, not just errors out"
+
+describe "pr-review-watch: CHECKS_RED keyed on .red alone (item 4)"
+
+# `.pending` legitimately counts down (5->4->3->0) while ONE check stays
+# red throughout an ordinary CI run. Comparing the whole {red,pending}
+# tuple (the pre-fix behavior) read every pending decrement as a fresh
+# transition — measured at 4 identical CHECKS_RED notifications for one
+# unchanged failure. Scoped to its own subshell/PR id so it can't leak a
+# collect_checks override into any other test.
+PENDING_CHURN="$(
+  detect_push() { printf ''; }
+  export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+  state_init 5021 "test-branch"
+  collect_checks() { printf '{"red":1,"pending":5}'; }
+  R1="$(poll_once 5021)"
+  collect_checks() { printf '{"red":1,"pending":4}'; }
+  R2="$(poll_once 5021)"
+  collect_checks() { printf '{"red":1,"pending":3}'; }
+  R3="$(poll_once 5021)"
+  collect_checks() { printf '{"red":1,"pending":0}'; }
+  R4="$(poll_once 5021)"
+  printf 'R1=%s\nR2=%s\nR3=%s\nR4=%s\n' \
+    "$(printf '%s\n' "$R1" | grep -c '"event":"CHECKS_RED"')" \
+    "$(printf '%s\n' "$R2" | grep -c '"event":"CHECKS_RED"')" \
+    "$(printf '%s\n' "$R3" | grep -c '"event":"CHECKS_RED"')" \
+    "$(printf '%s\n' "$R4" | grep -c '"event":"CHECKS_RED"')"
+)"
+
+assert_eq "1" "$(printf '%s\n' "$PENDING_CHURN" | grep '^R1=' | cut -d= -f2)" \
+  "CHECKS_RED fires on the first red observation"
+assert_eq "0" "$(printf '%s\n' "$PENDING_CHURN" | grep '^R2=' | cut -d= -f2)" \
+  "CHECKS_RED does not re-fire when only .pending changes (5->4), same red check"
+assert_eq "0" "$(printf '%s\n' "$PENDING_CHURN" | grep '^R3=' | cut -d= -f2)" \
+  "CHECKS_RED does not re-fire when only .pending changes (4->3)"
+assert_eq "0" "$(printf '%s\n' "$PENDING_CHURN" | grep '^R4=' | cut -d= -f2)" \
+  "CHECKS_RED does not re-fire as .pending drains to 0 with the same red check (the exact bug: 4 notifications for 1 failure)"
+
+describe "pr-review-watch: state_refresh_branch (item 5)"
+
+state_init 5022 "old-branch"
+assert_eq "old-branch" "$(state_read 5022 | jq -r '.branch')" \
+  "sanity: state_init seeds .branch on first creation"
+
+# state_init alone must NOT fix a stale .branch on a resumed state file — it
+# deliberately never clobbers an existing file (so `seen`/pending history
+# survives a resume). This simulates the bug exactly: a state file left
+# over from watching PR 5022 on a DIFFERENT branch keeps the old name.
+state_read 5022 | jq '.round = 5' | state_write 5022
+state_init 5022 "new-branch"
+assert_eq "old-branch" "$(state_read 5022 | jq -r '.branch')" \
+  "state_init alone leaves a stale .branch on a resumed state file (confirms the bug this closes)"
+
+state_refresh_branch 5022 "new-branch"
+assert_eq "new-branch" "$(state_read 5022 | jq -r '.branch')" \
+  "state_refresh_branch corrects the stale .branch"
+assert_eq "5" "$(state_read 5022 | jq -r '.round')" \
+  "state_refresh_branch does not disturb unrelated fields (round preserved)"
+
+describe "pr-review-watch: validate_head_sha (item 3 — unit level)"
+
+validate_head_sha "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c"
+assert_eq "0" "$?" "a real 40-char lowercase-hex SHA is accepted"
+
+validate_head_sha "null"
+assert_eq "1" "$?" \
+  "the literal string \"null\" (GitHub's null pullRequest, HTTP 200, gh exit 0) is rejected"
+
+validate_head_sha ""
+assert_eq "1" "$?" "an empty SHA is rejected"
+
+validate_head_sha "15A4E0A58707A8DB432EBA9AC4E3B5E31D136B7C"
+assert_eq "1" "$?" "an uppercase-hex SHA (git/GitHub never emit one) is rejected defensively"
+
+validate_head_sha "15a4e0a58707a8db432eba9ac4e3b5e31d136b7"
+assert_eq "1" "$?" "a 39-char (truncated) SHA is rejected"
+
+describe "pr-review-watch: main exits loudly on a bad PR number (item 3 — integration)"
+
+# Before this fix: repository.pullRequest comes back null (HTTP 200, gh exit
+# 0) for a bad PR number, head_sha's `-r` renders the literal string "null",
+# and the loop below would poll a PR that can never produce anything —
+# emitting NOTHING, forever, indistinguishable from a quiet healthy PR.
+BAD_PR_OUT="$(
+  {
+    head_sha() { printf 'null'; }
+    main 999999
+  } 2>&1
+)"
+BAD_PR_RC=$?
+
+assert_eq "2" "$BAD_PR_RC" \
+  "main exits 2 (not 0, not hanging in the poll loop) for an unresolvable head SHA"
+assert_contains "$BAD_PR_OUT" "PR #999999" \
+  "the exit message names the offending PR number"
+assert_contains "$BAD_PR_OUT" "head SHA" \
+  "the exit message explains the actual problem instead of failing silently"
+
+describe "pr-review-watch: run_with_timeout (item 2 — the primitive detect_push relies on)"
+
+# git fetch itself is exercised only manually (a real network hang is
+# impractical to simulate deterministically in a unit test — see
+# task-5-report.md for that transcript). This covers the actual timeout
+# PRIMITIVE, using `sleep` as a stand-in for a hung subprocess.
+T0=$(date +%s)
+run_with_timeout 1 sleep 30
+TIMEOUT_RC=$?
+T1=$(date +%s)
+ELAPSED=$((T1 - T0))
+
+assert_eq "124" "$TIMEOUT_RC" \
+  "run_with_timeout returns 124 (matching GNU timeout) when the command hangs past the deadline"
+if [[ "$ELAPSED" -le 10 ]]; then TIMELY="yes"; else TIMELY="no"; fi
+assert_eq "yes" "$TIMELY" \
+  "run_with_timeout actually returns quickly (<=10s) rather than waiting out the full 30s hang"
+
+run_with_timeout 5 true
+assert_eq "0" "$?" "run_with_timeout returns the real exit status on the non-timeout path"
+
+run_with_timeout 5 bash -c 'exit 7'
+assert_eq "7" "$?" "run_with_timeout preserves a non-zero-but-not-a-timeout exit status"
+
+# A plain single-PID kill only reaches the direct child — any subprocess IT
+# forked (git spawns a transport helper for the actual network I/O) survives
+# as an orphan. `bash -c "sleep 40"` mirrors that shape: run_with_timeout's
+# direct child is the wrapper `bash`, and `sleep` is ITS child, one level
+# down — exactly what a single `kill "$pid"` would miss.
+run_with_timeout 1 bash -c "sleep 40"
+sleep 0.5
+assert_eq "0" "$(pgrep -f 'sleep 40' | wc -l | tr -d ' ')" \
+  "run_with_timeout kills the whole process tree, not just the direct child (no orphaned grandchild)"
+
 unset -f detect_push collect_checks
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
