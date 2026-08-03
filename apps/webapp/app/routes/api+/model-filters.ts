@@ -1,17 +1,13 @@
-import type { Prisma } from "@prisma/client";
 import { BookingStatus, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import {
-  bookingDraftVisibilityClause,
-  resolveCustodianScope,
-} from "~/modules/booking/service.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
-  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
 
@@ -89,25 +85,6 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
             ),
         { message: "Invalid booking status" }
       ),
-
-    /**
-     * Opt in to the same custodian restriction the seeding loader applies.
-     *
-     * Set by the "Add to existing booking" dialogs, whose loader runs
-     * `loadBookingsData` → `getBookings({ custodianScope })` for SELF_SERVICE /
-     * BASE callers. Without it, typing replaces their custodian-scoped list with
-     * bookings they do not own, which `validateBookingOwnership` then rejects on
-     * submit — a dead end.
-     *
-     * The asset-index advanced filter does NOT set it, so that surface keeps
-     * seeing the same rows before and after typing.
-     *
-     * This is a request-controlled *toggle*, never a request-controlled *value*:
-     * the ids it restricts to are resolved server-side from the session user, so
-     * it cannot be used to widen or retarget the scope (the hazard documented on
-     * `getMinimalBookings`). It is also a no-op for ADMIN / OWNER.
-     */
-    scopeToCustodian: z.coerce.boolean().optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
@@ -123,9 +100,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, userOrganizations } = await getSelectedOrganization(
-      { userId, request }
-    );
+    const { organizationId, userOrganizations, currentOrganization } =
+      await getSelectedOrganization({ userId, request });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -209,33 +185,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
 
       /**
-       * Callers that opted in get the seeding loader's custodian restriction,
-       * resolved here from the session — see the `scopeToCustodian` docs above.
+       * Standard booking visibility: SELF_SERVICE / BASE users only see
+       * bookings they are custodian of, unless the workspace has switched the
+       * setting on. Same rule and same shape as `command-palette.search.ts`.
+       *
+       * Resolved from the session role plus the organization's settings, never
+       * from a request param, and AND-ed so the search `OR` cannot widen it.
        */
-      if (
-        modelFilters.scopeToCustodian &&
-        isSelfServiceOrBaseRole(
-          resolveEffectiveRole({ userOrganizations, organizationId })
-        )
-      ) {
-        const custodianScope = await resolveCustodianScope({
-          userId,
-          organizationId,
-        });
+      const canSeeAllBookings = resolveCanSeeAllBookings({
+        role: resolveEffectiveRole({ userOrganizations, organizationId }),
+        currentOrganization,
+      });
 
-        const selfBranches: Prisma.BookingWhereInput[] = [
-          { custodianUserId: custodianScope.userId },
-        ];
-
-        if (custodianScope.teamMemberIds.length) {
-          selfBranches.push({
-            custodianTeamMemberId: { in: custodianScope.teamMemberIds },
-          });
-        }
-
-        where.AND.push(
-          selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches }
-        );
+      if (!canSeeAllBookings) {
+        where.AND.push({ custodianUserId: userId });
       }
     }
 

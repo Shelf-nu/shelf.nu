@@ -12622,13 +12622,19 @@ export async function loadBookingsData({
   request,
   organizationId,
   userId,
-  isSelfServiceOrBase,
+  canSeeAllBookings,
   ids,
 }: {
   request: Request;
   organizationId: string;
   userId: string;
-  isSelfServiceOrBase: boolean;
+  /**
+   * Standard booking visibility, from `requirePermission`. Gating on the role
+   * alone ignored the workspace's `selfServiceCanSeeBookings` /
+   * `baseUserCanSeeBookings` overrides, so these pickers stayed restricted even
+   * when the workspace had switched the setting on.
+   */
+  canSeeAllBookings: boolean;
   ids?: string[];
 }): Promise<BookingLoaderResponse> {
   // Get search parameters and pagination settings
@@ -12639,10 +12645,10 @@ export async function loadBookingsData({
   // Fetch bookings with filters. Includes ONGOING/OVERDUE so assets/kits can be
   // added to active bookings (they stay AVAILABLE — progressive checkout), not
   // just to not-yet-started DRAFT/RESERVED ones.
-  // Self-service / base users may only work with their own bookings — resolve
-  // the full scope (user link + every team-member link) so legacy rows aren't
-  // hidden here while showing on the index.
-  const custodianScope = isSelfServiceOrBase
+  // Restricted users may only work with their own bookings — resolve the full
+  // scope (user link + every team-member link) so legacy rows aren't hidden
+  // here while showing on the index.
+  const custodianScope = !canSeeAllBookings
     ? await resolveCustodianScope({ userId, organizationId })
     : undefined;
 

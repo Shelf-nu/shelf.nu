@@ -133,11 +133,20 @@ async function readFilters(response: Response) {
 /** The clause every booking read path AND-s in — drafts are creator-only. */
 const DRAFT_VISIBILITY = clause.buildDraftVisibility("user-1");
 
-/** Points the session at a workspace where the caller holds `role`. */
-function setRole(role: OrganizationRoles) {
+/**
+ * Points the session at a workspace where the caller holds `role`.
+ *
+ * @param role - Caller's role in the workspace.
+ * @param canSeeAllOverride - Workspace override settings, both off by default.
+ */
+function setRole(role: OrganizationRoles, canSeeAllOverride = false) {
   orgMocks.getSelectedOrganization.mockResolvedValue({
     organizationId: ORG_ID,
     userOrganizations: [{ organization: { id: ORG_ID }, roles: [role] }],
+    currentOrganization: {
+      selfServiceCanSeeBookings: canSeeAllOverride,
+      baseUserCanSeeBookings: canSeeAllOverride,
+    },
   });
 }
 
@@ -267,54 +276,45 @@ describe("GET /api/model-filters", () => {
     });
   });
 
-  describe("scopeToCustodian", () => {
+  describe("booking visibility (standard rule)", () => {
     beforeEach(() => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
-      bookingMocks.resolveCustodianScope.mockResolvedValue({
-        userId: "user-1",
-        teamMemberIds: ["tm-1"],
-      });
     });
 
     it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-      "restricts %s callers that opt in to bookings they are custodian of",
+      "restricts %s users to their own bookings when the setting is off",
       async (role) => {
-        setRole(role);
+        setRole(role, false);
 
-        await loader(
-          buildArgs("name=booking&queryKey=name&scopeToCustodian=true")
-        );
+        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
 
         expect(lastWhere().AND).toEqual([
           DRAFT_VISIBILITY,
-          {
-            OR: [
-              { custodianUserId: "user-1" },
-              { custodianTeamMemberId: { in: ["tm-1"] } },
-            ],
-          },
+          { custodianUserId: "user-1" },
         ]);
       }
     );
 
-    it("is a no-op for admins and owners", async () => {
-      setRole(OrganizationRoles.ADMIN);
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "lets %s users see all bookings when the workspace enables it",
+      async (role) => {
+        setRole(role, true);
 
-      await loader(
-        buildArgs("name=booking&queryKey=name&scopeToCustodian=true")
-      );
+        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
 
-      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
-      expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
-    });
+        expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+      }
+    );
 
-    it("leaves callers that do not opt in unscoped (advanced filter)", async () => {
-      setRole(OrganizationRoles.SELF_SERVICE);
+    it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+      "never restricts %s",
+      async (role) => {
+        setRole(role, false);
 
-      await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
 
-      expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
-      expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
-    });
+        expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+      }
+    );
   });
 });

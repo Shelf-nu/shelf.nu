@@ -88,6 +88,44 @@ export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
   );
 }
 
+/**
+ * Whether the caller may see bookings they are not the custodian of.
+ *
+ * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
+ * has switched the corresponding setting on. This is the standard visibility
+ * rule for bookings; every read path that can surface someone else's booking
+ * gates on it (`/bookings`, the command palette, CSV export).
+ *
+ * Exported so callers outside {@link requirePermission} resolve it identically.
+ * A surface that invents its own rule ends up disagreeing with the loader that
+ * seeded it, which is how a picker's list changes the moment a user types.
+ *
+ * @param args.role - Effective role from {@link resolveEffectiveRole}.
+ * @param args.currentOrganization - Workspace whose override settings apply.
+ * @returns `true` when bookings should NOT be restricted to the caller's own.
+ */
+export function resolveCanSeeAllBookings({
+  role,
+  currentOrganization,
+}: {
+  role: OrganizationRoles;
+  currentOrganization: {
+    selfServiceCanSeeBookings: boolean;
+    baseUserCanSeeBookings: boolean;
+  };
+}): boolean {
+  return (
+    // Admin/Owner always can see all
+    !isSelfServiceOrBaseRole(role) ||
+    // SELF_SERVICE can see all if org setting allows
+    (role === OrganizationRoles.SELF_SERVICE &&
+      currentOrganization.selfServiceCanSeeBookings) ||
+    // BASE can see all if org setting allows
+    (role === OrganizationRoles.BASE &&
+      currentOrganization.baseUserCanSeeBookings)
+  );
+}
+
 export async function requirePermission({
   userId,
   request,
@@ -141,15 +179,10 @@ export async function requirePermission({
    * This checks the organization settings permissions overrides for BASE and SELF_SERVICE roles
    * If the user is in a BASE or SELF_SERVICE role, we check if they can see all bookings
    */
-  const canSeeAllBookings =
-    // Admin/Owner always can see all
-    !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeBookings) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeBookings);
+  const canSeeAllBookings = resolveCanSeeAllBookings({
+    role,
+    currentOrganization,
+  });
 
   // Determine if user can see all custody information
   const canSeeAllCustody =
