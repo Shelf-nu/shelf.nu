@@ -6,6 +6,7 @@ import { parseAcceptLanguage } from "intl-parse-accept-language";
 import {
   detectFormatPrefsFromHints,
   formatDate,
+  isValidTimeZone,
   type DetectedFormatPrefs,
   type ResolvedFormatPrefs,
 } from "~/utils/date-format";
@@ -87,6 +88,18 @@ export const getClientHint = (request: Request): ClientHint => ({
 });
 
 /**
+ * The raw `CH-time-zone` cookie value the request carries, or null when absent.
+ * Decoded but NOT validated — callers decide what counts as a usable value.
+ */
+function getTimeZoneCookieValue(request: Request): string | null {
+  const cookieString =
+    typeof document !== "undefined"
+      ? document.cookie
+      : request.headers.get("Cookie") ?? "";
+  return getCookieValue(cookieString, "timeZone");
+}
+
+/**
  * Whether the request actually carries the `CH-time-zone` cookie. Distinguishes
  * a genuine UTC user (cookie present, value "UTC") from the "UTC" FALLBACK that
  * {@link getHints} returns when the cookie is absent — e.g. the first
@@ -95,35 +108,36 @@ export const getClientHint = (request: Request): ClientHint => ({
  * ClientHintCheck first.
  *
  * @param request - the incoming request
- * @returns true when the timezone hint is authoritative (cookie present)
+ * @returns true when the timezone cookie is present (regardless of validity)
  */
 export function hasTimeZoneHint(request: Request): boolean {
-  const cookieString =
-    typeof document !== "undefined"
-      ? document.cookie
-      : request.headers.get("Cookie") ?? "";
-  return getCookieValue(cookieString, "timeZone") !== null;
+  return getTimeZoneCookieValue(request) !== null;
 }
 
 /**
  * Detected prefs for PERSISTENCE (new-user stamping + lazy backfill). Same as
- * {@link detectFormatPrefsFromHints}, EXCEPT `timeZone` is null when the request
- * lacks the CH-time-zone cookie. The "UTC" fallback must never be persisted:
- * once stored it is indistinguishable from a real UTC and permanently blocks the
- * lazy backfill from writing the user's true zone (the fast-path sees a non-null
- * column and returns). Leaving the column null lets the read path resolve from
- * live hints until a real zone arrives, at which point the backfill fills it. The
- * other three fields derive from the accept-language header, which is always
- * present, so they are always safe to persist.
+ * {@link detectFormatPrefsFromHints}, EXCEPT `timeZone` is null unless the request
+ * carries a VALID IANA zone in the CH-time-zone cookie. Both an absent cookie AND
+ * a present-but-MALFORMED one are treated as unknown: `detectFormatPrefsFromHints`
+ * maps a bad cookie to the "UTC" fallback, and persisting that UTC is
+ * indistinguishable from a real UTC — once stored it permanently blocks the lazy
+ * backfill from writing the user's true zone (the fast-path sees a non-null column
+ * and returns). Leaving the column null lets the read path resolve from live hints
+ * until a valid zone arrives, at which point the backfill fills it. The other three
+ * fields derive from the always-present accept-language header, so they are always
+ * safe to persist.
  *
  * @param request - the incoming request
- * @returns detected prefs to store; `timeZone` null when the cookie is absent
+ * @returns detected prefs to store; `timeZone` null when the cookie is absent or invalid
  */
 export function detectFormatPrefsForPersistence(
   request: Request
 ): DetectedFormatPrefs {
   const detected = detectFormatPrefsFromHints(getClientHint(request));
-  return hasTimeZoneHint(request) ? detected : { ...detected, timeZone: null };
+  const rawTimeZone = getTimeZoneCookieValue(request);
+  const timeZoneIsAuthoritative =
+    rawTimeZone !== null && isValidTimeZone(rawTimeZone);
+  return timeZoneIsAuthoritative ? detected : { ...detected, timeZone: null };
 }
 
 /**
