@@ -17,7 +17,9 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
+import { detectFormatPrefsFromHints } from "~/utils/date-format";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -117,12 +119,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * - Throwing an error if the user is already connected to an email account
          * - Linking the user to the correct org if SCIM is configured
          */
+        // Detect the caller's date/time/week/timezone prefs from browser hints;
+        // only the new-user branch of the resolver consumes them.
+        const formatPrefs = detectFormatPrefsFromHints(getClientHint(request));
         const { org } = await resolveUserAndOrgForSsoCallback({
           authSession,
           firstName,
           lastName,
           groups,
           contactInfo,
+          formatPrefs,
         });
 
         // Set the auth session and redirect to the assets page

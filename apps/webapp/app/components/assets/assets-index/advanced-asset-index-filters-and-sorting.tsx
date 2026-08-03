@@ -20,6 +20,7 @@ import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import {
   parseColumnName,
   type Column,
@@ -78,6 +79,9 @@ function AdvancedFilter() {
   const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
 
   const columns = settings.columns as Column[];
+  // Acting user's resolved pref timezone — seeds new date filters with the
+  // user's local "today" rather than the server/UTC day (avoids off-by-one).
+  const { timeZone } = useFormatPrefs();
   const disabled = useDisabled();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -191,7 +195,7 @@ function AdvancedFilter() {
       newCols.push({
         name: firstColumn.name, // Keep the name for proper UI rendering
         operator: operatorsPerType[fieldType][0],
-        value: getDefaultValueForFieldType(firstColumn, customFields),
+        value: getDefaultValueForFieldType(firstColumn, customFields, timeZone),
         type: fieldType,
         isNew: true, // Mark as new/unselected
       });
@@ -295,7 +299,8 @@ function AdvancedFilter() {
                                     operator: operatorsPerType[fieldType][0],
                                     value: getDefaultValueForFieldType(
                                       column,
-                                      customFields
+                                      customFields,
+                                      timeZone
                                     ),
                                     isNew: false,
                                   };
