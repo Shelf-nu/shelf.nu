@@ -4,10 +4,14 @@
  * Pure, dependency-free domain for Shelf's QUANTITY_TRACKED availability math.
  * Zero runtime dependencies; no `@prisma/client`, no database, no React.
  *
- * Distribution: shipped as raw TypeScript `src` (mirrors `@shelf/database`).
- * The webapp consumes it directly — Vite/Vitest/tsc compile the source via
- * `ssr.noExternal` (see `apps/webapp/vite.config.ts`), so there is no build
- * step and no `dist/` to drift. When the companion app (Metro, which cannot
+ * Distribution: shipped as raw TypeScript `src` (mirrors `@shelf/database`), so
+ * there is no build step and no `dist/` to drift. The webapp consumes the
+ * source directly through two independent paths: Vite — and Vitest, which runs
+ * on Vite's SSR pipeline — bundle it because it is listed in `ssr.noExternal`
+ * (see `apps/webapp/vite.config.ts`); TypeScript resolves it via this package's
+ * `exports` `src` entrypoint and type-checks the source through its own module
+ * resolution (`tsc` never reads the Vite config). When the companion app
+ * (Metro, which cannot
  * consume raw TS) is wired to this package in the mobile lane, add a compiled
  * output THEN — do not reintroduce a `prepare` script: it runs during the
  * turbo-pruned Docker `deps` install where the source/tsconfig are absent and
