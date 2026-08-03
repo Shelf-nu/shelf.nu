@@ -6000,6 +6000,8 @@ describe("removeAssets", () => {
     // The booking-overview bulk-remove sends standalone asset ids AND kit ids
     // in ONE call. `asset-standalone` sits on the booking as a plain row
     // (assetKitId null); `asset-in-kit` sits on it via kit-1's AssetKit row.
+    // No `standaloneAssetIds` here on purpose — this covers the inference
+    // fallback used by callers that can't observe per-row selection.
     const mockBooking = {
       id: "booking-1",
       assetIds: ["asset-standalone", "asset-in-kit"],
@@ -6044,6 +6046,57 @@ describe("removeAssets", () => {
     });
   });
 
+  it("removes both rows of an asset booked standalone AND inside a removed kit", async () => {
+    expect.assertions(1);
+
+    // A qty-tracked asset can hold a standalone row AND a kit-driven row on
+    // the same booking (the partial unique indexes allow exactly that). When
+    // the user ticks the standalone row and the kit, both must go — inferring
+    // standalone intent from kit membership would classify the asset as a kit
+    // member only and leave its standalone row attached.
+    const mockBooking = { id: "booking-1", assetIds: ["asset-both"] };
+
+    // why: the shared assetKit.findMany mock only echoes `where.id.in`; this
+    // query filters by kitId/assetId, so the kit-driven row must be supplied.
+    (
+      db.assetKit.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "assetkit-1", assetId: "asset-both" }]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 2 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+      kitIds: ["kit-1"],
+      kits: [{ id: "kit-1", name: "Kit 1" }],
+      // The caller saw the user tick this asset's own row, so it says so
+      // explicitly instead of letting the service infer.
+      standaloneAssetIds: ["asset-both"],
+      assets: [{ id: "asset-both", title: "Asset in both" }],
+    });
+
+    // Both predicates present: the kit-driven row AND the standalone row of
+    // the very same asset.
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        OR: [
+          { assetKitId: { in: ["assetkit-1"] } },
+          { assetId: { in: ["asset-both"] }, assetKitId: null },
+        ],
+      },
+    });
+  });
+
   it("keeps the delete scoped to kit-driven rows when only kits are removed", async () => {
     expect.assertions(1);
 
@@ -6053,6 +6106,8 @@ describe("removeAssets", () => {
     // above must not widen this back into a delete-by-assetId.
     const mockBooking = { id: "booking-1", assetIds: ["asset-in-kit"] };
 
+    // why: the shared assetKit.findMany mock only echoes `where.id.in`; this
+    // query filters by kitId/assetId, so the kit-driven row must be supplied.
     (
       db.assetKit.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValueOnce([{ id: "assetkit-1", assetId: "asset-in-kit" }]);
