@@ -90,6 +90,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import { checkoutSessionsToLogsByAsset } from "./checkout-attribution";
 import {
+  ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
@@ -12481,7 +12482,7 @@ export async function loadBookingsData({
     perPage,
     search,
     userId,
-    statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    statuses: ADDABLE_BOOKING_STATUSES,
     ...(custodianScope && { custodianScope }),
   });
 
