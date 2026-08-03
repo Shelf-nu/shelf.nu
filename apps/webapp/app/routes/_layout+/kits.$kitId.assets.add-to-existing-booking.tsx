@@ -15,6 +15,10 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 
 import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
+import {
   assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
   getExistingBookingDetails,
@@ -272,18 +276,6 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Kits added to
-    // an active booking stay AVAILABLE until purposefully checked out
-    // (progressive checkout).
-    return (
-      !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
-    );
-  }
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -307,6 +299,14 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
+              // Must mirror `isAddableBooking` and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
+              // Keep the typed list inside the same custodian scope
+              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
+              // are not offered bookings that submit would then reject.
+              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel=" Existing Bookings"
@@ -317,7 +317,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}

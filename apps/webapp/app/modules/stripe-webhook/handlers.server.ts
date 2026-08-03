@@ -13,6 +13,7 @@ import { scheduleTrialEndsTomorrowEmail } from "~/modules/addon-trial/scheduler.
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
@@ -575,12 +576,15 @@ export async function handleInvoicePaymentFailed(
     subject: `Unpaid invoice: ${user.email}`,
   });
 
-  // Send user notification (deduplicated)
+  // Send user notification (deduplicated). The due date is formatted with the
+  // billed (recipient) user's resolved prefs.
+  const prefs = await resolveUserFormatPrefsById(user.id, null);
   const { emailsToNotify, customerName, subscriptionName, amountDue, dueDate } =
     await getInvoiceNotificationData({
       customerId,
       invoice: failedInvoice,
       user,
+      prefs,
     });
 
   for (const email of emailsToNotify) {
@@ -787,12 +791,15 @@ export async function handleInvoiceOverdue(
     subject: `Invoice overdue: ${user.email}`,
   });
 
-  // Send user notification (deduplicated)
+  // Send user notification (deduplicated). The due date is formatted with the
+  // billed (recipient) user's resolved prefs.
+  const prefs = await resolveUserFormatPrefsById(user.id, null);
   const { emailsToNotify, customerName, subscriptionName, amountDue, dueDate } =
     await getInvoiceNotificationData({
       customerId,
       invoice: overdueInvoice,
       user,
+      prefs,
     });
 
   for (const email of emailsToNotify) {
@@ -876,6 +883,10 @@ export async function handleTrialWillEnd(
       const hasPaymentMethod = await customerHasPaymentMethod(customerId);
       const trialEndDate = new Date(subscription.trial_end * 1000);
 
+      // Resolve the billed (recipient) user's formatting prefs once for both
+      // addon variants' trial-end date.
+      const prefs = await resolveUserFormatPrefsById(user.id, null);
+
       // Send 3-day warning email
       if (addonType === "audits") {
         void sendAuditTrialEndsSoonEmail({
@@ -883,6 +894,7 @@ export async function handleTrialWillEnd(
           email: user.email,
           hasPaymentMethod,
           trialEndDate,
+          prefs,
         });
       } else {
         void sendBarcodeTrialEndsSoonEmail({
@@ -890,6 +902,7 @@ export async function handleTrialWillEnd(
           email: user.email,
           hasPaymentMethod,
           trialEndDate,
+          prefs,
         });
       }
 
@@ -933,12 +946,15 @@ export async function handleTrialWillEnd(
 
   if (isTrialSubscription) {
     const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+    // Format the trial-end date with the billed (recipient) user's prefs.
+    const prefs = await resolveUserFormatPrefsById(user.id, null);
     void sendTrialEndsSoonEmail({
       firstName: user.firstName,
       email: user.email,
       hasPaymentMethod,
       planName: product?.name || "Shelf",
       trialEndDate: new Date((subscription.trial_end as number) * 1000),
+      prefs,
     });
   }
 

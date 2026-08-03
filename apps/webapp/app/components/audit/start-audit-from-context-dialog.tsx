@@ -9,6 +9,7 @@ import Input from "~/components/forms/input";
 import Icon from "~/components/icons/icon";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
@@ -235,10 +236,10 @@ export function StartAuditFromContextDialog({
                   {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
                 </div>
 
-                <Input
+                <DateTimePicker
+                  mode="datetime"
                   name={zo.fields.dueDate()}
                   label="Due date"
-                  type="datetime-local"
                   error={zo.errors.dueDate()?.message}
                   disabled={isSubmitting}
                   className="mt-4"

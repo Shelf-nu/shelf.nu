@@ -6,6 +6,8 @@ import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { addAssetsToAudit } from "~/modules/audit/service.server";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { badRequest, makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -62,11 +64,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
         role,
       });
 
+      // Acting user's timezone: the select-all set is resolved from the current
+      // date filters, which must truncate the day in the user's tz (avoids an
+      // off-by-one for non-UTC users).
+      const { timeZone } = await resolveUserFormatPrefsById(
+        userId,
+        getClientHint(request)
+      );
+
       assetIds = await resolveAssetIdsForBulkOperation({
         assetIds: directAssetIds,
         organizationId,
         currentSearchParams,
         settings,
+        timeZone,
       });
     } else {
       assetIds = directAssetIds;

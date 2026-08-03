@@ -41,6 +41,12 @@ vitest.mock("~/database/db.server", () => ({
     partialBookingCheckin: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    // why: exportBookingsFromIndexToCsv now resolves the acting user's date
+    // format prefs (resolveUserFormatPrefsById → db.user.findFirst); null →
+    // HARDCODED_DEFAULT_PREFS. These permission tests don't assert on dates.
+    user: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
