@@ -1136,6 +1136,34 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
   });
 });
 
+describe("generateWhereClause - lowStockOnly", () => {
+  const orgId = "test-org-id";
+
+  it("does NOT emit the low-stock predicate when the flag is unset", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("does NOT emit the low-stock predicate when explicitly false", () => {
+    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+    );
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("emits the low-stock predicate when the flag is set", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+    );
+    expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
+    expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
+    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
 describe("buildAdvancedAssetsQuery", () => {
   /** Joins the raw SQL segments; interpolated values render as `?`. */
   function getQuerySqlString(sql: Prisma.Sql): string {

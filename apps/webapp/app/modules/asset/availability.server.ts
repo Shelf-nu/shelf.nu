@@ -63,6 +63,11 @@
 
 import type { Prisma } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import {
+  checkQuantityAvailable,
+  computeAvailability,
+  overCommittedWindows as overCommittedWindowsCore,
+} from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
 import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
 import { checkoutSessionsToLogsByAsset } from "~/modules/booking/checkout-attribution";
@@ -112,17 +117,14 @@ export type {
  * genuine over-commitment, not merely "at capacity"). Empty when the running
  * sum never exceeds `total`.
  *
- * Runs the identical O(n log n) event-sweep as {@link peakConcurrent} — same
- * +qty-at-`from` / −qty-at-`to` events, same tie-break (releases before
- * claims at an identical timestamp, so a booking ending exactly when another
- * begins is never treated as momentarily overlapping) — but instead of
- * tracking a single peak, it walks the timeline in timestamp-grouped batches
- * (every event sharing an exact instant is folded in together before the
- * level is tested) and records the `[from, to)` span of every contiguous
- * stretch where the level exceeds `total`. Adjacent over-committed spans that
- * touch (e.g. two back-to-back bookings that individually exceed `total`)
- * naturally merge into one window, because the level never dips back to
- * `total` or below in between.
+ * The event-sweep itself is owned by `@shelf/quantity-control` — the same
+ * O(n log n) walk as {@link peakConcurrent} (same events, same
+ * releases-before-claims tie-break, same timestamp-grouped batching, same
+ * adjacent-window merging). The package's primitive additionally tags each
+ * window with the `peak` level reached inside it; this module's public
+ * contract has always been `{from, to}` only (and its callers/tests depend on
+ * exactly that shape), so the extra `peak` field is projected away here. The
+ * `from`/`to` boundaries are byte-identical to the package's.
  *
  * @param intervals - committed booking intervals (already filtered to the assets/pool in question)
  * @param total - the asset's total quantity; the threshold intervals must NOT exceed
@@ -132,46 +134,10 @@ export function overCommittedWindows(
   intervals: AvailabilityInterval[],
   total: number
 ): Array<{ from: Date; to: Date }> {
-  const events: Array<{ t: number; delta: number }> = [];
-  for (const { from, to, qty } of intervals) {
-    events.push({ t: from.getTime(), delta: qty });
-    events.push({ t: to.getTime(), delta: -qty });
-  }
-  // Same tie-break as peakConcurrent: releases (−) before claims (+) at an
-  // identical timestamp.
-  events.sort((a, b) => a.t - b.t || a.delta - b.delta);
-
-  const windows: Array<{ from: Date; to: Date }> = [];
-  let running = 0;
-  // Timestamp (ms) the current over-committed window started, or `null` when
-  // the running level is currently at-or-below `total`.
-  let overSince: number | null = null;
-
-  let i = 0;
-  while (i < events.length) {
-    const t = events[i].t;
-    // Fold in every event sharing this exact instant before testing the
-    // level — the level for "at `t` and onward until the next distinct
-    // timestamp" only makes sense once all same-instant releases/claims are
-    // applied together (matches the interval model's end-exclusive `to`).
-    while (i < events.length && events[i].t === t) {
-      running += events[i].delta;
-      i++;
-    }
-
-    if (running > total) {
-      if (overSince === null) overSince = t;
-    } else if (overSince !== null) {
-      windows.push({ from: new Date(overSince), to: new Date(t) });
-      overSince = null;
-    }
-  }
-
-  // Not defensively closed: every interval contributes a matching +qty/−qty
-  // event pair, so the running sum always returns to 0 (≤ total, since
-  // `total` is never negative) by the final event — `overSince` is always
-  // `null` again once the loop above finishes.
-  return windows;
+  return overCommittedWindowsCore(intervals, total).map(({ from, to }) => ({
+    from,
+    to,
+  }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -467,11 +433,19 @@ export async function getAssetAvailability({
     // add-to-existing) stays CONSERVATIVE: subtract every active commitment,
     // including checked-out ONGOING/OVERDUE units.
     const reserved = window ? peakConcurrent(intervals) : allActiveRemaining;
-    const physicalAvailable = total - inCustody - inKits - checkedOut;
-    // Deliberately NOT `physicalAvailable - reserved` — that would subtract
-    // `checkedOut` a second time. ONGOING/OVERDUE occupancy is already fully
+    // Signed headline figures come from the pure package formula:
+    //   physicalAvailable = total − inCustody − inKits − checkedOut
+    //   bookable          = total − inCustody − inKits − reservedPeak
+    // `bookable` deliberately subtracts `reserved` (mapped to `reservedPeak`),
+    // NOT `checkedOut` a second time — ONGOING/OVERDUE occupancy is already
     // captured in `reserved`'s windowed sweep (see the module doc).
-    const bookable = total - inCustody - inKits - reserved;
+    const { physicalAvailable, bookable } = computeAvailability({
+      total,
+      inCustody,
+      inKits,
+      reservedPeak: reserved,
+      checkedOut,
+    });
 
     return {
       total,
@@ -823,10 +797,15 @@ export async function getAssetAvailabilityBatch(
       const reserved = window
         ? peakConcurrent(intervalsByAsset.get(assetId) ?? [])
         : allActiveRemainingByAsset.get(assetId) ?? 0;
-      const physicalAvailable = total - inCustody - inKits - checkedOut;
-      // Deliberately NOT `physicalAvailable - reserved` — see the singular
-      // primitive's matching comment; avoids double-subtracting `checkedOut`.
-      const bookable = total - inCustody - inKits - reserved;
+      // Same pure package formula as the singular primitive — `bookable`
+      // subtracts `reserved` (as `reservedPeak`), never `checkedOut` twice.
+      const { physicalAvailable, bookable } = computeAvailability({
+        total,
+        inCustody,
+        inKits,
+        reservedPeak: reserved,
+        checkedOut,
+      });
 
       result.set(assetId, {
         total,
@@ -1092,13 +1071,24 @@ export async function assertAssetQuantityAvailable({
     db: tx,
   });
 
+  // The verdict (allowed vs oversubscribed) comes from the pure package guard.
   // `bookable` EXCLUDES this booking (via `excludeBookingId`), so it is the
   // ABSOLUTE maximum this booking may hold given every OTHER overlapping
   // commitment — the full requested amount competes against it, not just the
   // delta. Comparing the delta (`requested − current > bookable`) would
   // double-count this booking's own headroom and allow it to grow to
-  // `current + bookable`, oversubscribing the pool by `current` units.
-  if (requestedQuantity > bookable) {
+  // `current + bookable`, oversubscribing the pool by `current` units. The
+  // thrown message + `additionalData` stay app-side so the exact
+  // (webapp-specific) shortfall copy `buildInsufficientStockMessage` produces
+  // is preserved — the package's own message differs and is deliberately unused.
+  const verdict = checkQuantityAvailable({
+    requestedQuantity,
+    currentQuantity,
+    bookable,
+    assetTitle,
+    unitOfMeasure,
+  });
+  if (!verdict.ok) {
     throw new ShelfError({
       cause: null,
       title: "Insufficient availability",
@@ -1231,12 +1221,6 @@ export async function assertAssetQuantitiesAvailable(
   const shortfalls: AssetQuantityShortfall[] = [];
 
   for (const item of items) {
-    const current = item.currentQuantity ?? 0;
-    // A reduction (or no-op) against this row's own prior quantity can never
-    // oversubscribe the pool → always allowed, without even touching
-    // `bookable` — mirrors the singular guard's #2725 recovery rule.
-    if (item.requestedQuantity <= current) continue;
-
     // An asset id the batch read couldn't resolve (should not happen for an
     // id the caller validated itself, but this primitive makes no such
     // assumption) is treated as zero bookable — the conservative reading,
@@ -1245,10 +1229,22 @@ export async function assertAssetQuantitiesAvailable(
     const bookable = availability?.bookable ?? 0;
     const total = availability?.total ?? 0;
 
-    // `bookable` already EXCLUDES this booking (via `excludeBookingId`), so —
-    // exactly as in the singular guard — the full requested amount competes
-    // against it, not just the delta over `current`.
-    if (item.requestedQuantity > bookable) {
+    // Per-item verdict from the pure package guard, same directional rule as
+    // the singular guard: a reduction/no-op against this row's own prior
+    // quantity is always allowed (the #2725 recovery, without even touching
+    // `bookable`), and — since `bookable` already EXCLUDES this booking (via
+    // `excludeBookingId`) — an increase competes against the full pool, not
+    // just the delta over `current`. `currentQuantity` defaults to `0` inside
+    // the package guard, so a brand-new booking's item is checked absolutely.
+    // The aggregated shortfall message stays app-side (its webapp-specific
+    // multi-line copy differs from the package's), so `verdict.message` is
+    // deliberately unused — only the ok/not-ok decision is taken from it.
+    const verdict = checkQuantityAvailable({
+      requestedQuantity: item.requestedQuantity,
+      currentQuantity: item.currentQuantity,
+      bookable,
+    });
+    if (!verdict.ok) {
       shortfalls.push({
         assetId: item.assetId,
         assetTitle: item.assetTitle,

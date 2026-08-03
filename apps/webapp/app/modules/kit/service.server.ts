@@ -5622,9 +5622,14 @@ export async function moveAssetKitUnits(
 
       // 2. Lock the asset row for the duration of the tx — serializes
       //    concurrent moves on the same asset (Phase 2 pattern).
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
-      // Defence-in-depth: lock helper doesn't org-scope; assert again.
+      // Defence-in-depth: the lock is now org-scoped (a foreign-org id 404s at
+      // the lock, taking no lock), so this re-check is belt-and-braces.
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
           cause: null,
