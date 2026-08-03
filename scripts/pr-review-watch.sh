@@ -10,7 +10,15 @@
 # Emits:  one-line JSON events on stdout, consumed by the Monitor tool.
 #         Stdout is deliberately terse — every line becomes a chat
 #         notification, so the full payload goes to the state file instead.
-# State:  $(git rev-parse --git-common-dir)/pr-review-loop/<pr>.json
+# State:  $(git rev-parse --git-common-dir)/pr-review-loop/<pr>.json — this
+#         script's OWN state, written every poll.
+#
+# Single-writer-per-file: the skill owns a SEPARATE file,
+# .../pr-review-loop/<pr>.decisions.json, holding triage verdicts. This
+# script only ever READS it (decisions_read) — poll_once holds state across
+# four network round trips per poll, so a write from here would silently
+# discard whatever the skill wrote in that window, including reply prose
+# that cannot be recovered. See decisions_read below.
 #
 # @see .claude/skills/pr-review-loop/SKILL.md
 # @see superpowers/2026-07-30-pr-review-loop-design.md
@@ -38,6 +46,10 @@ state_path() { printf '%s/pr-review-loop/%s.json' "$(git_common_dir)" "$1"; }
 
 # Create the state file if absent. Never clobbers an existing one, so
 # re-invoking the loop on the same PR resumes instead of re-triaging.
+#
+# No `seen` / `escalated` here — those are DECISIONS fields, owned and
+# written exclusively by the skill (see decisions_read). This state carries
+# only what the watcher itself computes each poll.
 state_init() {
   local p; p="$(state_path "$1")"
   mkdir -p "$(dirname "$p")"
@@ -46,9 +58,9 @@ state_init() {
   # corrupt file forever.
   if [[ -f "$p" ]] && jq -e 'type == "object"' "$p" >/dev/null 2>&1; then return 0; fi
   jq -n --argjson pr "$1" --arg branch "$2" '{
-    pr: $pr, branch: $branch, round: 0, lastPushedSha: null,
-    copilotExpected: true, reviewedHead: {}, seen: {},
-    escalated: [], humanThreads: [], quiescent: false
+    pr: $pr, branch: $branch, round: 0,
+    lastPushedSha: null, lastPushedAt: null,
+    copilotExpected: true, reviewedHead: {}, repostCounts: {}
   }' > "$p"
 }
 
@@ -74,6 +86,28 @@ state_write() {
   mv "$tmp" "$p"
 }
 
+# --- decisions (skill-owned; READ ONLY from here) ---------------------------
+
+decisions_path() { printf '%s/pr-review-loop/%s.decisions.json' "$(git_common_dir)" "$1"; }
+
+# The skill's verdict ledger — `.seen[<fingerprint>]`, `.escalated[]`,
+# `.addressedOutOfDiff`. This script must NEVER write this file (see the
+# file header); decisions_read is its only access to it.
+#
+# Returns a sane empty object when the file is absent or corrupt: a PR
+# nothing has been decided on yet, or a session resumed before the skill's
+# first write. Every reader downstream defaults missing keys
+# (`.seen // {}`, `.escalated // []`), so `{}` is a valid "nothing decided
+# yet" document, not a special case callers need to guard against.
+decisions_read() {
+  local p; p="$(decisions_path "$1")"
+  if [[ -f "$p" ]] && jq -e 'type == "object"' "$p" >/dev/null 2>&1; then
+    cat "$p"
+  else
+    printf '{}'
+  fi
+}
+
 # --- identity --------------------------------------------------------------
 
 normalize_login() { printf '%s' "${1%\[bot\]}"; }
@@ -84,6 +118,36 @@ is_bot() {
     *" $login "*) return 0 ;;
   esac
   return 1
+}
+
+# --- time --------------------------------------------------------------------
+
+# Normalize an ISO 8601 timestamp — already Z-suffixed, or carrying a numeric
+# offset — to a Z-suffixed UTC string.
+#
+# jq's `fromdateiso8601` requires the literal "Z" suffix and cannot parse a
+# numeric offset AT ALL (verified against jq 1.7.1: it rejects both "+03:00"
+# and even "+00:00", and `strptime(...."%z")` fares no better). git emits the
+# COMMITTER'S OWN offset, never "Z" — so anything reaching jq's date
+# functions has to be normalized in bash first, before it ever gets there.
+iso8601_to_utc_z() {
+  local ts="$1" compact
+  [[ -z "$ts" ]] && { printf ''; return 0; }
+  case "$ts" in
+    *Z) printf '%s' "$ts"; return 0 ;;
+  esac
+  # BSD `date`'s %z does not accept a colon in the offset ("-07:00"); strip
+  # it to "-0700" before parsing.
+  compact="${ts%:??}${ts: -2}"
+  TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%S%z' "$compact" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+    || printf ''
+}
+
+# UTC, Z-suffixed ISO 8601 timestamp for a commit's committer date.
+git_commit_iso_utc() {
+  local ts
+  ts="$(git show -s --format=%cI "$1" 2>/dev/null)" || return 0
+  iso8601_to_utc_z "$ts"
 }
 
 # --- fingerprinting --------------------------------------------------------
@@ -225,15 +289,36 @@ out_of_diff_reviews() {
 # Which commit each bot has reviewed. Mechanism differs per bot (verified
 # against #2770): Codex publishes "**Reviewed commit:** `<sha>`"; CodeRabbit
 # and Copilot publish nothing and fall back to submitted_at > push time.
+#
+# $since is normalized (iso8601_to_utc_z) and the comparison is NUMERIC
+# (fromdateiso8601), not lexicographic. Lexicographic `>` on ISO 8601 only
+# sorts correctly when both sides share the exact same format; a raw git
+# offset ("...-07:00") compared against GitHub's "...Z" sorts on the raw
+# digit at the point they diverge, not on chronological order — a review
+# made HOURS BEFORE a west-of-UTC push could read as after it.
+#
+# `. as $acc` before the value expression is required, not stylistic: `|`
+# rebinds `.` for the REST of the expression it starts, including anything
+# after `//`. Without capturing the accumulator first, `.[$r.user.login]` in
+# the else-branch below would index whatever `($r.body // "") | capture(...)`
+# left `.` pointing at (the review BODY STRING) instead of the accumulator —
+# "Cannot index string with string" — the moment a review is genuinely
+# older than $since and the else-branch actually runs (every existing
+# fixture's reviews postdate $since, so this went unexercised until a test
+# with a genuinely-earlier review caught it).
 reviewed_head_map() {
-  local reviews="$1" since="$2"
-  printf '%s' "$reviews" | jq --arg since "$since" '
-    reduce (.[] | select(.user.login | endswith("[bot]"))) as $r ({};
-      . + {
-        ($r.user.login):
-          (($r.body // "") | capture("\\*\\*Reviewed commit:\\*\\* `(?<sha>[0-9a-f]+)`").sha
-           // (if $r.submitted_at > $since then "timestamp" else .[$r.user.login] end))
-      })
+  local reviews="$1" since="$2" since_z
+  since_z="$(iso8601_to_utc_z "$since")"
+  printf '%s' "$reviews" | jq --arg since "$since_z" '
+    (try ($since | fromdateiso8601) catch 0) as $since_epoch
+    | reduce (.[] | select(.user.login | endswith("[bot]"))) as $r ({};
+        . as $acc
+        | . + {
+            ($r.user.login):
+              (($r.body // "") | capture("\\*\\*Reviewed commit:\\*\\* `(?<sha>[0-9a-f]+)`").sha
+               // (if ($r.submitted_at | fromdateiso8601) > $since_epoch
+                   then "timestamp" else $acc[$r.user.login] end))
+          })
     | with_entries(select(.value != null))'
 }
 
@@ -257,19 +342,61 @@ collect_checks() {
 
 # --- dedup -------------------------------------------------------------------
 
-# Findings with no decided verdict in state.
+# Findings with no decided verdict in the DECISIONS document (skill-owned —
+# see decisions_read — never this script's own state).
 #
 # Suppression covers EVERY decided verdict, not just rejections. A bot
 # re-flagging something already fixed is at least as common as one re-flagging
 # something rejected, and re-triaging it burns a whole round to reach the same
 # answer. This is what stops the fix -> re-review -> re-post cycle.
+#
+# Escalated findings are ALSO excluded: they have no verdict (that's the
+# point — a human has to look), but re-dispatching a triager for the same
+# escalated finding every round is exactly as wasteful as re-triaging a
+# decided one.
 unseen_findings() {
-  jq -n --argjson f "$1" --argjson s "$2" \
-    '[$f[] | select(($s.seen[.fingerprint] // null) == null)]'
+  jq -n --argjson f "$1" --argjson d "$2" \
+    '[$f[] | select((($d.seen // {})[.fingerprint] // null) == null)
+           | select(.fingerprint as $fp
+                     | (($d.escalated // []) | map(.fingerprint) | index($fp)) == null)]'
 }
 
+# Reads THIS script's OWN map. Repost counts cannot live in the skill's
+# `.seen` — only one component may write a given file — so the watcher keeps
+# its own `repostCounts` map in state instead.
 repost_count() {
-  printf '%s' "$2" | jq -r --arg fp "$1" '.seen[$fp].reposts // 0'
+  printf '%s' "$2" | jq -r --arg fp "$1" '(.repostCounts // {})[$fp].count // 0'
+}
+
+# The next repostCounts map: given the CURRENT one, this poll's full findings
+# (not just fresh ones — a decided finding must still be seen to detect a
+# repost), and the skill's decisions document.
+#
+# Grouped by fingerprint and compared against the ACCUMULATOR, not a frozen
+# snapshot of decisions/state. Comparing each finding individually against a
+# snapshot breaks the moment two threads share one fingerprint — routine,
+# since fingerprints deliberately ignore line numbers — because whichever
+# thread isn't the one currently on record always looks "new", so the
+# counter ticks on EVERY poll, alternating which thread "wins". Grouping
+# means a tick fires only once the ORIGINALLY DECIDED thread id is no longer
+# among the currently open threads for that fingerprint (an actual close +
+# repost), and the result then stays stable no matter how many threads
+# coexist under it.
+advance_repost_counts() {
+  local state="$1" findings="$2" decisions="$3"
+  jq -n --argjson s "$state" --argjson f "$findings" --argjson d "$decisions" '
+    ($s.repostCounts // {}) as $counts
+    | reduce ($f | group_by(.fingerprint)[]
+              | select((($d.seen // {})[.[0].fingerprint]) != null)) as $g
+        ($counts;
+          ($g[0].fingerprint) as $fp
+          | (.[$fp].threadId // $d.seen[$fp].threadId) as $current
+          | if ([$g[].threadId] | index($current)) then .
+            else .[$fp] = {
+                   count: ((.[$fp].count // 0) + 1),
+                   threadId: ($g[0].threadId)
+                 }
+            end)'
 }
 
 # --- events ------------------------------------------------------------------
@@ -333,7 +460,7 @@ detect_push() {
 # non-numeric value aborts the whole script with exit status 0, which a
 # supervisor reads as a clean shutdown.
 poll_once() {
-  local pr="$1" state findings fresh reviews issues ood checks sha pushed pushed_at e
+  local pr="$1" state decisions findings fresh reviews issues ood checks sha pushed pushed_at e
   local -a events=()
 
   state="$(state_read "$pr")" || {
@@ -341,7 +468,8 @@ poll_once() {
 
   findings="$(collect_threads "$pr" | shape_findings)" || {
     emit_error_once "collect_threads failed"; return 1; }
-  fresh="$(unseen_findings "$findings" "$state")"
+  decisions="$(decisions_read "$pr")"
+  fresh="$(unseen_findings "$findings" "$decisions")"
 
   reviews="$(collect_reviews "$pr")" || reviews="[]"
   issues="$(collect_issue_comments "$pr")" || issues="[]"
@@ -359,14 +487,15 @@ poll_once() {
     state="$(printf '%s' "$state" | jq '.copilotExpected = true')"
   fi
 
-  # Push — guarded by lastPushedSha, which main seeds so the first poll of an
-  # already-pushed branch does not announce a push that never happened.
+  # Push — guarded by lastPushedSha, which seed_push_state seeds so the first
+  # poll of an already-pushed branch does not announce a push that never
+  # happened.
   pushed="$(detect_push "$(printf '%s' "$state" | jq -r '.branch')" "$state")"
   if [[ -n "$pushed" ]]; then
     # Record WHEN as well as WHAT: reviewed_head_map needs a timestamp to
     # decide whether a bot's review post-dates the push, and CodeRabbit and
     # Copilot publish no reviewed-SHA marker at all.
-    pushed_at="$(git show -s --format=%cI "$pushed" 2>/dev/null || printf '')"
+    pushed_at="$(git_commit_iso_utc "$pushed")"
     state="$(printf '%s' "$state" \
       | jq --arg sha "$pushed" --arg at "$pushed_at" \
            '.lastPushedSha = $sha | .lastPushedAt = $at')"
@@ -382,9 +511,10 @@ poll_once() {
     '$s + {reviewedHead: $rh}')"
 
   # Findings — announce only fingerprints not already announced. `announced`
-  # is separate from `seen`: `seen` holds DECIDED verdicts, `announced` holds
-  # "the human has been told", which is what stops re-notification while a
-  # finding sits undecided between rounds.
+  # (in THIS script's state) is separate from `seen` (in the skill's
+  # decisions): `seen` holds DECIDED verdicts, `announced` holds "the human
+  # has been told", which is what stops re-notification while a finding sits
+  # undecided between rounds.
   local newbot newhuman
   newbot="$(jq -n --argjson f "$fresh" --argjson s "$state" \
     '[$f[] | select(.kind=="bot") | select((($s.announced // {})[.fingerprint]) == null)]')"
@@ -403,23 +533,20 @@ poll_once() {
   # fingerprint, by design) would stay silent forever while `seen` is still
   # empty, i.e. while nothing has actually been judged. Rebuilding it each
   # poll keeps still-pending findings quiet and lets a vanished-and-returned
-  # finding speak again. Decided findings are suppressed by `seen`, upstream.
+  # finding speak again. Decided findings are suppressed by decisions' `seen`,
+  # upstream, in unseen_findings.
   state="$(jq -n --argjson s "$state" --argjson f "$fresh" \
     '$s + {announced: ([$f[] | {(.fingerprint): true}] | add // {})}')"
 
-  # A DECIDED finding re-posted by the bot under a NEW thread id. Same
-  # fingerprint + different thread = a genuine re-post; matching on thread id
-  # too is what stops this ticking up merely because one thread stays open
-  # across polls. The skill's three-repost escape hatch is the runaway guard
-  # that replaced the round cap, and it reads this counter — without it a
-  # re-posting bot gets auto-replied to forever.
-  state="$(jq -n --argjson s "$state" --argjson f "$findings" '
-    $s + {seen: (reduce ($f[]
-                 | select((($s.seen // {})[.fingerprint]) != null)
-                 | select(.threadId != ($s.seen[.fingerprint].threadId)))
-                 as $x (($s.seen // {});
-                   .[$x.fingerprint].reposts  = ((.[$x.fingerprint].reposts // 0) + 1)
-                 | .[$x.fingerprint].threadId = $x.threadId))}')"
+  # A DECIDED finding re-posted by the bot under a NEW thread id. The skill's
+  # three-repost escape hatch is the runaway guard that replaced the round
+  # cap, and it reads this counter — without it a re-posting bot gets
+  # auto-replied to forever. See advance_repost_counts for why this is
+  # grouped by fingerprint rather than compared per-finding against a frozen
+  # snapshot.
+  state="$(jq -n --argjson s "$state" \
+    --argjson rc "$(advance_repost_counts "$state" "$findings" "$decisions")" \
+    '$s + {repostCounts: $rc}')"
 
   # Out-of-diff findings get their OWN event, deduped by review id.
   #
@@ -507,26 +634,45 @@ poll_once() {
 
 # --- entrypoint ------------------------------------------------------------
 
+# The remote-tracking ref for a branch, or empty if it doesn't exist yet (the
+# branch hasn't been pushed). Isolated into its own function, matching
+# detect_push/collect_checks, so tests can substitute it as a seam instead of
+# touching real git refs.
+resolve_remote_ref() {
+  # --verify --quiet is required: a bare `git rev-parse origin/<branch>`
+  # ECHOES ITS UNRESOLVED ARGUMENT on stdout when the ref is missing (the
+  # normal case for a branch not yet pushed), so callers would receive the
+  # literal string "origin/<branch>" instead of emptiness.
+  git rev-parse --verify --quiet "origin/$1" 2>/dev/null || true
+}
+
+# Seed lastPushedSha AND lastPushedAt, once, WITHOUT emitting — main() calls
+# this before the poll loop starts.
+#
+# At loop start the branch is normally already pushed. Leaving lastPushedSha
+# null makes the FIRST poll announce a PUSHED that never happened, which
+# would drive the reply step to post "Fixed in <sha>" before any fix exists.
+# Leaving lastPushedAt unseeded is worse and silent: `$since` then falls back
+# to the 1970 epoch default in poll_once, so on the DOMINANT path — branch
+# already pushed when the loop is armed — every bot review reads as "after"
+# the push. Quiescence condition #1 then passes vacuously: a false clean by
+# default, not an edge case.
+seed_push_state() {
+  local pr="$1" branch="$2" seed seed_at
+  [[ "$(state_read "$pr" | jq -r '.lastPushedSha')" != "null" ]] && return 0
+  seed="$(resolve_remote_ref "$branch")"
+  [[ -z "$seed" ]] && return 0
+  seed_at="$(git_commit_iso_utc "$seed")"
+  state_read "$pr" | jq --arg s "$seed" --arg at "$seed_at" \
+    '.lastPushedSha = $s | .lastPushedAt = $at' | state_write "$pr"
+}
+
 main() {
-  local pr="${1:-}" branch seed
+  local pr="${1:-}" branch
   [[ -z "$pr" ]] && { printf 'usage: pr-review-watch.sh <pr-number>\n' >&2; exit 2; }
   branch="$(git rev-parse --abbrev-ref HEAD)"
   state_init "$pr" "$branch"
-
-  # Seed lastPushedSha WITHOUT emitting. At loop start the branch is normally
-  # already pushed; leaving it null makes the first poll announce a PUSHED
-  # that never happened, which would drive the reply step to post
-  # "Fixed in <sha>" before any fix exists.
-  if [[ "$(state_read "$pr" | jq -r '.lastPushedSha')" == "null" ]]; then
-    # --verify --quiet is required: a bare `git rev-parse origin/<branch>`
-    # ECHOES ITS UNRESOLVED ARGUMENT on stdout when the ref is missing (the
-    # normal case for a branch not yet pushed), so `seed` would be the string
-    # "origin/<branch>" and that non-SHA would be written into the very field
-    # this seeding exists to make trustworthy.
-    seed="$(git rev-parse --verify --quiet "origin/$branch" 2>/dev/null || true)"
-    [[ -n "$seed" ]] && state_read "$pr" \
-      | jq --arg s "$seed" '.lastPushedSha = $s' | state_write "$pr"
-  fi
+  seed_push_state "$pr" "$branch"
 
   printf 'pr-review-watch: watching PR #%s every %ss\n' "$pr" "$POLL_INTERVAL" >&2
   while :; do

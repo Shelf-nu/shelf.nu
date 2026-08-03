@@ -47,6 +47,25 @@ assert_json_eq() {
 
 describe() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
+# Test-only helper simulating what the SKILL does when it records a verdict.
+# The script under test must never write decisions.json itself — decisions_read
+# is its only access to that file (single-writer-per-file) — so this exists
+# purely to seed fixtures for these tests.
+#
+# Atomic tmp+mv, matching state_write's pattern — NOT optional here. A plain
+# `cat > "$p"` truncates the target the instant the redirect opens, which
+# races a concurrent `decisions_read "$pr" | jq ... | decisions_write "$pr"`
+# pipeline: bash starts every stage of a pipe at once, so decisions_read can
+# open the SAME path mid-truncation and read back empty/partial content.
+# Verified empirically — flaky, timing-dependent data loss, not a one-off.
+decisions_write() {
+  local p tmp; p="$(decisions_path "$1")"
+  mkdir -p "$(dirname "$p")"
+  tmp="$(mktemp "${p}.XXXXXX")"
+  cat > "$tmp"
+  mv "$tmp" "$p"
+}
+
 # --- harness self-test ------------------------------------------------------
 describe "harness"
 assert_eq "ok" "ok" "assert_eq compares equal strings"
@@ -253,29 +272,116 @@ TMP_STATE="$(mktemp -d)"; GIT_COMMON_DIR="$TMP_STATE"
 state_init 2770 "test-branch"
 
 FINDINGS="$(collect_threads 2770 | shape_findings)"
-FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
-assert_json_eq "4" "$FRESH" 'length' "all four findings are unseen on a fresh state"
 
-# Record a verdict for the first fingerprint, then re-run.
+# decisions_read must not error before the skill has ever written anything —
+# poll_once depends on a fresh PR reading as "nothing decided yet", not a
+# hard failure.
+assert_eq "{}" "$(decisions_read 2770)" \
+  "decisions_read returns an empty object when no decisions.json exists yet"
+
+FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
+assert_json_eq "4" "$FRESH" 'length' "all four findings are unseen on a fresh decisions doc"
+
+# Record a verdict for the first fingerprint, then re-run. Written to the
+# SKILL's own file via decisions_write (a test-only seam) — this script must
+# never write decisions.json itself.
 FP="$(printf '%s' "$FINDINGS" | jq -r '.[0].fingerprint')"
-state_read 2770 | jq --arg fp "$FP" \
-  '.seen[$fp] = {verdict:"FALSE_POSITIVE", decidedInRound:1, reposts:1}' \
-  | state_write 2770
-FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
+jq -n --arg fp "$FP" '{seen: {($fp): {verdict:"FALSE_POSITIVE", decidedInRound:1}}}' \
+  | decisions_write 2770
+FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
 assert_json_eq "3" "$FRESH" 'length' "a decided fingerprint is not re-triaged"
 
 # A VALID (already-fixed) verdict must ALSO suppress re-triage — a bot
 # re-flagging fixed work is at least as common as one re-flagging a rejection.
 FP2="$(printf '%s' "$FINDINGS" | jq -r '.[1].fingerprint')"
-state_read 2770 | jq --arg fp "$FP2" \
-  '.seen[$fp] = {verdict:"VALID", decidedInRound:1, reposts:1, resolvedSha:"abc1234"}' \
-  | state_write 2770
-FRESH="$(unseen_findings "$FINDINGS" "$(state_read 2770)")"
+decisions_read 2770 | jq --arg fp "$FP2" \
+  '.seen[$fp] = {verdict:"VALID", decidedInRound:1, resolvedSha:"abc1234"}' \
+  | decisions_write 2770
+FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
 assert_json_eq "2" "$FRESH" 'length' "an already-fixed fingerprint is not re-triaged"
 
+# ESCALATE verdicts live in .escalated[], not .seen — and must ALSO suppress
+# re-triage, or the loop re-dispatches a triager for the same finding every
+# round.
+FP3="$(printf '%s' "$FINDINGS" | jq -r '.[2].fingerprint')"
+decisions_read 2770 | jq --arg fp "$FP3" \
+  '.escalated += [{fingerprint:$fp, reason:"security-flavored", round:1}]' \
+  | decisions_write 2770
+FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
+assert_json_eq "1" "$FRESH" 'length' "an escalated fingerprint is not re-dispatched either"
+
+# repost_count reads the WATCHER's OWN map, in state — repostCounts cannot
+# live in the skill's decisions.json, because only one component may write
+# a given file.
+state_read 2770 | jq --arg fp "$FP" '.repostCounts[$fp] = {count:1, threadId:"PRRT_x"}' \
+  | state_write 2770
 assert_eq "1" "$(repost_count "$FP" "$(state_read 2770)")" "repost_count reads the counter"
 assert_eq "0" "$(repost_count "nonexistent" "$(state_read 2770)")" \
   "repost_count is 0 for an unknown fingerprint"
+
+describe "pr-review-watch: repost counter (accumulator, not a frozen snapshot)"
+
+# Regression coverage for the "reposts reducer oscillates" bug: the original
+# implementation compared each finding against a FROZEN document instead of
+# the reduce's own accumulator, so two open threads sharing one fingerprint
+# ticked the counter on EVERY poll, alternating which thread "currently"
+# differs. Three polls is three minutes — enough to trip the skill's
+# three-repost escalation on a healthy, still-open finding.
+DECIDED='{"seen":{"fpX":{"threadId":"PRRT_A","verdict":"FALSE_POSITIVE"}}}'
+
+# Same-fingerprint coexistence is routine — fingerprints deliberately ignore
+# line numbers — and the ORIGINALLY DECIDED thread (A) is still open here,
+# so nothing has actually reposted yet.
+COEXIST='[{"fingerprint":"fpX","threadId":"PRRT_A"},{"fingerprint":"fpX","threadId":"PRRT_B"}]'
+RC1="$(advance_repost_counts '{}' "$COEXIST" "$DECIDED")"
+assert_eq "0" "$(printf '%s' "$RC1" | jq -r '.fpX.count // 0')" \
+  "a decided thread still open alongside a same-fingerprint sibling is not a repost"
+
+RC2="$(advance_repost_counts "$(jq -n --argjson rc "$RC1" '{repostCounts:$rc}')" "$COEXIST" "$DECIDED")"
+assert_eq "0" "$(printf '%s' "$RC2" | jq -r '.fpX.count // 0')" \
+  "the same coexistence on the next poll still does not tick — the oscillation this guards against"
+
+# The decided thread closes and only the sibling remains — a genuine repost.
+CLOSED='[{"fingerprint":"fpX","threadId":"PRRT_B"}]'
+RC3="$(advance_repost_counts "$(jq -n --argjson rc "$RC2" '{repostCounts:$rc}')" "$CLOSED" "$DECIDED")"
+assert_eq "1" "$(printf '%s' "$RC3" | jq -r '.fpX.count')" \
+  "the decided thread closing and a new one appearing ticks the counter once"
+
+RC4="$(advance_repost_counts "$(jq -n --argjson rc "$RC3" '{repostCounts:$rc}')" "$CLOSED" "$DECIDED")"
+RC5="$(advance_repost_counts "$(jq -n --argjson rc "$RC4" '{repostCounts:$rc}')" "$CLOSED" "$DECIDED")"
+assert_eq "1" "$(printf '%s' "$RC5" | jq -r '.fpX.count')" \
+  "repeated polls of a now-settled repost do not keep incrementing the counter"
+
+describe "pr-review-watch: UTC-normalized timestamp comparison"
+
+# git emits the COMMITTER'S OWN offset, never "Z" — jq's fromdateiso8601
+# cannot parse a numeric offset at all (verified: it rejects both "+03:00"
+# and even "+00:00", requiring the literal "Z").
+assert_eq "2026-07-30T20:00:00Z" "$(iso8601_to_utc_z "2026-07-30T13:00:00-07:00")" \
+  "iso8601_to_utc_z converts a west-of-UTC offset to the correct UTC instant"
+assert_eq "2026-07-30T18:00:00Z" "$(iso8601_to_utc_z "2026-07-30T23:00:00+05:00")" \
+  "iso8601_to_utc_z converts an east-of-UTC offset to the correct UTC instant"
+assert_eq "2026-07-30T18:00:00Z" "$(iso8601_to_utc_z "2026-07-30T18:00:00Z")" \
+  "iso8601_to_utc_z passes an already-Z timestamp through unchanged"
+
+WEST_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" git commit-tree -m t 'HEAD^{tree}')"
+assert_eq "2026-07-30T20:00:00Z" "$(git_commit_iso_utc "$WEST_SHA")" \
+  "git_commit_iso_utc normalizes a west-of-UTC committer date to Z"
+
+# The bug this replaces: comparing ISO strings LEXICOGRAPHICALLY. A review at
+# 18:00 UTC is genuinely BEFORE a 20:00 UTC push, but "18:00:00Z" sorts
+# GREATER than "13:00:00-07:00" byte-for-byte (the hour digit alone decides
+# it), so the old `$r.submitted_at > $since` read the earlier review as
+# having happened after the push.
+REVIEWS_TZ="$(jq -n '[
+  {user:{login:"coderabbitai[bot]"}, submitted_at:"2026-07-30T18:00:00Z"},
+  {user:{login:"copilot-pull-request-reviewer[bot]"}, submitted_at:"2026-07-30T21:00:00Z"}
+]')"
+RH_TZ="$(reviewed_head_map "$REVIEWS_TZ" "2026-07-30T13:00:00-07:00")"
+assert_eq "null" "$(printf '%s' "$RH_TZ" | jq -r '."coderabbitai[bot]" // "null"')" \
+  "a review genuinely before the push is not read as caught up"
+assert_eq "timestamp" "$(printf '%s' "$RH_TZ" | jq -r '."copilot-pull-request-reviewer[bot]"')" \
+  "a review genuinely after the push is read as caught up"
 
 describe "pr-review-watch: event emission"
 
@@ -371,21 +477,22 @@ poll_once 5007 >/dev/null
 FP="$(state_read 5007 | jq -r '.pending[0].fingerprint')"
 TID="$(state_read 5007 | jq -r '.pending[0].threadId')"
 
-# Mark it decided, recording the thread it was decided on.
-state_read 5007 | jq --arg fp "$FP" --arg tid "$TID" \
-  '.seen[$fp] = {threadId:$tid, verdict:"FALSE_POSITIVE", decidedInRound:1, reposts:0}' \
-  | state_write 5007
+# Mark it decided in the skill's OWN file, recording the thread it was
+# decided on — decisions_write is a test-only seam simulating the skill.
+jq -n --arg fp "$FP" --arg tid "$TID" \
+  '{seen: {($fp): {threadId:$tid, verdict:"FALSE_POSITIVE", decidedInRound:1}}}' \
+  | decisions_write 5007
 
 poll_once 5007 >/dev/null   # same thread still present
-assert_eq "0" "$(state_read 5007 | jq -r --arg fp "$FP" '.seen[$fp].reposts')" \
+assert_eq "0" "$(repost_count "$FP" "$(state_read 5007)")" \
   "a decided finding on the SAME thread does not tick the repost counter"
 
 # Simulate the bot closing that thread and re-posting the identical finding
 # under a new id — the exact case fingerprinting exists to catch.
-state_read 5007 | jq --arg fp "$FP" '.seen[$fp].threadId = "PRRT_previously_closed"' \
-  | state_write 5007
+decisions_read 5007 | jq --arg fp "$FP" '.seen[$fp].threadId = "PRRT_previously_closed"' \
+  | decisions_write 5007
 poll_once 5007 >/dev/null
-assert_eq "1" "$(state_read 5007 | jq -r --arg fp "$FP" '.seen[$fp].reposts')" \
+assert_eq "1" "$(repost_count "$FP" "$(state_read 5007)")" \
   "a decided finding re-posted under a new thread id ticks the repost counter"
 
 # Top-level PR comments. Review threads carry only INLINE comments, so without
@@ -435,7 +542,7 @@ assert_eq "0" "$(printf '%s\n' "$GONE2" | grep -c '"event":"NEW_FINDINGS"')" \
 assert_eq "1" "$(printf '%s\n' "$GONE3" | grep -c '"event":"NEW_FINDINGS"')" \
   "an undecided finding that vanished and returned is announced again"
 
-assert_eq "0" "$(state_read 5005 | jq '.seen | length')" \
+assert_eq "0" "$(decisions_read 5005 | jq '.seen // {} | length')" \
   "the vanish/return cycle never wrote a verdict — these are still unjudged"
 
 # A persistent fault must report once, not once per poll.
@@ -448,6 +555,47 @@ assert_eq "1" "$(emit_error_once "different" | wc -l | tr -d ' ')" \
 LAST_ERROR=""
 
 unset -f detect_push collect_checks
+export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+
+describe "pr-review-watch: push seeding (main's lastPushedAt bug)"
+
+# Fake an already-pushed remote via the resolve_remote_ref seam — matches the
+# detect_push/collect_checks pattern, and avoids touching real
+# remote-tracking refs in this repo.
+SEED_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" git commit-tree -m seed 'HEAD^{tree}')"
+resolve_remote_ref() { printf '%s' "$SEED_SHA"; }
+
+state_init 6001 "test-branch"
+seed_push_state 6001 "test-branch"
+
+assert_eq "$SEED_SHA" "$(state_read 6001 | jq -r '.lastPushedSha')" \
+  "seed_push_state records the already-pushed remote SHA"
+assert_eq "2026-07-30T20:00:00Z" "$(state_read 6001 | jq -r '.lastPushedAt')" \
+  "seed_push_state UTC-normalizes lastPushedAt from a west-of-UTC committer offset"
+
+# The consequence this seeding exists to prevent: without a seeded
+# lastPushedAt, $since falls back to the 1970 epoch and EVERY bot review
+# reads as after the push — a false clean by default, not an edge case. With
+# it, a review before the actual push is correctly NOT caught up.
+EARLY="$(jq -n '[{user:{login:"coderabbitai[bot]"}, submitted_at:"2026-07-30T19:00:00Z"}]')"
+RH_SEED="$(reviewed_head_map "$EARLY" "$(state_read 6001 | jq -r '.lastPushedAt')")"
+assert_eq "null" "$(printf '%s' "$RH_SEED" | jq -r '."coderabbitai[bot]" // "null"')" \
+  "a review before the seeded push time correctly reads as not caught up"
+
+# Idempotent — does not reseed once lastPushedSha is already set.
+resolve_remote_ref() { printf '%s' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"; }
+seed_push_state 6001 "test-branch"
+assert_eq "$SEED_SHA" "$(state_read 6001 | jq -r '.lastPushedSha')" \
+  "seed_push_state does not reseed once lastPushedSha is already set"
+
+# Not-yet-pushed branch: resolve_remote_ref returns empty, nothing is seeded.
+resolve_remote_ref() { printf ''; }
+state_init 6002 "unpushed-branch"
+seed_push_state 6002 "unpushed-branch"
+assert_eq "null" "$(state_read 6002 | jq -r '.lastPushedSha')" \
+  "seed_push_state leaves lastPushedSha null when the branch has no remote ref yet"
+
+unset -f resolve_remote_ref
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
 rm -rf "$TMP_STATE"
