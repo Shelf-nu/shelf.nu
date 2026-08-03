@@ -132,6 +132,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     let assetIds: string[];
 
+    // Resolve the acting user's timezone AT MOST ONCE. Both the select-all id
+    // resolution and the due-date parse below can need it on the same submit;
+    // memoizing means a select-all + due-date start issues a single lookup,
+    // while a start needing neither issues none.
+    let cachedTimeZone: string | undefined;
+    const getUserTimeZone = async () => {
+      if (cachedTimeZone === undefined) {
+        cachedTimeZone = (await resolveUserFormatPrefsById(userId, hints))
+          .timeZone;
+      }
+      return cachedTimeZone;
+    };
+
     if (contextType === "location" && locationIds && locationIds.length > 0) {
       // Bulk "Create audit" from the Locations index (multi-select). Resolve
       // the union of assets across the selected locations server-side — handles
@@ -163,7 +176,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       // Acting user's timezone: the select-all set is resolved from the current
       // date filters, which must truncate the day in the user's tz (avoids an
       // off-by-one for non-UTC users).
-      const { timeZone } = await resolveUserFormatPrefsById(userId, hints);
+      const timeZone = await getUserTimeZone();
 
       assetIds = await resolveAssetIdsForBulkOperation({
         assetIds: directAssetIds,
@@ -198,7 +211,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     // date was actually submitted (no date → no parse → no DB lookup needed).
     const dueDateUTC = dueDateString
       ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-          zone: (await resolveUserFormatPrefsById(userId, hints)).timeZone,
+          zone: await getUserTimeZone(),
         }).toJSDate()
       : undefined;
     if (dueDateUTC && dueDateUTC <= new Date()) {

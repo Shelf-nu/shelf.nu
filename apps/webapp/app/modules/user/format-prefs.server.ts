@@ -21,27 +21,29 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
-import type { ClientHint } from "~/utils/client-hints";
-import type { RawFormatPrefs } from "~/utils/date-format";
-import { detectFormatPrefsFromHints } from "~/utils/date-format";
+import type { DetectedFormatPrefs, RawFormatPrefs } from "~/utils/date-format";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 /**
- * Detect and persist a pre-existing user's formatting prefs from browser hints,
- * filling only the columns that are still `null`. Fire-and-forget: never awaited,
- * never throws, safe to call on every authenticated request.
+ * Persist a pre-existing user's detected formatting prefs, filling only the
+ * columns that are still `null`. Fire-and-forget: never awaited, never throws,
+ * safe to call on every authenticated request.
  *
  * @param userId - The authenticated (acting) user.
  * @param currentPrefs - The user's four raw pref columns as just read.
- * @param hints - The request's browser hints (locale + timezone).
+ * @param detected - Prefs to persist, from {@link detectFormatPrefsForPersistence}.
+ *   Its `timeZone` is null when the request lacked the CH-time-zone cookie; the
+ *   timezone column is then deliberately left null (never stamped with the "UTC"
+ *   fallback, which would block this backfill forever) so a later request
+ *   carrying the real cookie fills it.
  * @returns void — best-effort, non-blocking.
  * @throws Never — any failure is caught and logged (uncaptured telemetry).
  */
 export function detectAndPersistFormatPrefs(
   userId: string,
   currentPrefs: RawFormatPrefs,
-  hints: ClientHint
+  detected: DetectedFormatPrefs
 ): void {
   // Fast-path: nothing to backfill if every field is already concrete.
   if (
@@ -52,8 +54,6 @@ export function detectAndPersistFormatPrefs(
   ) {
     return;
   }
-
-  const detected = detectFormatPrefsFromHints(hints);
 
   // Backfill each still-null column with its OWN null-guarded updateMany rather
   // than one write covering every read-time-null column. The single-write form
@@ -90,7 +90,12 @@ export function detectAndPersistFormatPrefs(
       })
     );
   }
-  if (currentPrefs.timeZone === null) {
+  // Only persist the timezone when it is actually known (cookie present). A null
+  // `detected.timeZone` means the request had no CH-time-zone cookie — leave the
+  // column null so a later request with the real zone backfills it, rather than
+  // stamping the "UTC" fallback permanently (which the fast-path above would then
+  // treat as concrete, never correcting it).
+  if (currentPrefs.timeZone === null && detected.timeZone !== null) {
     writes.push(
       db.user.updateMany({
         where: { id: userId, timeZone: null },
