@@ -22,10 +22,14 @@ test("isLowStock: available above threshold is not low", () => {
   assert.equal(isLowStock({ available: 6, minQuantity: 5 }), false);
 });
 
-test("isLowStock: no threshold (null or <= 0) is never low", () => {
+test("isLowStock: null threshold is never low; 0 is a valid out-of-stock threshold", () => {
   assert.equal(isLowStock({ available: 0, minQuantity: null }), false);
-  assert.equal(isLowStock({ available: 0, minQuantity: 0 }), false);
-  assert.equal(isLowStock({ available: -1, minQuantity: -3 }), false);
+  // A 0 threshold alerts when out of stock (available <= 0) — matches the
+  // webapp notifier's `minQuantity != null && available <= minQuantity`.
+  assert.equal(isLowStock({ available: 0, minQuantity: 0 }), true);
+  assert.equal(isLowStock({ available: 1, minQuantity: 0 }), false);
+  // A negative threshold can't be reached by a non-negative available.
+  assert.equal(isLowStock({ available: 0, minQuantity: -3 }), false);
 });
 
 /* ------------------------- crossedLowStockThreshold ----------------------- */
@@ -67,13 +71,14 @@ test("crossedLowStockThreshold: does NOT fire when staying above", () => {
   );
 });
 
-test("crossedLowStockThreshold: no threshold (null or <= 0) never fires", () => {
+test("crossedLowStockThreshold: null never fires; 0 is a valid out-of-stock threshold", () => {
   assert.equal(
     crossedLowStockThreshold({ before: 10, after: 0, minQuantity: null }),
     false
   );
+  // A 0 threshold fires when available crosses DOWN to 0 (out of stock).
   assert.equal(
-    crossedLowStockThreshold({ before: 10, after: 0, minQuantity: 0 }),
-    false
+    crossedLowStockThreshold({ before: 3, after: 0, minQuantity: 0 }),
+    true
   );
 });

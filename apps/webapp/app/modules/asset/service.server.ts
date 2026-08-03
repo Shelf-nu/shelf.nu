@@ -3163,32 +3163,42 @@ export async function updateAsset({
     }
 
     /**
-     * Low-stock check — on ANY quantity change to a QUANTITY_TRACKED asset,
-     * both a drop AND a raise. A drop may cross INTO the low-stock band (fire
-     * the alert); a raise (e.g. a restock via the edit form / CSV update-import)
-     * may cross back OUT, which must clear the `lowStockNotifiedAt` debounce
-     * marker and send the "back in stock" notice. Gating on a drop only would
-     * leave a stale marker after a restock, silently suppressing the next
-     * genuine low-stock alert — the notifier only performs its recovery
-     * transition when it is actually called. Mirrors the adjust-quantity route,
-     * which calls the notifier unconditionally on both add and subtract.
-     * Reuses the hoisted `quantityBeforeUpdate` / `lockedAssetType` signals.
-     * Runs OUTSIDE the committed transaction (best-effort — a notification
-     * failure must never roll back a successful asset edit).
+     * Low-stock check — on any QUANTITY change OR any MIN-QUANTITY (threshold)
+     * change to a QUANTITY_TRACKED asset.
+     * - A quantity DROP may cross INTO the low-stock band (fire the alert); a
+     *   raise (restock via the edit form / CSV update-import) may cross back OUT
+     *   (clear the `lowStockNotifiedAt` marker + send the "back in stock" notice).
+     * - A THRESHOLD change must also run — including CLEARING `minQuantity`.
+     *   Otherwise removing a threshold while an asset is low leaves the marker
+     *   set, and re-adding a threshold later would let that stale marker suppress
+     *   the next genuine alert. The notifier only performs its clear/recovery
+     *   transition when it is actually called (it clears a stale marker when the
+     *   asset has no threshold).
+     * Mirrors the adjust-quantity route (unconditional on add/subtract). Runs
+     * OUTSIDE the committed transaction (best-effort — a notification failure
+     * must never roll back a successful asset edit). The min-quantity branch
+     * relies on `asset.type` (not the hoisted `lockedAssetType`, which is only
+     * set when a quantity write took the row lock).
      */
-    if (
+    const isQuantityTrackedAsset =
+      lockedAssetType === AssetType.QUANTITY_TRACKED ||
+      asset.type === AssetType.QUANTITY_TRACKED;
+    const quantityChanged =
       quantity != null &&
-      lockedAssetType === AssetType.QUANTITY_TRACKED &&
       quantityBeforeUpdate != null &&
-      quantity !== quantityBeforeUpdate
-    ) {
+      quantity !== quantityBeforeUpdate;
+    const minQuantityChanged =
+      typeof minQuantity !== "undefined" &&
+      (assetBeforeUpdate?.minQuantity ?? null) !== (asset.minQuantity ?? null);
+    if (isQuantityTrackedAsset && (quantityChanged || minQuantityChanged)) {
       try {
         await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
       } catch (lowStockError) {
         Logger.error(
           new ShelfError({
             cause: lowStockError,
-            message: "Failed to run low-stock check after asset quantity edit",
+            message:
+              "Failed to run low-stock check after asset quantity/threshold edit",
             label: "Assets",
             additionalData: { assetId: id, organizationId },
           })

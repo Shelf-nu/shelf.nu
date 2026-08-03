@@ -1736,6 +1736,48 @@ describe("updateAsset low-stock notifier wiring", () => {
 
     expect(mockLowStock).not.toHaveBeenCalled();
   });
+
+  it("runs checkAndNotifyLowStock when only the min-quantity threshold changes (so a stale marker is cleared)", async () => {
+    // No `quantity` in the patch → no row lock; the QT check falls back to the
+    // returned asset's `type`, and the change is detected from the before-snapshot.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 5,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      minQuantity: 8,
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      minQuantity: 8, // threshold 2 → 8; quantity is NOT part of the patch
+      request: new Request("http://localhost"),
+    } as any);
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
 });
 
 /**

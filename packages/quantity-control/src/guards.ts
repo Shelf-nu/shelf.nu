@@ -57,7 +57,9 @@ export function buildInsufficientStockMessage(args: {
   unitOfMeasure?: string | null;
 }): string {
   const { assetTitle, requested, bookable, unitOfMeasure } = args;
-  const unit = unitOfMeasure || "units";
+  // Trim so a blank/whitespace unit (user-entered fields allow it) falls back
+  // to "units" instead of rendering "Only 2   available".
+  const unit = unitOfMeasure?.trim() || "units";
   const available = Math.max(0, bookable);
   const forAsset = assetTitle ? ` for "${assetTitle}"` : "";
   return `Only ${available} ${unit} available${forAsset} in this window — you requested ${requested}. Reduce the quantity to continue.`;
