@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DetectedFormatPrefs } from "~/utils/date-format";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // connects at module load. Mock the db module so the fire-and-forget updateMany
@@ -11,20 +12,16 @@ vi.mock("~/database/db.server", () => ({
   db: { user: { updateMany: updateManyMock } },
 }));
 
-// why: pin detection so the test asserts the write shape (not Phase-2 detection
-// logic, which is covered by date-format.test.ts).
-vi.mock("~/utils/date-format", () => ({
-  detectFormatPrefsFromHints: vi.fn(() => ({
-    dateFormat: "DD_MM_YYYY",
-    timeFormat: "H24",
-    weekStart: "MONDAY",
-    timeZone: "Europe/London",
-  })),
-}));
-
 import { detectAndPersistFormatPrefs } from "./format-prefs.server";
 
-const hints = { locale: "en-GB", timeZone: "Europe/London" };
+// Fully-detected prefs to persist — the shape `detectFormatPrefsForPersistence`
+// returns when the CH-time-zone cookie IS present.
+const detected: DetectedFormatPrefs = {
+  dateFormat: "DD_MM_YYYY",
+  timeFormat: "H24",
+  weekStart: "MONDAY",
+  timeZone: "Europe/London",
+};
 
 describe("detectAndPersistFormatPrefs", () => {
   beforeEach(() => {
@@ -40,7 +37,7 @@ describe("detectAndPersistFormatPrefs", () => {
         weekStart: "SUNDAY",
         timeZone: "UTC",
       },
-      hints
+      detected
     );
 
     expect(updateManyMock).not.toHaveBeenCalled();
@@ -55,7 +52,7 @@ describe("detectAndPersistFormatPrefs", () => {
         weekStart: null,
         timeZone: null,
       },
-      hints
+      detected
     );
 
     // One updateMany PER still-null field (3 here), not a single combined write.
@@ -82,6 +79,27 @@ describe("detectAndPersistFormatPrefs", () => {
     expect(wroteDateFormat).toBe(false);
   });
 
+  it("never stamps the timezone when detected.timeZone is null (CH cookie absent)", () => {
+    // detectFormatPrefsForPersistence returns timeZone: null when the request
+    // lacks the CH-time-zone cookie (first authenticated load / SSO / OAuth).
+    // The backfill must leave the column null — so a later request carrying the
+    // real cookie fills it — rather than stamping the "UTC" fallback, which the
+    // fast-path would then treat as concrete and never correct. The other still-
+    // null fields are still backfilled.
+    detectAndPersistFormatPrefs(
+      "user-1",
+      { dateFormat: null, timeFormat: null, weekStart: null, timeZone: null },
+      { ...detected, timeZone: null }
+    );
+
+    // dateFormat + timeFormat + weekStart written; timeZone deliberately skipped.
+    expect(updateManyMock).toHaveBeenCalledTimes(3);
+    const wroteTimeZone = updateManyMock.mock.calls.some(
+      ([arg]) => arg?.data && "timeZone" in arg.data
+    );
+    expect(wroteTimeZone).toBe(false);
+  });
+
   it("does not throw when the write rejects (fire-and-forget)", async () => {
     updateManyMock.mockRejectedValueOnce(new Error("db down"));
 
@@ -94,7 +112,7 @@ describe("detectAndPersistFormatPrefs", () => {
           weekStart: null,
           timeZone: null,
         },
-        hints
+        detected
       )
     ).not.toThrow();
 

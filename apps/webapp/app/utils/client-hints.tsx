@@ -3,7 +3,12 @@
  * are needed by the server, but are only known by the browser.
  */
 import { parseAcceptLanguage } from "intl-parse-accept-language";
-import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
+import {
+  detectFormatPrefsFromHints,
+  formatDate,
+  type DetectedFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
 import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
 
@@ -80,6 +85,46 @@ export const getClientHint = (request: Request): ClientHint => ({
   locale: getLocale(request),
   timeZone: getHints(request).timeZone,
 });
+
+/**
+ * Whether the request actually carries the `CH-time-zone` cookie. Distinguishes
+ * a genuine UTC user (cookie present, value "UTC") from the "UTC" FALLBACK that
+ * {@link getHints} returns when the cookie is absent — e.g. the first
+ * authenticated request before {@link ClientHintCheck} sets the cookie + reloads,
+ * and server-established sessions (SSO / OAuth callbacks) that never render
+ * ClientHintCheck first.
+ *
+ * @param request - the incoming request
+ * @returns true when the timezone hint is authoritative (cookie present)
+ */
+export function hasTimeZoneHint(request: Request): boolean {
+  const cookieString =
+    typeof document !== "undefined"
+      ? document.cookie
+      : request.headers.get("Cookie") ?? "";
+  return getCookieValue(cookieString, "timeZone") !== null;
+}
+
+/**
+ * Detected prefs for PERSISTENCE (new-user stamping + lazy backfill). Same as
+ * {@link detectFormatPrefsFromHints}, EXCEPT `timeZone` is null when the request
+ * lacks the CH-time-zone cookie. The "UTC" fallback must never be persisted:
+ * once stored it is indistinguishable from a real UTC and permanently blocks the
+ * lazy backfill from writing the user's true zone (the fast-path sees a non-null
+ * column and returns). Leaving the column null lets the read path resolve from
+ * live hints until a real zone arrives, at which point the backfill fills it. The
+ * other three fields derive from the accept-language header, which is always
+ * present, so they are always safe to persist.
+ *
+ * @param request - the incoming request
+ * @returns detected prefs to store; `timeZone` null when the cookie is absent
+ */
+export function detectFormatPrefsForPersistence(
+  request: Request
+): DetectedFormatPrefs {
+  const detected = detectFormatPrefsFromHints(getClientHint(request));
+  return hasTimeZoneHint(request) ? detected : { ...detected, timeZone: null };
+}
 
 /**
  * @returns an object with the client hints and their values

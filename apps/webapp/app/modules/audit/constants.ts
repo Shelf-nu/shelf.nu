@@ -9,6 +9,12 @@ export const AUDIT_INCLUDE_FOR_EMAIL = {
       lastName: true,
       displayName: true,
       email: true,
+      // Format-preference columns so the email fan-out resolves each recipient's
+      // date/time formatting from the loaded row (no per-recipient DB fetch).
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
     },
   },
   assignments: {
@@ -20,6 +26,11 @@ export const AUDIT_INCLUDE_FOR_EMAIL = {
           lastName: true,
           displayName: true,
           email: true,
+          // Carried for recipient-specific email formatting (see `createdBy`).
+          dateFormat: true,
+          timeFormat: true,
+          weekStart: true,
+          timeZone: true,
         },
       },
     },

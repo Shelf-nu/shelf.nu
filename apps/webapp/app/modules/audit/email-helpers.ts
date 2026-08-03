@@ -444,7 +444,7 @@ export function sendAuditReminderEmail({
       firstName: string | null;
       lastName: string | null;
       displayName?: string | null;
-    };
+    } & RawFormatPrefs;
   }>;
   hints: ClientHint;
   timeframe: string;
@@ -458,11 +458,10 @@ export function sendAuditReminderEmail({
       // Resolve THIS recipient's stored formatting prefs (their own
       // dateFormat/timeFormat/timeZone), not the scheduler-captured creator
       // hints — otherwise every reminder recipient sees the creator's
-      // format/timezone. The scheduler's assignee rows (AUDIT_INCLUDE_FOR_EMAIL)
-      // don't carry the raw preference columns, so a per-recipient lookup is
-      // required; `hints` is the null-field fallback only. Audits have few
-      // assignees, so the per-recipient fetch is cheap.
-      const prefs = await resolveUserFormatPrefsById(assignment.userId, hints);
+      // format/timezone. AUDIT_INCLUDE_FOR_EMAIL now carries the raw preference
+      // columns on each assignee, so we resolve from the loaded row (no
+      // per-recipient DB fetch); `hints` is the null-field fallback only.
+      const prefs = resolveFormatPrefs(assignment.user, hints);
 
       const html = await auditUpdatesTemplateString({
         audit,
@@ -524,19 +523,16 @@ export function sendAuditOverdueEmail({
   hints,
 }: {
   audit: AuditForEmail;
-  recipients: Array<{
-    /**
-     * Recipient user id — used to resolve their stored formatting prefs so the
-     * dates render in the recipient's own format/timezone rather than the
-     * creator's. Optional because some callers only have the email row; those
-     * recipients fall back to the request `hints` for formatting.
-     */
-    userId?: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    displayName?: string | null;
-  }>;
+  recipients: Array<
+    {
+      /** Recipient user id (informational; prefs resolve from the columns). */
+      userId?: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      displayName?: string | null;
+    } & RawFormatPrefs
+  >;
   hints: ClientHint;
 }): void {
   const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
@@ -544,13 +540,11 @@ export function sendAuditOverdueEmail({
 
   recipients.forEach(async (recipient) => {
     try {
-      // Resolve THIS recipient's stored formatting prefs, not the
-      // scheduler-captured creator hints. When the recipient's userId is
-      // available we look up their own dateFormat/timeFormat/timeZone;
-      // otherwise `hints` is the null-field fallback (previous behavior).
-      const prefs = recipient.userId
-        ? await resolveUserFormatPrefsById(recipient.userId, hints)
-        : resolveFormatPrefs(null, hints);
+      // Resolve THIS recipient's stored formatting prefs from the loaded row
+      // (AUDIT_INCLUDE_FOR_EMAIL carries the raw pref columns), not the
+      // scheduler-captured creator hints — no per-recipient DB fetch. `hints` is
+      // the null-field fallback.
+      const prefs = resolveFormatPrefs(recipient, hints);
 
       const html = await auditUpdatesTemplateString({
         audit,

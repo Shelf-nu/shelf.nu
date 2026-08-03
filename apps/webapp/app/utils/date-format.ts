@@ -45,7 +45,18 @@ export type DetectedFormatPrefs = {
   dateFormat: DateFormatPreference;
   timeFormat: TimeFormatPreference;
   weekStart: WeekStartPreference;
-  timeZone: string;
+  /**
+   * Nullable for PERSISTENCE. The timezone comes from the `CH-time-zone` COOKIE,
+   * which is absent on a user's first authenticated request (and on
+   * server-established sessions like SSO/OAuth callbacks that never render
+   * `ClientHintCheck` first). Persisting the "UTC" fallback then is
+   * indistinguishable from a real UTC and permanently blocks the lazy backfill
+   * from ever writing the true zone — so persistence paths
+   * ({@link detectFormatPrefsForPersistence}) set this to null when the cookie is
+   * absent, leaving the column null for a later retry. The read path
+   * ({@link detectFormatPrefsFromHints}) always yields a concrete zone.
+   */
+  timeZone: string | null;
 };
 
 /**
