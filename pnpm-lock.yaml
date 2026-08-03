@@ -184,7 +184,7 @@ importers:
         version: 10.0.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@9.39.4(jiti@2.6.1))
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1))
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -293,6 +293,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/quantity-control':
+        specifier: workspace:*
+        version: link:../../packages/quantity-control
       '@supabase/supabase-js':
         specifier: ^2.103.0
         version: 2.105.1
@@ -659,7 +662,7 @@ importers:
         version: 6.19.3(magicast@0.3.5)(typescript@6.0.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1)
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@8.57.1)
       remix-flat-routes:
         specifier: ^0.8.5
         version: 0.8.5
@@ -720,6 +723,21 @@ importers:
         version: 6.0.3
 
   packages/labels: {}
+
+  packages/quantity-control:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      '@types/node':
+        specifier: ^22.19.17
+        version: 22.19.17
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
 
   tooling/typescript: {}
 
@@ -1992,7 +2010,6 @@ packages:
 
   '@evilmartians/lefthook@2.1.6':
     resolution: {integrity: sha512-ysZbzryf74wlISmgm0PH/n1lJ0HD7AHmI6DoJgWO9qzIETQknhGdmKbkOi0MjLYtiOHWQl8Dr2qwg0ksDpNZjA==}
-    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -20832,10 +20849,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
+      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       ora: 9.4.0
       oxlint: 1.62.0
@@ -20849,10 +20866,10 @@ snapshots:
       - oxlint-tsgolint
       - supports-color
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@9.39.4(jiti@2.6.1)):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)(eslint@8.57.1):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.2)
       ora: 9.4.0
       oxlint: 1.62.0

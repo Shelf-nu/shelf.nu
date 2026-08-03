@@ -23,6 +23,11 @@ import {
 } from "@prisma/client";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+// `recordEvent` writes the structured activity-event audit row alongside the
+// immutable ConsumptionLog. The activity-event service is a dependency-free
+// leaf (imports only db + error + its own types), so this does NOT reintroduce
+// the availability/booking cycle guarded against below.
+import { recordEvent } from "~/modules/activity-event/service.server";
 // Imported from the dependency-free leaf (NOT `availability.server`) to avoid
 // the cycle `consumption-log → availability.server → booking/service.server →
 // consumption-log`, which corrupts Vitest partial-mock bindings on
@@ -488,7 +493,11 @@ export async function adjustQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
        * Step 2: Validate asset belongs to the caller's organization.
@@ -496,6 +505,10 @@ export async function adjustQuantity({
        * user with `asset:update` in any org could mutate another org's
        * qty-tracked asset by passing its id. Mirrors the pattern used in
        * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+       *
+       * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
+       * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
+       * here. We keep this belt-and-braces check to document the invariant.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -584,6 +597,28 @@ export async function adjustQuantity({
         note,
         tx,
       });
+
+      /**
+       * Step 8: Structured activity event for the reporting pipeline — one
+       * `ASSET_QUANTITY_CHANGED` per total-quantity change, emitted inside the
+       * SAME tx so it commits atomically with the asset update + log (see
+       * `.claude/rules/use-record-event.md`). `fromValue`/`toValue` capture the
+       * true direction the direction-agnostic ConsumptionLog cannot.
+       */
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          field: "quantity",
+          fromValue: currentQuantity,
+          toValue: newQuantity,
+        },
+        tx
+      );
 
       return updatedAsset;
     });

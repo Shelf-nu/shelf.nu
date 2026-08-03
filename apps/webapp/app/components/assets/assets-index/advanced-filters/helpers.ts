@@ -73,6 +73,7 @@ export function getUIFieldType({
       break;
     case "valuation":
     case "quantity":
+    case "minQuantity":
       fieldType = "number";
       break;
     case "availableToBook":

@@ -5,8 +5,9 @@
  * N units of a QUANTITY_TRACKED asset from a team member back to the pool
  * via `releaseQuantity`. Pins the SELF_SERVICE own-custody-only guard, the
  * service error passthroughs (over-release 400, no-custody-row 404), the
- * deliberate ABSENCE of a low-stock check on release (web parity), and the
- * refreshed viewer-shaped asset in the success envelope.
+ * low-stock check on release (a release raises available and can recover an
+ * asset above its threshold, so the debounce marker must be cleared; web
+ * parity), and the refreshed viewer-shaped asset in the success envelope.
  *
  * @see {@link file://../../../app/routes/api+/mobile+/custody.release-quantity.ts}
  */
@@ -67,12 +68,13 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn(),
 }));
 
-// why: the release route must NOT run the low-stock check (release adds
-// stock back; the web release route has none either). The route doesn't
-// import this module — mocking it lets the happy-path test pin that with
-// an explicit zero-calls assertion.
+// why: the release route runs the low-stock check (a release raises available
+// and can move the asset back above its threshold, which must clear the
+// lowStockNotifiedAt debounce marker / send the recovery notice). Mocking it
+// lets the happy-path test pin that the call is made with the right args
+// without exercising the notifier's own debounce logic.
 vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
-  checkAndNotifyLowStock: vitest.fn(),
+  checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: keep pino/Sentry out of the test graph; the note-failure test asserts
@@ -222,9 +224,13 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       })
     );
 
-    // Web parity: NO low-stock check on release (release adds stock back;
-    // the web release route never calls checkAndNotifyLowStock)
-    expect(checkAndNotifyLowStock).not.toHaveBeenCalled();
+    // Release raises available → run the notifier so a recovery clears the
+    // debounce marker (and sends the "back in stock" notice). Web parity.
+    expect(checkAndNotifyLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
 
     // Refreshed asset is shaped for THIS viewer (visibility filter applied)
     expect(getMobileAssetForViewer).toHaveBeenCalledWith(

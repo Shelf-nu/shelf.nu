@@ -88,6 +88,9 @@ async function getAdvancedFilteredAssetIds({
     const searchParams = new URLSearchParams(filters);
     const paramsValues = getParamsValues(searchParams);
     const { search } = paramsValues;
+    // "Low stock" quick filter toggle — must be forwarded here too so
+    // "select all" (ALL_SELECTED_KEY) matches the same rows the index shows.
+    const lowStockOnly = searchParams.get("lowStockOnly") === "true";
 
     const settingColumns = settings.columns as Column[];
     const parsedFilters = await parseFiltersWithHierarchy(
@@ -103,7 +106,8 @@ async function getAdvancedFilteredAssetIds({
       parsedFilters,
       undefined, // no specific assetIds filter
       availableToBookOnly,
-      timeZone
+      timeZone,
+      lowStockOnly
     );
 
     // Minimal query: only SELECT id, but include the same joins the main

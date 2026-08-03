@@ -352,6 +352,19 @@ export function AdvancedIndexColumn({
         </Td>
       );
 
+    case "minQuantity":
+      // Low-stock reorder threshold — only meaningful for QUANTITY_TRACKED
+      // assets. Plain number, mirroring the "quantity" cell above.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.minQuantity != null ? (
+            item.minQuantity
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 

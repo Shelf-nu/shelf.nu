@@ -61,6 +61,17 @@ vitest.mock("~/database/db.server", () => ({
     consumptionLog: {
       create: vitest.fn().mockResolvedValue({}),
     },
+    // why: `adjustQuantity` now emits an `ASSET_QUANTITY_CHANGED` activity
+    // event via `recordEvent` inside the same tx (audit trail). `recordEvent`
+    // resolves the actor snapshot (`user.findUnique`) then writes the row
+    // (`activityEvent.create`); both run against this mocked `tx` (= `db`), so
+    // they must exist or every adjust would throw.
+    activityEvent: {
+      create: vitest.fn().mockResolvedValue({}),
+    },
+    user: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -190,6 +201,65 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
 
     expect(assertAssetQuantityNotBelowReservationsMock).not.toHaveBeenCalled();
     expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("emits an ASSET_QUANTITY_CHANGED event with the true direction alongside the ConsumptionLog on a subtract", async () => {
+    resetMocks();
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 3,
+      category: ConsumptionCategory.ADJUSTMENT,
+      direction: "subtract",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    // The direction-agnostic ConsumptionLog stores the positive delta (3)…
+    expect(db.consumptionLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: 3 }),
+      })
+    );
+    // …while the activity event captures the true 10 → 7 decrease.
+    expect(db.activityEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: ASSET_ID,
+          assetId: ASSET_ID,
+          field: "quantity",
+          fromValue: 10,
+          toValue: 7,
+        }),
+      })
+    );
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED capturing the increase on an add (RESTOCK)", async () => {
+    resetMocks();
+
+    await adjustQuantity({
+      assetId: ASSET_ID,
+      quantity: 5,
+      category: ConsumptionCategory.RESTOCK,
+      direction: "add",
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    // current 10 + 5 = 15
+    expect(db.activityEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ASSET_QUANTITY_CHANGED",
+          field: "quantity",
+          fromValue: 10,
+          toValue: 15,
+        }),
+      })
+    );
   });
 
   it("still enforces the existing custody-only check before ever reaching the fuller guard", async () => {
