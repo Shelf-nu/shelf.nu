@@ -538,12 +538,33 @@ compute_quiescent() {
 # is a REJECTED STATE WRITE — which by definition cannot persist a guard.
 LAST_ERROR=""
 
+# Set by emit_error_once whenever THIS poll hit a degraded-but-continuing
+# collection (collect_reviews/collect_issue_comments failing, or the
+# pagination cap firing) — as opposed to a hard failure that `return 1`s
+# immediately. poll_once resets this to 0 at its own top and only clears
+# LAST_ERROR at the bottom when it is still 0, i.e. the poll actually
+# completed cleanly. Without this, a persistently-degraded-but-recoverable
+# condition (a revoked review-scope token, say) re-announces every single
+# poll: poll_once still reaches state_write successfully in that case, so
+# the OLD unconditional `LAST_ERROR=""` reset at the bottom re-armed the
+# SAME error for the very next poll — one ERROR per POLL_INTERVAL forever,
+# which is exactly the "emits too much, gets auto-killed" self-destruct the
+# transition guards exist to prevent, just reached from the degraded-poll
+# path instead of a hard-failure path.
+POLL_DEGRADED=0
+
 # Emit an ERROR only on transition. A persistent fault (revoked gh auth, a
 # read-only git dir) would otherwise emit one line per poll forever — the same
 # self-destruct the per-event transition guards exist to prevent, since
 # monitors that emit too much are killed automatically.
+#
+# POLL_DEGRADED is set unconditionally, even when this specific call is a
+# repeat (dedup returns before touching LAST_ERROR) — the underlying
+# condition still happened THIS poll either way, and that is what the
+# bottom-of-poll_once reset needs to know.
 emit_error_once() {
   local reason="$1"
+  POLL_DEGRADED=1
   [[ "$reason" == "$LAST_ERROR" ]] && return 0
   LAST_ERROR="$reason"
   emit ERROR "$(jq -c -n --arg r "$reason" '{reason:$r}')"
@@ -651,6 +672,11 @@ poll_once() {
   local pr="$1" state state_before decisions findings fresh reviews issues ood checks sha
   local pushed pushed_at e reviews_ok issues_ok collect_threads_rc
   local -a events=()
+
+  # Fresh each poll: this run hasn't hit a degraded collection YET. Any
+  # emit_error_once call below flips it, which then guards the LAST_ERROR
+  # reset at the bottom — see POLL_DEGRADED's definition, above.
+  POLL_DEGRADED=0
 
   state="$(state_read "$pr")" || {
     emit_error_once "state unreadable"; return 1; }
@@ -948,8 +974,14 @@ poll_once() {
   printf '%s' "$state" | state_write "$pr" || {
     emit_error_once "state write rejected; events withheld"; return 1; }
 
-  # A poll got all the way through: the next distinct fault is newsworthy again.
-  LAST_ERROR=""
+  # A poll got all the way through CLEANLY (state_write succeeded AND
+  # nothing this round was merely degraded-but-continuing): the next
+  # distinct fault is newsworthy again. A poll that reached here only
+  # because collect_reviews/collect_issue_comments/collect_threads
+  # degraded but did not hard-fail must NOT re-arm — that condition may
+  # still be ongoing, and clearing LAST_ERROR here would re-announce the
+  # SAME reason on the very next poll (see POLL_DEGRADED's definition).
+  [[ "$POLL_DEGRADED" -eq 0 ]] && LAST_ERROR=""
 
   # Flush only now that the suppressing state is durable. The `${a[@]+...}`
   # form is required: under `set -u`, bash 3.2 treats "${a[@]}" on an EMPTY

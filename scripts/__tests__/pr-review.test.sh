@@ -970,6 +970,81 @@ sleep 0.5
 assert_eq "0" "$(pgrep -f 'sleep 40' | wc -l | tr -d ' ')" \
   "run_with_timeout kills the whole process tree, not just the direct child (no orphaned grandchild)"
 
+describe "pr-review-watch: LAST_ERROR does not re-arm on a degraded-but-continuing poll"
+
+# Before this fix: collect_reviews failing did NOT `return 1` (it's a
+# degraded-but-continuing path — poll_once keeps going with the prior
+# .outOfDiff payload), so poll_once still reached state_write successfully,
+# which unconditionally reset LAST_ERROR at the bottom. A PERSISTENTLY
+# failing collect_reviews (revoked token scope, repo permission change,
+# GitHub incident) then re-announced ERROR on every single poll — one per
+# POLL_INTERVAL forever, which is the exact "emits too much, gets
+# auto-killed" self-destruct the transition guards throughout this file
+# exist to prevent, just reached via the degraded-poll path instead of a
+# hard failure. POLL_DEGRADED closes it: emit_error_once sets it whenever
+# THIS poll hit a degraded collection, and the bottom-of-poll_once reset is
+# skipped while it's set.
+#
+# LAST_ERROR/POLL_DEGRADED are process-lifetime shell globals by design —
+# that's exactly what makes them work in the REAL script, where main()'s
+# loop calls poll_once directly, in the same shell process, every
+# iteration. `X="$(poll_once ...)"` breaks that on purpose-built test
+# harness reasoning alone: command substitution FORKS A SUBSHELL, so a
+# global mutation made inside one `$(poll_once ...)` call is invisible to
+# the next `$(poll_once ...)` call — verified directly (a toy counter
+# incremented across two `$(f)` calls stayed 0 in the caller, but reached 2
+# across two plain-redirected `f > file` calls). Every poll_once call below
+# therefore redirects to a file instead of being captured via `$(...)`, so
+# these globals persist between calls exactly as they do in production.
+DEGRADED_TMP="$(mktemp -d)"
+(
+  detect_push() { printf ''; }
+  export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+  state_init 5023 "test-branch"
+  collect_reviews() { return 1; }
+  poll_once 5023 > "$DEGRADED_TMP/d1"
+  poll_once 5023 > "$DEGRADED_TMP/d2"
+  poll_once 5023 > "$DEGRADED_TMP/d3"
+)
+
+assert_eq "1" "$(grep -c '"event":"ERROR"' "$DEGRADED_TMP/d1")" \
+  "the first poll with a persistently-failing collect_reviews emits ERROR"
+assert_eq "0" "$(grep -c '"event":"ERROR"' "$DEGRADED_TMP/d2")" \
+  "the SAME persistent failure does not re-announce on the second consecutive poll"
+assert_eq "0" "$(grep -c '"event":"ERROR"' "$DEGRADED_TMP/d3")" \
+  "...nor the third — this is the bug closed: 3 consecutive degraded polls used to emit 3 ERRORs, now 1"
+rm -rf "$DEGRADED_TMP"
+
+# The mirror-image requirement: an intervening CLEAN poll must still
+# re-arm LAST_ERROR, so a fault that recurs later (a distinct incident, not
+# the same ongoing one) is newsworthy again. Restoring collect_reviews to
+# its real body for the middle poll — never `unset -f` (see the note above
+# the "Round A2 hardening" section: it cannot restore a shadowed function,
+# it just deletes it, breaking any LATER call that needs the original).
+REARM_TMP="$(mktemp -d)"
+(
+  detect_push() { printf ''; }
+  export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
+  state_init 5024 "test-branch"
+
+  collect_reviews() { return 1; }
+  poll_once 5024 > "$REARM_TMP/f1"
+
+  collect_reviews() { gh api "repos/$REPO/pulls/$1/reviews"; }   # real body
+  poll_once 5024 > "$REARM_TMP/clean"
+
+  collect_reviews() { return 1; }
+  poll_once 5024 > "$REARM_TMP/f2"
+)
+
+assert_eq "1" "$(grep -c '"event":"ERROR"' "$REARM_TMP/f1")" \
+  "the first fault emits ERROR"
+assert_eq "0" "$(grep -c '"event":"ERROR"' "$REARM_TMP/clean")" \
+  "an intervening genuinely-clean poll emits nothing"
+assert_eq "1" "$(grep -c '"event":"ERROR"' "$REARM_TMP/f2")" \
+  "the fault recurring AFTER a clean poll re-announces — re-armed, not stuck suppressed forever (2 ERRORs total across this sequence, not 1)"
+rm -rf "$REARM_TMP"
+
 unset -f detect_push collect_checks
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 
