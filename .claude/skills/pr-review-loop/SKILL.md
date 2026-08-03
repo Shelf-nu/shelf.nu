@@ -56,16 +56,19 @@ file, not the notification line.
 Every event has an action. Silence on an event you were not told to handle is
 how a loop sits idle over a PR that needs work:
 
-| Event           | What to do                                                                                                                                                                                                        |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEW_FINDINGS`  | Start a round (§ Round).                                                                                                                                                                                          |
-| `OUT_OF_DIFF`   | Start a round; these have no thread (§ Out-of-diff).                                                                                                                                                              |
-| `HUMAN_COMMENT` | Surface in the next summary. Never reply, never resolve. Read BOTH `.pending` (inline review comments) and `.humanComments` (top-level PR comments) — different sources, and a teammate usually uses the latter.  |
-| `DOCTOR`        | React Doctor posted or rewrote its sticky comment. Read `.doctor`. Newly-introduced **errors** are findings to fix; warnings stay advisory. Use the `react-doctor` skill.                                         |
-| `PUSHED`        | Run § Respond.                                                                                                                                                                                                    |
-| `CHECKS_RED`    | Report to the user with the failing check names. Do not attempt a fix unless the failure is caused by this round's changes — and say which you concluded. Red checks block quiescence.                            |
-| `COPILOT_QUOTA` | Note it once; stop waiting on Copilot for quiescence.                                                                                                                                                             |
-| `ERROR`         | **Tell the user immediately.** `state write rejected; events withheld` means the feed is dropping events — the loop is blind and quiet, which is indistinguishable from a clean PR. Do not keep waiting silently. |
+| Event           | What to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEW_FINDINGS`  | Start a round (§ Round).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `OUT_OF_DIFF`   | Start a round; these have no thread (§ Out-of-diff).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `REPOST`        | A bot closed a thread and re-posted a finding you already decided, under a **new** thread id — invisible to `.pending` by construction (`unseen_findings` filters out fingerprints already in `.seen`). Read `.reposted`: each entry has `fingerprint`, `threadId` (the new, open thread), `priorThreadId`, `priorVerdict`, `count`. Reply on the new thread pointing at the prior decision and resolve it — unless `count` has reached 3, in which case stop auto-replying and escalate instead. `count` reads `0` for mere same-fingerprint coexistence and `1+` for a confirmed genuine repost; both warrant a reply, only `1+` counts toward the three-repost escape hatch. |
+| `HUMAN_COMMENT` | Surface in the next summary. Never reply, never resolve. Read BOTH `.pending` (inline review comments) and `.humanComments` (top-level PR comments) — different sources, and a teammate usually uses the latter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `DOCTOR`        | React Doctor posted or rewrote its sticky comment. Read `.doctor`. Newly-introduced **errors** are findings to fix; warnings stay advisory. Use the `react-doctor` skill.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `PUSHED`        | Run § Respond.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `CHECKS_RED`    | Report to the user with the failing check names. Do not attempt a fix unless the failure is caused by this round's changes — and say which you concluded. Red checks block quiescence.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `CHECKS_CLEAR`  | Checks stopped being red. Informational — may unblock quiescence condition 4, nothing to fix.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `COPILOT_QUOTA` | Note it once; stop waiting on Copilot for quiescence.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `QUIESCENT`     | The watcher has confirmed all four § Quiescence conditions hold. Emit the clean report (§ Quiescence) — do not recompute the conditions yourself; the watcher owns that evaluation now. Report once per transition, then keep watching.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ERROR`         | **Tell the user immediately.** `state write rejected; events withheld` means the feed is dropping events — the loop is blind and quiet, which is indistinguishable from a clean PR. Do not keep waiting silently.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Round
 
@@ -145,12 +148,17 @@ So they need different handling from thread findings:
    ```
 
    Then record it, so a resumed session does not post it again and quiescence
-   condition #3 can become true:
+   condition #3 can become true. Nothing initializes `<pr>.decisions.json` —
+   create it before the first write, or `jq` fails with "Could not open
+   file", the `&&` swallows that into a no-op, and the round's decisions are
+   silently lost:
 
    ```bash
+   DEC="$(git rev-parse --git-common-dir)/pr-review-loop/<PR>.decisions.json"
+   [[ -f "$DEC" ]] || printf '{"seen":{},"escalated":[],"addressedOutOfDiff":{}}\n' > "$DEC"
    tmp="$(mktemp "${DEC}.XXXXXX")"
    jq --arg id "<reviewId>" '.addressedOutOfDiff[$id] = true' "$DEC" > "$tmp" \
-     && mv "$tmp" "$DEC"
+     && mv "$tmp" "$DEC" || rm -f "$tmp"
    ```
 
 3. Dedup is already handled for you: the watcher tracks `announcedOutOfDiff`
@@ -216,14 +224,24 @@ what makes this safe without a lock. Read its file freely; write only yours.
 
 ```bash
 DEC="$(git rev-parse --git-common-dir)/pr-review-loop/<PR>.decisions.json"
+[[ -f "$DEC" ]] || printf '{"seen":{},"escalated":[],"addressedOutOfDiff":{}}\n' > "$DEC"
 ```
+
+Nothing else initializes this file — create it before the first write, every
+time, even if you believe an earlier round already did. Skipping the guard
+means `jq … "$DEC"` fails with "Could not open file", the `&&` below
+swallows that into a silent no-op, and a zero-byte tmp file is left behind
+while the round's verdicts and reply prose vanish.
 
 Write it atomically — `jq … "$DEC" > "$DEC"` truncates the file to empty:
 
 ```bash
 tmp="$(mktemp "${DEC}.XXXXXX")"
-jq '<your edit>' "$DEC" > "$tmp" && mv "$tmp" "$DEC"
+jq '<your edit>' "$DEC" > "$tmp" && mv "$tmp" "$DEC" || rm -f "$tmp"
 ```
+
+On failure the `rm -f "$tmp"` above prevents stray tmp files from
+accumulating beside the real one.
 
 Record each decision into `.seen[<fingerprint>]` with **exactly this shape**:
 
@@ -240,8 +258,8 @@ Record each decision into `.seen[<fingerprint>]` with **exactly this shape**:
 ```
 
 Repost counts are **not** in this shape: the watcher owns them, in its own
-`repostCounts` map. Read `repostCounts[<fp>].count` to drive the three-repost
-escape hatch; never write it.
+`.reposted` array (see the `REPOST` event above). Read `count` there to drive
+the three-repost escape hatch; never write to `.reposted`.
 
 **`replied` starts `false` and only becomes `true` once the reply has actually
 posted.** Writing a decision marks it as no longer needing triage — but the
@@ -257,25 +275,47 @@ set `replied: true`; still open → treat it as owed a reply and include it in
 the next decisions file. Defaulting to `true` re-opens the false-clean;
 defaulting to `false` strands the loop.
 
-**`ESCALATE` verdicts go to `.escalated[]`, not `.seen`** — recording the
-fingerprint, so the watcher's `unseen_findings` drops it from `.pending` and
-you do not re-dispatch a triager for the same escalated finding every round. Putting them in
-`.seen` removes them from `.pending` permanently and the human sees them once,
-ever — and escalations are precisely the findings a human must not miss.
+**`ESCALATE` verdicts go to `.escalated[]`, not `.seen`** — recorded with
+**exactly this shape** (the watcher's `unseen_findings` does
+`map(.fingerprint)` over this array, so a bare string instead of an object
+breaks polling — it degrades to a single `state write rejected` ERROR and
+then silence):
+
+```jsonc
+{
+  "fingerprint": "…", // what unseen_findings matches on
+  "threadId": "PRRT_…", // the thread the finding was escalated on
+  "reason": "…", // why: malformed, empty, no evidence, bad verdict, etc.
+  "escalatedInRound": 3
+}
+```
+
+This is what makes the watcher's `unseen_findings` drop it from `.pending`,
+so you do not re-dispatch a triager for the same escalated finding every
+round. Putting it in `.seen` instead removes it from `.pending` permanently
+and the human sees it once, ever — and escalations are precisely the
+findings a human must not miss.
 
 Then wait. Do not re-commit or re-notify on a timer.
 
 ### 5. Respond
 
 On the `PUSHED` event — not before, so replies cite a SHA that exists on the
-remote — build a decisions file and run:
+remote — build a **replies file** and run:
 
-The decisions file is `[{threadId, replyBody, resolve}]`. Write it to the
-session scratchpad directory named in your system prompt — substitute the real
-path; `$SCRATCH` is not a variable that exists in your shell:
+The replies file is an **array**, `[{threadId, replyBody, resolve}]` — name
+it `replies.json`, never `decisions.json`. That name is reserved for your own
+`<pr>.decisions.json` (§ Notify), an **object** keyed by fingerprint. The two
+have historically shared a name; passing the wrong one makes `jq 'length'`
+return a key count instead of an item count and every reply fail with an
+empty thread id, so the naming collision must not be reintroduced. (The
+responder also validates the shape itself now and exits 2 on a mismatch, but
+don't rely on that catching it.) Write it to the session scratchpad directory
+named in your system prompt — substitute the real path; `$SCRATCH` is not a
+variable that exists in your shell:
 
 ```bash
-bash scripts/pr-review-respond.sh <PR> "<scratchpad>/decisions.json"
+bash scripts/pr-review-respond.sh <PR> "<scratchpad>/replies.json"
 ```
 
 **Check its exit status.** Non-zero means at least one reply failed to post;
@@ -283,7 +323,7 @@ it prints `reply FAILED, not resolving: <thread>` per failure on stderr. The
 script deliberately does NOT resolve a thread whose reply failed, so the
 correct residue is an open, unanswered thread — not a silently closed one.
 On non-zero: leave those `.seen[<fp>].replied` at `false`, report the failed
-threads to the user, and re-run the same decisions file. Re-running is safe:
+threads to the user, and re-run the same replies file. Re-running is safe:
 the responder keys an idempotency ledger on thread id plus a hash of the reply
 body, so a reply that already posted is never posted twice.
 
@@ -308,10 +348,10 @@ silently close exactly the findings that most need a human.
 After the responder returns, flip `.seen[<fp>].replied = true` for every
 thread it actually replied to.
 
-A fingerprint already in `.seen` that reappears gets a short pointer to the
-earlier decision and is resolved — do not re-triage it. On its **third**
-re-post, stop auto-replying and escalate: three re-posts means the fix did not
-land or the reasoning is not landing, and both need a human.
+Reposts of an already-`.seen` finding are not triaged again here — that
+handling lives entirely under the `REPOST` event above (§ Arm the watcher):
+reply on the new thread with a pointer to the prior decision, resolve, and
+escalate instead once `.reposted[<fp>].count` reaches 3.
 
 Then return to waiting.
 
