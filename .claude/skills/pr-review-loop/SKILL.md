@@ -60,7 +60,8 @@ how a loop sits idle over a PR that needs work:
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NEW_FINDINGS`  | Start a round (§ Round).                                                                                                                                                                                          |
 | `OUT_OF_DIFF`   | Start a round; these have no thread (§ Out-of-diff).                                                                                                                                                              |
-| `HUMAN_COMMENT` | Surface in the next summary. Never reply, never resolve.                                                                                                                                                          |
+| `HUMAN_COMMENT` | Surface in the next summary. Never reply, never resolve. Read BOTH `.pending` (inline review comments) and `.humanComments` (top-level PR comments) — different sources, and a teammate usually uses the latter.  |
+| `DOCTOR`        | React Doctor posted or rewrote its sticky comment. Read `.doctor`. Newly-introduced **errors** are findings to fix; warnings stay advisory. Use the `react-doctor` skill.                                         |
 | `PUSHED`        | Run § Respond.                                                                                                                                                                                                    |
 | `CHECKS_RED`    | Report to the user with the failing check names. Do not attempt a fix unless the failure is caused by this round's changes — and say which you concluded. Red checks block quiescence.                            |
 | `COPILOT_QUOTA` | Note it once; stop waiting on Copilot for quiescence.                                                                                                                                                             |
@@ -138,9 +139,20 @@ So they need different handling from thread findings:
 2. They cannot be replied to or resolved through `pr-review-respond.sh` —
    that script requires a `threadId`. Post **one aggregate comment** covering
    the whole review instead:
+
    ```bash
-   gh pr comment <PR> --body-file "$SCRATCH/out-of-diff-reply.md"
+   gh pr comment <PR> --body-file "<scratchpad>/out-of-diff-reply.md"
    ```
+
+   Then record it, so a resumed session does not post it again and quiescence
+   condition #3 can become true:
+
+   ```bash
+   tmp="$(mktemp "${DEC}.XXXXXX")"
+   jq --arg id "<reviewId>" '.addressedOutOfDiff[$id] = true' "$DEC" > "$tmp" \
+     && mv "$tmp" "$DEC"
+   ```
+
 3. Dedup is already handled for you: the watcher tracks `announcedOutOfDiff`
    by `reviewId` and will not re-announce a review you have seen. Do not add
    them to `.seen`, which is keyed by fingerprint.
@@ -196,32 +208,58 @@ unresolved, and tell the user what failed. Do not retry blindly.
 `FIXED` / `REJECTED` / `HUMAN` / `ESCALATED`, and end with the commit SHA and
 `ready to push`.
 
-Record each decision into `.seen[<fingerprint>]` with **exactly this shape** —
-other components read these fields by name:
+You write to **your own file**, `<pr>.decisions.json`, beside the watcher's
+state. **Never write the watcher's `<pr>.json`** — it holds its state across
+four network round trips per poll, so anything you write there is silently
+discarded, including reply prose you cannot recover. Single-writer-per-file is
+what makes this safe without a lock. Read its file freely; write only yours.
+
+```bash
+DEC="$(git rev-parse --git-common-dir)/pr-review-loop/<PR>.decisions.json"
+```
+
+Write it atomically — `jq … "$DEC" > "$DEC"` truncates the file to empty:
+
+```bash
+tmp="$(mktemp "${DEC}.XXXXXX")"
+jq '<your edit>' "$DEC" > "$tmp" && mv "$tmp" "$DEC"
+```
+
+Record each decision into `.seen[<fingerprint>]` with **exactly this shape**:
 
 ```jsonc
 {
-  "threadId": "PRRT_…", // the thread it was decided on; the repost
-  // counter compares against this
+  "threadId": "PRRT_…", // the thread it was decided on
   "verdict": "VALID", // the six-value enum
-  "reasoning": "…", // the reply prose; MUST be persisted here, not
-  // left in your context — see below
+  "reasoning": "…", // the reply prose; persist it HERE, never
+  // only in your context — see below
   "resolvedSha": "a3293f1", // VALID only; what the reply cites
   "decidedInRound": 3,
-  "reposts": 0, // maintained by the watcher, never by you
-  "replied": false // flips to true in step 5, NOT here
+  "replied": false // flips true in step 5, NOT here
 }
 ```
 
-**`replied` starts `false` and only becomes `true` once the reply has actually
-posted.** Writing a decision here marks it as no longer needing triage — but
-the GitHub thread is still open and unanswered until step 5 runs, and step 5
-waits for a push that may be hours away or never come. If the session ends in
-that window and `reasoning` lives only in your context, the verdict is lost
-and the thread stays open forever. That is the silent drop this loop exists to
-prevent, so persist the prose, not just the verdict.
+Repost counts are **not** in this shape: the watcher owns them, in its own
+`repostCounts` map. Read `repostCounts[<fp>].count` to drive the three-repost
+escape hatch; never write it.
 
-**`ESCALATE` verdicts go to `.escalated[]`, not `.seen`.** Putting them in
+**`replied` starts `false` and only becomes `true` once the reply has actually
+posted.** Writing a decision marks it as no longer needing triage — but the
+GitHub thread is still open and unanswered until step 5 runs, and step 5 waits
+for a push that may be hours away or never come. If the session ends in that
+window and `reasoning` lives only in your context, the verdict is lost and the
+thread stays open forever. That is the silent drop this loop exists to prevent.
+
+**On resume, reconcile before trusting `replied`.** A decisions file written
+before this field existed has no `replied` key, and absent is not `true`. For
+any `.seen` entry lacking it, check the thread on GitHub: already resolved →
+set `replied: true`; still open → treat it as owed a reply and include it in
+the next decisions file. Defaulting to `true` re-opens the false-clean;
+defaulting to `false` strands the loop.
+
+**`ESCALATE` verdicts go to `.escalated[]`, not `.seen`** — recording the
+fingerprint, so the watcher's `unseen_findings` drops it from `.pending` and
+you do not re-dispatch a triager for the same escalated finding every round. Putting them in
 `.seen` removes them from `.pending` permanently and the human sees them once,
 ever — and escalations are precisely the findings a human must not miss.
 
@@ -233,10 +271,11 @@ On the `PUSHED` event — not before, so replies cite a SHA that exists on the
 remote — build a decisions file and run:
 
 The decisions file is `[{threadId, replyBody, resolve}]`. Write it to the
-session scratchpad, not `/tmp`:
+session scratchpad directory named in your system prompt — substitute the real
+path; `$SCRATCH` is not a variable that exists in your shell:
 
 ```bash
-bash scripts/pr-review-respond.sh <PR> "$SCRATCH/decisions.json"
+bash scripts/pr-review-respond.sh <PR> "<scratchpad>/decisions.json"
 ```
 
 **Check its exit status.** Non-zero means at least one reply failed to post;
@@ -280,13 +319,30 @@ Then return to waiting.
 
 The PR is quiescent when the state file shows all of:
 
-1. every expected bot caught up to `headSha` (read `.reviewedHead`; Copilot
-   excluded when `.copilotExpected` is `false`),
+1. every expected bot caught up to `headSha`, decoded from `.reviewedHead` as
+   follows — the stored values are **not** full SHAs and never equal
+   `headSha` directly:
+
+   | Stored value                                   | Meaning                                      |
+   | ---------------------------------------------- | -------------------------------------------- |
+   | a hex string that is a **prefix of** `headSha` | caught up (Codex's own marker)               |
+   | the literal `"timestamp"`                      | caught up (bot reviewed after the last push) |
+   | absent, or a hex string that is not a prefix   | **not** caught up                            |
+
+   Copilot is excluded entirely when `.copilotExpected` is `false`.
+
 2. every decided bot finding carrying `.seen[<fp>].replied == true` — **not**
    merely "`.pending` is empty". `.pending` is the _undecided_ set, so a
    finding decided but never answered is invisible to it, and the loop would
    report "0 open threads" over a PR full of them,
-3. no unaddressed out-of-diff findings,
+3. every entry in the watcher's `.outOfDiff` has a matching key in **your**
+   `.addressedOutOfDiff` (keyed by `reviewId`). This has to be your own
+   record: `.outOfDiff` is rebuilt each poll from the review list and can
+   never shrink, because GitHub reviews are permanent. The watcher's
+   `announcedOutOfDiff` means _announced_, not _addressed_, so reading that
+   instead makes this condition vacuously true from the first poll. Without a
+   record of your own, condition #3 is uncomputable in both directions —
+   permanently false, or falsely true,
 4. checks neither red nor pending.
 
 Open human threads and open escalations do **not** block quiescence — they are
