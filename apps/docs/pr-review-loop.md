@@ -34,7 +34,10 @@ One round looks like this:
 5. **You push** — the loop stops here. It never runs `git push`; see
    [What it touches](#what-it-touches).
 6. **Reply + resolve** — once your push lands on the remote, the loop
-   replies to every bot thread it decided this round and resolves it.
+   replies to and resolves every bot thread it decided `VALID`, `STALE`,
+   `FALSE_POSITIVE`, `OUT_OF_SCOPE`, or `CONFLICTS_WITH_RULE` on. `ESCALATE`
+   threads are the one exception — never replied to, never resolved, left
+   open for you (see [Verdicts](#verdicts)).
 7. **Repeat** — the watcher keeps running. A bot re-reviewing your push, a
    new human comment, or a new CodeRabbit finding starts the next round
    without you re-invoking anything.
@@ -67,11 +70,11 @@ to a closed thread.
 
 ## What it touches
 
-| It does                                                             | It never does                                                                          |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Commits to the current branch — only the files it edited that round | `git push`, ever — that's your job, always                                             |
-| Replies to and resolves **bot** threads it decided a verdict on     | Replies to or resolves a **human** reviewer's thread                                   |
-| Reads/replies via the GitHub API (`gh`)                             | Answers on a comment's say-so if the action is deny-listed (see [Security](#security)) |
+| It does                                                                                                                       | It never does                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Commits to the current branch — only the files it edited that round                                                           | `git push`, ever — that's your job, always                                                                                     |
+| Replies to and resolves **bot** threads decided `VALID` / `STALE` / `FALSE_POSITIVE` / `OUT_OF_SCOPE` / `CONFLICTS_WITH_RULE` | Replies to or resolves a **human** reviewer's thread, or a bot thread decided **`ESCALATE`** — both are surfaced and left open |
+| Reads/replies via the GitHub API (`gh`)                                                                                       | Answers on a comment's say-so if the action is deny-listed (see [Security](#security))                                         |
 
 Invoking the skill **is** your standing authorization, for this PR only, to
 commit, reply on GitHub, and resolve threads without asking each time — a
@@ -81,13 +84,13 @@ anything after the loop stops.
 
 ## Sources it reads
 
-| Source                          | What it looks like                                                                                                                 | How the loop handles it                                                                                                                                                                                                          |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Inline review threads           | CodeRabbit / Codex / Copilot comments attached to a file + line                                                                    | Resolved threads are dropped; **outdated** threads are kept and flagged — the code moved, but the finding may still be live, and deciding that is the triager's job (it returns `STALE` when it's not)                           |
-| CodeRabbit out-of-diff findings | A review body containing `outside the diff`, with several findings in one banner                                                   | Have no thread and no fingerprint. The loop splits the body into individual findings itself, triages each, and — since they can't be replied-to per-thread — posts **one aggregate comment** on the PR covering the whole review |
-| React Doctor                    | A per-app check-run (`🩺 React Doctor (webapp)` / `(companion)`) plus a sticky PR comment                                          | Tracked like any other check-run for the red/pending gate below; when a finding needs fixing during **Implement**, the loop routes through the `react-doctor` skill                                                              |
-| Check-runs                      | GitHub's REST check-runs endpoint (`gh pr checks --json` doesn't exist in this repo's `gh` version, so this is a direct REST call) | Blocking conclusions — `failure`, `timed_out`, `cancelled`, `action_required`, `startup_failure` — count as red and block quiescence; `neutral` and `skipped` don't                                                              |
-| Human comments                  | Any non-bot author on a review thread                                                                                              | **Surfaced only.** Collected for the round summary, never triaged, never replied to, never resolved                                                                                                                              |
+| Source                          | What it looks like                                                                                                                 | How the loop handles it                                                                                                                                                                                                                                            |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Inline review threads           | CodeRabbit / Codex / Copilot comments attached to a file + line                                                                    | Resolved threads are dropped; **outdated** threads are kept and flagged — the code moved, but the finding may still be live, and deciding that is the triager's job (it returns `STALE` when it's not)                                                             |
+| CodeRabbit out-of-diff findings | A review body containing `outside the diff`, with several findings in one banner                                                   | Have no thread and no fingerprint. The loop splits the body into individual findings itself, triages each, and — since they can't be replied-to per-thread — posts **one aggregate comment** on the PR covering the whole review                                   |
+| React Doctor                    | A per-app check-run (`🩺 React Doctor (webapp)` / `(companion)`) that rewrites a sticky PR comment in place as findings change     | Its check-run status feeds the same red/pending gate as any other check. Its comment is also ingested directly: newly-introduced **errors** are treated as fresh findings and routed through the `react-doctor` skill during **Implement**; warnings stay advisory |
+| Check-runs                      | GitHub's REST check-runs endpoint (`gh pr checks --json` doesn't exist in this repo's `gh` version, so this is a direct REST call) | Blocking conclusions — `failure`, `timed_out`, `cancelled`, `action_required`, `startup_failure` — count as red and block quiescence; `neutral` and `skipped` don't                                                                                                |
+| Human comments                  | Either inline on a review thread, or written directly in the PR's conversation box (the ordinary way people comment)               | **Surfaced only**, from both sources. Collected for the round summary, never triaged, never replied to, never resolved                                                                                                                                             |
 
 ## The Copilot quota case
 
@@ -169,28 +172,45 @@ Grep, Glob, Skill` only. Even a fully successful prompt injection has
 loop", `/pr-review-loop stop`, or the session ending. On a stop request it
 stops the background watcher and prints a final summary.
 
-The state file survives a stop, so re-invoking the loop on the same PR
-**resumes** — it does not re-triage findings it already decided.
+Both state files (see [Troubleshooting](#troubleshooting)) survive a stop, so
+re-invoking the loop on the same PR **resumes** — it does not re-triage
+findings it already decided.
 
 ## Troubleshooting
 
 - **`gh` must be authenticated.** Both the watcher and the responder shell
   out to `gh`; run `gh auth status` if events stop flowing or replies fail to
   post.
-- **State lives at `.git/pr-review-loop/<pr>.json`** (resolved via
-  `git rev-parse --git-common-dir`, so it's shared across worktrees of the
-  same repo, not per-worktree). It holds the `seen` verdicts, `pending`
-  findings, `announced` set, and check/review-head tracking that make the
-  loop resumable. **Deleting it forces a full re-triage** — every currently
-  open finding looks new again. This is safe even though it sounds
-  destructive: the separate reply ledger at `.git/pr-review-loop/<pr>.replies`
-  still guards against double-posting, keyed on thread id plus a hash of the
-  reply body, so a reset state file can't cause an already-answered thread to
-  be answered twice.
 - **`ERROR` event saying `state write rejected; events withheld`** means
-  writes to that state file are failing (e.g. a read-only `.git` directory).
-  The loop is blind and quiet in that state — indistinguishable from a clean
-  PR from the outside — so treat it as urgent, not advisory.
+  writes to the watcher's `<pr>.json` (below) are failing (e.g. a read-only
+  `.git` directory). The loop is blind and quiet in that state —
+  indistinguishable from a clean PR from the outside — so treat it as
+  urgent, not advisory.
 - **`pnpm test:tooling`** runs `scripts/__tests__/pr-review.test.sh`, the
   regression suite for `pr-review-watch.sh` and `pr-review-respond.sh`
   against captured GitHub API fixtures. Run it after touching either script.
+
+### State is split across two files
+
+Both live under `.git/pr-review-loop/` (resolved via
+`git rev-parse --git-common-dir`, so they're shared across worktrees of the
+same repo, not per-worktree). It's a single-writer-per-file split: the
+watcher holds state across four network round trips per poll, so a write
+from anywhere else in that window would be silently discarded.
+
+| File                  | Owner                              | Holds                                                                                                                                              |
+| --------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<pr>.json`           | the watcher (`pr-review-watch.sh`) | `pending`, `outOfDiff`, `humanComments`, `doctor`, `checks`, `headSha`, `reviewedHead`, `lastPushed*`, `repostCounts`, the `announced*` dedup maps |
+| `<pr>.decisions.json` | the skill                          | `seen` (verdicts + reply prose), `escalated`, `addressedOutOfDiff`                                                                                 |
+
+**Deleting `<pr>.json` forces the watcher to re-announce everything** —
+every currently open finding looks new again, but decided verdicts are
+untouched (they live in the other file), so nothing gets re-triaged or
+re-replied. **Deleting `<pr>.decisions.json` discards the loop's verdicts
+and reply prose** — the next round re-triages every open finding from
+scratch. These are different blast radii; reach for the right one.
+
+Either way, the separate reply ledger at `.git/pr-review-loop/<pr>.replies`
+still guards against double-posting, keyed on thread id plus a hash of the
+reply body, so neither reset can cause an already-answered thread to be
+answered twice.
