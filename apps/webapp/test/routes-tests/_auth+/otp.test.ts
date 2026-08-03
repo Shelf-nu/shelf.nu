@@ -1,3 +1,5 @@
+import type { ActionFunctionArgs } from "react-router";
+
 import { USER_EMAIL, USER_ID, ORGANIZATION_ID } from "@mocks/user";
 
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
@@ -50,6 +52,22 @@ const DETECTED = {
   timeZone: "Asia/Tokyo",
 } as const;
 
+/**
+ * Builds the otp action's args for a request. `context` is a minimal stub: the
+ * signup path only reads `context.isAuthenticated` (false → proceeds) and calls
+ * `context.setSession` after creating the session.
+ */
+function actionArgs(request: Request): ActionFunctionArgs {
+  return {
+    request,
+    // why: the action calls context.setSession(authSession) after signup, so the
+    // stub must provide it. These tests assert on createUser (the detection
+    // wiring), not on setSession, so its calls are intentionally not asserted.
+    context: { isAuthenticated: false, setSession: vitest.fn() },
+    params: {},
+  } as ActionFunctionArgs;
+}
+
 describe("otp action — format pref detection", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -89,9 +107,7 @@ describe("otp action — format pref detection", () => {
       },
       body: formData,
     });
-    const context = { isAuthenticated: false, setSession: vitest.fn() };
-
-    await action({ request, context, params: {} } as any);
+    await action(actionArgs(request));
 
     expect(detectFormatPrefsFromHints).toHaveBeenCalledTimes(1);
     expect(createUser).toHaveBeenCalledWith(
@@ -112,9 +128,7 @@ describe("otp action — format pref detection", () => {
       headers: { "accept-language": "ja-JP" }, // no CH-time-zone cookie
       body: formData,
     });
-    const context = { isAuthenticated: false, setSession: vitest.fn() };
-
-    await action({ request, context, params: {} } as any);
+    await action(actionArgs(request));
 
     expect(createUser).toHaveBeenCalledWith(
       expect.objectContaining({
