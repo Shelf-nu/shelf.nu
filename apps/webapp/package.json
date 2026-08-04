@@ -63,6 +63,7 @@
     "@remix-run/form-data-parser": "^0.14.0",
     "@sentry/react-router": "^10.47.0",
     "@shelf/database": "workspace:*",
+    "@shelf/datetime": "workspace:*",
     "@shelf/labels": "workspace:*",
     "@shelf/quantity-control": "workspace:*",
     "@supabase/supabase-js": "^2.103.0",
