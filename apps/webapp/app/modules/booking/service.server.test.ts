@@ -6136,6 +6136,87 @@ describe("removeAssets", () => {
     });
   });
 
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ])("refuses to delete rows from a %s booking", async (status) => {
+    expect.assertions(2);
+
+    // Backstop for the callers' own status gates. They read the booking BEFORE
+    // calling, so a booking closed in the meantime would still have its rows
+    // deleted. This check shares the transaction snapshot with the deleteMany.
+    const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status,
+    });
+
+    await expect(
+      removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      "Removing items is not allowed for the current status of the booking."
+    );
+
+    expect(db.bookingAsset.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("reports removals only for assets that actually lost a booking row", async () => {
+    expect.assertions(2);
+
+    // The bulk handler passes every member of a selected kit, including
+    // members added to the kit AFTER the booking was created — those have no
+    // BookingAsset row and never left. Emitting a note/event for them forges
+    // the audit trail.
+    const mockBooking = {
+      id: "booking-1",
+      assetIds: ["asset-on-booking", "asset-never-on-booking"],
+    };
+
+    // why: this is the pre-delete snapshot of rows about to be dropped; only
+    // the first asset has one, which is exactly the condition under test.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ assetId: "asset-on-booking", quantity: 3 }]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Exactly one event, for the asset that genuinely left.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        action: "BOOKING_ASSETS_REMOVED",
+        assetId: "asset-on-booking",
+      }),
+    ]);
+    // And no asset-timeline note for the one that was never attached.
+    expect(noteService.createNotes).not.toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["asset-never-on-booking"] })
+    );
+  });
+
   it("keeps the delete scoped to kit-driven rows when only kits are removed", async () => {
     expect.assertions(1);
 
