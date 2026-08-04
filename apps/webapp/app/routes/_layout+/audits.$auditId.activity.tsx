@@ -37,10 +37,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    /**
+     * Gate on `auditNote:read`, not `audit:read`. The parent route
+     * (`audits.$auditId.tsx`) already enforces `audit:read`; this child's
+     * payload contains the audit notes, so it must require the right to read
+     * them rather than checking that client-side after shipping them.
+     *
+     * Every role currently holds `auditNote:read`, so this is not a live
+     * exposure today — it is the same shape as the asset gap, one permission
+     * edit away from becoming one. Mirrors bookings / locations.
+     */
     const permissionResult = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.audit,
+      entity: PermissionEntity.auditNote,
       action: PermissionAction.read,
     });
 

@@ -3,8 +3,14 @@
  *
  * Displays a breakdown of custodians and their assigned quantities for a
  * QUANTITY_TRACKED asset. Each row shows the custodian name, quantity held,
- * and a "Release" button. An "Assign" button in the header opens the
- * QuantityCustodyDialog.
+ * and an action that ends the hold. An "Assign" button in the header opens
+ * the QuantityCustodyDialog.
+ *
+ * The action's wording follows the asset's `consumptionType`: a returnable
+ * (`TWO_WAY`) asset offers "Release" back to the pool, a consumable
+ * (`ONE_WAY`) offers "Mark as consumed", which permanently reduces stock.
+ * Both post to the same endpoint — the server derives the outcome from the
+ * asset row, so this is presentation only, never the authority.
  *
  * If no custody records exist, a placeholder message with the available
  * quantity is shown instead.
@@ -15,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { User } from "@prisma/client";
+import type { ConsumptionType, User } from "@prisma/client";
 import { Link, useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -73,6 +79,10 @@ export interface QuantityCustodyListProps {
   assetId: string;
   /** Optional unit of measure label (e.g., "pcs", "liters") */
   unitOfMeasure?: string | null;
+  /** How the asset is consumed. `ONE_WAY` swaps "Release" for
+   * "Mark as consumed" — a consumable's units never come back, so returning
+   * them to the pool is not an outcome the UI should offer. */
+  consumptionType?: ConsumptionType | null;
   /** Quantity currently available for checkout */
   availableQuantity?: number;
   /** Whether the current user is self-service */
@@ -103,6 +113,7 @@ export function QuantityCustodyList({
   custody,
   assetId,
   unitOfMeasure,
+  consumptionType,
   availableQuantity,
   isSelfService = false,
   currentUserId,
@@ -112,6 +123,12 @@ export function QuantityCustodyList({
 }: QuantityCustodyListProps) {
   const unitLabel = unitOfMeasure || "units";
   const allRecords = custody ?? [];
+
+  /**
+   * Legacy rows predate `consumptionType` and are treated as returnable,
+   * matching `resolveReleaseDisposition` on the server.
+   */
+  const isConsumable = consumptionType === "ONE_WAY";
 
   /**
    * Filter visible custody records based on permissions.
@@ -181,6 +198,7 @@ export function QuantityCustodyList({
                 record={record}
                 assetId={assetId}
                 unitLabel={unitLabel}
+                isConsumable={isConsumable}
                 canRelease={canRelease(record)}
               />
             ))}
@@ -215,15 +233,18 @@ interface CustodyRowProps {
   record: CustodyRecord;
   assetId: string;
   unitLabel: string;
+  /** Whether the asset is a ONE_WAY consumable (see QuantityCustodyListProps) */
+  isConsumable?: boolean;
   /** Whether the current user can release this custody record */
   canRelease?: boolean;
 }
 
 /**
- * Renders a single custodian row with their name, quantity, and a release button.
+ * Renders a single custodian row with their name, quantity, and the action
+ * that ends the hold.
  *
- * The release button opens a confirmation dialog where the user can specify
- * how many units to release.
+ * The action opens a confirmation dialog where the user can specify how many
+ * units to release (or, for a consumable, mark as consumed).
  *
  * @param props - The custody record and context
  */
@@ -231,6 +252,7 @@ function CustodyRow({
   record,
   assetId,
   unitLabel,
+  isConsumable = false,
   canRelease = true,
 }: CustodyRowProps) {
   const custodianName = resolveTeamMemberName(record.custodian);
@@ -265,6 +287,7 @@ function CustodyRow({
           teamMemberId={record.custodian.id}
           maxQuantity={quantity}
           unitLabel={unitLabel}
+          isConsumable={isConsumable}
         />
       ) : null}
     </li>
@@ -328,11 +351,14 @@ interface ReleaseButtonProps {
   teamMemberId: string;
   maxQuantity: number;
   unitLabel: string;
+  /** Consumable (ONE_WAY) assets are consumed, not returned */
+  isConsumable?: boolean;
 }
 
 /**
- * A button that opens a confirmation dialog to release (return) quantity
- * from a custodian back to the available pool.
+ * A button that opens a confirmation dialog to end a custodian's hold on N
+ * units — returning them to the available pool for a `TWO_WAY` asset, or
+ * consuming them (permanently reducing stock) for a `ONE_WAY` consumable.
  *
  * @param props - Asset and custodian identifiers plus constraints
  */
@@ -341,6 +367,7 @@ function ReleaseButton({
   teamMemberId,
   maxQuantity,
   unitLabel,
+  isConsumable = false,
 }: ReleaseButtonProps) {
   const [open, setOpen] = useState(false);
   const fetcher = useFetcher({ key: `release-qty-${teamMemberId}` });
@@ -364,16 +391,28 @@ function ReleaseButton({
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button type="button" variant="secondary" className="py-1 text-xs">
-          Release
+          {isConsumable ? "Mark as consumed" : "Release"}
         </Button>
       </AlertDialogTrigger>
 
       <AlertDialogContent onEscapeKeyDown={() => setOpen(false)}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Release Quantity</AlertDialogTitle>
+          <AlertDialogTitle>
+            {isConsumable ? "Mark as consumed" : "Release Quantity"}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            Enter the number of {unitLabel} to release back to the available
-            pool. Maximum: {maxQuantity}.
+            {isConsumable ? (
+              <>
+                Enter the number of {unitLabel} that were used up. This
+                permanently reduces total stock and cannot be undone. Maximum:{" "}
+                {maxQuantity}.
+              </>
+            ) : (
+              <>
+                Enter the number of {unitLabel} to release back to the available
+                pool. Maximum: {maxQuantity}.
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -403,7 +442,11 @@ function ReleaseButton({
               name="note"
               inputType="textarea"
               label="Note (optional)"
-              placeholder="Reason for release..."
+              placeholder={
+                isConsumable
+                  ? "What were they used for..."
+                  : "Reason for release..."
+              }
               rows={2}
             />
           </div>
@@ -416,7 +459,13 @@ function ReleaseButton({
             </AlertDialogCancel>
 
             <Button type="submit" variant="primary" disabled={disabled}>
-              {isSubmitting ? "Releasing..." : "Release"}
+              {isConsumable
+                ? isSubmitting
+                  ? "Marking..."
+                  : "Mark as consumed"
+                : isSubmitting
+                ? "Releasing..."
+                : "Release"}
             </Button>
           </AlertDialogFooter>
         </fetcher.Form>

@@ -154,7 +154,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // lookup, over-release check) lives inside the service. Kit-allocated
     // custody rows are NOT releasable here by design — only the operator
     // row (kitCustodyId: null) is targeted.
-    await releaseQuantity({
+    const { disposition } = await releaseQuantity({
       assetId,
       teamMemberId,
       quantity,
@@ -162,6 +162,11 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       note,
     });
+    // ONE_WAY consumables are used up rather than returned — the service
+    // reports which branch it took so the note matches what was persisted.
+    // The app needs no new build for this: the disposition is decided
+    // server-side from `Asset.consumptionType`.
+    const wasConsumed = disposition === "CONSUME";
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -187,7 +192,9 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
+      const baseLine = wasConsumed
+        ? `${actor} marked **${quantity}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
+        : `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
@@ -211,12 +218,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
 
-    // Releasing custody raises available stock and can move the asset back
-    // above its low-stock threshold — run the notifier to clear a now-stale
-    // debounce marker (and send the recovery notice) so the next genuine
-    // low-stock alert isn't suppressed. Best-effort: releaseQuantity has
-    // already committed, so a notifier failure must NOT surface as an action
-    // error (the client could retry the non-idempotent release).
+    // Both dispositions move the asset across its low-stock threshold: a
+    // RETURN raises available stock (clear a now-stale debounce marker and
+    // send the recovery notice, so the next genuine alert isn't suppressed),
+    // a CONSUME lowers `Asset.quantity` and may trip it. Best-effort:
+    // releaseQuantity has already committed, so a notifier failure must NOT
+    // surface as an action error (the client could retry the non-idempotent
+    // release).
     try {
       await checkAndNotifyLowStock({
         assetId,

@@ -92,7 +92,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await releaseQuantity({
+    /**
+     * The service decides RETURN vs CONSUME from `Asset.consumptionType` and
+     * reports it back, so the audit note and the toast below describe what was
+     * actually persisted instead of re-deriving the branch here.
+     */
+    const { disposition } = await releaseQuantity({
       assetId,
       teamMemberId,
       quantity,
@@ -100,6 +105,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       note,
     });
+    const wasConsumed = disposition === "CONSUME";
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -125,7 +131,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         },
       });
 
-      const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
+      const baseLine = wasConsumed
+        ? `${actor} marked **${quantity}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
+        : `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
@@ -147,17 +155,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     sendNotification({
-      title: `${quantity} unit(s) released successfully`,
-      message: "The quantity has been returned to the available pool.",
+      title: wasConsumed
+        ? `${quantity} unit(s) marked as consumed`
+        : `${quantity} unit(s) released successfully`,
+      message: wasConsumed
+        ? "The units were used up and have been removed from stock."
+        : "The quantity has been returned to the available pool.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
 
-    // Releasing custody RAISES available stock and can move the asset back
-    // above its low-stock threshold. Run the debounced notifier so the
-    // `lowStockNotifiedAt` marker is cleared (and the "back in stock" notice
-    // sent) on recovery — otherwise a stale marker would suppress the next
-    // genuine low-stock alert. Best-effort: `releaseQuantity` has already
+    // Either disposition moves the asset across its low-stock threshold, in
+    // opposite directions: a RETURN raises available stock (so a stale
+    // `lowStockNotifiedAt` marker must be cleared, and the "back in stock"
+    // notice sent, or the next genuine alert is suppressed), while a CONSUME
+    // lowers `Asset.quantity` outright and may TRIP the threshold. Run the
+    // debounced notifier for both. Best-effort: `releaseQuantity` has already
     // committed, so a notifier failure must NOT surface as an action error
     // (the client could retry the non-idempotent release).
     try {
