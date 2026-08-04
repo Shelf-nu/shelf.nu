@@ -51,6 +51,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCustodianForNote,
   wrapKitsWithDataForNote,
@@ -482,10 +483,13 @@ export async function emitAssetKitDetachmentNotes({
     }
   }
   for (const group of groups.values()) {
+    // Asset titles and the kit name are user-supplied and render as literal
+    // text in this Markdoc note.
+    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
     const subjects =
-      group.assetTitles.length === 1
-        ? `**${group.assetTitles[0]}**`
-        : `**${group.assetTitles.length} assets** (${group.assetTitles
+      safeTitles.length === 1
+        ? `**${safeTitles[0]}**`
+        : `**${safeTitles.length} assets** (${safeTitles
             .map((t) => `*${t}*`)
             .join(", ")})`;
     // `createSystemBookingNote` doesn't accept a tx (matches the other
@@ -496,7 +500,9 @@ export async function emitAssetKitDetachmentNotes({
     await createSystemBookingNote({
       bookingId: group.bookingId,
       organizationId,
-      content: `${actorLink} removed ${subjects} from kit **${group.kitName}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
+      content: `${actorLink} removed ${subjects} from kit **${stripMarkdocDelimiters(
+        group.kitName
+      )}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
     });
   }
 }
@@ -1653,7 +1659,9 @@ async function performKitDeletion({
           );
           const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${k.name.trim()}** was deleted.`,
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${stripMarkdocDelimiters(
+              k.name
+            )}** was deleted.`,
             type: "UPDATE" as const,
             userId,
             assetId: asset.id,
@@ -2477,7 +2485,8 @@ export async function bulkAssignKitCustody({
       });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => {
           const kitLink = asset.kit

@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import {
   BookingStatus,
   AssetStatus,
@@ -1226,6 +1227,44 @@ describe("updateBasicBooking", () => {
     custodianTeamMemberId: "team-member-2",
     tags: [{ id: "tag-1" }, { id: "tag-2" }],
   };
+
+  it("cannot be used to inject a Markdoc tag via the booking name", async () => {
+    expect.assertions(3);
+
+    // The reported vector: booking names are free-form user input and land in
+    // Markdoc-rendered note content, so a name containing `{% … %}` became a
+    // LIVE tag in the activity feed — an attacker-chosen link shown to anyone
+    // viewing the booking. The note must carry the name as inert text.
+    const payload = '{% link to="javascript:alert(1)" text="x" /%}';
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: "Old Name",
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBookingData, name: payload });
+
+    await updateBasicBooking({ ...mockUpdateBookingParams, name: payload });
+
+    const noteCall = (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.find(
+      ([args]) => args?.content?.includes("changed booking name")
+    );
+
+    expect(noteCall).toBeDefined();
+    const { content } = noteCall![0];
+    // Parsed the way the feed parses it: no tag node may exist.
+    const tags = [...Markdoc.parse(content).walk()].filter(
+      (node) => node.type === "tag"
+    );
+    expect(tags).toHaveLength(0);
+    expect(content).not.toContain("{%");
+  });
 
   it("should update booking successfully when status is DRAFT", async () => {
     expect.assertions(2);

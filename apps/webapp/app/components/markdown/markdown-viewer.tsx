@@ -4,6 +4,7 @@ import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
+import { sanitizeMarkdocTree } from "~/utils/sanitize-markdoc-tree";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { AuditImagesComponent } from "./audit-images-component";
@@ -37,6 +38,16 @@ interface Props {
   className?: string;
   pre?: string;
   disablePortal?: boolean;
+  /**
+   * Allow off-origin links in this content.
+   *
+   * Defaults to `false` — safe for system-generated notes, whose text we
+   * assemble from entity names, so any external link in one was injected.
+   * Pass `true` only for genuinely author-written content (user comments,
+   * admin announcements), where linking out is a deliberate feature.
+   * Dangerous schemes and off-origin images are blocked regardless.
+   */
+  allowExternalLinks?: boolean;
 }
 
 // Default components map including our custom components
@@ -75,6 +86,7 @@ export const MarkdownViewer = ({
   pre,
   className,
   disablePortal,
+  allowExternalLinks = false,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
@@ -93,13 +105,23 @@ export const MarkdownViewer = ({
     [components, WrappedAuditImages]
   );
 
-  // Parse content if it's a string, otherwise use as-is
+  // Parse content if it's a string, otherwise use as-is.
+  //
+  // SECURITY: sanitize the resulting tree before rendering. Markdoc turns
+  // ordinary Markdown link/image syntax into NATIVE `a`/`img` nodes that never
+  // reach our custom tag components, so `[x](https://evil.example)` inside a
+  // stored note would otherwise render as a working anchor and an image would
+  // fire an off-origin request on load. Sanitizing here — rather than during
+  // parsing — also covers pre-parsed `RenderableTreeNodes` passed straight in,
+  // and protects notes already stored in the database.
   const parsedContent = React.useMemo(() => {
-    if (typeof content === "string") {
-      return parseMarkdownToReact(content, markdocConfig);
-    }
-    return content;
-  }, [content]);
+    const tree =
+      typeof content === "string"
+        ? parseMarkdownToReact(content, markdocConfig)
+        : content;
+
+    return sanitizeMarkdocTree(tree, { allowExternalLinks });
+  }, [content, allowExternalLinks]);
 
   return (
     <div className={styles}>

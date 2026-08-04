@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
@@ -143,7 +144,10 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         organizationId: reminder.organizationId,
         userId: reminder.createdById,
         type: "UPDATE",
-        content: `**System** has sent **${reminder.name.trim()}** reminder.`,
+        // Reminder names are user-supplied and render as literal text here.
+        content: `**System** has sent **${stripMarkdocDelimiters(
+          reminder.name
+        )}** reminder.`,
       }),
     ]);
   },
