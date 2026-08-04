@@ -12,7 +12,11 @@ import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
-import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
+import {
+  buildPdfAssetRows,
+  filterBookingAssets,
+  groupAndSortAssetsByKit,
+} from "./helpers";
 import { getBooking } from "./service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -49,10 +53,22 @@ export interface PdfDbResult {
       tags: typeof TAG_WITH_COLOR_SELECT;
     };
   }>;
+  /**
+   * The PDF render list, ONE ROW PER `BookingAsset` slice (not one deduped row
+   * per asset). A QUANTITY_TRACKED asset booked standalone + via multiple kits
+   * appears once per slice, each carrying its own booked `quantity` and its own
+   * `kit`. `bookingAssetId` is the unique React key for the row.
+   */
   assets: (Asset & {
     category: Pick<Category, "name"> | null;
     location: Pick<Location, "name"> | null;
-    kit: Pick<Kit, "name"> | null;
+    kit:
+      | (Pick<Kit, "id" | "name"> & { location: Pick<Location, "name"> | null })
+      | null;
+    /** THIS slice's booked units (`BookingAsset.quantity`). */
+    quantity: number;
+    /** Unique `BookingAsset.id` — the rendered row's React key. */
+    bookingAssetId: string;
   })[];
   totalValue: string;
   organization: Pick<
@@ -60,8 +76,6 @@ export interface PdfDbResult {
     "id" | "name" | "imageId" | "currency" | "updatedAt"
   >;
   assetIdToQrCodeMap: Record<string, string>;
-  /** Maps asset ID to booked quantity for quantity-tracked assets */
-  assetIdToQuantityMap: Record<string, number>;
   /**
    * Outstanding model-level reservations on the booking (Phase 3d).
    * Only rows with `quantity > 0` are meaningful for the PDF — the
@@ -108,9 +122,12 @@ export async function fetchAllPdfRelatedData(
     // getBooking no longer filters by search, so honor the page's active
     // search here (in memory) — the PDF should export exactly what the user is
     // looking at. Mirrors the overview loader. We filter on the normalized
-    // (singular kit/location) projection of the booking's bookingAssets, then
-    // dedupe assetIds (one asset can have multiple BookingAsset slices — one
-    // standalone + N kit-driven — and the export wants each asset once).
+    // (singular kit/location) projection of the booking's bookingAssets. This
+    // stays a PER-SLICE list (one entry per BookingAsset row: one standalone +
+    // N kit-driven for a QT asset) — the PDF renders one row per slice. Each
+    // slice carries its own booked `quantity` and its unique `bookingAssetId`
+    // (used later as the row key); the asset ids are deduped only for the
+    // efficiency of the `rawAssets` fetch below, not for the render list.
     const visibleBookingAssets = filterBookingAssets(
       (booking?.bookingAssets ?? []).map((ba) => ({
         ...ba.asset,
@@ -118,6 +135,10 @@ export async function fetchAllPdfRelatedData(
         kit:
           ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null,
         location: getPrimaryLocation(ba.asset),
+        // Slice-level fields carried through search filtering so each slice
+        // renders as its own PDF row with the correct quantity/key.
+        quantity: ba.quantity,
+        bookingAssetId: ba.id,
       })),
       sortParams?.search
     );
@@ -147,15 +168,17 @@ export async function fetchAllPdfRelatedData(
               },
             },
           },
-          // `kit` / `kitId` fields are derived from `assetKits[0]?.kit`
-          // below so `groupAndSortAssetsByKit` (which still consumes the
-          // singular shape) keeps working. `kit.location` is included so
-          // groupAndSortAssetsByKit can sort kit groups by Location in
-          // the exported PDF (otherwise every kit is treated as null-
-          // location and falls back to kit-name order, making the PDF
-          // not match the selected Location sort).
+          // Each slice's `kit` / `kitId` are resolved PER SLICE below by
+          // matching the slice's `BookingAsset.assetKitId` against these
+          // memberships' `id` (a QT asset can be in several kits, so
+          // `assetKits[0]` is not necessarily the slice's kit). `kit.location`
+          // is included so `groupAndSortAssetsByKit` can sort kit groups by
+          // Location in the exported PDF (otherwise every kit is treated as
+          // null-location and falls back to kit-name order, making the PDF not
+          // match the selected Location sort).
           assetKits: {
             select: {
+              id: true,
               kit: {
                 select: {
                   id: true,
@@ -188,18 +211,14 @@ export async function fetchAllPdfRelatedData(
       });
     }
 
-    // consumed by groupAndSortAssetsByKit / downstream PDF helpers.
-    const assets = rawAssets.map((asset) => {
-      const assetKit = asset.assetKits[0]?.kit ?? null;
-      return {
-        ...asset,
-        kitId: assetKit?.id ?? null,
-        kit: assetKit ? { id: assetKit.id, name: assetKit.name } : null,
-        location: getPrimaryLocation(asset),
-      };
-    });
+    // Build the PER-SLICE render list: join each search-visible BookingAsset
+    // slice to its full (deduped) asset data, resolving that slice's own kit
+    // and carrying its own booked quantity + unique row key. A QT asset booked
+    // standalone + via two kits produces three rows here.
+    const rawAssetsById = new Map(rawAssets.map((asset) => [asset.id, asset]));
+    const assets = buildPdfAssetRows(visibleBookingAssets, rawAssetsById);
 
-    // Group by kit and sort - this ensures kit assets stay together
+    // Group by kit and sort - this keeps each kit's per-slice rows contiguous.
     const sortedAssets = groupAndSortAssetsByKit(
       assets,
       orderBy,
@@ -212,15 +231,6 @@ export async function fetchAllPdfRelatedData(
       organizationId,
       size: "small",
     });
-
-    // Build a map of asset ID to booked quantity from the pivot records.
-    // Only entries with quantity > 1 are meaningful (QUANTITY_TRACKED assets).
-    const assetIdToQuantityMap: Record<string, number> = {};
-    for (const ba of booking.bookingAssets) {
-      if (ba.quantity > 1) {
-        assetIdToQuantityMap[ba.assetId] = ba.quantity;
-      }
-    }
 
     // Phase 3d (Book-by-Model): surface outstanding model-level
     // reservations so the PDF can render a dedicated "Requested models"
@@ -268,7 +278,6 @@ export async function fetchAllPdfRelatedData(
       }),
       organization,
       assetIdToQrCodeMap,
-      assetIdToQuantityMap,
       modelRequests,
     };
   } catch (cause) {
