@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import {
   BookingStatus,
   AssetStatus,
@@ -1226,6 +1227,44 @@ describe("updateBasicBooking", () => {
     custodianTeamMemberId: "team-member-2",
     tags: [{ id: "tag-1" }, { id: "tag-2" }],
   };
+
+  it("cannot be used to inject a Markdoc tag via the booking name", async () => {
+    expect.assertions(3);
+
+    // The reported vector: booking names are free-form user input and land in
+    // Markdoc-rendered note content, so a name containing `{% … %}` became a
+    // LIVE tag in the activity feed — an attacker-chosen link shown to anyone
+    // viewing the booking. The note must carry the name as inert text.
+    const payload = '{% link to="javascript:alert(1)" text="x" /%}';
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: "Old Name",
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBookingData, name: payload });
+
+    await updateBasicBooking({ ...mockUpdateBookingParams, name: payload });
+
+    const noteCall = (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.find(
+      ([args]) => args?.content?.includes("changed booking name")
+    );
+
+    expect(noteCall).toBeDefined();
+    const { content } = noteCall![0];
+    // Parsed the way the feed parses it: no tag node may exist.
+    const tags = [...Markdoc.parse(content).walk()].filter(
+      (node) => node.type === "tag"
+    );
+    expect(tags).toHaveLength(0);
+    expect(content).not.toContain("{%");
+  });
 
   it("should update booking successfully when status is DRAFT", async () => {
     expect.assertions(2);
@@ -6045,6 +6084,153 @@ describe("removeAssets", () => {
       select: {
         status: true,
         name: true,
+      },
+    });
+  });
+
+  it("removes BOTH standalone and kit-driven rows when the caller mixes assets and kits", async () => {
+    expect.assertions(1);
+
+    // The booking-overview bulk-remove sends standalone asset ids AND kit ids
+    // in ONE call. `asset-standalone` sits on the booking as a plain row
+    // (assetKitId null); `asset-in-kit` sits on it via kit-1's AssetKit row.
+    // No `standaloneAssetIds` here on purpose — this covers the inference
+    // fallback used by callers that can't observe per-row selection.
+    const mockBooking = {
+      id: "booking-1",
+      assetIds: ["asset-standalone", "asset-in-kit"],
+    };
+
+    // why: the shared assetKit.findMany mock only echoes `where.id.in`; this
+    // query filters by kitId/assetId, so the kit-driven row must be supplied.
+    (
+      db.assetKit.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "assetkit-1", assetId: "asset-in-kit" }]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 2 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+      kitIds: ["kit-1"],
+      kits: [{ id: "kit-1", name: "Kit 1" }],
+      assets: [{ id: "asset-standalone", title: "Standalone asset" }],
+    });
+
+    // The delete scope must cover the standalone slice too — scoping purely by
+    // `assetKitId` leaves the standalone rows on the booking, which is what
+    // made the bulk action look like it "only removed the kit".
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        OR: [
+          { assetKitId: { in: ["assetkit-1"] } },
+          { assetId: { in: ["asset-standalone"] }, assetKitId: null },
+        ],
+      },
+    });
+  });
+
+  it("removes both rows of an asset booked standalone AND inside a removed kit", async () => {
+    expect.assertions(1);
+
+    // A qty-tracked asset can hold a standalone row AND a kit-driven row on
+    // the same booking (the partial unique indexes allow exactly that). When
+    // the user ticks the standalone row and the kit, both must go — inferring
+    // standalone intent from kit membership would classify the asset as a kit
+    // member only and leave its standalone row attached.
+    const mockBooking = { id: "booking-1", assetIds: ["asset-both"] };
+
+    // why: the shared assetKit.findMany mock only echoes `where.id.in`; this
+    // query filters by kitId/assetId, so the kit-driven row must be supplied.
+    (
+      db.assetKit.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "assetkit-1", assetId: "asset-both" }]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 2 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+      kitIds: ["kit-1"],
+      kits: [{ id: "kit-1", name: "Kit 1" }],
+      // The caller saw the user tick this asset's own row, so it says so
+      // explicitly instead of letting the service infer.
+      standaloneAssetIds: ["asset-both"],
+      assets: [{ id: "asset-both", title: "Asset in both" }],
+    });
+
+    // Both predicates present: the kit-driven row AND the standalone row of
+    // the very same asset.
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        OR: [
+          { assetKitId: { in: ["assetkit-1"] } },
+          { assetId: { in: ["asset-both"] }, assetKitId: null },
+        ],
+      },
+    });
+  });
+
+  it("keeps the delete scoped to kit-driven rows when only kits are removed", async () => {
+    expect.assertions(1);
+
+    // Guards the reason the kit-scoped branch exists: an asset can sit on the
+    // booking BOTH via a kit slice and as a separately-added standalone slice.
+    // Removing the kit must take only the kit's slice. The mixed-selection fix
+    // above must not widen this back into a delete-by-assetId.
+    const mockBooking = { id: "booking-1", assetIds: ["asset-in-kit"] };
+
+    // why: the shared assetKit.findMany mock only echoes `where.id.in`; this
+    // query filters by kitId/assetId, so the kit-driven row must be supplied.
+    (
+      db.assetKit.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "assetkit-1", assetId: "asset-in-kit" }]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+      kitIds: ["kit-1"],
+      kits: [{ id: "kit-1", name: "Kit 1" }],
+      assets: [],
+    });
+
+    // No `OR`, no standalone clause — the asset is a member of the kit being
+    // removed, so its standalone slice (if any) stays on the booking.
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        assetKitId: { in: ["assetkit-1"] },
       },
     });
   });
