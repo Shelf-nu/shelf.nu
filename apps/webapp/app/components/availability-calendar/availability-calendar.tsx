@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CustomContentGenerator, EventInput } from "@fullcalendar/core";
+// Named-timezone support: FullCalendar v6 only understands "local"/"UTC"; a
+// named IANA `timeZone` (below) silently falls back to UTC — rendering non-UTC
+// users' booking bars at the wrong time in the Day/Week views — unless this
+// Luxon connector is registered in `plugins`. Same reason as routes/calendar.tsx.
+import luxonPlugin from "@fullcalendar/luxon3";
 import FullCalendar from "@fullcalendar/react";
 import type {
   ResourceInput,
@@ -150,7 +155,10 @@ export default function AvailabilityCalendar({
               eventMouseLeave={handleEventMouseLeave("resourceTimelineMonth")}
               eventClick={handleEventClick}
               resourceOrder="none"
-              plugins={[resourceTimelinePlugin]}
+              // luxonPlugin registers named-IANA-timezone resolution so
+              // `timeZone={timeZone}` above renders in the user's zone instead
+              // of falling back to UTC (see import note).
+              plugins={[resourceTimelinePlugin, luxonPlugin]}
               schedulerLicenseKey={FULL_CALENDAR_LICENSE_KEY}
               initialView={DEFAULT_CALENDAR_VIEW}
               headerToolbar={false}

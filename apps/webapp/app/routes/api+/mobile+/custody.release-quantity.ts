@@ -5,9 +5,11 @@
  * back to the available pool. Mobile twin of the web's
  * `/api/assets/release-quantity-custody` route — same Zod schema, same
  * SELF_SERVICE guard, same `releaseQuantity` service call, same best-effort
- * audit note. Deliberately NO low-stock check: release ADDS stock back, and
- * the web release route has none either (verified: no
- * `checkAndNotifyLowStock` import/call in that file).
+ * audit note. Runs the debounced low-stock notifier (best-effort): release
+ * RAISES available stock and can move the asset back above its threshold, so
+ * the notifier must run to clear the `lowStockNotifiedAt` marker (and send the
+ * "back in stock" notice) on recovery — otherwise a stale marker would suppress
+ * the next genuine low-stock alert. Mirrors the web release route.
  *
  * Body: { assetId: string, teamMemberId: string, quantity: number, note?: string }
  * Org: `?orgId=` query param or `x-shelf-organization` header.
@@ -33,6 +35,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { releaseQuantity } from "~/modules/asset/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -207,7 +210,29 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
-    // And no checkAndNotifyLowStock — see the file JSDoc.
+
+    // Releasing custody raises available stock and can move the asset back
+    // above its low-stock threshold — run the notifier to clear a now-stale
+    // debounce marker (and send the recovery notice) so the next genuine
+    // low-stock alert isn't suppressed. Best-effort: releaseQuantity has
+    // already committed, so a notifier failure must NOT surface as an action
+    // error (the client could retry the non-idempotent release).
+    try {
+      await checkAndNotifyLowStock({
+        assetId,
+        userId: user.id,
+        organizationId,
+      });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: "Failed to run low-stock check after mobile custody release",
+          label: "Assets",
+          additionalData: { assetId, organizationId },
+        })
+      );
+    }
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.

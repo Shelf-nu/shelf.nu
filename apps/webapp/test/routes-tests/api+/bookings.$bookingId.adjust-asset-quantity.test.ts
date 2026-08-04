@@ -30,14 +30,23 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-const dbMocks = vi.hoisted(() => ({
-  bookingAssetFindFirst: vi.fn(),
-  $transaction: vi.fn(async (cb: any) =>
-    cb({
-      bookingAsset: { update: vi.fn().mockResolvedValue(undefined) },
-    })
-  ),
-}));
+const dbMocks = vi.hoisted(() => {
+  // Re-read of the slice's booked quantity UNDER the asset lock (the TOCTOU
+  // guard). Hoisted so tests can control the FRESH value per-scenario.
+  const bookingAssetFindUnique = vi.fn();
+  return {
+    bookingAssetFindFirst: vi.fn(),
+    bookingAssetFindUnique,
+    $transaction: vi.fn(async (cb: any) =>
+      cb({
+        bookingAsset: {
+          findUnique: bookingAssetFindUnique,
+          update: vi.fn().mockResolvedValue(undefined),
+        },
+      })
+    ),
+  };
+});
 
 const consumptionMocks = vi.hoisted(() => ({
   lockAssetForQuantityUpdate: vi.fn().mockResolvedValue(undefined),
@@ -149,6 +158,10 @@ function buildArgs(request: Request): ActionFunctionArgs {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: the locked re-read observes the same quantity the outside-tx
+  // snapshot did (`buildBookingAsset` → 5). Tests that model a concurrent
+  // change override this per-scenario.
+  dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 5 });
 });
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", () => {
@@ -299,5 +312,57 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
 
     expect(response.status).toBe(200);
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("api/bookings/:bookingId/adjust-asset-quantity — TOCTOU re-read", () => {
+  it("measures availability against the re-read quantity under the lock, not the stale snapshot", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      isSelfServiceOrBase: false,
+    } as any);
+
+    // Outside-tx snapshot reports 5 units (stale HIGH).
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // A concurrent request already lowered the real booked qty to 2 before
+    // this request acquired the lock and re-read.
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 2 });
+
+    await action(buildArgs(buildRequest(4)));
+
+    // The directional guard must see currentQuantity = 2 (the FRESH value): a
+    // submission of 4 is then a genuine INCREASE (2 → 4), not a reduction
+    // masked by the stale 5 that would skip the availability check entirely.
+    expect(consumptionMocks.assertAssetQuantityAvailable).toHaveBeenCalledWith(
+      expect.objectContaining({ currentQuantity: 2, requestedQuantity: 4 })
+    );
+  });
+
+  it("returns 404 when the slice vanishes under the lock (concurrent removal)", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      isSelfServiceOrBase: false,
+    } as any);
+
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // The row was deleted by a concurrent request between the outside-tx read
+    // and the locked re-read.
+    dbMocks.bookingAssetFindUnique.mockResolvedValue(null);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(404);
+    // Once the row is gone, neither the availability guard nor the write runs.
+    expect(
+      consumptionMocks.assertAssetQuantityAvailable
+    ).not.toHaveBeenCalled();
   });
 });

@@ -11,9 +11,8 @@ import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
-import { getClientHint } from "~/utils/client-hints";
+import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
 import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
-import { detectFormatPrefsFromHints } from "~/utils/date-format";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   getActionMethod,
@@ -134,9 +133,11 @@ export async function action({ request }: ActionFunctionArgs) {
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
         // the user up by email, so this must run before we mint a code.
-        // Same detection as the web callback; the mobile Request still carries
-        // accept-language + the CH-time-zone cookie for getClientHint.
-        const formatPrefs = detectFormatPrefsFromHints(getClientHint(request));
+        // Same detection as the web callback; timeZone is null when the mobile
+        // Request lacks the CH-time-zone cookie (see
+        // detectFormatPrefsForPersistence), so the lazy backfill fills the real
+        // zone later rather than sticking on the "UTC" fallback.
+        const formatPrefs = detectFormatPrefsForPersistence(request);
         await resolveUserAndOrgForSsoCallback({
           authSession,
           firstName,

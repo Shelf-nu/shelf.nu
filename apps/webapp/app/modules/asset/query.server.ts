@@ -35,11 +35,12 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
- * @param availableToBookOnly - Restrict to bookable assets (self-service)
+ * @param availableToBookOnly - Restrict to assets with `availableToBook = true`
  * @param timeZone - IANA timezone name the acting user displays dates in.
  *   Used only by built-in date-column filters so their day truncation matches
  *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
  *   preserve behavior for callers that don't supply it.
+ * @param lowStockOnly - Restrict to low-stock QUANTITY_TRACKED assets (see below)
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -48,12 +49,21 @@ export function generateWhereClause(
   filters: Filter[],
   assetIds?: string[],
   availableToBookOnly = false,
-  timeZone: string = "UTC"
+  timeZone: string = "UTC",
+  lowStockOnly = false
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
   if (availableToBookOnly) {
     whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  }
+
+  if (lowStockOnly) {
+    // Low stock = a QUANTITY_TRACKED asset whose stock is at/below its
+    // reorder threshold. Deliberately stock-vs-threshold only, NOT
+    // custody-aware (a one-line change could add a custody-aware variant
+    // later if that's ever wanted) — keeps this fast and simple.
+    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND a."quantity" <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided
@@ -1485,7 +1495,8 @@ type DirectAssetField =
   | "updatedAt"
   | "availableToBook"
   | "type"
-  | "quantity";
+  | "quantity"
+  | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1499,6 +1510,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  minQuantity: "assetMinQuantity",
 };
 
 /**
@@ -2864,6 +2876,7 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
+          a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",
           a.status AS "assetStatus",
