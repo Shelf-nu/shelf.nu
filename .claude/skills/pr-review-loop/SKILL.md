@@ -348,17 +348,26 @@ open. Escalation is the sink for security-flavored findings, deny-listed
 actions, low confidence, and every triager malfunction; resolving those would
 silently close exactly the findings that most need a human.
 
-**`commentsTruncated: true`: reply, never resolve** (`resolve: false` in the
-replies file, regardless of verdict). The watcher only fetches a thread's
-first 20 comments (`comments(first:20)` in `THREADS_QUERY`); this flag means
-the thread has more. A comment past that cutoff could be a human reply this
-poll never saw — resolving on a decided BOT finding would then silently close
-a thread with an unanswered human still on it, the exact failure this loop
-exists to prevent. Post the reply (it is still correct and still helps) but
-leave the thread open for a human to resolve once they've read past comment 20. Check the field per-finding, not per-thread-once: every finding shares
-one thread's value, but re-read it from `.pending` rather than assuming it
-carries over between rounds — a thread can cross the 20-comment mark between
-polls.
+**`commentsTruncated: true`: reply, never resolve** — `resolve: false` in the
+replies file. This **downgrades** an entry that was already going to be
+replied to; it never promotes one into the replies file. Threads excluded
+above stay excluded: a `commentsTruncated` thread carrying an `ESCALATE`
+verdict, or a human thread, is still absent from the replies file entirely and
+still left unresolved. So the rule applies only to the reply-eligible decided
+verdicts in the table above (`VALID`, `STALE`, `FALSE_POSITIVE`,
+`CONFLICTS_WITH_RULE`, `OUT_OF_SCOPE`).
+
+The watcher only fetches a thread's first 20 comments (`comments(first:20)` in
+`THREADS_QUERY`); this flag means the thread has more. A comment past that
+cutoff could be a human reply this poll never saw — resolving on a decided BOT
+finding would then silently close a thread with an unanswered human still on
+it, the exact failure this loop exists to prevent. Post the reply (it is still
+correct and still helps) but leave the thread open for a human to resolve once
+they have read past comment 20.
+
+Check the field per-finding, not per-thread-once: every finding shares one
+thread's value, but re-read it from `.pending` rather than assuming it carries
+over between rounds — a thread can cross the 20-comment mark between polls.
 
 After the responder returns, flip `.seen[<fp>].replied = true` for every
 thread it actually replied to.
