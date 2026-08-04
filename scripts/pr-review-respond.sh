@@ -53,8 +53,21 @@ git_common_dir() {
 }
 
 LEDGER="$(git_common_dir)/pr-review-loop/${PR}.replies"
-mkdir -p "$(dirname "$LEDGER")"
-touch "$LEDGER"
+
+# Fail fast, before any live mutation, if the ledger cannot be created or
+# written — e.g. a read-only .git (worktree on a read-only mount, permission
+# issue). An unguarded mkdir/touch failure here would silently continue into
+# the loop below with a ledger that can never record a successful reply,
+# turning EVERY future re-run into a duplicate-post risk with no error
+# anywhere pointing at the actual cause.
+mkdir -p "$(dirname "$LEDGER")" || {
+  printf 'cannot create ledger directory: %s\n' "$(dirname "$LEDGER")" >&2
+  exit 1
+}
+touch "$LEDGER" || {
+  printf 'cannot write ledger file: %s\n' "$LEDGER" >&2
+  exit 1
+}
 
 posted() { grep -qxF "$1" "$LEDGER"; }
 record() { printf '%s\n' "$1" >> "$LEDGER"; }
@@ -81,6 +94,18 @@ for ((i = 0; i < n; i++)); do
   do_resolve="$(jq -r ".[$i].resolve" "$DECISIONS")"
 
   # `jq -r` prints the literal string "null" for a missing or JSON-null
+  # threadId, same as it does for replyBody below — without this check that
+  # string reaches reply_mutation as a real GraphQL argument (posting to
+  # thread "null") instead of being rejected as the data problem it is. Skip
+  # the mutation outright rather than letting a generic GitHub API error
+  # obscure a missing/malformed decision.
+  if [[ -z "$thread" || "$thread" == "null" ]]; then
+    printf 'skip (missing threadId), decision index %s\n' "$i" >&2
+    failures=$((failures + 1))
+    continue
+  fi
+
+  # `jq -r` prints the literal string "null" for a missing or JSON-null
   # replyBody — without this check that string gets posted verbatim to a
   # public PR thread instead of the actual reply prose. Reject in both dry
   # and live mode; it is a data problem, not a live-mutation concern.
@@ -101,13 +126,51 @@ for ((i = 0; i < n; i++)); do
     continue
   fi
 
+  # Deliberately post-then-record, not record-then-post. A crash in the
+  # narrow window between a successful reply_mutation and this record() call
+  # means a re-run cannot see the ledger entry and posts a duplicate reply on
+  # retry — that is a real, accepted gap (see the note below), but the
+  # alternative (record the key BEFORE attempting the post) is worse: a
+  # mutation that then fails (network blip, rate limit, `gh` crash) leaves
+  # the ledger falsely claiming success, so a genuinely-never-posted reply is
+  # silently swallowed forever with no retry path — worse than "double replies",
+  # because replies are outward-facing and cannot be taken back, and a
+  # visible duplicate is at least something a human can see and clean up,
+  # unlike a silently-lost one.
+  #
+  # What IS fixed here: record()'s own exit status was previously ignored,
+  # so a ledger write that fails AFTER a successful post (disk full, ledger
+  # file went unwritable mid-run) still fell through as if nothing had gone
+  # wrong — `replied=1`, thread resolved, no error anywhere, even though the
+  # ledger can no longer prove the reply happened. That's the actual
+  # "silent success masking a future duplicate" mechanism, and it's a
+  # containable, mechanical thing to guard, unlike the crash-mid-syscall
+  # window above.
+  #
+  # NOT implemented: a durable idempotency marker embedded in the reply body
+  # plus a pre-mutation query of the thread's existing comments to detect an
+  # ambiguous prior attempt, and a PR-scoped lock against concurrent runs.
+  # Declined as disproportionate to what this script actually needs: it is
+  # invoked once per triage round by a single skill instance per PR — never
+  # concurrently against the same PR, so there is no concurrent-writer
+  # scenario to lock against — and a reconciliation query before EVERY reply
+  # would double this script's GitHub API traffic to guard a failure window
+  # (a process kill in the few hundred ms between the mutation returning and
+  # the next line running) that is both rare and, per the paragraph above,
+  # already resolved in the direction that fails visibly rather than
+  # silently. Revisit if duplicate replies are ever actually observed in
+  # practice.
   replied=0
   if posted "$key"; then
     printf 'skip (already replied): %s\n' "$thread" >&2
     replied=1
   elif reply_mutation "$thread" "$body"; then
-    record "$key"
-    replied=1
+    if record "$key"; then
+      replied=1
+    else
+      printf 'reply posted but ledger write FAILED, not resolving: %s\n' "$thread" >&2
+      failures=$((failures + 1))
+    fi
   else
     printf 'reply FAILED, not resolving: %s\n' "$thread" >&2
     failures=$((failures + 1))

@@ -169,17 +169,33 @@ now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # and even "+00:00", and `strptime(...."%z")` fares no better). git emits the
 # COMMITTER'S OWN offset, never "Z" — so anything reaching jq's date
 # functions has to be normalized in bash first, before it ever gets there.
+#
+# `date` itself is NOT portable between the dev/CI split: macOS ships BSD
+# date (`-j -f INPUT_FMT`), CI runs Ubuntu with GNU date (`-d`, no `-j` at
+# all). Picking one syntax at write time silently breaks the other host —
+# confirmed empirically: GNU date rejects `-j` outright, and (shimming a GNU
+# `date` onto PATH here via Homebrew's `gdate`) the BSD-only invocation below
+# returns empty against it. An empty return here propagates all the way to
+# `seed_push_state`/`reviewed_head_map`, which then compares every review
+# against the 1970 epoch and treats stale reviews as caught up — a false
+# clean. Try the GNU form first (fails fast with empty stdout on a BSD host —
+# verified, not assumed), then the BSD form; only return empty once both have
+# failed.
 iso8601_to_utc_z() {
-  local ts="$1" compact
+  local ts="$1" compact out
   [[ -z "$ts" ]] && { printf ''; return 0; }
   case "$ts" in
     *Z) printf '%s' "$ts"; return 0 ;;
   esac
-  # BSD `date`'s %z does not accept a colon in the offset ("-07:00"); strip
-  # it to "-0700" before parsing.
+  # GNU form: `-d` parses a numeric offset (colon included) directly.
+  out="$(date -u -d "$ts" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
+  if [[ -n "$out" ]]; then printf '%s' "$out"; return 0; fi
+  # BSD form: `-j -f`'s %z does not accept a colon in the offset ("-07:00");
+  # strip it to "-0700" before parsing.
   compact="${ts%:??}${ts: -2}"
-  TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%S%z' "$compact" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
-    || printf ''
+  out="$(TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%S%z' "$compact" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
+  if [[ -n "$out" ]]; then printf '%s' "$out"; return 0; fi
+  printf ''
 }
 
 # UTC, Z-suffixed ISO 8601 timestamp for a commit's committer date.
@@ -295,40 +311,78 @@ collect_threads() {
 # Resolved threads are dropped. OUTDATED threads are kept but flagged: an
 # outdated thread only means the code moved under it, not that the finding
 # died — deciding that is the triager's job, and it returns STALE when so.
+#
+# EVERY comment in an unresolved thread becomes its own finding, not just
+# comments.nodes[0]. The original bug: a reply added to an existing thread
+# was invisible here, so a HUMAN answering inside a bot-created thread stayed
+# classified solely as the bot's original finding — the decisions ledger's
+# verdict for the bot fingerprint could then auto-answer and resolve the
+# thread with the human's own words never having reached anyone. Each
+# comment gets its own author/body/kind/fingerprint, so a reply fingerprints
+# independently of comment[0] and surfaces as its own fresh (undecided)
+# finding — via HUMAN_COMMENT for a human reply, or as a distinct bot finding
+# for a bot's own follow-up — until something actually judges it.
+#
+# THREADS_QUERY fetches comments(first:20); a thread with more than 20
+# comments still only surfaces the first page here. That's an existing,
+# separate limit (nested pagination under an already-paginated threads
+# query), not fixed by this change — noted so a reviewer doesn't assume it's
+# covered.
 shape_findings() {
   local raw n i out="[]"
   raw="$(cat)"
   n="$(printf '%s' "$raw" | jq 'length')"
   for ((i = 0; i < n; i++)); do
-    local t resolved outdated author path line body kind fp
+    local t resolved outdated path line threadId ncomments j
     t="$(printf '%s' "$raw" | jq -c ".[$i]")"
     resolved="$(printf '%s' "$t" | jq -r '.isResolved')"
     [[ "$resolved" == "true" ]] && continue
     outdated="$(printf '%s' "$t" | jq -r '.isOutdated')"
-    author="$(printf '%s' "$t" | jq -r '.comments.nodes[0].author.login // "unknown"')"
     path="$(printf '%s' "$t" | jq -r '.path // ""')"
     line="$(printf '%s' "$t" | jq -r '.line // 0')"
-    body="$(printf '%s' "$t" | jq -r '.comments.nodes[0].body // ""')"
-    if is_bot "$author"; then kind="bot"; else kind="human"; fi
-    fp="$(finding_fingerprint "$author" "$path" "$body")"
-    out="$(jq -n --argjson acc "$out" \
-      --arg fp "$fp" \
-      --arg id "$(printf '%s' "$t" | jq -r '.id')" \
-      --arg author "$author" --arg path "$path" --arg kind "$kind" \
-      --arg body "$body" \
-      --argjson line "$line" --argjson outdated "$outdated" \
-      '$acc + [{fingerprint:$fp, threadId:$id, author:$author, path:$path,
-                line:$line, kind:$kind, outdated:$outdated, body:$body}]')"
+    threadId="$(printf '%s' "$t" | jq -r '.id')"
+    ncomments="$(printf '%s' "$t" | jq '.comments.nodes | length')"
+    for ((j = 0; j < ncomments; j++)); do
+      local author body kind fp
+      author="$(printf '%s' "$t" | jq -r ".comments.nodes[$j].author.login // \"unknown\"")"
+      body="$(printf '%s' "$t" | jq -r ".comments.nodes[$j].body // \"\"")"
+      if is_bot "$author"; then kind="bot"; else kind="human"; fi
+      fp="$(finding_fingerprint "$author" "$path" "$body")"
+      out="$(jq -n --argjson acc "$out" \
+        --arg fp "$fp" \
+        --arg id "$threadId" \
+        --arg author "$author" --arg path "$path" --arg kind "$kind" \
+        --arg body "$body" \
+        --argjson line "$line" --argjson outdated "$outdated" \
+        '$acc + [{fingerprint:$fp, threadId:$id, author:$author, path:$path,
+                  line:$line, kind:$kind, outdated:$outdated, body:$body}]')"
+    done
   done
   printf '%s' "$out"
 }
 
+# --paginate is required, not optional: gh's REST list endpoints default to
+# ~30 items/page, and a long-running loop round-tripping this same PR many
+# times over (a bot re-review per push) can walk right past that on a PR
+# that has been through several rounds. Without it, later-page reviews,
+# out-of-diff findings, human comments, and React Doctor updates are
+# invisible past page 1 — the watcher can then report quiescence while
+# unseen later-page feedback sits unread.
+#
+# Verified against this repo's pinned gh 2.32.1 (no `--slurp` flag exists
+# yet — that shipped later) directly against the live API: for an
+# array-shaped REST response, `--paginate` alone already concatenates every
+# page into ONE combined JSON array in the output (confirmed: per_page=5
+# against PR #2770's 20 real reviews returns all 20 as a single `[...]`
+# document, not 4 separate arrays back to back) — so no extra `jq -s`/`add`
+# step is needed here; `jq` downstream sees the same single-array shape it
+# always has.
 collect_reviews() {
-  gh api "repos/$REPO/pulls/$1/reviews"
+  gh api --paginate "repos/$REPO/pulls/$1/reviews"
 }
 
 collect_issue_comments() {
-  gh api "repos/$REPO/issues/$1/comments"
+  gh api --paginate "repos/$REPO/issues/$1/comments"
 }
 
 # Copilot regularly reports "unable to review ... quota limit" instead of a

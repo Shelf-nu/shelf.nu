@@ -212,14 +212,29 @@ export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/unresolved"
 RAW="$(collect_threads 2770)"
 assert_json_eq "14" "$RAW" 'length' "collect_threads returns all 14 threads"
 
+# The unresolved fixture's four open threads each carry exactly two
+# comments: the bot's original finding, then a HUMAN ("DonKoko") reply —
+# "Fixed in 779fb60b — ...". shape_findings must surface BOTH as their own
+# findings, not just comments.nodes[0] — otherwise the human's reply is
+# invisible to unseen_findings/quiescence and the thread can be auto-answered
+# and resolved off the bot's stale verdict without the human ever being seen.
 FINDINGS="$(printf '%s' "$RAW" | shape_findings)"
-assert_json_eq "4" "$FINDINGS" 'length' "shape_findings keeps only unresolved threads"
+assert_json_eq "8" "$FINDINGS" 'length' \
+  "shape_findings surfaces every comment (4 threads x 2 comments), not just comments.nodes[0]"
 assert_json_eq "4" "$FINDINGS" '[.[]|select(.kind=="bot")]|length' \
-  "all four unresolved threads are classified as bot"
+  "the four original bot findings are still classified as bot"
+assert_json_eq "4" "$FINDINGS" '[.[]|select(.kind=="human")]|length' \
+  "the four human follow-up replies are now surfaced too, classified as human"
+assert_json_eq "4" "$FINDINGS" \
+  '[.[]|select(.kind=="human")|select(.body|test("Fixed in 779fb60b"))]|length' \
+  "the human replies carry their OWN body text, not the bot's original finding"
 assert_json_eq "0" "$FINDINGS" '[.[]|select(.fingerprint=="")]|length' \
   "every finding gets a non-empty fingerprint"
 assert_json_eq "0" "$FINDINGS" '[.[]|select(.threadId|startswith("PRRT_")|not)]|length' \
   "every finding carries a PRRT_ thread id"
+assert_json_eq "4" "$FINDINGS" \
+  '[group_by(.threadId)[]|select(length==2)]|length' \
+  "each thread's two comments share the same threadId — a reply is scoped to its own thread"
 
 assert_eq "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c" "$(head_sha 2770)" \
   "head_sha reads headRefOid from the GraphQL response"
@@ -234,6 +249,29 @@ describe "pr-review-watch: auxiliary sources"
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 REVIEWS="$(collect_reviews 2770)"
 assert_json_eq "20" "$REVIEWS" 'length' "collect_reviews returns all 20 reviews"
+
+# gh's REST list endpoints default to ~30 items/page; a PR with more reviews
+# or issue comments than that would silently lose everything past page 1
+# without `--paginate`. The shared fixture stub can't reveal a missing flag
+# on its own (it serves the same fixture file regardless of args), so this
+# uses a local, single-purpose stub — matching the FAILDIR/RESOLVEFAILDIR
+# pattern used later in this file for pr-review-respond — that logs the
+# exact invocation instead of serving a fixture.
+PAGINATE_BIN="$(mktemp -d)"
+PAGINATE_LOG="$PAGINATE_BIN/calls.log"
+cat > "$PAGINATE_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_PAGINATE_LOG"
+printf '[]\n'
+STUB
+chmod +x "$PAGINATE_BIN/gh"
+GH_PAGINATE_LOG="$PAGINATE_LOG" PATH="$PAGINATE_BIN:$PATH" collect_reviews 2770 >/dev/null
+GH_PAGINATE_LOG="$PAGINATE_LOG" PATH="$PAGINATE_BIN:$PATH" collect_issue_comments 2770 >/dev/null
+assert_eq "2" "$(wc -l < "$PAGINATE_LOG" | tr -d ' ')" \
+  "collect_reviews and collect_issue_comments each made exactly one gh call"
+assert_eq "2" "$(grep -c -- '--paginate' "$PAGINATE_LOG")" \
+  "both of those gh calls carry --paginate, not just the first"
+rm -rf "$PAGINATE_BIN"
 
 copilot_quota_exhausted "$REVIEWS" && r=exhausted || r=ok
 assert_eq "exhausted" "$r" "Copilot quota-limit body is detected on #2770"
@@ -280,7 +318,7 @@ assert_eq "{}" "$(decisions_read 2770)" \
   "decisions_read returns an empty object when no decisions.json exists yet"
 
 FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
-assert_json_eq "4" "$FRESH" 'length' "all four findings are unseen on a fresh decisions doc"
+assert_json_eq "8" "$FRESH" 'length' "all eight findings are unseen on a fresh decisions doc"
 
 # Record a verdict for the first fingerprint, then re-run. Written to the
 # SKILL's own file via decisions_write (a test-only seam) — this script must
@@ -289,7 +327,7 @@ FP="$(printf '%s' "$FINDINGS" | jq -r '.[0].fingerprint')"
 jq -n --arg fp "$FP" '{seen: {($fp): {verdict:"FALSE_POSITIVE", decidedInRound:1}}}' \
   | decisions_write 2770
 FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
-assert_json_eq "3" "$FRESH" 'length' "a decided fingerprint is not re-triaged"
+assert_json_eq "7" "$FRESH" 'length' "a decided fingerprint is not re-triaged"
 
 # A VALID (already-fixed) verdict must ALSO suppress re-triage — a bot
 # re-flagging fixed work is at least as common as one re-flagging a rejection.
@@ -298,7 +336,7 @@ decisions_read 2770 | jq --arg fp "$FP2" \
   '.seen[$fp] = {verdict:"VALID", decidedInRound:1, resolvedSha:"abc1234"}' \
   | decisions_write 2770
 FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
-assert_json_eq "2" "$FRESH" 'length' "an already-fixed fingerprint is not re-triaged"
+assert_json_eq "6" "$FRESH" 'length' "an already-fixed fingerprint is not re-triaged"
 
 # ESCALATE verdicts live in .escalated[], not .seen — and must ALSO suppress
 # re-triage, or the loop re-dispatches a triager for the same finding every
@@ -308,7 +346,7 @@ decisions_read 2770 | jq --arg fp "$FP3" \
   '.escalated += [{fingerprint:$fp, reason:"security-flavored", round:1}]' \
   | decisions_write 2770
 FRESH="$(unseen_findings "$FINDINGS" "$(decisions_read 2770)")"
-assert_json_eq "1" "$FRESH" 'length' "an escalated fingerprint is not re-dispatched either"
+assert_json_eq "5" "$FRESH" 'length' "an escalated fingerprint is not re-dispatched either"
 
 # repost_count reads the WATCHER's OWN map, in state — repostCounts cannot
 # live in the skill's decisions.json, because only one component may write
@@ -452,6 +490,44 @@ assert_eq "null" "$(printf '%s' "$RH_TZ" | jq -r '."coderabbitai[bot]" // "null"
 assert_eq "timestamp" "$(printf '%s' "$RH_TZ" | jq -r '."copilot-pull-request-reviewer[bot]"')" \
   "a review genuinely after the push is read as caught up"
 
+describe "pr-review-watch: iso8601_to_utc_z is portable across the GNU/BSD date split"
+
+# The assertions above this block exercise whatever `date` dialect is NATIVE
+# to the host running the suite — BSD on a macOS dev machine, but GNU on the
+# Ubuntu runner CI actually uses. A fix that only works on the dialect the
+# author happened to test on can still pass the suite 100% of the time on
+# their machine while failing outright in CI (the original bug: `date -j -f`
+# is BSD-only, GNU date rejects `-j`, and the empty fallback silently made
+# `reviewed_head_map` compare every review against the 1970 epoch — a false
+# "caught up"). Shim a real GNU `date` onto PATH (Homebrew's `gdate`, if
+# present) so BOTH dialects' actual output gets exercised on every host,
+# rather than trusting whichever one happens to be native here.
+GNU_DATE_BIN="$(command -v gdate || true)"
+if [[ -n "$GNU_DATE_BIN" ]]; then
+  GNU_SHIM_DIR="$(mktemp -d)"
+  ln -s "$GNU_DATE_BIN" "$GNU_SHIM_DIR/date"
+
+  assert_eq "2026-07-30T20:00:00Z" \
+    "$(PATH="$GNU_SHIM_DIR:$PATH" iso8601_to_utc_z "2026-07-30T13:00:00-07:00")" \
+    "iso8601_to_utc_z converts a west-of-UTC offset under a GNU-dialect date"
+  assert_eq "2026-07-30T18:00:00Z" \
+    "$(PATH="$GNU_SHIM_DIR:$PATH" iso8601_to_utc_z "2026-07-30T23:00:00+05:00")" \
+    "iso8601_to_utc_z converts an east-of-UTC offset under a GNU-dialect date"
+  assert_eq "2026-07-30T18:00:00Z" \
+    "$(PATH="$GNU_SHIM_DIR:$PATH" iso8601_to_utc_z "2026-07-30T18:00:00Z")" \
+    "iso8601_to_utc_z passes an already-Z timestamp through unchanged under GNU date"
+  assert_eq "" \
+    "$(PATH="$GNU_SHIM_DIR:$PATH" iso8601_to_utc_z "")" \
+    "iso8601_to_utc_z still returns empty for empty input under GNU date"
+
+  rm -rf "$GNU_SHIM_DIR"
+else
+  # No GNU coreutils to shim with (`brew install coreutils` provides gdate)
+  # — say so loudly rather than silently passing without exercising this
+  # half of the claim at all.
+  printf '  \033[33m⚠\033[0m skipped: no gdate on PATH — GNU date dialect not exercised locally\n'
+fi
+
 describe "pr-review-watch: event emission"
 
 EV="$(emit NEW_FINDINGS '{"count":3}')"
@@ -486,6 +562,17 @@ assert_eq "0" "$(printf '%s\n' "$POLL2" | grep -c '"event":"NEW_FINDINGS"')" \
   "NEW_FINDINGS is not repeated while the same findings stay undecided"
 assert_eq "0" "$(printf '%s\n' "$POLL3" | grep -c '"event":"NEW_FINDINGS"')" \
   "NEW_FINDINGS stays quiet on a third poll"
+
+# The unresolved fixture's four threads each carry a human ("DonKoko") reply
+# after the bot's original comment. shape_findings surfacing that reply as
+# its OWN (kind: human) finding must reach poll_once's event stream as
+# HUMAN_COMMENT — this is the end-to-end pin for the fix: a human answering
+# inside a bot-created thread must be visibly surfaced, not silently folded
+# into the bot's original (already-fingerprinted-differently) finding.
+assert_eq "1" "$(printf '%s\n' "$POLL1" | grep -c '"event":"HUMAN_COMMENT"')" \
+  "a human reply inside a bot-created thread is announced as HUMAN_COMMENT"
+assert_eq "0" "$(printf '%s\n' "$POLL2" | grep -c '"event":"HUMAN_COMMENT"')" \
+  "the same human reply is not re-announced on a later poll"
 assert_eq "0" "$(printf '%s\n' "$POLL1" | grep -c '"event":"PUSHED"')" \
   "no PUSHED event is announced when nothing was pushed"
 
@@ -1227,6 +1314,80 @@ assert_eq "1" "$RESOLVE_FAIL_RC" \
   "a failed resolve_mutation makes the script's exit status non-zero"
 assert_eq "1" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
   "the reply itself still posted despite the resolve failing"
+
+# A decision with a missing/null threadId must never reach `gh` either — not
+# even as the literal string "null", which would post to a non-existent
+# thread and obscure the real (data) problem behind a generic API error.
+: > "$GH_MUTATION_LOG"
+cat > "$TMP_D/missing-thread.json" <<'JSON'
+[{"replyBody":"Fixed in deadbee — tightened the guard.","resolve":true}]
+JSON
+MISSING_THREAD_RC=0
+bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$TMP_D/missing-thread.json" \
+  >/dev/null 2>&1 || MISSING_THREAD_RC=$?
+assert_eq "1" "$MISSING_THREAD_RC" \
+  "a decision with a missing threadId makes the script exit non-zero"
+assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
+  "a missing threadId is never posted to — not even the literal string null"
+
+describe "pr-review-respond: ledger fail-fast on a read-only git dir"
+
+# A read-only .git (or computed git common dir) must abort BEFORE any live
+# mutation, not silently continue with a ledger that can never record a
+# successful reply — that would turn every future re-run into a
+# duplicate-post risk with no error anywhere pointing at the cause.
+RO_TMP="$(mktemp -d)"
+RO_GIT="$RO_TMP/git"
+mkdir -p "$RO_GIT/pr-review-loop"
+chmod 555 "$RO_GIT/pr-review-loop"
+cat > "$RO_TMP/decisions.json" <<'JSON'
+[{"threadId":"PRRT_ro","replyBody":"Fixed in deadbee.","resolve":true}]
+JSON
+RO_LOG="$RO_TMP/mutations.log"; : > "$RO_LOG"
+RO_RC=0
+GIT_COMMON_DIR="$RO_GIT" GH_MUTATION_LOG="$RO_LOG" \
+  bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$RO_TMP/decisions.json" \
+  >/dev/null 2>&1 || RO_RC=$?
+assert_eq "1" "$RO_RC" \
+  "a read-only ledger directory makes the script exit non-zero, before any mutation"
+assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$RO_LOG")" \
+  "no reply is ever attempted when the ledger cannot be written"
+chmod 755 "$RO_GIT/pr-review-loop"
+rm -rf "$RO_TMP"
+
+describe "pr-review-respond: a failed ledger write after a successful reply is a failed run"
+
+# The reply itself already went out (outward-facing, cannot be un-posted);
+# only the ledger write failed. This must NOT read as a clean run — silently
+# proceeding as if replied=1 masks that the ledger can no longer prove the
+# reply happened — and, per the resolve invariant above, must also not
+# resolve the thread.
+LW_TMP="$(mktemp -d)"
+LW_GIT="$LW_TMP/git"
+mkdir -p "$LW_GIT/pr-review-loop"
+# Pre-create the ledger file read-only. touch(1) on an EXISTING file can
+# still succeed for the owner even when it isn't writable (verified: macOS
+# touch updates mtime via utimes, not a write-open) — so the fail-fast guard
+# above does not trip here — but actually appending a line to it fails,
+# which is exactly the scenario record()'s exit status now has to catch.
+touch "$LW_GIT/pr-review-loop/2770.replies"
+chmod 444 "$LW_GIT/pr-review-loop/2770.replies"
+cat > "$LW_TMP/decisions.json" <<'JSON'
+[{"threadId":"PRRT_lw","replyBody":"Fixed in deadbee.","resolve":true}]
+JSON
+LW_LOG="$LW_TMP/mutations.log"; : > "$LW_LOG"
+LW_RC=0
+GIT_COMMON_DIR="$LW_GIT" GH_MUTATION_LOG="$LW_LOG" \
+  bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$LW_TMP/decisions.json" \
+  >/dev/null 2>&1 || LW_RC=$?
+assert_eq "1" "$LW_RC" \
+  "a reply that posts but can't be recorded makes the script exit non-zero"
+assert_eq "1" "$(grep -c 'addPullRequestReviewThreadReply' "$LW_LOG")" \
+  "the reply mutation itself still went out — that part cannot be undone"
+assert_eq "0" "$(grep -c 'resolveReviewThread' "$LW_LOG")" \
+  "the thread is NOT resolved when the ledger write failed — the reply isn't durably confirmed"
+chmod 644 "$LW_GIT/pr-review-loop/2770.replies"
+rm -rf "$LW_TMP"
 
 rm -rf "$TMP_D"
 unset GH_MUTATION_LOG GIT_COMMON_DIR
