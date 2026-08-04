@@ -70,7 +70,13 @@ export function AuditAssetNoteItem({
   });
 
   // Only allow deletion of COMMENT notes (manual notes), not UPDATE notes (auto-generated)
-  const canDelete = note.type === "COMMENT" || note.type === undefined;
+  /**
+   * `type` is optional on `NoteData`, and an absent type means a manual,
+   * author-written note — legacy rows predate the discriminator. Derived once
+   * so deletion and external-link permission cannot drift apart.
+   */
+  const isAuthorWritten = note.type === "COMMENT" || note.type === undefined;
+  const canDelete = isAuthorWritten;
   const canAttachImages = currentImageCount < maxImageCount;
 
   /**
@@ -145,7 +151,7 @@ export function AuditAssetNoteItem({
             <MarkdownViewer
               content={note.content}
               disablePortal={true}
-              allowExternalLinks={note.type === "COMMENT"}
+              allowExternalLinks={isAuthorWritten}
             />
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">

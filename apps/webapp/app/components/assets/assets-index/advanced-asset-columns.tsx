@@ -463,13 +463,11 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              {/* Asset descriptions are author-written free text; users are
-                  given the option to add links. */}
-              <MarkdownViewer
-                content={value}
-                className="mt-2 text-sm"
-                allowExternalLinks
-              />
+              {/* No `allowExternalLinks`: descriptions are authored in a plain
+                  textarea and rendered as plain text on the asset page, so
+                  they are not a markdown surface. Links here would also be
+                  unreachable — Radix tooltip content is not interactive. */}
+              <MarkdownViewer content={value} className="mt-2 text-sm" />
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

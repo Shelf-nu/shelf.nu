@@ -42,10 +42,17 @@ assemble from entity names.
 
 The reliable test is the **editor**, not the data's origin: everything authored
 through `MarkdownEditor` gets `allowExternalLinks`, because its link dialog
-makes linking out a supported feature. Today that is comments, admin
-announcements, changelog entries, custom field values and asset descriptions.
-System-generated notes keep the default — an external link in one was injected,
-since we only ever build those from entity names.
+makes linking out a supported feature. Today that is comments (incl. audit
+condition notes), admin announcements, changelog entries and custom field
+values. System-generated notes keep the default — an external link in one was
+injected, since we only ever build those from entity names.
+
+Asset **descriptions** are NOT on that list, despite being free text. They are
+authored in a plain textarea and rendered as plain text on the asset page; the
+only Markdoc rendering is the index preview, where a link would be unreachable
+anyway because Radix tooltip content is not interactive. Making descriptions a
+markdown surface is a product change (editor + detail page + HoverCard), not a
+prop.
 
 "It's user-controlled, so restrict it" is the WRONG test and has caused this
 miss three times: user comments are user-controlled too, and they legitimately
