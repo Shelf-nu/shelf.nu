@@ -21,13 +21,42 @@ anyone (incl. admins) who views the note. The repo contract is
 **sanitize-at-write** — the feed renders note content raw, so write-time
 stripping is what keeps injected tags out.
 
-**Defence in depth, not a substitute:** `LinkComponent` now refuses any `to`
-that is not an internal path (`isInternalPath`, `~/utils/safe-internal-path`),
-so an injected link renders as plain text. That guard exists because
-write-time sanitization cannot reach notes ALREADY stored in the database — it
-is not a licence to skip sanitizing. Every other tag (`booking_status`,
-`assets_list`, `tag`, `category_badge`) still renders if injected, which forges
-the audit trail even without a working link.
+**The render layer is the primary control.** `MarkdownViewer` sanitizes the
+final renderable tree via `sanitizeMarkdocTree` (`~/utils/sanitize-markdoc-tree`):
+off-origin `img` dropped, off-origin `a` unwrapped to plain text, non
+http(s)/mailto schemes dropped. It has to live there because Markdoc renders
+ordinary `[text](url)` / `![](url)` into NATIVE `a`/`img` nodes that bypass
+every custom tag component — and that syntax contains no Markdoc delimiter, so
+write-time stripping cannot touch it. Working on the tree also covers
+pre-parsed `RenderableTreeNodes` and notes ALREADY stored in the database.
+
+Sanitizing at write time is still required: it is not a licence to skip it.
+Non-link tags (`booking_status`, `assets_list`, `tag`, `category_badge`) still
+render if injected, which forges the audit trail even without a working link.
+
+## `allowExternalLinks` — decide by AUTHORSHIP, not by "is it user input"
+
+`MarkdownViewer` defaults to `allowExternalLinks={false}`. Pass `true` only for
+content a human deliberately wrote in a rich-text field, NOT for content we
+assemble from entity names.
+
+The reliable test is the **editor**, not the data's origin: everything authored
+through `MarkdownEditor` gets `allowExternalLinks`, because its link dialog
+makes linking out a supported feature. Today that is comments (incl. audit
+condition notes), admin announcements, changelog entries and custom field
+values. System-generated notes keep the default — an external link in one was
+injected, since we only ever build those from entity names.
+
+Asset **descriptions** are NOT on that list, despite being free text. They are
+authored in a plain textarea and rendered as plain text on the asset page; the
+only Markdoc rendering is the index preview, where a link would be unreachable
+anyway because Radix tooltip content is not interactive. Making descriptions a
+markdown surface is a product change (editor + detail page + HoverCard), not a
+prop.
+
+"It's user-controlled, so restrict it" is the WRONG test and has caused this
+miss three times: user comments are user-controlled too, and they legitimately
+link out. When you add a `MarkdownViewer` call site, ask who typed the string.
 
 When you splice ANY user-controlled string into note content:
 
