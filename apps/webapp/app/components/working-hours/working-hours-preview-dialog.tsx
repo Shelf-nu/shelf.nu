@@ -150,14 +150,19 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
             <div className="mb-1 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-gray-900">
                 <DateS
-                  date={override.date}
+                  // Overrides are absolute real-world calendar dates that must
+                  // never shift with the viewer's timezone. The stored value can
+                  // be a UTC-midnight instant; passing it straight to DateS reads
+                  // its browser-local components and lands a day west of UTC.
+                  // Collapse it to a bare "YYYY-MM-DD" first so formatDate takes
+                  // its no-shift path and renders the calendar date exactly.
+                  date={getOverrideDateKey(override.date)}
                   localeOnly
-                  options={{
-                    weekday: "long",
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  }}
+                  // Show the weekday, but let the DATE itself follow the user's
+                  // dateFormat pref (e.g. "Friday, 2026-07-31" for YYYY-MM-DD).
+                  // includeWeekday is additive; naming month/day/year here would
+                  // instead force those styles and ignore the numeric pref.
+                  options={{ includeWeekday: true }}
                 />
               </h4>
               <span

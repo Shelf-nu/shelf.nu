@@ -86,10 +86,18 @@ function createToken(overrides: Partial<ScimTokenItem> = {}): ScimTokenItem {
 // ── Route loader data by route ID ──────────────────────
 
 const routeLoaderDefaults: Record<string, unknown> = {
-  // DateS → useHints → useRequestInfo → useRouteLoaderData("root")
+  // DateS → useFormatPrefs → useRequestInfo → useRouteLoaderData("root").
+  // formatPrefs (resolved by the root loader in the app) is required — without
+  // it DateS crashes on `prefs.timeZone`. hints is kept for any hint readers.
   root: {
     requestInfo: {
       hints: { timeZone: "UTC", locale: "en-US" },
+      formatPrefs: {
+        dateFormat: "MM_DD_YYYY",
+        timeFormat: "H12",
+        weekStartsOn: 0,
+        timeZone: "UTC",
+      },
     },
   },
   // useUserRoleHelper → useRouteLoaderData("routes/_layout+/_layout")

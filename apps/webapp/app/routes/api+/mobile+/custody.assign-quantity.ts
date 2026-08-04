@@ -39,6 +39,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
+  appendUserTextToNote,
   wrapCustodianForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -180,7 +181,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const baseLine = isSelfService
         ? `${actor} took custody of **${quantity}** unit(s).`
         : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
-      const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+      const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
         content: noteContent,

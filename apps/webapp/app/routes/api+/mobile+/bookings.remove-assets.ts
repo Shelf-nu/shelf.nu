@@ -173,14 +173,36 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const attachedAssetIds = assets.map((asset) => asset.id);
 
+    // Whatever the caller put in `assetIds` is an explicit "remove this
+    // asset's own row" instruction — that is the endpoint's contract. So a
+    // directly-requested asset stays in the standalone bucket even when it
+    // ALSO belongs to a kit in `kitIds`: a qty-tracked asset can hold both a
+    // standalone row and a kit-driven row on one booking, and the caller
+    // asked for both. Narrowed to rows actually attached to this booking.
+    const requestedAssetIdSet = new Set(assetIds);
+    const standaloneAssetIds = attachedAssetIds.filter((assetId) =>
+      requestedAssetIdSet.has(assetId)
+    );
+
+    // `assets` drives the booking-note phrasing only ("… removed {kits} and
+    // {assets} from booking"), NOT what gets detached. Members pulled in by a
+    // kit are already covered by the kit half of the note, so listing them
+    // again duplicates them (and turns a kit-only removal into a note naming
+    // every member). Mirrors the web bulk-remove handler.
+    const standaloneAssetIdSet = new Set(standaloneAssetIds);
+    const standaloneAssets = assets.filter((asset) =>
+      standaloneAssetIdSet.has(asset.id)
+    );
+
     const updated = await removeAssets({
       booking: { id: bookingId, assetIds: attachedAssetIds },
       kitIds,
       kits,
+      standaloneAssetIds,
       firstName: user.firstName ?? "",
       lastName: user.lastName ?? "",
       userId: user.id,
-      assets,
+      assets: standaloneAssets,
       organizationId,
     });
 

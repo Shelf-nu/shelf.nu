@@ -15,6 +15,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { formatDate } from "~/utils/date-format";
 import LocationOverview, {
   loader,
 } from "~/routes/_layout+/locations.$locationId.overview";
@@ -43,6 +44,25 @@ vi.mock("react-router", async () => {
   return {
     ...(actual as Record<string, unknown>),
     useLoaderData: vi.fn(),
+    // why: DateS now reads the acting user's resolved formatting prefs via
+    // useDateFormatter → useRequestInfo → useRouteLoaderData("root"). This
+    // component renders in isolation (no data router), so stub the root loader
+    // lookup with a concrete requestInfo. Non-"root" ids stay undefined.
+    useRouteLoaderData: vi.fn((id: string) =>
+      id === "root"
+        ? {
+            requestInfo: {
+              hints: { locale: "en-US", timeZone: "UTC" },
+              formatPrefs: {
+                dateFormat: "MM_DD_YYYY",
+                timeFormat: "H12",
+                weekStartsOn: 0,
+                timeZone: "UTC",
+              },
+            },
+          }
+        : undefined
+    ),
   };
 });
 
@@ -158,8 +178,21 @@ describe("LocationOverview component", () => {
     expect(screen.getByText("ID")).toBeInTheDocument();
     expect(screen.getByText("loc-123")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
-    // DateS component formats the date client-side
-    expect(screen.getByText("formatted-date")).toBeInTheDocument();
+    // DateS now formats via the real prefs-bound formatter (no Intl mock).
+    // Compute the expected string from the same formatter + stubbed prefs,
+    // passing the route's options ({ dateStyle, timeStyle }) so the expected
+    // string matches what this DateS call site renders.
+    const expectedDate = formatDate(
+      new Date("2024-01-01T12:34:56Z"),
+      {
+        dateFormat: "MM_DD_YYYY",
+        timeFormat: "H12",
+        weekStartsOn: 0,
+        timeZone: "UTC",
+      },
+      { dateStyle: "short", timeStyle: "short" }
+    );
+    expect(screen.getByText(expectedDate)).toBeInTheDocument();
 
     const formattedValue = formatCurrency({
       value: 12345.6,

@@ -36,6 +36,7 @@ import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
@@ -82,8 +83,8 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization, timeZone } =
-    useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -106,10 +107,10 @@ export function AdvancedIndexColumn({
       );
     }
 
-    const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
-      locale,
-      timeZone,
-    });
+    const customFieldDisplayValue = getCustomFieldDisplayValue(
+      fieldValue,
+      prefs
+    );
 
     return (
       <Td>
@@ -125,8 +126,12 @@ export function AdvancedIndexColumn({
                   "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
+                {/* Custom field values are authored in `MarkdownEditor`,
+                    whose link control makes external links a deliberate
+                    feature — same treatment as comments and announcements. */}
                 <MarkdownViewer
                   content={customFieldDisplayValue as RenderableTreeNode}
+                  allowExternalLinks
                 />
               </PopoverContent>
             </PopoverPortal>
@@ -345,6 +350,19 @@ export function AdvancedIndexColumn({
             `${item.quantity}${
               item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
             }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "minQuantity":
+      // Low-stock reorder threshold — only meaningful for QUANTITY_TRACKED
+      // assets. Plain number, mirroring the "quantity" cell above.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.minQuantity != null ? (
+            item.minQuantity
           ) : (
             <EmptyTableValue />
           )}

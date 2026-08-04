@@ -16,13 +16,17 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
 
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
 import {
   loadBookingsData,
   processBooking,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -97,7 +101,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const assetAvailability =
       asset && isQuantityTracked(asset)
-        ? await computeBookingAvailableQuantity(asset.id)
+        ? {
+            // Current physical stock as the modal's cap hint. The target
+            // booking (and its date window) isn't known at load time, so this
+            // is a conservative upper bound; `updateBookingAssets` does the
+            // authoritative WINDOWED over-allocation check at write time.
+            available: (
+              await getAssetAvailability({ assetId: asset.id, organizationId })
+            ).physicalAvailable,
+          }
         : null;
 
     return data(payload({ ...loaderData, asset, assetAvailability }), {
@@ -154,19 +166,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       if (asset && isQuantityTracked(asset)) {
-        const availability = await computeBookingAvailableQuantity(
-          assetId,
-          bookingId
-        );
-        if (quantity > availability.available) {
-          throw new ShelfError({
-            cause: null,
-            message: `Cannot reserve ${quantity} units of "${asset.title}". Only ${availability.available} available.`,
-            label: "Booking",
-            shouldBeCaptured: false,
-            status: 400,
-          });
-        }
+        // The authoritative WINDOWED over-allocation guard runs inside
+        // `updateBookingAssets` (for active bookings, via
+        // `assertAssetQuantitiesAvailable`). We just forward the requested
+        // quantity — the old inline check here used the global, all-time
+        // `computeBookingAvailableQuantity`, which over-counted
+        // non-overlapping bookings (#2724).
         quantities = { [assetId]: quantity };
       }
     }
@@ -249,18 +254,6 @@ export default function ExistingBooking() {
   const unitLabel = asset?.unitOfMeasure || "units";
   const maxQuantity = assetAvailability?.available ?? undefined;
 
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
-    // active booking keeps the asset AVAILABLE until it is purposefully checked
-    // out (progressive checkout).
-    return (
-      !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
-    );
-  }
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -289,8 +282,14 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // we can achieve it using this also. currently it is accepting only one status value.
-              // status: ['DRAFT', 'RESERVED']
+              // Must mirror `isAddableBooking` and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
+              // Keep the typed list inside the same custodian scope
+              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
+              // are not offered bookings that submit would then reject.
+              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"
@@ -301,7 +300,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}

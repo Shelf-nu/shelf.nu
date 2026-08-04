@@ -15,6 +15,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { releaseQuantity } from "~/modules/asset/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -23,6 +24,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import {
+  appendUserTextToNote,
   wrapCustodianForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -124,7 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
 
       const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
-      const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+      const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
         content: noteContent,
@@ -150,6 +152,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
+
+    // Releasing custody RAISES available stock and can move the asset back
+    // above its low-stock threshold. Run the debounced notifier so the
+    // `lowStockNotifiedAt` marker is cleared (and the "back in stock" notice
+    // sent) on recovery — otherwise a stale marker would suppress the next
+    // genuine low-stock alert. Best-effort: `releaseQuantity` has already
+    // committed, so a notifier failure must NOT surface as an action error
+    // (the client could retry the non-idempotent release).
+    try {
+      await checkAndNotifyLowStock({ assetId, userId, organizationId });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: "Failed to run low-stock check after custody release",
+          label: "Assets",
+          additionalData: { assetId, organizationId },
+        })
+      );
+    }
 
     return data(payload({ success: true }));
   } catch (cause) {
