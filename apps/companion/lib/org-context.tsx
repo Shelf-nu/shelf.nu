@@ -147,7 +147,20 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   // profile loads (or against a pre-format-prefs server) yields fully
   // device-local formatting rather than an arbitrary US/UTC default.
   const formatPrefs = useMemo<ResolvedFormatPrefs>(() => {
-    const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
+    // Capture device hints defensively. Hermes ships Intl, but guard anyway:
+    // where Intl timezone data is missing/partial, resolvedOptions() can yield an
+    // undefined/blank timeZone (or, in the extreme, throw). resolveFormatPrefs
+    // validates the zone downstream, but coalescing here keeps an undefined from
+    // ever flowing in as a hint, and a broken Intl from throwing out of render.
+    let locale = "en-US";
+    let timeZone = "UTC";
+    try {
+      const resolved = Intl.DateTimeFormat().resolvedOptions();
+      locale = resolved.locale || locale;
+      timeZone = resolved.timeZone || timeZone;
+    } catch {
+      // Keep the en-US / UTC fallbacks.
+    }
     const raw = userProfile
       ? {
           dateFormat: userProfile.dateFormat ?? null,
