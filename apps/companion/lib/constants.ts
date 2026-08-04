@@ -177,23 +177,6 @@ export function getQuantityStatusLabel(
   return ASSET_QTY_STATUS_LABELS.AVAILABLE;
 }
 
-export function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-export function formatDateTime(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 /**
  * Compact magnitude for a millisecond span — "30m", "6h", "2d", "3w".
  * Used by the booking countdown so a field tech reads "Due in 3h" at a glance.
