@@ -40,6 +40,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { labelForRequired } from "@/lib/a11y";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 
 /**
  * Field metadata consumed by `CustomFieldInput`. `required` defaults to
@@ -339,6 +340,12 @@ function OptionDropdown({
  * server contract — see `lib/api/types.ts`). Parsing the existing value uses
  * local-time `Date` construction to avoid the UTC-shift footgun (e.g. a
  * stored "2026-01-15" rendering as Jan 14 in negative-UTC timezones).
+ *
+ * The closed-state button renders the stored value in the acting user's date
+ * format via `useDateFormatter`. This is an absolute calendar date, so the
+ * date-only formatter applies NO timezone shift — the day is preserved. Only
+ * the display changes; the stored/submitted value (`value` / `onChange`) stays
+ * raw `YYYY-MM-DD`.
  */
 function DateFieldInput({
   fieldId,
@@ -366,7 +373,14 @@ function DateFieldInput({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
   const [open, setOpen] = useState(false);
+
+  // Human-readable rendering of the stored `YYYY-MM-DD` calendar date in the
+  // acting user's date format. This is an absolute calendar date, so the
+  // date-only formatter does NOT tz-shift — the day is preserved. The stored
+  // value (`value` / `onChange`) stays raw; only the display string changes.
+  const displayValue = value ? formatDate(value) : "";
 
   const dateValue = useMemo(() => {
     if (!value) return new Date();
@@ -425,7 +439,7 @@ function DateFieldInput({
         accessibilityRole="button"
         accessibilityLabel={
           value
-            ? `${accessibilityLabel}: ${value}, tap to change`
+            ? `${accessibilityLabel}: ${displayValue}, tap to change`
             : `${accessibilityLabel}, tap to choose`
         }
         accessibilityHint={accessibilityHint}
@@ -434,7 +448,7 @@ function DateFieldInput({
         <Text
           style={value ? styles.pickerSelectedText : styles.pickerPlaceholder}
         >
-          {value || "Select date..."}
+          {displayValue || "Select date..."}
         </Text>
         <Ionicons name="calendar-outline" size={18} color={colors.mutedLight} />
       </TouchableOpacity>

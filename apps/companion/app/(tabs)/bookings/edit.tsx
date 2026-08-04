@@ -35,6 +35,7 @@ import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
@@ -55,22 +56,14 @@ function toLocalWire(d: Date): string {
   )}:${p(d.getMinutes())}`;
 }
 
-function formatDisplay(d: Date): string {
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 export default function EditBookingScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
+  // Picker button labels render date+time in the user's format prefs + timezone.
+  const { formatDateTime } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -404,7 +397,7 @@ export default function EditBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              from ? `Starts ${formatDisplay(from)}` : "Start"
+              from ? `Starts ${formatDateTime(from)}` : "Start"
             }
           >
             <Text
@@ -412,7 +405,7 @@ export default function EditBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from ? formatDisplay(from) : "Choose start..."}
+              {from ? formatDateTime(from) : "Choose start..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -449,12 +442,12 @@ export default function EditBookingScreen() {
               setShowFromPicker(false);
             }}
             accessibilityRole="button"
-            accessibilityLabel={to ? `Ends ${formatDisplay(to)}` : "End"}
+            accessibilityLabel={to ? `Ends ${formatDateTime(to)}` : "End"}
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDisplay(to) : "Choose end..."}
+              {to ? formatDateTime(to) : "Choose end..."}
             </Text>
             {isDraft && (
               <Ionicons

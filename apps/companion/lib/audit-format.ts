@@ -10,7 +10,7 @@
  * @see {@link file://./../app/(tabs)/audits/index.tsx} (Audits list)
  * @see {@link file://./../app/(tabs)/home.tsx} (Home "Active Audits" cards)
  */
-import { formatDate } from "@/lib/constants";
+import { formatDate, type ResolvedFormatPrefs } from "@shelf/datetime";
 
 /**
  * Urgency tier for an audit's deadline.
@@ -31,11 +31,14 @@ export type DueTier = "overdue" | "soon" | "neutral" | "none";
  *
  * @param dueDate - ISO due date, or null when none is set
  * @param isActive - whether the audit is still PENDING/ACTIVE
+ * @param prefs - the acting user's resolved format prefs, used for the absolute
+ *   "Due <date>" label so it renders in their date format + timezone
  * @returns the badge label (or null) and its urgency tier
  */
 export function formatDue(
   dueDate: string | null,
-  isActive: boolean
+  isActive: boolean,
+  prefs: ResolvedFormatPrefs
 ): { label: string | null; tier: DueTier } {
   if (!isActive) return { label: null, tier: "none" };
   if (!dueDate) return { label: "No due date", tier: "none" };
@@ -62,5 +65,5 @@ export function formatDue(
   if (calDays === 0) return { label: "Due today", tier: "soon" };
   if (calDays === 1) return { label: "Due tomorrow", tier: "soon" };
   if (calDays <= 3) return { label: `Due in ${calDays}d`, tier: "soon" };
-  return { label: `Due ${formatDate(dueDate)}`, tier: "neutral" };
+  return { label: `Due ${formatDate(dueDate, prefs)}`, tier: "neutral" };
 }
