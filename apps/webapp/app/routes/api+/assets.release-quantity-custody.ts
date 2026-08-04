@@ -1,13 +1,24 @@
 /**
  * API Route: Release Quantity Custody
  *
- * Handles POST requests to release (return) a specific quantity of a
- * QUANTITY_TRACKED asset from a team member back to the available pool.
- * Validates permissions, parses form data with Zod, delegates to
- * `releaseQuantity`, and sends a success notification.
+ * Handles POST requests that end a team member's hold on a specific quantity of
+ * a QUANTITY_TRACKED asset. Validates permissions, parses form data with Zod,
+ * delegates to `releaseQuantity`, and sends a success notification.
+ *
+ * **What happens to the units is decided server-side** from the asset's
+ * `consumptionType` (see `resolveReleaseDisposition`), never by the caller:
+ *
+ * - `RETURN` (`TWO_WAY`, and legacy rows with no `consumptionType`) — the units
+ *   go back into the available pool and `Asset.quantity` is untouched.
+ * - `CONSUME` (`ONE_WAY` consumables) — the units were used up, so
+ *   `Asset.quantity` is permanently decremented.
+ *
+ * The audit note and the toast are worded from the `disposition` the service
+ * reports back, so what the operator reads always matches what was persisted.
  *
  * @see {@link file://./../../modules/asset/service.server.ts} — releaseQuantity
  * @see {@link file://./assets.assign-quantity-custody.ts} — Counterpart checkout route
+ * @see {@link file://./mobile+/custody.release-quantity.ts} — the mirrored mobile route
  */
 
 import type { Prisma } from "@prisma/client";

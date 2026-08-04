@@ -1,22 +1,35 @@
 /**
  * POST /api/mobile/custody/release-quantity
  *
- * Releases (returns) N units of a QUANTITY_TRACKED asset from a team member
- * back to the available pool. Mobile twin of the web's
- * `/api/assets/release-quantity-custody` route — same Zod schema, same
- * SELF_SERVICE guard, same `releaseQuantity` service call, same best-effort
- * audit note. Runs the debounced low-stock notifier (best-effort): release
- * RAISES available stock and can move the asset back above its threshold, so
- * the notifier must run to clear the `lowStockNotifiedAt` marker (and send the
- * "back in stock" notice) on recovery — otherwise a stale marker would suppress
- * the next genuine low-stock alert. Mirrors the web release route.
+ * Ends a team member's hold on N units of a QUANTITY_TRACKED asset. Mobile twin
+ * of the web's `/api/assets/release-quantity-custody` route — same Zod schema,
+ * same SELF_SERVICE guard, same `releaseQuantity` service call, same
+ * best-effort audit note.
+ *
+ * **What happens to the units is decided server-side** from the asset's
+ * `consumptionType` (see `resolveReleaseDisposition`), never by the caller:
+ *
+ * - `RETURN` (`TWO_WAY`, and legacy rows with no `consumptionType`) — the units
+ *   go back into the available pool and `Asset.quantity` is untouched.
+ * - `CONSUME` (`ONE_WAY` consumables) — the units were used up, so
+ *   `Asset.quantity` is permanently decremented.
+ *
+ * Runs the debounced low-stock notifier (best-effort) for BOTH outcomes,
+ * because each crosses the threshold in a different direction: a `RETURN`
+ * raises available stock and can move the asset back above its threshold, so
+ * the notifier must clear the `lowStockNotifiedAt` marker (and send the "back
+ * in stock" notice) or a stale marker suppresses the next genuine alert; a
+ * `CONSUME` lowers stock and can trip the threshold. Mirrors the web route.
  *
  * Body: { assetId: string, teamMemberId: string, quantity: number, note?: string }
  * Org: `?orgId=` query param or `x-shelf-organization` header.
  *
- * Success envelope: `{ success: true, asset }` where `asset` is the
- * refreshed asset shaped for mobile (custody visibility already filtered
- * for the caller) so the app can update state without a second round trip.
+ * Success envelope: `{ success: true, asset, disposition }` where `asset` is
+ * the refreshed asset shaped for mobile (custody visibility already filtered
+ * for the caller) so the app can update state without a second round trip, and
+ * `disposition` is `"RETURN" | "CONSUME"` — what the server actually did, so
+ * the app can confirm it without re-deriving the rule. Clients predating the
+ * field simply ignore it.
  *
  * @see {@link file://./../assets.release-quantity-custody.ts} — the mirrored web route
  * @see {@link file://./../../../modules/asset/service.server.ts} — releaseQuantity
