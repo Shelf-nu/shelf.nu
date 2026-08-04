@@ -86,7 +86,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  canUserRemoveBookingAssets,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -1396,6 +1399,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         getBookingSettingsForOrganization(organizationId),
       ]
     );
+
+    /**
+     * A finished booking is a closed record — its contents must not change.
+     *
+     * The remove intents were gated on `booking:update` permission alone: the
+     * COMPLETE/ARCHIVED block lived only in the client dropdown, so a crafted
+     * POST could still strip items from a finished booking. Every sibling
+     * path already guards this server-side (`manage-assets`, `manage-kits`,
+     * and the mobile remove endpoint).
+     *
+     * Status only — WHO may remove is already settled upstream by the row/bulk
+     * action gating, and differs from who may add (a self-service custodian
+     * may remove from their own RESERVED booking).
+     */
+    const removeIntents = [
+      "removeAsset",
+      "removeKit",
+      "bulk-remove-asset-or-kit",
+    ];
+    if (
+      removeIntents.includes(intent) &&
+      !canUserRemoveBookingAssets(basicBookingInfo)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Removing items is not allowed for the current status of the booking.",
+        additionalData: { userId, id, intent, status: basicBookingInfo.status },
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     switch (intent) {
       case "save": {
