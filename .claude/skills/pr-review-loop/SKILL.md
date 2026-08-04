@@ -351,7 +351,9 @@ thread it actually replied to.
 Reposts of an already-`.seen` finding are not triaged again here — that
 handling lives entirely under the `REPOST` event above (§ Arm the watcher):
 reply on the new thread with a pointer to the prior decision, resolve, and
-escalate instead once `.reposted[<fp>].count` reaches 3.
+escalate instead once that finding's count reaches 3. `.reposted` is an
+**array**, not an object keyed by fingerprint (see § Arm the watcher above),
+so read it as `.reposted[] | select(.fingerprint == <fp>) | .count`.
 
 Then return to waiting.
 
