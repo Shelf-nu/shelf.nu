@@ -224,12 +224,18 @@ normalize_body() {
 
 # Prefer CodeRabbit's own stable marker when present — it survives rewording
 # that our normalization would not. Otherwise hash author + path + body.
+#
+# Digest::SHA (not `shasum`): it's a core Perl module guaranteed present
+# wherever normalize_body's perl already runs, whereas `shasum` is not
+# guaranteed on every supported OS/image. A missing `shasum` makes this
+# function return an empty string, which collapses every unrelated finding
+# into the same fingerprint — silently losing triage and replies.
 finding_fingerprint() {
   local author="$1" path="$2" body="$3" cr
   cr="$(printf '%s' "$body" | grep -oE 'cr-comment:v1:[a-f0-9]+' | head -1)"
   if [[ -n "$cr" ]]; then printf '%s' "$cr"; return 0; fi
   printf '%s|%s|%s' "$(normalize_login "$author")" "$path" "$(normalize_body "$body")" \
-    | shasum -a 256 | cut -c1-16
+    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print substr(sha256_hex($_), 0, 16)'
 }
 
 # --- collection ------------------------------------------------------------
@@ -240,7 +246,8 @@ THREADS_QUERY='query($owner:String!,$name:String!,$pr:Int!,$cursor:String){
     reviewThreads(first:100, after:$cursor){
       pageInfo{hasNextPage endCursor}
       nodes{ id isResolved isOutdated path line
-        comments(first:20){nodes{id databaseId author{login} body createdAt}} } } } } }'
+        comments(first:20){pageInfo{hasNextPage}
+          nodes{id databaseId author{login} body createdAt}} } } } } }'
 
 # One page of review threads. The cursor variable is omitted rather than sent
 # empty — GraphQL rejects after:"" but accepts a null/absent cursor.
@@ -324,16 +331,22 @@ collect_threads() {
 # for a bot's own follow-up — until something actually judges it.
 #
 # THREADS_QUERY fetches comments(first:20); a thread with more than 20
-# comments still only surfaces the first page here. That's an existing,
-# separate limit (nested pagination under an already-paginated threads
-# query), not fixed by this change — noted so a reviewer doesn't assume it's
-# covered.
+# comments still only surfaces the first page here — nested pagination under
+# an already-paginated threads query. Rather than fetch it (a per-thread
+# follow-up query, looped, with its own page cap — a second collect_threads),
+# every finding on such a thread is flagged `commentsTruncated: true` from
+# `comments.pageInfo.hasNextPage`. The correctness hazard this closes: a
+# human replying past comment 20 is invisible to this function, so the loop
+# could triage an earlier bot finding and RESOLVE the thread without ever
+# having seen that reply. The skill must treat `commentsTruncated: true` as
+# reply-but-never-resolve — see SKILL.md § Respond — leaving the thread for a
+# human, rather than silently completing on partial data.
 shape_findings() {
   local raw n i out="[]"
   raw="$(cat)"
   n="$(printf '%s' "$raw" | jq 'length')"
   for ((i = 0; i < n; i++)); do
-    local t resolved outdated path line threadId ncomments j
+    local t resolved outdated path line threadId ncomments j truncated
     t="$(printf '%s' "$raw" | jq -c ".[$i]")"
     resolved="$(printf '%s' "$t" | jq -r '.isResolved')"
     [[ "$resolved" == "true" ]] && continue
@@ -341,6 +354,10 @@ shape_findings() {
     path="$(printf '%s' "$t" | jq -r '.path // ""')"
     line="$(printf '%s' "$t" | jq -r '.line // 0')"
     threadId="$(printf '%s' "$t" | jq -r '.id')"
+    # `// false`: fixtures/API responses predating this field simply lack
+    # `.comments.pageInfo` — must read as "not truncated", not as the string
+    # "null" that a bare `-r` would otherwise emit into commentsTruncated.
+    truncated="$(printf '%s' "$t" | jq -r '.comments.pageInfo.hasNextPage // false')"
     ncomments="$(printf '%s' "$t" | jq '.comments.nodes | length')"
     for ((j = 0; j < ncomments; j++)); do
       local author body kind fp
@@ -354,8 +371,10 @@ shape_findings() {
         --arg author "$author" --arg path "$path" --arg kind "$kind" \
         --arg body "$body" \
         --argjson line "$line" --argjson outdated "$outdated" \
+        --argjson truncated "$truncated" \
         '$acc + [{fingerprint:$fp, threadId:$id, author:$author, path:$path,
-                  line:$line, kind:$kind, outdated:$outdated, body:$body}]')"
+                  line:$line, kind:$kind, outdated:$outdated, body:$body,
+                  commentsTruncated:$truncated}]')"
     done
   done
   printf '%s' "$out"

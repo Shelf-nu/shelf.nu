@@ -129,6 +129,27 @@ assert_eq "false" \
      && echo true || echo false)" \
   "same text on a different file fingerprints differently"
 
+# item 1 (copilot): `shasum` is not guaranteed present on every supported
+# OS/image. A restricted PATH carrying only what finding_fingerprint's own
+# Digest::SHA path needs (perl, grep, head) — no shasum binary anywhere on
+# it — must still hash successfully. Before the fix this silently returned
+# an empty string, collapsing every unrelated finding into one fingerprint.
+NOSHASUM_BIN="$(mktemp -d)"
+for tool in perl grep head cat; do
+  ln -s "$(command -v "$tool")" "$NOSHASUM_BIN/$tool"
+done
+assert_eq "1" \
+  "$([[ -z "$(PATH="$NOSHASUM_BIN" command -v shasum 2>/dev/null)" ]] && echo 1 || echo 0)" \
+  "sanity: shasum is genuinely absent from this restricted PATH"
+
+FP_NOSHASUM_A="$(PATH="$NOSHASUM_BIN" finding_fingerprint "chatgpt-codex-connector" "a.ts" "finding A")"
+FP_NOSHASUM_B="$(PATH="$NOSHASUM_BIN" finding_fingerprint "chatgpt-codex-connector" "a.ts" "finding B")"
+assert_eq "1" "$([[ -n "$FP_NOSHASUM_A" ]] && echo 1 || echo 0)" \
+  "finding_fingerprint returns a non-empty hash even with no shasum on PATH"
+assert_eq "1" "$([[ "$FP_NOSHASUM_A" != "$FP_NOSHASUM_B" ]] && echo 1 || echo 0)" \
+  "two distinct findings still fingerprint distinctly with no shasum on PATH"
+rm -rf "$NOSHASUM_BIN"
+
 describe "pr-review-watch: state"
 
 TMP_STATE="$(mktemp -d)"
@@ -236,6 +257,12 @@ assert_json_eq "4" "$FINDINGS" \
   '[group_by(.threadId)[]|select(length==2)]|length' \
   "each thread's two comments share the same threadId — a reply is scoped to its own thread"
 
+# This fixture predates comments.pageInfo entirely (no such key on any
+# thread). `// false` must read that as "not truncated", not as the string
+# "null" a bare `-r` would otherwise emit into commentsTruncated.
+assert_json_eq "0" "$FINDINGS" '[.[]|select(.commentsTruncated != false)]|length' \
+  "a fixture with no comments.pageInfo defaults every finding to commentsTruncated:false"
+
 assert_eq "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c" "$(head_sha 2770)" \
   "head_sha reads headRefOid from the GraphQL response"
 
@@ -243,6 +270,42 @@ assert_eq "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c" "$(head_sha 2770)" \
 export GH_FIXTURE_DIR="$ROOT/scripts/__tests__/fixtures/pr2770"
 assert_json_eq "0" "$(collect_threads 2770 | shape_findings)" 'length' \
   "a fully-resolved PR yields zero findings"
+
+# commentsTruncated (item 3): THREADS_QUERY caps comments(first:20), so a
+# thread with more than 20 comments only ever surfaces its first page here.
+# A human reply sitting past that cutoff would otherwise be invisible while
+# the loop resolves the thread off an earlier bot finding it CAN see. Every
+# finding on such a thread must carry commentsTruncated:true so the skill can
+# withhold RESOLVE (see SKILL.md § Respond) — a thread whose comment page IS
+# complete must not be flagged.
+TRUNCATED_THREADS='[
+  { "id": "PRRT_full", "isResolved": false, "isOutdated": false,
+    "path": "a.ts", "line": 1,
+    "comments": { "pageInfo": { "hasNextPage": true },
+      "nodes": [
+        { "id": "c1", "databaseId": 1,
+          "author": { "login": "chatgpt-codex-connector" },
+          "body": "finding one", "createdAt": "2026-01-01T00:00:00Z" },
+        { "id": "c2", "databaseId": 2, "author": { "login": "DonKoko" },
+          "body": "a reply within the first 20 comments",
+          "createdAt": "2026-01-01T00:05:00Z" }
+      ] } },
+  { "id": "PRRT_short", "isResolved": false, "isOutdated": false,
+    "path": "b.ts", "line": 2,
+    "comments": { "pageInfo": { "hasNextPage": false },
+      "nodes": [
+        { "id": "c3", "databaseId": 3,
+          "author": { "login": "chatgpt-codex-connector" },
+          "body": "finding two", "createdAt": "2026-01-01T00:00:00Z" }
+      ] } }
+]'
+TRUNCATED_FINDINGS="$(printf '%s' "$TRUNCATED_THREADS" | shape_findings)"
+assert_json_eq "2" "$TRUNCATED_FINDINGS" \
+  '[.[]|select(.threadId=="PRRT_full")|select(.commentsTruncated==true)]|length' \
+  "every finding (bot AND human reply) on a thread with more comment pages is flagged"
+assert_json_eq "1" "$TRUNCATED_FINDINGS" \
+  '[.[]|select(.threadId=="PRRT_short")|select(.commentsTruncated==false)]|length' \
+  "a thread whose comment page is complete is not flagged"
 
 describe "pr-review-watch: auxiliary sources"
 
@@ -1330,16 +1393,20 @@ assert_eq "1" "$MISSING_THREAD_RC" \
 assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$GH_MUTATION_LOG")" \
   "a missing threadId is never posted to — not even the literal string null"
 
-describe "pr-review-respond: ledger fail-fast on a read-only git dir"
+describe "pr-review-respond: ledger fail-fast when the git dir cannot be created"
 
-# A read-only .git (or computed git common dir) must abort BEFORE any live
+# A ledger directory that cannot be created must abort BEFORE any live
 # mutation, not silently continue with a ledger that can never record a
 # successful reply — that would turn every future re-run into a
 # duplicate-post risk with no error anywhere pointing at the cause.
+#
+# A regular file in place of the git-common-dir makes `mkdir -p` fail with
+# ENOTDIR for ANY effective UID, including root. `chmod 555` does NOT — root
+# ignores file mode bits — which would silently no-op this fixture the moment
+# it runs in a CI container (commonly root), testing nothing.
 RO_TMP="$(mktemp -d)"
 RO_GIT="$RO_TMP/git"
-mkdir -p "$RO_GIT/pr-review-loop"
-chmod 555 "$RO_GIT/pr-review-loop"
+: > "$RO_GIT"
 cat > "$RO_TMP/decisions.json" <<'JSON'
 [{"threadId":"PRRT_ro","replyBody":"Fixed in deadbee.","resolve":true}]
 JSON
@@ -1349,10 +1416,9 @@ GIT_COMMON_DIR="$RO_GIT" GH_MUTATION_LOG="$RO_LOG" \
   bash "$ROOT/scripts/pr-review-respond.sh" 2770 "$RO_TMP/decisions.json" \
   >/dev/null 2>&1 || RO_RC=$?
 assert_eq "1" "$RO_RC" \
-  "a read-only ledger directory makes the script exit non-zero, before any mutation"
+  "an uncreatable ledger directory makes the script exit non-zero, before any mutation"
 assert_eq "0" "$(grep -c 'addPullRequestReviewThreadReply' "$RO_LOG")" \
   "no reply is ever attempted when the ledger cannot be written"
-chmod 755 "$RO_GIT/pr-review-loop"
 rm -rf "$RO_TMP"
 
 describe "pr-review-respond: a failed ledger write after a successful reply is a failed run"
@@ -1365,13 +1431,15 @@ describe "pr-review-respond: a failed ledger write after a successful reply is a
 LW_TMP="$(mktemp -d)"
 LW_GIT="$LW_TMP/git"
 mkdir -p "$LW_GIT/pr-review-loop"
-# Pre-create the ledger file read-only. touch(1) on an EXISTING file can
-# still succeed for the owner even when it isn't writable (verified: macOS
-# touch updates mtime via utimes, not a write-open) — so the fail-fast guard
-# above does not trip here — but actually appending a line to it fails,
-# which is exactly the scenario record()'s exit status now has to catch.
-touch "$LW_GIT/pr-review-loop/2770.replies"
-chmod 444 "$LW_GIT/pr-review-loop/2770.replies"
+# Pre-create the ledger PATH as a directory instead of a read-only file.
+# touch(1) on an EXISTING directory still succeeds (it only updates mtime —
+# no write-open happens), so the fail-fast guard above does not trip here —
+# but appending a line to it fails with EISDIR, which is exactly the
+# scenario record()'s exit status now has to catch. Unlike chmod 444, EISDIR
+# is a kernel type-check that rejects the write for ANY effective UID,
+# including root, so this keeps testing the failure path under CI containers
+# that commonly run as root.
+mkdir -p "$LW_GIT/pr-review-loop/2770.replies"
 cat > "$LW_TMP/decisions.json" <<'JSON'
 [{"threadId":"PRRT_lw","replyBody":"Fixed in deadbee.","resolve":true}]
 JSON
@@ -1386,7 +1454,6 @@ assert_eq "1" "$(grep -c 'addPullRequestReviewThreadReply' "$LW_LOG")" \
   "the reply mutation itself still went out — that part cannot be undone"
 assert_eq "0" "$(grep -c 'resolveReviewThread' "$LW_LOG")" \
   "the thread is NOT resolved when the ledger write failed — the reply isn't durably confirmed"
-chmod 644 "$LW_GIT/pr-review-loop/2770.replies"
 rm -rf "$LW_TMP"
 
 rm -rf "$TMP_D"

@@ -79,7 +79,10 @@ dispatch one `shelf-pr-comment-triager` **in parallel** — one agent per
 finding, all in a single message. Use `superpowers:dispatching-parallel-agents`.
 
 Pass each agent: `fingerprint`, `threadId`, `path`, `line`, `outdated`, and
-the `body` **wrapped in a unique per-invocation random marker**:
+the `body` **wrapped in a unique per-invocation random marker**. Triage as
+normal regardless of `commentsTruncated` (below) — it only changes whether
+the thread may be resolved in § Respond, not whether it can be triaged off
+the comments this poll could see.
 
 ```bash
 # Mirror gen_nonce() in scripts/security-review-staged.sh — fall through
@@ -344,6 +347,18 @@ Bot threads with a decided verdict: reply and resolve. Human threads: neither.
 open. Escalation is the sink for security-flavored findings, deny-listed
 actions, low confidence, and every triager malfunction; resolving those would
 silently close exactly the findings that most need a human.
+
+**`commentsTruncated: true`: reply, never resolve** (`resolve: false` in the
+replies file, regardless of verdict). The watcher only fetches a thread's
+first 20 comments (`comments(first:20)` in `THREADS_QUERY`); this flag means
+the thread has more. A comment past that cutoff could be a human reply this
+poll never saw — resolving on a decided BOT finding would then silently close
+a thread with an unanswered human still on it, the exact failure this loop
+exists to prevent. Post the reply (it is still correct and still helps) but
+leave the thread open for a human to resolve once they've read past comment 20. Check the field per-finding, not per-thread-once: every finding shares
+one thread's value, but re-read it from `.pending` rather than assuming it
+carries over between rounds — a thread can cross the 20-comment mark between
+polls.
 
 After the responder returns, flip `.seen[<fp>].replied = true` for every
 thread it actually replied to.
