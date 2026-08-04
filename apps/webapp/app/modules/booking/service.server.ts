@@ -43,6 +43,7 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -9943,6 +9944,23 @@ export async function removeAssets({
       sourceBookingStatus = sourceBooking.status;
       sourceBookingName = sourceBooking.name;
 
+      // Race-proof backstop for the callers' own status gates. Those read the
+      // booking before calling, so a booking completed/archived/cancelled in
+      // between would still have its rows deleted. This read shares the tx
+      // snapshot with the `deleteMany` below, so the status the check sees is
+      // the status the delete commits against.
+      if (!canUserRemoveBookingAssets(sourceBooking)) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Removing items is not allowed for the current status of the booking.",
+          additionalData: { bookingId: id, status: sourceBooking.status },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const removedAssets = await tx.asset.findMany({
         where: { id: { in: assetIds }, organizationId },
         select: {
@@ -10172,6 +10190,23 @@ export async function removeAssets({
     const userForNotes = { firstName, lastName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
+
+    /**
+     * Assets that genuinely lost a `BookingAsset` row on this call.
+     *
+     * `assetIds` is the caller's REQUEST, not the outcome: the bulk-remove
+     * handler passes every member of a selected kit, including members added
+     * to the kit after the booking was created and therefore never on it.
+     * Reporting those as removed forges the audit trail — a note and a
+     * `BOOKING_ASSETS_REMOVED` event for something that never left.
+     *
+     * `removedQtyByAssetId` was populated inside the tx from the rows about to
+     * be deleted, so it is the exact record of what actually went.
+     */
+    const actuallyRemovedAssetIds = assetIds.filter((assetId) =>
+      removedQtyByAssetId.has(assetId)
+    );
+
     // Asset-timeline note — one row per asset. Previously every asset
     // shared the same "removed assets from {booking}" string via
     // createNotes (one content for N ids); now qty-tracked rows surface
@@ -10180,7 +10215,7 @@ export async function removeAssets({
     // byte-for-byte. why: content now differs per asset, so a single
     // shared `createNotes({assetIds: […]})` call no longer fits — we
     // flatMap one note per asset instead.
-    const removalNoteData = assetIds.map((assetId) => {
+    const removalNoteData = actuallyRemovedAssetIds.map((assetId) => {
       const assetForNote = removedAssetMeta.get(assetId);
       const removedQty = removedQtyByAssetId.get(assetId);
       // Only switch to the qty-aware per-asset phrasing when we have the
@@ -10217,10 +10252,10 @@ export async function removeAssets({
     // Best-effort: don't fail the removal if event recording fails.
     // `meta.quantity` is the sum of BookingAsset.quantity from rows
     // dropped for that asset on this call (qty-tracked only).
-    if (assetIds.length > 0) {
+    if (actuallyRemovedAssetIds.length > 0) {
       try {
         await recordEvents(
-          assetIds.map((assetId) => {
+          actuallyRemovedAssetIds.map((assetId) => {
             const asset = removedAssetMeta.get(assetId);
             const removedQty = removedQtyByAssetId.get(assetId);
             return {
@@ -10304,8 +10339,12 @@ export async function removeAssets({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while removing assets from the booking. Please try again or contact support.",
+      // Keep a deliberate message (e.g. the closed-booking 403 above) instead
+      // of burying it under the generic one. `status` and `shouldBeCaptured`
+      // already carry over from a ShelfError cause.
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while removing assets from the booking. Please try again or contact support.",
       additionalData: { booking, userId },
       label,
     });
