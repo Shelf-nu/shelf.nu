@@ -534,7 +534,14 @@ assert_eq "2026-07-30T18:00:00Z" "$(iso8601_to_utc_z "2026-07-30T23:00:00+05:00"
 assert_eq "2026-07-30T18:00:00Z" "$(iso8601_to_utc_z "2026-07-30T18:00:00Z")" \
   "iso8601_to_utc_z passes an already-Z timestamp through unchanged"
 
-WEST_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" git commit-tree -m t 'HEAD^{tree}')"
+# Identity is passed explicitly: `git commit-tree` fails with "Author identity
+# unknown" when none is configured, and GitHub runners configure none. A dev
+# machine derives one from $USER@hostname, so this passes locally and fails
+# only in CI — which is exactly how it got here.
+WEST_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" \
+  GIT_COMMITTER_NAME=tests GIT_COMMITTER_EMAIL=tests@example.invalid \
+  GIT_AUTHOR_NAME=tests GIT_AUTHOR_EMAIL=tests@example.invalid \
+  git commit-tree -m t 'HEAD^{tree}')"
 assert_eq "2026-07-30T20:00:00Z" "$(git_commit_iso_utc "$WEST_SHA")" \
   "git_commit_iso_utc normalizes a west-of-UTC committer date to Z"
 
@@ -1203,7 +1210,10 @@ describe "pr-review-watch: push seeding (main's lastPushedAt bug)"
 # Fake an already-pushed remote via the resolve_remote_ref seam — matches the
 # detect_push/collect_checks pattern, and avoids touching real
 # remote-tracking refs in this repo.
-SEED_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" git commit-tree -m seed 'HEAD^{tree}')"
+SEED_SHA="$(GIT_COMMITTER_DATE="2026-07-30T13:00:00-07:00" \
+  GIT_COMMITTER_NAME=tests GIT_COMMITTER_EMAIL=tests@example.invalid \
+  GIT_AUTHOR_NAME=tests GIT_AUTHOR_EMAIL=tests@example.invalid \
+  git commit-tree -m seed 'HEAD^{tree}')"
 resolve_remote_ref() { printf '%s' "$SEED_SHA"; }
 
 state_init 6001 "test-branch"
