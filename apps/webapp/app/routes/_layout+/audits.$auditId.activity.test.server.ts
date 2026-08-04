@@ -12,6 +12,7 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -89,8 +90,19 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
     requirePermission.mockImplementation(
       ({ entity }: { entity: PermissionEntity }) => {
         if (entity === PermissionEntity.auditNote) {
+          // why: a real `ShelfError` — the shape `validatePermission` throws.
+          // The loader's `makeShelfError` only preserves the 403 for a
+          // ShelfError; a bare Error becomes a generic 500, which would let
+          // the assertion below pass against the wrong status.
           return Promise.reject(
-            Object.assign(new Error("You have no permission"), { status: 403 })
+            new ShelfError({
+              cause: null,
+              title: "Unauthorized",
+              message: "You have no permission to perform this action",
+              status: 403,
+              label: "Permission",
+              shouldBeCaptured: false,
+            })
           );
         }
         return Promise.resolve({
@@ -101,7 +113,13 @@ describe("audit activity loader — auditNote:read is enforced server-side", () 
       }
     );
 
-    await expect(loader(loaderArgs())).rejects.toBeDefined();
+    // Assert the denial is specifically a 403, not merely "something threw".
+    const thrown = await loader(loaderArgs()).then(
+      () => null,
+      (caught: unknown) => caught
+    );
+
+    expect((thrown as { init?: { status?: number } })?.init?.status).toBe(403);
 
     expect(getAuditNotes).not.toHaveBeenCalled();
   });

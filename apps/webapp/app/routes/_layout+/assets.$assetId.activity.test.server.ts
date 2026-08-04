@@ -17,6 +17,7 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -72,8 +73,20 @@ function actAs(role: OrganizationRoles) {
       const granted = Role2PermissionMap[role]?.[entity] ?? [];
 
       if (!isAdminOrOwner && !granted.includes(action)) {
+        // why: a real `ShelfError`, not a bare Error — `validatePermission`
+        // throws exactly this shape, and the loader's `makeShelfError` only
+        // preserves the 403 for a ShelfError (anything else becomes a generic
+        // 500). A bare Error would let the denial assertion pass while the
+        // route actually surfaced the wrong status.
         return Promise.reject(
-          Object.assign(new Error("You have no permission"), { status: 403 })
+          new ShelfError({
+            cause: null,
+            title: "Unauthorized",
+            message: "You have no permission to perform this action",
+            status: 403,
+            label: "Permission",
+            shouldBeCaptured: false,
+          })
         );
       }
 
@@ -138,7 +151,18 @@ describe("asset activity loader — note:read is enforced server-side", () => {
 
       actAs(role);
 
-      await expect(loader(loaderArgs())).rejects.toBeDefined();
+      // The loader rethrows as `data(..., { status })`. Assert the observable
+      // outcome is a 403 specifically — `toBeDefined()` alone would also pass
+      // on a parse error or a 500 from error mapping, which is not the denial
+      // this test is about.
+      const thrown = await loader(loaderArgs()).then(
+        () => null,
+        (caught: unknown) => caught
+      );
+
+      expect((thrown as { init?: { status?: number } })?.init?.status).toBe(
+        403
+      );
 
       // The point of the fix: the notes are never fetched, so they can never
       // reach the payload. A client-side check would have let this call run.

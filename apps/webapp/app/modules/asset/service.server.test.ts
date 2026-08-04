@@ -1238,6 +1238,40 @@ describe("releaseQuantity — consumptionType disposition", () => {
     expect(result.disposition).toBe("RETURN");
   });
 
+  it("does not touch AssetLocation on consume (documented deferral, matches booking check-in)", async () => {
+    // A CONSUME lowers `Asset.quantity` and deliberately leaves placements
+    // alone, so `SUM(AssetLocation.quantity)` can end up above the total. This
+    // is pre-existing, not introduced by the consumable branch: the booking
+    // service makes no `assetLocation` write at all, and the manual
+    // stock-lowering guard (`assertAssetQuantityNotBelowReservations`) queries
+    // custody / assetKit / bookingAsset / consumptionLog, never assetLocation.
+    // Custody carries no location, so there is nothing here to identify WHICH
+    // placement the used-up units came off.
+    //
+    // This test pins the deferral rather than the desired end state: when the
+    // location axis is reconciled across every path that lowers
+    // `Asset.quantity`, this is the assertion that should fail and be rewritten.
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // The three write methods the mocked client exposes — the same set
+    // `moveAssetLocationUnits` / `placeUnplacedUnits` drive when they DO
+    // adjust placements.
+    expect(db.assetLocation.create).not.toHaveBeenCalled();
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.delete).not.toHaveBeenCalled();
+  });
+
   it("still flips Asset.status to AVAILABLE when a consume empties the last custody row", async () => {
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
