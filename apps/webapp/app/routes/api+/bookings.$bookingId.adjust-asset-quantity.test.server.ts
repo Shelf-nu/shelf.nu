@@ -35,7 +35,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -93,7 +93,7 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
   computeAvailableQuantity: vitest.fn(),
 }));
 vitest.mock("~/modules/booking/service.server", () => ({
-  computeCheckedOutForAsset: vitest.fn(),
+  computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
 // why: `vitest.mock` calls above are hoisted above all imports by Vitest's
@@ -232,7 +232,10 @@ beforeEach(() => {
   // @ts-expect-error mocked
   sendNotification.mockReturnValue(undefined);
   // @ts-expect-error mocked
-  computeCheckedOutForAsset.mockResolvedValue(0);
+  computeCheckedOutBreakdownForAsset.mockResolvedValue({
+    total: 0,
+    standalone: 0,
+  });
 });
 
 /* -------------------------------------------------------------------------- */
