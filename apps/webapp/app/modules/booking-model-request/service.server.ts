@@ -32,6 +32,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
@@ -617,13 +618,15 @@ export async function upsertBookingModelRequest({
     //   - decrease : "decreased the **Model** reservation from **M** to **N**."
     //   - no-op    : skip the note entirely (nothing actually changed)
     const { assetModel, previousQuantity } = result;
+    // Model names are user-supplied and render as literal text in the note.
+    const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
     if (previousQuantity == null) {
-      content = `{actor} reserved **${quantity} × ${assetModel.name}** for this booking.`;
+      content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
     } else if (quantity > previousQuantity) {
-      content = `{actor} increased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     } else if (quantity < previousQuantity) {
-      content = `{actor} decreased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
     if (content != null) {
@@ -742,7 +745,9 @@ export async function removeBookingModelRequest({
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: `${actor} cancelled the model-level reservation for **${assetModelName}**.`,
+          content: `${actor} cancelled the model-level reservation for **${stripMarkdocDelimiters(
+            assetModelName
+          )}**.`,
         });
       } catch {
         // non-fatal
@@ -865,10 +870,11 @@ export async function materializeModelRequestForAsset({
     // materialization if anything later in the scan pipeline fails.
     const actor = await loadActor(userId);
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
+    const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     await tx.bookingNote.create({
       data: {
         type: "UPDATE",
-        content: `${actor} assigned ${assetLink} (${existing.assetModel.name}) to this booking — ${remaining} × ${existing.assetModel.name} remaining.`,
+        content: `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`,
         booking: { connect: { id: bookingId } },
       },
     });

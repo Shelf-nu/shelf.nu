@@ -126,8 +126,12 @@ export function AdvancedIndexColumn({
                   "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
+                {/* Custom field values are authored in `MarkdownEditor`,
+                    whose link control makes external links a deliberate
+                    feature — same treatment as comments and announcements. */}
                 <MarkdownViewer
                   content={customFieldDisplayValue as RenderableTreeNode}
+                  allowExternalLinks
                 />
               </PopoverContent>
             </PopoverPortal>
@@ -459,6 +463,10 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
+              {/* No `allowExternalLinks`: descriptions are authored in a plain
+                  textarea and rendered as plain text on the asset page, so
+                  they are not a markdown surface. Links here would also be
+                  unreachable — Radix tooltip content is not interactive. */}
               <MarkdownViewer content={value} className="mt-2 text-sm" />
             </TooltipContent>
           </Tooltip>

@@ -1,6 +1,7 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
+import { getPrimaryLocation } from "../asset/utils";
 
 type AssetWithKit = {
   id: string;
@@ -644,4 +645,125 @@ export function filterBookingAssets<T extends SearchableBookingAsset>(
       directIds.has(asset.id) ||
       (asset.kitId != null && matchedKitIds.has(asset.kitId))
   );
+}
+
+/**
+ * A single search-visible `BookingAsset` slice, reduced to the fields the PDF
+ * per-slice row builder needs.
+ *
+ * One QUANTITY_TRACKED asset can contribute several slices to a single booking
+ * (one standalone / free-pool slice plus one per kit it is booked under), and
+ * the exported PDF renders EACH slice as its own row — so a slice must carry
+ * its own booked quantity and a unique key, not be collapsed into one asset row.
+ */
+export type PdfBookingAssetSlice = {
+  /** The asset id. Shared across a QT asset's multiple slices. */
+  id: string;
+  /**
+   * The slice's `BookingAsset.assetKitId`: `null` for a standalone (free-pool)
+   * slice, otherwise the `AssetKit.id` this slice was booked under. Matched
+   * against `assetKits[].id` on the joined asset to resolve the slice's kit.
+   */
+  kitId: string | null;
+  /** Booked units for THIS slice (`BookingAsset.quantity`). */
+  quantity: number;
+  /** Unique `BookingAsset.id`, used as the rendered row's React key. */
+  bookingAssetId: string;
+};
+
+/**
+ * Minimal shape of the full per-asset data joined onto each slice. `assetKits`
+ * carries each membership's `AssetKit.id` so a slice's `kitId` can be resolved
+ * to the specific kit (name + location) it was booked under — a QT asset can
+ * belong to several kits, so `assetKits[0]` is NOT necessarily the right one.
+ */
+type PdfRawAssetShape = {
+  id: string;
+  assetKits: Array<{
+    /** `AssetKit.id` — matched against a slice's `kitId`. */
+    id: string;
+    kit: {
+      id: string;
+      name: string;
+      location: { name: string } | null;
+    } | null;
+  }>;
+  assetLocations?: Array<{ location?: { name: string } | null }>;
+};
+
+/** The resolved kit + location + slice metadata layered onto each raw asset. */
+type PdfSliceOverrides = {
+  /** The resolved kit's id (a `Kit.id`), or `null` for a standalone slice. */
+  kitId: string | null;
+  kit: {
+    id: string;
+    name: string;
+    location: { name: string } | null;
+  } | null;
+  location: { name: string } | null;
+  /** THIS slice's booked units. */
+  quantity: number;
+  /** Unique React key for the rendered row. */
+  bookingAssetId: string;
+};
+
+/**
+ * Builds the booking PDF's render list as ONE ROW PER `BookingAsset` slice
+ * (mirroring the on-screen booking overview), rather than one deduped row per
+ * asset.
+ *
+ * A QUANTITY_TRACKED asset booked as 4 standalone + 3 via Kit B1 + 3 via Kit B2
+ * yields THREE rows — each carrying its own booked `quantity` and its own kit —
+ * so the reader sees exactly which units belong to which kit. `groupAndSortAssetsByKit`
+ * then groups these rows by their resolved `kitId` (never collapsing duplicate
+ * asset ids), keeping each kit's slices contiguous.
+ *
+ * The join is done by asset id: `rawAssetsById` holds the full (deduped) asset
+ * payload, and each slice's kit is resolved by matching the slice's `kitId`
+ * (a `BookingAsset.assetKitId`) against the asset's `assetKits[].id`. A slice
+ * whose asset didn't resolve is skipped defensively rather than crashing — it
+ * cannot normally happen, since the visible slices are the source of the asset
+ * ids fetched into `rawAssetsById`.
+ *
+ * @param visibleSlices - The search-visible, per-slice `BookingAsset` list
+ *   (each already reduced to {@link PdfBookingAssetSlice}).
+ * @param rawAssetsById - Full per-asset data keyed by asset id (deduped fetch).
+ * @returns One row per slice: the full asset data plus the slice's resolved
+ *   kit, primary location, booked quantity and unique key.
+ */
+export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
+  visibleSlices: PdfBookingAssetSlice[],
+  rawAssetsById: Map<string, TRaw>
+): Array<TRaw & PdfSliceOverrides> {
+  const rows: Array<TRaw & PdfSliceOverrides> = [];
+
+  for (const slice of visibleSlices) {
+    const raw = rawAssetsById.get(slice.id);
+    // Defensive: a slice whose asset didn't resolve is dropped, not crashed.
+    if (!raw) {
+      continue;
+    }
+
+    // Resolve THIS slice's kit (with location) from the full asset data. A
+    // standalone slice (`kitId === null`) has no kit; a kit-driven slice
+    // matches its `AssetKit.id` against the asset's memberships.
+    const sliceKit = slice.kitId
+      ? raw.assetKits.find((ak) => ak.id === slice.kitId)?.kit ?? null
+      : null;
+
+    rows.push({
+      ...raw,
+      // Group by the resolved KIT id so per-slice rows land in the right kit
+      // group (standalone slices stay individual).
+      kitId: sliceKit?.id ?? null,
+      kit: sliceKit
+        ? { id: sliceKit.id, name: sliceKit.name, location: sliceKit.location }
+        : null,
+      location: getPrimaryLocation<{ name: string }>(raw),
+      quantity: slice.quantity,
+      bookingAssetId: slice.bookingAssetId,
+    });
+  }
+
+  return rows;
 }

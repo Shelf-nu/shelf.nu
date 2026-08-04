@@ -1,3 +1,5 @@
+import type { ActionFunctionArgs } from "react-router";
+
 import { USER_EMAIL, USER_ID, ORGANIZATION_ID } from "@mocks/user";
 
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
@@ -50,6 +52,22 @@ const DETECTED = {
   timeZone: "Asia/Tokyo",
 } as const;
 
+/**
+ * Builds the otp action's args for a request. `context` is a minimal stub: the
+ * signup path only reads `context.isAuthenticated` (false → proceeds) and calls
+ * `context.setSession` after creating the session.
+ */
+function actionArgs(request: Request): ActionFunctionArgs {
+  return {
+    request,
+    // why: the action calls context.setSession(authSession) after signup, so the
+    // stub must provide it. These tests assert on createUser (the detection
+    // wiring), not on setSession, so its calls are intentionally not asserted.
+    context: { isAuthenticated: false, setSession: vitest.fn() },
+    params: {},
+  } as ActionFunctionArgs;
+}
+
 describe("otp action — format pref detection", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -81,16 +99,41 @@ describe("otp action — format pref detection", () => {
 
     const request = new Request("http://localhost/otp", {
       method: "POST",
-      headers: { "accept-language": "ja-JP" },
+      headers: {
+        "accept-language": "ja-JP",
+        // A present + valid CH-time-zone cookie makes the detected timezone
+        // authoritative, so the full detected prefs are stamped on the new user.
+        cookie: "CH-time-zone=Asia%2FTokyo",
+      },
       body: formData,
     });
-    const context = { isAuthenticated: false, setSession: vitest.fn() };
-
-    await action({ request, context, params: {} } as any);
+    await action(actionArgs(request));
 
     expect(detectFormatPrefsFromHints).toHaveBeenCalledTimes(1);
     expect(createUser).toHaveBeenCalledWith(
       expect.objectContaining({ formatPrefs: DETECTED })
+    );
+  });
+
+  it("stamps a null timezone when the CH-time-zone cookie is absent (no UTC-fallback lock-in)", async () => {
+    // Without the cookie the detected timezone is NOT authoritative, so it must
+    // be persisted as null — the user's real zone is filled by the lazy backfill
+    // on a later request that carries the cookie, rather than stuck on "UTC".
+    const formData = new FormData();
+    formData.append("email", USER_EMAIL);
+    formData.append("otp", "123456");
+
+    const request = new Request("http://localhost/otp", {
+      method: "POST",
+      headers: { "accept-language": "ja-JP" }, // no CH-time-zone cookie
+      body: formData,
+    });
+    await action(actionArgs(request));
+
+    expect(createUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        formatPrefs: { ...DETECTED, timeZone: null },
+      })
     );
   });
 });

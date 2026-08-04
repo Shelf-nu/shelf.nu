@@ -16,10 +16,47 @@ Booking / audit / asset notes are stored as text and rendered through Markdoc
 parsed as a live Markdoc **tag** at render time, so a user-controlled string
 (kit name, a title used as literal text, unit of measure, free-form note body)
 spliced RAW into note content is a **stored XSS**: a value like
-`{% link to="javascript:alert(document.cookie)" /%}` renders as a live link that
-fires for anyone (incl. admins) who views the note. The repo contract is
+`{% link to="javascript:alert(document.cookie)" /%}` renders as a live tag for
+anyone (incl. admins) who views the note. The repo contract is
 **sanitize-at-write** — the feed renders note content raw, so write-time
 stripping is what keeps injected tags out.
+
+**The render layer is the primary control.** `MarkdownViewer` sanitizes the
+final renderable tree via `sanitizeMarkdocTree` (`~/utils/sanitize-markdoc-tree`):
+off-origin `img` dropped, off-origin `a` unwrapped to plain text, non
+http(s)/mailto schemes dropped. It has to live there because Markdoc renders
+ordinary `[text](url)` / `![](url)` into NATIVE `a`/`img` nodes that bypass
+every custom tag component — and that syntax contains no Markdoc delimiter, so
+write-time stripping cannot touch it. Working on the tree also covers
+pre-parsed `RenderableTreeNodes` and notes ALREADY stored in the database.
+
+Sanitizing at write time is still required: it is not a licence to skip it.
+Non-link tags (`booking_status`, `assets_list`, `tag`, `category_badge`) still
+render if injected, which forges the audit trail even without a working link.
+
+## `allowExternalLinks` — decide by AUTHORSHIP, not by "is it user input"
+
+`MarkdownViewer` defaults to `allowExternalLinks={false}`. Pass `true` only for
+content a human deliberately wrote in a rich-text field, NOT for content we
+assemble from entity names.
+
+The reliable test is the **editor**, not the data's origin: everything authored
+through `MarkdownEditor` gets `allowExternalLinks`, because its link dialog
+makes linking out a supported feature. Today that is comments (incl. audit
+condition notes), admin announcements, changelog entries and custom field
+values. System-generated notes keep the default — an external link in one was
+injected, since we only ever build those from entity names.
+
+Asset **descriptions** are NOT on that list, despite being free text. They are
+authored in a plain textarea and rendered as plain text on the asset page; the
+only Markdoc rendering is the index preview, where a link would be unreachable
+anyway because Radix tooltip content is not interactive. Making descriptions a
+markdown surface is a product change (editor + detail page + HoverCard), not a
+prop.
+
+"It's user-controlled, so restrict it" is the WRONG test and has caused this
+miss three times: user comments are user-controlled too, and they legitimately
+link out. When you add a `MarkdownViewer` call site, ask who typed the string.
 
 When you splice ANY user-controlled string into note content:
 
@@ -27,9 +64,15 @@ When you splice ANY user-controlled string into note content:
   `wrapKitsWithDataForNote`, …) — they place the value inside a quoted, escaped
   Markdoc attribute and never emit a raw tag.
 - If the value must appear as **literal text** (not inside a tag), strip the
-  delimiters first with `stripMarkdocDelimiters` (`~/modules/audit/note-content.server`).
+  delimiters first with `stripMarkdocDelimiters` (`~/utils/markdoc-sanitize`).
+  It loops until the string stops changing: a single `.replace()` pass splices
+  the remainder into a NEW delimiter, so `{{% … /%}}` would come out as a
+  working `{% … /%}` tag. Never hand-roll a one-pass strip.
 - A length/format check is NOT protection — `Kit.name`, `Asset.title`,
   `unitOfMeasure`, note bodies have no `{`/`%`/`}` restriction.
+- Watch for **indirection**: the raw value is often a few hops away
+  (`changes[]`, `parts[]`, `subjects`, a local `escape()` that only handles
+  markdown emphasis). Fix where the user value ENTERS the string.
 
 ```ts
 // ❌ Bad — raw user input becomes a live Markdoc tag when the note renders
@@ -42,5 +85,11 @@ content = `checked out (${wrapKitsWithDataForNote([kit], "checked out")})`;
 ```
 
 Add a regression test asserting a value containing `{% … %}` can't inject a tag.
+Assert on the PARSE, not the string — `[...Markdoc.parse(content).walk()]`
+filtered to `type === "tag"` must be empty. A substring check misses payloads
+that only become tags after concatenation.
+
 When you find one unsanitized splice, grep sibling note builders — this class
-travels in packs (asset unit-of-measure and audit notes were prior instances).
+travels in packs (asset unit-of-measure and audit notes were prior instances;
+the 2026-07-31 sweep found live splices across booking, kit, asset, location,
+audit and model-request in one pass).
