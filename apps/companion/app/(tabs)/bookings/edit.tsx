@@ -62,7 +62,10 @@ export default function EditBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels render date+time in the user's format prefs + timezone.
+  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
+  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
+  // are device-local, so formatting them in the preferred timezone would show a
+  // different time than the one being edited and submitted (CodeRabbit, #2798).
   const { formatDateTime } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -397,7 +400,9 @@ export default function EditBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              from ? `Starts ${formatDateTime(from)}` : "Start"
+              from
+                ? `Starts ${formatDateTime(from, { localeOnly: true })}`
+                : "Start"
             }
           >
             <Text
@@ -405,7 +410,9 @@ export default function EditBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from ? formatDateTime(from) : "Choose start..."}
+              {from
+                ? formatDateTime(from, { localeOnly: true })
+                : "Choose start..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -442,12 +449,14 @@ export default function EditBookingScreen() {
               setShowFromPicker(false);
             }}
             accessibilityRole="button"
-            accessibilityLabel={to ? `Ends ${formatDateTime(to)}` : "End"}
+            accessibilityLabel={
+              to ? `Ends ${formatDateTime(to, { localeOnly: true })}` : "End"
+            }
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDateTime(to) : "Choose end..."}
+              {to ? formatDateTime(to, { localeOnly: true }) : "Choose end..."}
             </Text>
             {isDraft && (
               <Ionicons

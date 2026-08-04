@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HARDCODED_DEFAULT_PREFS,
+  calendarDayIndex,
   detectDateFormat,
   detectFormatPrefsFromHints,
   detectTimeFormat,
@@ -159,6 +160,85 @@ describe("resolveFormatPrefs", () => {
     expect(
       resolveFormatPrefs({ ...base, weekStart: "SATURDAY" }, null).weekStartsOn
     ).toBe(6);
+  });
+
+  it("rejects corrupted stored values, degrading each to the detected hint", () => {
+    // The companion feeds unvalidated JSON here; a non-null-but-invalid value
+    // must NOT pass through (`??` only short-circuits null/undefined).
+    const r = resolveFormatPrefs(
+      {
+        dateFormat: "NONSENSE",
+        timeFormat: "H99",
+        weekStart: "FUNDAY",
+        timeZone: "Mars/Phobos",
+      } as unknown as RawFormatPrefs,
+      enGB
+    );
+    expect(r).toEqual({
+      dateFormat: "DD_MM_YYYY", // detected from en-GB, not the bad stored value
+      timeFormat: "H24",
+      weekStartsOn: 1, // MONDAY, detected from en-GB
+      timeZone: "Europe/London", // detected hint, NOT the invalid stored zone
+    });
+  });
+
+  it("degrades a corrupted stored timezone to the device hint, not UTC", () => {
+    // Regression: an invalid non-null zone used to fall straight to UTC (worse
+    // than the valid detected hint), because `??` never reached the hint.
+    const r = resolveFormatPrefs(
+      {
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: "Not/AZone",
+      },
+      enGB
+    );
+    expect(r.timeZone).toBe("Europe/London");
+  });
+
+  it("falls back to the hardcoded default when a corrupted value has no hint", () => {
+    const r = resolveFormatPrefs(
+      {
+        dateFormat: "BOGUS",
+        timeFormat: "BOGUS",
+        weekStart: "BOGUS",
+        timeZone: "BOGUS",
+      } as unknown as RawFormatPrefs,
+      null
+    );
+    expect(r).toEqual(HARDCODED_DEFAULT_PREFS);
+  });
+});
+
+describe("calendarDayIndex — timezone-aware calendar day", () => {
+  it("counts a whole-day difference in the given timezone", () => {
+    const a = "2026-06-22T10:00:00Z";
+    const b = "2026-06-23T10:00:00Z";
+    expect(calendarDayIndex(b, "UTC") - calendarDayIndex(a, "UTC")).toBe(1);
+  });
+
+  it("uses the LOCAL calendar day, not the UTC day, near midnight", () => {
+    // 2026-08-04T00:30Z is still Aug 3 (17:30) in America/Los_Angeles, while
+    // 2026-08-04T20:00Z is Aug 4 (13:00) there — one LA calendar day apart, but
+    // the SAME UTC calendar day. This is exactly the audit "Due today/tomorrow"
+    // boundary that must follow the preferred zone.
+    const early = "2026-08-04T00:30:00Z";
+    const later = "2026-08-04T20:00:00Z";
+    expect(
+      calendarDayIndex(later, "America/Los_Angeles") -
+        calendarDayIndex(early, "America/Los_Angeles")
+    ).toBe(1);
+    expect(
+      calendarDayIndex(later, "UTC") - calendarDayIndex(early, "UTC")
+    ).toBe(0);
+  });
+
+  it("accepts a Date as well as an ISO string", () => {
+    expect(
+      calendarDayIndex(new Date("2026-01-02T00:00:00Z"), "UTC") -
+        calendarDayIndex(new Date("2026-01-01T00:00:00Z"), "UTC")
+    ).toBe(1);
   });
 });
 
@@ -596,5 +676,31 @@ describe("getCachedFormatter — memoizes Intl.DateTimeFormat instances", () => 
       ).toBe(once);
     }
     expect(once).toBe("06/22/2026, 5:05 PM");
+  });
+});
+
+describe("formatDate — option-combination regressions (PR #2798 review)", () => {
+  it("appends time when includeTime is combined with dateStyle", () => {
+    // Regression: includeTime used to be ignored whenever dateStyle was set, so
+    // the companion's formatDateTime({ ...opts, includeTime: true }) would
+    // silently drop the time if a caller also passed dateStyle.
+    expect(formatDate(V, US, { dateStyle: "medium" })).toBe("Jun 22, 2026");
+    expect(formatDate(V, US, { dateStyle: "medium", includeTime: true })).toBe(
+      "Jun 22, 2026, 5:05 PM"
+    );
+  });
+
+  it("renders a bare year (no leading comma) for a year-only month-name request", () => {
+    // Regression: `{ year: "numeric" }` under a month-name pref yielded ", 2026".
+    expect(formatDate(JUL, US_NAME, { year: "numeric" })).toBe("2026");
+    expect(formatDate(JUL, EU_NAME, { year: "numeric" })).toBe("2026");
+  });
+
+  it("zero-pads the H12 hour when hour: '2-digit' is requested (H24 parity)", () => {
+    // Regression: the H12 branch ignored hour:"2-digit" and disagreed with H24.
+    // V → America/New_York 5:05 PM; 2-digit hour ⇒ "05:05 PM".
+    expect(formatDate(V, US, { hour: "2-digit", minute: "2-digit" })).toBe(
+      "05:05 PM"
+    );
   });
 });

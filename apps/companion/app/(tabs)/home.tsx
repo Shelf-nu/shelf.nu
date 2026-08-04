@@ -452,7 +452,10 @@ const BookingCard = memo(function BookingCard({
             color={colors.mutedLight}
           />
           <Text style={styles.metaText}>
-            {formatDate(booking.from)} – {formatDate(booking.to)}
+            {/* Compact month/day range (no year) to keep the dashboard card
+                glanceable, still in the user's timezone + format order. */}
+            {formatDate(booking.from, { month: "short", day: "numeric" })} –{" "}
+            {formatDate(booking.to, { month: "short", day: "numeric" })}
           </Text>
         </View>
         <View style={styles.metaItem}>

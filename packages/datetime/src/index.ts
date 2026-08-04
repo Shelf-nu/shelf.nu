@@ -111,6 +111,74 @@ export function isValidTimeZone(tz: string): boolean {
   }
 }
 
+/** The valid members of each preference enum, for narrowing untrusted values. */
+const DATE_FORMAT_VALUES: readonly DateFormatPreference[] = [
+  "DD_MM_YYYY",
+  "MM_DD_YYYY",
+  "YYYY_MM_DD",
+  "MMM_DD_YYYY",
+  "DD_MMM_YYYY",
+];
+const TIME_FORMAT_VALUES: readonly TimeFormatPreference[] = ["H12", "H24"];
+const WEEK_START_VALUES: readonly WeekStartPreference[] = [
+  "MONDAY",
+  "SUNDAY",
+  "SATURDAY",
+];
+
+/** Type guard: `v` is a known `DateFormatPreference` member. */
+function isDateFormat(v: unknown): v is DateFormatPreference {
+  return (
+    typeof v === "string" &&
+    (DATE_FORMAT_VALUES as readonly string[]).includes(v)
+  );
+}
+/** Type guard: `v` is a known `TimeFormatPreference` member. */
+function isTimeFormat(v: unknown): v is TimeFormatPreference {
+  return (
+    typeof v === "string" &&
+    (TIME_FORMAT_VALUES as readonly string[]).includes(v)
+  );
+}
+/** Type guard: `v` is a known `WeekStartPreference` member. */
+function isWeekStart(v: unknown): v is WeekStartPreference {
+  return (
+    typeof v === "string" &&
+    (WEEK_START_VALUES as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * The calendar-day index of an instant AS SEEN in `timeZone`: whole days from
+ * the Unix epoch to that instant's LOCAL calendar date in `timeZone`. Computed
+ * identically for any two instants, so
+ * `calendarDayIndex(a, tz) - calendarDayIndex(b, tz)` is the signed number of
+ * calendar days between them in that zone — the correct basis for relative
+ * "today / tomorrow / N days" labels that must agree with a `timeZone`-formatted
+ * absolute date (a device-local day count disagrees near midnight when the
+ * device zone differs from the preferred one).
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone the calendar day is measured in
+ * @returns whole days since the epoch for that local calendar date
+ */
+export function calendarDayIndex(
+  value: string | Date,
+  timeZone: string
+): number {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return Math.floor(
+    Date.UTC(get("year"), get("month") - 1, get("day")) / 86_400_000
+  );
+}
+
 /** Superset of the option shapes DateS callers pass today (facts-02 §C). */
 export type DateFormatOptions = {
   weekday?: "long" | "short" | "narrow";
@@ -295,31 +363,40 @@ export function resolveFormatPrefs(
   // Detect once; each field falls back to its detected value independently.
   const detected = hints ? detectFormatPrefsFromHints(hints) : null;
 
-  const weekStartEnum = userPrefs?.weekStart ?? detected?.weekStart ?? null;
+  // This is the single place a raw preference is interpreted, and `userPrefs`
+  // may carry corrupted values or — on the companion, which feeds unvalidated
+  // JSON from an independently-deployed server — untrusted ones. `??` only
+  // short-circuits null/undefined, so a non-null-but-INVALID value would pass
+  // straight through (and a bad timezone would resolve to "UTC" instead of the
+  // device hint). Pick the FIRST VALID candidate per field: stored → detected →
+  // hardcoded. `detected` values are already validated at detection.
+  const rawDate = userPrefs?.dateFormat;
+  const rawTime = userPrefs?.timeFormat;
+  const rawWeek = userPrefs?.weekStart;
+  const rawZone = userPrefs?.timeZone;
 
-  // Rows written before timezone validation existed (or via any other path)
-  // may hold an invalid zone; never resolve to one — it would throw at format
-  // time. `detected` is already validated in detectFormatPrefsFromHints.
-  const candidateTimeZone =
-    userPrefs?.timeZone ??
-    detected?.timeZone ??
-    HARDCODED_DEFAULT_PREFS.timeZone;
+  const weekStartEnum: WeekStartPreference | null = isWeekStart(rawWeek)
+    ? rawWeek
+    : detected?.weekStart ?? null;
+
+  const timeZone =
+    rawZone && isValidTimeZone(rawZone)
+      ? rawZone
+      : detected?.timeZone && isValidTimeZone(detected.timeZone)
+      ? detected.timeZone
+      : HARDCODED_DEFAULT_PREFS.timeZone;
 
   return {
-    dateFormat:
-      userPrefs?.dateFormat ??
-      detected?.dateFormat ??
-      HARDCODED_DEFAULT_PREFS.dateFormat,
-    timeFormat:
-      userPrefs?.timeFormat ??
-      detected?.timeFormat ??
-      HARDCODED_DEFAULT_PREFS.timeFormat,
+    dateFormat: isDateFormat(rawDate)
+      ? rawDate
+      : detected?.dateFormat ?? HARDCODED_DEFAULT_PREFS.dateFormat,
+    timeFormat: isTimeFormat(rawTime)
+      ? rawTime
+      : detected?.timeFormat ?? HARDCODED_DEFAULT_PREFS.timeFormat,
     weekStartsOn: weekStartEnum
       ? weekStartEnumToIndex(weekStartEnum)
       : HARDCODED_DEFAULT_PREFS.weekStartsOn,
-    timeZone: isValidTimeZone(candidateTimeZone)
-      ? candidateTimeZone
-      : HARDCODED_DEFAULT_PREFS.timeZone,
+    timeZone,
   };
 }
 
@@ -523,7 +600,10 @@ function normalizeOptions(opts: DateFormatOptions): NormalizedOptions {
     Boolean(opts.timeStyle) ||
     merged.hour != null ||
     merged.minute != null ||
-    (opts.includeTime === true && !opts.dateStyle);
+    // `includeTime` is ADDITIVE — it appends the time portion. It must hold even
+    // alongside `dateStyle` (a `{ dateStyle, includeTime: true }` caller, e.g.
+    // the companion's `formatDateTime` spreading opts, wants "date, time").
+    opts.includeTime === true;
 
   const wantDate = opts.onlyTime
     ? false
@@ -580,7 +660,10 @@ function renderNameMonth(
       .filter((f) => f !== "year")
       .map((f) => rendered[f])
       .join(" ");
-    return hasYear ? `${monthDay}, ${rendered.year}` : monthDay;
+    if (!hasYear) return monthDay;
+    // A year-only request (`activeOrder === ["year"]`) leaves `monthDay` empty;
+    // return the bare year rather than a leading-comma ", 2026".
+    return monthDay ? `${monthDay}, ${rendered.year}` : rendered.year;
   }
   // D-M-Y and Y-M-D: space-separated, no comma.
   return activeOrder.map((f) => rendered[f]).join(" ");
@@ -690,7 +773,10 @@ export function formatDate(
         minute: "2-digit",
         hour12: true,
       });
-      timeStr = `${dp.hour}:${dp.minute} ${dp.dayPeriod}`;
+      // Honour an explicit `hour: "2-digit"` so the H12 clock zero-pads like the
+      // H24 branch below ("05:30 PM"), instead of the two disagreeing.
+      const hour = n.hourStyle === "2-digit" ? pad2(dp.hour) : dp.hour;
+      timeStr = `${hour}:${dp.minute} ${dp.dayPeriod}`;
     } else {
       const hour =
         n.hourStyle === "2-digit" ? pad2(numeric.hour) : numeric.hour;

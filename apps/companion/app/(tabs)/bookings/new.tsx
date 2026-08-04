@@ -67,7 +67,10 @@ export default function CreateBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels render date+time in the user's format prefs + timezone.
+  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
+  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
+  // are device-local, so formatting them in the preferred timezone would show a
+  // different time than the one being edited and submitted (CodeRabbit, #2798).
   const { formatDateTime } = useDateFormatter();
 
   // ── Form state ──────────────────────────────────
@@ -339,7 +342,9 @@ export default function CreateBookingScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               from
-                ? `Starts ${formatDateTime(from)}, tap to change`
+                ? `Starts ${formatDateTime(from, {
+                    localeOnly: true,
+                  })}, tap to change`
                 : "Choose start"
             }
           >
@@ -348,7 +353,9 @@ export default function CreateBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from ? formatDateTime(from) : "Choose start date & time..."}
+              {from
+                ? formatDateTime(from, { localeOnly: true })
+                : "Choose start date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -383,13 +390,19 @@ export default function CreateBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              to ? `Ends ${formatDateTime(to)}, tap to change` : "Choose end"
+              to
+                ? `Ends ${formatDateTime(to, {
+                    localeOnly: true,
+                  })}, tap to change`
+                : "Choose end"
             }
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDateTime(to) : "Choose end date & time..."}
+              {to
+                ? formatDateTime(to, { localeOnly: true })
+                : "Choose end date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"

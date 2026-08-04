@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -273,6 +273,12 @@ describe("shapeMobileAssetResponse", () => {
  * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
  */
 describe("requireMobileAuth", () => {
+  // Reset the module-scoped `findUnique` spy before each test so this suite's
+  // assertions read only its own call, not calls accumulated by earlier suites.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
@@ -307,9 +313,11 @@ describe("requireMobileAuth", () => {
 
     const { user } = await requireMobileAuth(request);
 
-    // The 4 format-pref columns are part of the select (regression guard).
-    const select = (db.user.findUnique as unknown as Mock).mock.calls[0][0]
-      .select;
+    // The 4 format-pref columns are part of the select (regression guard). Read
+    // the LATEST call so a future test that reaches requireMobileAuth first
+    // can't shift the call this assertion inspects.
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    const select = lastCall?.[0].select;
     expect(select).toMatchObject({
       dateFormat: true,
       timeFormat: true,

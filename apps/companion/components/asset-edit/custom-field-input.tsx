@@ -376,36 +376,36 @@ function DateFieldInput({
   const { formatDate } = useDateFormatter();
   const [open, setOpen] = useState(false);
 
-  // Human-readable rendering of the stored `YYYY-MM-DD` calendar date in the
-  // acting user's date format. This is an absolute calendar date, so the
-  // date-only formatter does NOT tz-shift — the day is preserved. The stored
-  // value (`value` / `onChange`) stays raw; only the display string changes.
-  const displayValue = value ? formatDate(value) : "";
-
-  const dateValue = useMemo(() => {
-    if (!value) return new Date();
-    // Parse `YYYY-MM-DD` as a local date (NOT `new Date(value)`, which
-    // interprets the bare date as UTC midnight and shifts the day in
-    // negative-offset timezones).
+  // Validate the stored `YYYY-MM-DD` ONCE. The round-trip check catches overflow
+  // like "2026-02-30", which JS's Date silently rolls forward to "2026-03-02".
+  // Parsed as a LOCAL date (NOT `new Date(value)`, which reads a bare date as UTC
+  // midnight and shifts the day in negative-offset zones). Shared by the display
+  // label AND the picker's initial value so the two never disagree.
+  const parsedDate = useMemo<Date | null>(() => {
+    if (!value) return null;
     const [y, m, d] = value.split("-").map(Number);
-    if (!y || !m || !d) return new Date();
-    // why: the truthiness check above lets through nonsense like
-    // "2026-13-99" or "2026-02-30" — JS's Date constructor silently
-    // overflows (2026-02-30 → 2026-03-02), which would render a
-    // confusing date on the picker. Construct, then verify the
-    // round-trip matches the input. If a server bug ever ships a bad
-    // YYYY-MM-DD string, this falls back to "today" instead of a
-    // silently wrong date.
+    if (!y || !m || !d) return null;
     const parsed = new Date(y, m - 1, d);
     if (
       parsed.getFullYear() !== y ||
       parsed.getMonth() + 1 !== m ||
       parsed.getDate() !== d
     ) {
-      return new Date();
+      return null;
     }
     return parsed;
   }, [value]);
+
+  // The native picker needs a concrete Date; fall back to today when there's no
+  // valid stored value.
+  const dateValue = useMemo(() => parsedDate ?? new Date(), [parsedDate]);
+
+  // Render the stored calendar date in the user's format ONLY when it is valid —
+  // pass the bare `YYYY-MM-DD` string so the date-only path does NOT tz-shift
+  // (the day is preserved). An invalid value renders "" (→ "Select date…")
+  // rather than a silently-overflowed wrong date (CodeRabbit, #2798). The stored
+  // value (`value` / `onChange`) always stays raw.
+  const displayValue = parsedDate && value ? formatDate(value) : "";
 
   const handleChange = (
     event: DateTimePickerEvent,
