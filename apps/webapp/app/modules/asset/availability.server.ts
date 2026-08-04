@@ -334,12 +334,7 @@ export async function getAssetAvailability({
           where: { assetId, organizationId },
           _sum: { quantity: true },
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- computeCheckedOutBreakdownForAsset's `tx` param is typed `any` upstream
-        computeCheckedOutBreakdownForAsset(
-          client as any,
-          assetId,
-          organizationId
-        ),
+        computeCheckedOutBreakdownForAsset(client, assetId, organizationId),
       ]);
     const inKits = inKitsAgg._sum.quantity ?? 0;
     // #2790 ③: `physicalAvailable` must subtract only the STANDALONE

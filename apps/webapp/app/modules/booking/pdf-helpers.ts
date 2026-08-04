@@ -225,8 +225,17 @@ export async function fetchAllPdfRelatedData(
       orderDirection
     );
 
+    // Deduplicate by asset id before QR generation: `sortedAssets` is now
+    // one row PER SLICE, so a QT asset booked standalone + via kits appears
+    // several times. `getQrCodeMaps` generates a QR per row and keys the
+    // result by asset id, so passing duplicates only repeats identical work —
+    // pass each asset once. The render still reads the map by `asset.id`, so
+    // every slice row resolves to the same (correct) QR.
+    const uniqueAssetsForQr = Array.from(
+      new Map(sortedAssets.map((asset) => [asset.id, asset])).values()
+    );
     const assetIdToQrCodeMap = await getQrCodeMaps({
-      assets: sortedAssets,
+      assets: uniqueAssetsForQr,
       userId,
       organizationId,
       size: "small",

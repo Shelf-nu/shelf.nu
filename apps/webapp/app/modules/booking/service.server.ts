@@ -3541,6 +3541,12 @@ export async function computeBookingAssetRemainingToCheckOut(
  * @returns Non-negative integer — units of `assetId` currently
  *          considered checked out across all active bookings in this org
  */
+// `tx` is intentionally `any` rather than a structural
+// `Pick<ExtendedPrismaClient, "bookingAsset" | "partialBookingCheckout">`: the
+// availability module's own `PrismaClientOrTx` client type and the real-impl
+// parity tests' in-memory fake clients do NOT satisfy that Pick, so structural
+// typing only relocates the escape hatch into an `as` cast at every call site.
+// Mirrors the `tx: any` convention of the sibling checkout-remaining helpers.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function computeCheckedOutForAsset(
   tx: any,
@@ -3600,7 +3606,7 @@ export async function computeCheckedOutForAsset(
  * @returns `{ total, standalone }` — non-negative unit counts; `standalone`
  *          is always `≤ total`
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- `tx` stays `any` for the same reason as computeCheckedOutForAsset above
 export async function computeCheckedOutBreakdownForAsset(
   tx: any,
   assetId: Asset["id"],
