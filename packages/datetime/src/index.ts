@@ -75,10 +75,11 @@ export type DetectedFormatPrefs = {
    * server-established sessions like SSO/OAuth callbacks that never render
    * `ClientHintCheck` first). Persisting the "UTC" fallback then is
    * indistinguishable from a real UTC and permanently blocks the lazy backfill
-   * from ever writing the true zone — so persistence paths
-   * ({@link detectFormatPrefsForPersistence}) set this to null when the cookie is
-   * absent, leaving the column null for a later retry. The read path
-   * ({@link detectFormatPrefsFromHints}) always yields a concrete zone.
+   * from ever writing the true zone — so the webapp's persistence path
+   * (`detectFormatPrefsForPersistence` in `client-hints`) sets this to null when
+   * the cookie is absent, leaving the column null for a later retry. The
+   * in-package read path ({@link detectFormatPrefsFromHints}) always yields a
+   * concrete zone.
    */
   timeZone: string | null;
 };
