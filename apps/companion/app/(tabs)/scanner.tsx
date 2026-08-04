@@ -33,6 +33,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
+import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
@@ -189,6 +190,19 @@ function ScannerContent() {
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
+
+  /**
+   * Prime scan geolocation on scanner use: lazily requests location
+   * permission (once per session — see scan-location.ts) and warms a
+   * background position fix so scans can attach coordinates without waiting
+   * on GPS. Gated on camera permission so the location prompt never stacks
+   * on top of the camera prompt during first run; granting camera re-runs
+   * this effect. Never gates scanning — denied simply means scans are
+   * recorded without coordinates.
+   */
+  useEffect(() => {
+    if (isFocused && permission?.granted) primeScanLocation();
+  }, [isFocused, permission?.granted]);
 
   // Booking check-in mode
   const isBookingMode = !!bookingId;
@@ -695,13 +709,20 @@ function ScannerContent() {
             return;
           }
 
+          // Best-effort scan geolocation (web parity). Cached / last-known
+          // position only, bounded to ~1.5s worst case and usually instant —
+          // never a fresh GPS fix in the scan hot path (see scan-location.ts).
+          // Null (no permission / no recent fix / timeout) simply means the
+          // scan is recorded without coordinates.
+          const coordinates = await getScanCoordinates();
+
           // orgId is only consumed by the server's SAM branch; on the QR path
           // the org is derived from the QR record and this is ignored.
           const {
             data: qrData,
             error,
             errorDetails,
-          } = await api.qr(qrLookupId, currentOrg?.id);
+          } = await api.qr(qrLookupId, currentOrg?.id, coordinates);
 
           if (error || !qrData) {
             flashFrame("error");
