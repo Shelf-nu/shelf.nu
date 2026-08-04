@@ -1270,6 +1270,7 @@ export default function AssetOverview() {
                                   content={
                                     customFieldDisplayValue as RenderableTreeNode
                                   }
+                                  allowExternalLinks
                                 />
                               ) : isLink(customFieldDisplayValue as string) ? (
                                 <Button

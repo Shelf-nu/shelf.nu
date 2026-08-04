@@ -24,6 +24,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import {
+  appendUserTextToNote,
   wrapCustodianForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -125,7 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
 
       const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
-      const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+      const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
         content: noteContent,
