@@ -1949,15 +1949,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "bulk-remove-asset-or-kit": {
-        const { assetOrKitIds } = parseData(
-          formData,
-          BulkRemoveAssetsAndKitSchema
-        );
+        const { assetOrKitIds, standaloneAssetIds: selectedStandaloneIds } =
+          parseData(formData, BulkRemoveAssetsAndKitSchema);
 
         /**
-         * From frontend, we get both assetIds and kitIds,
-         * here we are separating them and excluding assets that belong to kits
-         * */
+         * The selection arrives as one flat id list holding both assets and
+         * kits, so resolve it against each table to split it apart. Ticking a
+         * kit also injects its member rows into the selection, which is why
+         * the split alone can't tell a member apart from a directly-ticked
+         * asset — `standaloneAssetIds` carries that provenance separately.
+         */
         const assets = await db.asset.findMany({
           where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
@@ -1977,19 +1978,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           kit.assetKits.map((ak) => ak.asset.id)
         );
 
-        // Filter out assets that belong to the selected kits to avoid double-counting
-        const standaloneAssets = assets.filter(
-          (asset) => !kitAssetIds.includes(asset.id)
+        /**
+         * Assets the user ticked as their own standalone row. Intersected
+         * with the org-scoped `assets` above so a forged id in the hidden
+         * field can never reach the delete predicate.
+         *
+         * Kit membership deliberately does NOT disqualify an asset here: a
+         * qty-tracked asset can sit on the booking both standalone and via a
+         * kit, and ticking both rows must remove both. Falls back to the
+         * membership filter when the field is absent (older clients), which
+         * is the pre-existing behaviour.
+         */
+        const orgScopedAssetIds = new Set(assets.map((asset) => asset.id));
+        const standaloneAssetIds =
+          selectedStandaloneIds.length > 0
+            ? selectedStandaloneIds.filter((assetId) =>
+                orgScopedAssetIds.has(assetId)
+              )
+            : assets
+                .filter((asset) => !kitAssetIds.includes(asset.id))
+                .map((asset) => asset.id);
+
+        // Drives the removal note wording only — the ids above drive what is
+        // actually detached.
+        const standaloneAssets = assets.filter((asset) =>
+          standaloneAssetIds.includes(asset.id)
         );
 
-        // All asset IDs to be disconnected (standalone assets + kit assets)
+        // All asset IDs to be disconnected (standalone assets + kit assets).
+        // De-duped: an asset ticked standalone AND present in a ticked kit
+        // appears in both buckets, and `assetIds` drives one-note-per-asset
+        // downstream.
         const allAssetIdsToRemove = [
-          ...standaloneAssets.map((a) => a.id),
-          ...kitAssetIds,
+          ...new Set([...standaloneAssetIds, ...kitAssetIds]),
         ];
 
         const b = await removeAssets({
           booking: { id, assetIds: allAssetIdsToRemove },
+          standaloneAssetIds,
           kitIds: kits.map((k) => k.id),
           kits: kits.map((kit) => ({ id: kit.id, name: kit.name })),
           assets: standaloneAssets.map((asset) => ({
@@ -2012,9 +2038,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
+        // The selection can hold assets, kits, or both — the old hardcoded
+        // "Kit removed" toast was wrong for every selection that wasn't a
+        // lone kit, which read as "the assets weren't removed".
+        const removedCount = standaloneAssets.length + kits.length;
         sendNotification({
-          title: "Kit removed",
-          message: "Your kit has been removed from the booking",
+          title: removedCount === 1 ? "Item removed" : "Items removed",
+          message:
+            removedCount === 1
+              ? "The selected item has been removed from the booking"
+              : `${removedCount} items have been removed from the booking`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
