@@ -10,6 +10,7 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { removeAssets } from "~/modules/booking/service.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -86,7 +87,12 @@ export async function action({ request }: ActionFunctionArgs) {
         status: true,
         from: true,
         to: true,
+        // BOTH custody links are needed. A booking assigned to a team member
+        // before a user was attached to it keeps `custodianUserId = NULL` even
+        // after the invite is accepted, so the user link alone fails closed for
+        // the very users those bookings belong to. See `canSeeBooking`.
         custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
       },
     });
 
@@ -106,8 +112,17 @@ export async function action({ request }: ActionFunctionArgs) {
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
-    // Self-service / BASE users may only modify their own bookings.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // Self-service / BASE users may only modify their own bookings. Reuses the
+    // shared custody predicate rather than comparing `custodianUserId` alone:
+    // that narrower test 403s a custodian whose booking is held through the
+    // team-member link, which is precisely the user this endpoint's removal
+    // parity is meant to serve.
+    const ownsBooking = canSeeBooking({
+      canSeeAllBookings: false,
+      booking,
+      userId: user.id,
+    });
+    if (isSelfServiceOrBase && !ownsBooking) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
