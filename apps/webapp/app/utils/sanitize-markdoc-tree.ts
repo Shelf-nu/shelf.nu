@@ -44,6 +44,7 @@ function isSafeExternalUrl(href: unknown): href is string {
   }
 }
 
+/** Options controlling how strictly a tree is sanitized. */
 export type SanitizeOptions = {
   /**
    * Allow off-origin links through.
@@ -61,6 +62,16 @@ function unwrap(node: Tag, options: SanitizeOptions): RenderableTreeNode[] {
   return sanitizeChildren(node.children ?? [], options);
 }
 
+/**
+ * Sanitize a node's children, flattening the result.
+ *
+ * `sanitizeNode` may return several nodes for one input (a rejected link
+ * collapses to its own children), so the mapping is a `flatMap`.
+ *
+ * @param children - Child nodes to sanitize
+ * @param options - See {@link SanitizeOptions}
+ * @returns The sanitized, flattened child list
+ */
 function sanitizeChildren(
   children: RenderableTreeNode[],
   options: SanitizeOptions

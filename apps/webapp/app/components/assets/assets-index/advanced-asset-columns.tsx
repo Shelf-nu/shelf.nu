@@ -126,8 +126,12 @@ export function AdvancedIndexColumn({
                   "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
+                {/* Custom field values are authored in `MarkdownEditor`,
+                    whose link control makes external links a deliberate
+                    feature — same treatment as comments and announcements. */}
                 <MarkdownViewer
                   content={customFieldDisplayValue as RenderableTreeNode}
+                  allowExternalLinks
                 />
               </PopoverContent>
             </PopoverPortal>
