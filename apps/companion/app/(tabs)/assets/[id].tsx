@@ -312,6 +312,12 @@ export default function AssetDetailScreen() {
   const releaseMax = releaseQtyEntry
     ? releaseQtyEntry.releasableQuantity ?? releaseQtyEntry.quantity
     : 0;
+  // A ONE_WAY consumable's units are used up rather than returned, so ending a
+  // hold permanently reduces stock. The server decides that from the asset row
+  // (see `resolveReleaseDisposition`); this only changes the wording so the
+  // action never reads as a return. Pre-quantity servers omit the field, which
+  // falls through to the returnable copy — matching the server's own default.
+  const isConsumable = asset.consumptionType === "ONE_WAY";
   // Custody holders the server hid from this caller (privacy filtering for
   // roles without view-all-custody). Shown as a muted "+N others" row.
   const custodyOthersCount = isQtyTracked
@@ -496,9 +502,13 @@ export default function AssetDetailScreen() {
                     }
                     accessibilityLabel={
                       canReleaseRow
-                        ? `Release custody from ${
-                            entry.custodian.name
-                          }, holds ${qtyLabel ?? entry.quantity}`
+                        ? isConsumable
+                          ? `Mark units held by ${
+                              entry.custodian.name
+                            } as consumed, holds ${qtyLabel ?? entry.quantity}`
+                          : `Release custody from ${
+                              entry.custodian.name
+                            }, holds ${qtyLabel ?? entry.quantity}`
                         : undefined
                     }
                   />
@@ -751,22 +761,27 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={releaseQtyEntry != null}
-                title="Release Quantity"
+                title={isConsumable ? "Mark as consumed" : "Release Quantity"}
                 subtitle={
                   releaseQtyEntry
-                    ? `Release how many of ${
-                        releaseQtyEntry.custodian.name
-                      }'s ${
-                        formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                        String(releaseMax)
-                      }?`
+                    ? isConsumable
+                      ? `How many of ${releaseQtyEntry.custodian.name}'s ${
+                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
+                          String(releaseMax)
+                        } were used up? This permanently reduces total stock.`
+                      : `Release how many of ${
+                          releaseQtyEntry.custodian.name
+                        }'s ${
+                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
+                          String(releaseMax)
+                        }?`
                     : undefined
                 }
                 max={releaseMax}
                 // Web parity: the release dialog pre-fills a full release.
                 defaultValue={releaseMax}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel="Release"
+                confirmLabel={isConsumable ? "Mark as consumed" : "Release"}
                 destructive
                 onSubmit={(quantity) => {
                   const entry = releaseQtyEntry;

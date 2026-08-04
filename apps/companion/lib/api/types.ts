@@ -446,6 +446,14 @@ export type CustodyResponse = {
 export type QuantityCustodyResponse = {
   success: boolean;
   asset?: AssetDetail;
+  /**
+   * What the server did with the units when a custodian's hold ended.
+   * `RETURN` puts them back in the available pool; `CONSUME` permanently
+   * removes them from stock (a `ONE_WAY` consumable was used up). Decided
+   * server-side from the asset's `consumptionType`, never by the client.
+   * Absent on pre-consumable-disposition servers — treat as `RETURN`.
+   */
+  disposition?: "RETURN" | "CONSUME";
 };
 
 export type UpdateLocationResponse = {

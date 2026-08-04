@@ -267,7 +267,10 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    return data({ success: true, asset });
+    // `disposition` tells the app what actually happened to the units, so it
+    // can confirm "released" vs "consumed" without re-deriving the rule from
+    // `consumptionType`. Additive: older clients ignore the extra field.
+    return data({ success: true, asset, disposition });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(
