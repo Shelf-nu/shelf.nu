@@ -8,6 +8,7 @@
 
 import type { AssetType, Category } from "@prisma/client";
 import { formatUnitCount } from "~/utils/asset-quantity";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { resolveUserDisplayName } from "~/utils/user";
 
 /**
@@ -202,6 +203,27 @@ export function wrapLinkForNote(to: string, text: string): string {
   return `{% link to="${to}" text="${text.replace(/"/g, "&quot;")}" /%}`;
 }
 
+/**
+ * Appends an optional free-text remark to a system-generated note line.
+ *
+ * Several quantity custody / adjustment endpoints let the caller attach a
+ * free-form `note`, which is then persisted as part of an `UPDATE` note and
+ * rendered through Markdoc. Every one of them built the same string by hand,
+ * and every one of them forgot to sanitize it — so the composition lives here
+ * once, with the strip built in.
+ *
+ * @param baseLine - The system-generated sentence (already safe)
+ * @param text - Untrusted free-text remark; omitted when empty
+ * @returns `baseLine` with the quoted remark appended, or `baseLine` unchanged
+ */
+export function appendUserTextToNote(
+  baseLine: string,
+  text?: string | null
+): string {
+  const safeText = stripMarkdocDelimiters(text);
+  return safeText ? `${baseLine} *"${safeText}"*` : baseLine;
+}
+
 export function wrapTagForNote(tag: {
   id?: string | null;
   name: string;
@@ -283,8 +305,14 @@ export function wrapCustodianForNote(custodian: {
     // Custodian has a user account, create a link
     return wrapUserLinkForNote(teamMember.user);
   } else {
-    // Team member without user account, use bold text with escaped asterisks
-    return `**${teamMember.name.replace(/\*\*/g, "\\*\\*")}**`;
+    // Team member without a user account renders as literal bold text, so the
+    // name must be stripped of Markdoc delimiters as well as escaped for
+    // emphasis — a non-registered member's name is free-form user input and
+    // this wrapper is shared by every custody note in the app.
+    return `**${stripMarkdocDelimiters(teamMember.name).replace(
+      /\*\*/g,
+      "\\*\\*"
+    )}**`;
   }
 }
 

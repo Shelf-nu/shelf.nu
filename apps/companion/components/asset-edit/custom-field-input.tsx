@@ -40,6 +40,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { labelForRequired } from "@/lib/a11y";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 
 /**
  * Field metadata consumed by `CustomFieldInput`. `required` defaults to
@@ -339,6 +340,12 @@ function OptionDropdown({
  * server contract — see `lib/api/types.ts`). Parsing the existing value uses
  * local-time `Date` construction to avoid the UTC-shift footgun (e.g. a
  * stored "2026-01-15" rendering as Jan 14 in negative-UTC timezones).
+ *
+ * The closed-state button renders the stored value in the acting user's date
+ * format via `useDateFormatter`. This is an absolute calendar date, so the
+ * date-only formatter applies NO timezone shift — the day is preserved. Only
+ * the display changes; the stored/submitted value (`value` / `onChange`) stays
+ * raw `YYYY-MM-DD`.
  */
 function DateFieldInput({
   fieldId,
@@ -366,32 +373,39 @@ function DateFieldInput({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
   const [open, setOpen] = useState(false);
 
-  const dateValue = useMemo(() => {
-    if (!value) return new Date();
-    // Parse `YYYY-MM-DD` as a local date (NOT `new Date(value)`, which
-    // interprets the bare date as UTC midnight and shifts the day in
-    // negative-offset timezones).
+  // Validate the stored `YYYY-MM-DD` ONCE. The round-trip check catches overflow
+  // like "2026-02-30", which JS's Date silently rolls forward to "2026-03-02".
+  // Parsed as a LOCAL date (NOT `new Date(value)`, which reads a bare date as UTC
+  // midnight and shifts the day in negative-offset zones). Shared by the display
+  // label AND the picker's initial value so the two never disagree.
+  const parsedDate = useMemo<Date | null>(() => {
+    if (!value) return null;
     const [y, m, d] = value.split("-").map(Number);
-    if (!y || !m || !d) return new Date();
-    // why: the truthiness check above lets through nonsense like
-    // "2026-13-99" or "2026-02-30" — JS's Date constructor silently
-    // overflows (2026-02-30 → 2026-03-02), which would render a
-    // confusing date on the picker. Construct, then verify the
-    // round-trip matches the input. If a server bug ever ships a bad
-    // YYYY-MM-DD string, this falls back to "today" instead of a
-    // silently wrong date.
+    if (!y || !m || !d) return null;
     const parsed = new Date(y, m - 1, d);
     if (
       parsed.getFullYear() !== y ||
       parsed.getMonth() + 1 !== m ||
       parsed.getDate() !== d
     ) {
-      return new Date();
+      return null;
     }
     return parsed;
   }, [value]);
+
+  // The native picker needs a concrete Date; fall back to today when there's no
+  // valid stored value.
+  const dateValue = useMemo(() => parsedDate ?? new Date(), [parsedDate]);
+
+  // Render the stored calendar date in the user's format ONLY when it is valid —
+  // pass the bare `YYYY-MM-DD` string so the date-only path does NOT tz-shift
+  // (the day is preserved). An invalid value renders "" (→ "Select date…")
+  // rather than a silently-overflowed wrong date (CodeRabbit, #2798). The stored
+  // value (`value` / `onChange`) always stays raw.
+  const displayValue = parsedDate && value ? formatDate(value) : "";
 
   const handleChange = (
     event: DateTimePickerEvent,
@@ -424,17 +438,22 @@ function DateFieldInput({
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityLabel={
-          value
-            ? `${accessibilityLabel}: ${value}, tap to change`
+          // Key the "selected" state off the VALIDATED date, not the raw value:
+          // a present-but-invalid stored value has no displayValue, so it must
+          // read as "tap to choose", not "tap to change" with an empty label.
+          parsedDate
+            ? `${accessibilityLabel}: ${displayValue}, tap to change`
             : `${accessibilityLabel}, tap to choose`
         }
         accessibilityHint={accessibilityHint}
         accessibilityState={{ expanded: open }}
       >
         <Text
-          style={value ? styles.pickerSelectedText : styles.pickerPlaceholder}
+          style={
+            parsedDate ? styles.pickerSelectedText : styles.pickerPlaceholder
+          }
         >
-          {value || "Select date..."}
+          {displayValue || "Select date..."}
         </Text>
         <Ionicons name="calendar-outline" size={18} color={colors.mutedLight} />
       </TouchableOpacity>

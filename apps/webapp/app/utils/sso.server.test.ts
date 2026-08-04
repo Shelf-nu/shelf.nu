@@ -201,7 +201,10 @@ describe("resolveUserAndOrgForSsoCallback", () => {
           firstName: "Jane",
           lastName: "Doe",
           groups: [],
-        })
+        }),
+        // 3rd arg: browser-detected format prefs forwarded to the new-user
+        // branch. Undefined here — this call site passes no hints.
+        undefined
       );
       expect(mockAuth.deleteAuthAccount).not.toHaveBeenCalled();
       expect(result).toEqual(created);

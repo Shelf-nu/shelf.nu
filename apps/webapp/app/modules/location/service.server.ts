@@ -29,6 +29,7 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
@@ -1043,7 +1044,11 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  const escape = (v: string) => `**${v.replace(/([*_`~])/g, "\\$1")}**`;
+  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
+  // and address are free-form user input rendered through Markdoc, so escaping
+  // `*_~` alone still lets `{% … %}` through as a live tag.
+  const escape = (v: string) =>
+    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
   const changes: string[] = [];
 
   // Name change

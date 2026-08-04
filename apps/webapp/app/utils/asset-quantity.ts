@@ -35,6 +35,14 @@ export type AssetForUnitCount = {
  * characters, so the strip is lossless for legitimate input. Defence in
  * depth — the same characters are also rejected by the form-level Zod
  * refinement.
+ *
+ * Deliberately STRICTER than the repo-wide {@link stripMarkdocDelimiters}
+ * (`~/utils/markdoc-sanitize`), which removes only the `{%` / `%}` pairs so
+ * that free-form names like `50% off {new}` survive intact. Because this one
+ * drops every `{`, `%` and `}` in a single pass, no delimiter can be re-formed
+ * from the remainder — the failure mode that forces the canonical helper to
+ * loop. Do not "unify" these two: this field can afford the stricter rule and
+ * is safer for it.
  */
 export function sanitizeUnitOfMeasureLabel(
   value: string | null | undefined

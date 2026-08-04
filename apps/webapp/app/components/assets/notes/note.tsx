@@ -100,7 +100,11 @@ const Comment = ({
       {actionsDropdown}
     </header>
     <div className="message px-3.5 py-3">
-      <MarkdownViewer content={note.content} />
+      {/* Author-written content: the editor's link dialog makes external links
+          a deliberate feature here. System notes (the `Update` variant above)
+          get the default `false` — their text is assembled by us from entity
+          names, so an external link in one was injected. */}
+      <MarkdownViewer content={note.content} allowExternalLinks />
     </div>
   </>
 );

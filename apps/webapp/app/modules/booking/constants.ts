@@ -1,23 +1,85 @@
-import type { Prisma } from "@prisma/client";
+import { BookingStatus, type Prisma } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+
+/**
+ * Booking statuses an asset or kit can still be added to.
+ *
+ * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
+ * to an active booking stay AVAILABLE until purposefully checked out
+ * (progressive checkout).
+ *
+ * This single list has to drive all three layers of the "Add to existing
+ * booking" dialogs, or they disagree and rows vanish:
+ *   1. the loader that seeds the picker (`loadBookingsData`),
+ *   2. the `/api/model-filters` search the picker fires once you type,
+ *   3. the client-side `renderItem` guard in the dialog itself.
+ */
+export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Whether an asset or kit can still be added to this booking.
+ *
+ * Used by the "Add to existing booking" dialogs to decide whether to render a
+ * row for a booking the picker handed them. Accepts a loose shape because the
+ * pickers pass records from two sources (the route loader and
+ * `/api/model-filters`), neither of which is narrowed to `Booking` client-side.
+ *
+ * @param booking - Candidate booking; anything without a `status` is rejected.
+ * @returns `true` when the booking's status is in {@link ADDABLE_BOOKING_STATUSES}.
+ */
+export function isAddableBooking(
+  booking: { status?: string | null } | null | undefined
+): boolean {
+  return (
+    !!booking?.status &&
+    ADDABLE_BOOKING_STATUSES.includes(booking.status as BookingStatus)
+  );
+}
 
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
   custodianUser: true,
   // Include creator details so the notification resolver can add the
-  // booking creator as a recipient when the org setting is enabled
+  // booking creator as a recipient when the org setting is enabled.
+  // The four format-preference columns are carried so the email fan-out can
+  // resolve this recipient's date/time formatting from the loaded row
+  // (see NotificationRecipient) without a per-recipient DB fetch.
   creator: {
-    select: { id: true, email: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
+    },
   },
   // Include per-booking notification recipients (team members explicitly
-  // added to this booking) for the recipient resolver's step 6
+  // added to this booking) for the recipient resolver's step 6. Format-pref
+  // columns carried for recipient-specific email formatting (see `creator`).
   notificationRecipients: {
     select: {
       id: true,
       name: true,
       user: {
-        select: { id: true, email: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          dateFormat: true,
+          timeFormat: true,
+          weekStart: true,
+          timeZone: true,
+        },
       },
     },
   },
