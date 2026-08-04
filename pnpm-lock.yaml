@@ -79,6 +79,9 @@ importers:
       '@sentry/react-native':
         specifier: ~7.2.0
         version: 7.2.0(expo@54.0.33)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+      '@shelf/datetime':
+        specifier: workspace:*
+        version: link:../../packages/datetime
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
@@ -290,6 +293,9 @@ importers:
       '@shelf/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@shelf/datetime':
+        specifier: workspace:*
+        version: link:../../packages/datetime
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
@@ -718,6 +724,15 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  packages/datetime:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
       typescript:
         specifier: ^6.0.2
         version: 6.0.3
