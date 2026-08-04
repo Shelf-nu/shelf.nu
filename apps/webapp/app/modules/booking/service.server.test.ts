@@ -3237,6 +3237,61 @@ describe("checkoutBooking", () => {
       );
       expect(caughtMessage).not.toContain("Tripod");
     });
+
+    it("(d) validates only STANDALONE slices against the free pool — a QT asset split across kits + standalone still checks out (#2790)", async () => {
+      expect.assertions(1);
+
+      // Reproduction of the reported bug: "Boards" has total 10 with 6 units
+      // allocated across two kits (inKits = 6), so its free pool is 4. This
+      // booking holds Boards as 4 standalone + 3 (kit b1) + 3 (kit b2) = 10.
+      // The kit slices draw from the kits' own allocation — already reserved
+      // out of `bookable` via `inKits` — so ONLY the 4 standalone units are
+      // validated against the free pool of 4, and checkout must succeed.
+      // Before the fix, `requested` summed all 10 slices against `bookable` 4
+      // and threw "requested 10, only 4 available in this window".
+      mockAssetTotals({ [CAMERA_ID]: 10 });
+      // inKits = 6 for this asset (two kit memberships of 3 units each).
+      (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue(
+        { _sum: { quantity: 6 } }
+      );
+      mockReservedRows([]);
+
+      // One standalone slice (qty 4) + two kit-driven slices (qty 3 each). The
+      // fixture leaves `asset.assetKits` empty so no kit-status flip runs —
+      // this isolates the availability guard, which keys off `ba.assetKitId`.
+      const standalone = qtyBookingAssetRow(CAMERA_ID, "Boards", 4, "ba-free");
+      const thisBooking = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [
+          standalone,
+          { ...standalone, assetKitId: "kit-1", quantity: 3, id: "ba-kit-1" },
+          { ...standalone, assetKitId: "kit-2", quantity: 3, id: "ba-kit-2" },
+        ],
+      };
+      const hydratedBooking = { ...thisBooking, status: BookingStatus.ONGOING };
+      (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(thisBooking)
+        .mockResolvedValueOnce(hydratedBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+      await checkoutBooking(mockCheckoutParams);
+
+      // Checkout proceeded: the asset was flipped to CHECKED_OUT (the guard did
+      // NOT reject on the kit-inflated request). The `id.in` array carries the
+      // asset id once per slice (3 here — standalone + 2 kit), so match it
+      // loosely; the point is checkout ran rather than throwing.
+      expect(db.asset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: expect.arrayContaining([CAMERA_ID]) },
+            organizationId: "org-1",
+          },
+          data: { status: AssetStatus.CHECKED_OUT },
+        })
+      );
+    });
   });
 });
 
