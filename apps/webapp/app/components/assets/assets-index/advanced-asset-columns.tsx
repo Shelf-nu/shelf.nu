@@ -463,7 +463,13 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              {/* Asset descriptions are author-written free text; users are
+                  given the option to add links. */}
+              <MarkdownViewer
+                content={value}
+                className="mt-2 text-sm"
+                allowExternalLinks
+              />
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

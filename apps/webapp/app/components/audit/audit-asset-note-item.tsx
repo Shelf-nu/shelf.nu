@@ -140,7 +140,13 @@ export function AuditAssetNoteItem({
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
           <div className="text-sm text-gray-900">
-            <MarkdownViewer content={note.content} disablePortal={true} />
+            {/* Author-written condition notes may link out; system-generated
+                audit activity keeps the restrictive default. */}
+            <MarkdownViewer
+              content={note.content}
+              disablePortal={true}
+              allowExternalLinks={note.type === "COMMENT"}
+            />
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
             <>
