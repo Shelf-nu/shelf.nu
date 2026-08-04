@@ -438,7 +438,10 @@ function DateFieldInput({
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityLabel={
-          value
+          // Key the "selected" state off the VALIDATED date, not the raw value:
+          // a present-but-invalid stored value has no displayValue, so it must
+          // read as "tap to choose", not "tap to change" with an empty label.
+          parsedDate
             ? `${accessibilityLabel}: ${displayValue}, tap to change`
             : `${accessibilityLabel}, tap to choose`
         }
@@ -446,7 +449,9 @@ function DateFieldInput({
         accessibilityState={{ expanded: open }}
       >
         <Text
-          style={value ? styles.pickerSelectedText : styles.pickerPlaceholder}
+          style={
+            parsedDate ? styles.pickerSelectedText : styles.pickerPlaceholder
+          }
         >
           {displayValue || "Select date..."}
         </Text>
