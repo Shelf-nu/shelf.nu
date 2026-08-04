@@ -33,7 +33,11 @@ import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
-import { ClientHintCheck, getClientHint } from "./utils/client-hints";
+import {
+  ClientHintCheck,
+  detectFormatPrefsForPersistence,
+  getClientHint,
+} from "./utils/client-hints";
 import { resolveFormatPrefs } from "./utils/date-format";
 import type { ResolvedFormatPrefs } from "./utils/date-format";
 import { getBrowserEnv, MAINTENANCE_MODE } from "./utils/env";
@@ -104,7 +108,10 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     formatPrefs = resolveFormatPrefs(userPrefs, hints);
 
     // Lazy backfill: pre-existing users have null pref columns. Snapshot the
-    // hint-detected values once, fire-and-forget (mirrors recordMobileActivity).
+    // detected values once, fire-and-forget (mirrors recordMobileActivity).
+    // `detectFormatPrefsForPersistence` nulls the timezone when the request has
+    // no CH-time-zone cookie, so the fallback "UTC" is never stamped permanently
+    // (see its doc + detectAndPersistFormatPrefs).
     if (
       userPrefs &&
       (userPrefs.dateFormat === null ||
@@ -112,7 +119,11 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         userPrefs.weekStart === null ||
         userPrefs.timeZone === null)
     ) {
-      detectAndPersistFormatPrefs(userId, userPrefs, hints);
+      detectAndPersistFormatPrefs(
+        userId,
+        userPrefs,
+        detectFormatPrefsForPersistence(request)
+      );
     }
   } catch {
     // No session / getSession unavailable / transient DB error → hints govern.

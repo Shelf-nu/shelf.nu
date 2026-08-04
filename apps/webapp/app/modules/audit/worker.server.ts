@@ -185,12 +185,22 @@ const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
         email: audit.createdBy.email,
         firstName: audit.createdBy.firstName,
         lastName: audit.createdBy.lastName,
+        // Raw pref columns (from AUDIT_INCLUDE_FOR_EMAIL) so the sender renders
+        // this recipient's dates from the loaded row — no per-recipient fetch.
+        dateFormat: audit.createdBy.dateFormat,
+        timeFormat: audit.createdBy.timeFormat,
+        weekStart: audit.createdBy.weekStart,
+        timeZone: audit.createdBy.timeZone,
       },
       ...audit.assignments.map((a) => ({
         userId: a.user.id,
         email: a.user.email,
         firstName: a.user.firstName,
         lastName: a.user.lastName,
+        dateFormat: a.user.dateFormat,
+        timeFormat: a.user.timeFormat,
+        weekStart: a.user.weekStart,
+        timeZone: a.user.timeZone,
       })),
     ];
 
