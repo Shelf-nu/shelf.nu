@@ -448,6 +448,22 @@ function ReleaseButton({
     }
   }, [open, maxQuantity]);
 
+  /**
+   * Server-side rejection message, shown above the form.
+   *
+   * The reducer only clamps `consumed` against the `maxQuantity` this dialog
+   * was rendered with, so a page left open while the same units move
+   * elsewhere still submits a release the service refuses. `releaseQuantity`
+   * also rejects a `consumed` above the released amount, and any `consumed`
+   * on a returnable asset. Those messages are written for an operator to
+   * read — without this the dialog just sits there with its submit button
+   * re-enabled and no explanation.
+   */
+  const serverErrorMessage =
+    fetcher.data?.error != null
+      ? (fetcher.data.error as { message?: string })?.message
+      : null;
+
   /** Close the dialog after a successful release */
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
@@ -485,6 +501,19 @@ function ReleaseButton({
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {serverErrorMessage ? (
+          // Mirrors the shape of `WarningBox` (text-sm + p-4 + 25/300/700
+          // token ladder) so server-side block errors render with the same
+          // weight as the inline warnings used elsewhere — just in error tone.
+          // Matches `move-units-dialog.tsx`.
+          <div
+            role="alert"
+            className="rounded border border-error-300 bg-error-25 p-4 text-sm text-error-700"
+          >
+            {serverErrorMessage}
+          </div>
+        ) : null}
 
         <fetcher.Form
           ref={formRef}

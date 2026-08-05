@@ -138,11 +138,32 @@ export function QuantityInputSheet({
       parsedSecondary <= parsed);
   const canConfirm = isValid && isSecondaryValid;
 
+  /**
+   * Pull the secondary value down when the primary quantity drops below it.
+   *
+   * Both fields seed to the same number for a consumable release, so without
+   * this a single tap of the minus button leaves the secondary above the
+   * primary and disables Confirm until the operator edits the second field by
+   * hand. Clamps DOWNWARD only, so someone who deliberately typed a smaller
+   * used-up count keeps it when they raise the primary again. The webapp's
+   * counterpart already does this in its reducer.
+   */
+  const clampSecondaryTo = (nextPrimary: number) => {
+    if (!hasSecondaryField) return;
+    setSecondaryValue((prev) => {
+      const prevParsed = prev ? parseInt(prev, 10) : NaN;
+      if (!Number.isFinite(prevParsed) || prevParsed <= nextPrimary)
+        return prev;
+      return String(nextPrimary);
+    });
+  };
+
   /** Step the current value by `delta`, clamped to [1, max]. */
   const step = (delta: number) => {
     const current = hasValue ? parsed : 0;
     const next = Math.min(Math.max(current + delta, 1), Math.max(max, 1));
     setValue(String(next));
+    clampSecondaryTo(next);
   };
 
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
@@ -199,7 +220,13 @@ export function QuantityInputSheet({
               onChangeText={(text) => {
                 // Digits only — quantities are positive integers
                 // (valuation-field.tsx pattern, minus the decimal point).
-                setValue(text.replace(/[^0-9]/g, ""));
+                const cleaned = text.replace(/[^0-9]/g, "");
+                setValue(cleaned);
+                // Guard on finite: clearing the field must not write "NaN"
+                // into the secondary input. An empty primary already blocks
+                // Confirm via `isValid`.
+                const next = cleaned ? parseInt(cleaned, 10) : NaN;
+                if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
               placeholder={`Max: ${max}`}
               placeholderTextColor={colors.placeholderText}
