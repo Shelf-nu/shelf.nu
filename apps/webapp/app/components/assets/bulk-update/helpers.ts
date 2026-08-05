@@ -8,7 +8,13 @@
  * @see {@link file://./../../../utils/csv.server.ts} Server-side CSV parsing
  */
 
-/** Identifier columns we accept, in order of preference */
+/**
+ * Identifier columns we accept, in order of preference. Matched
+ * case-insensitively (see `validateCsvClientSide` below) to mirror the
+ * server-side `analyzeUpdateHeaders` — this matters because the
+ * Import-ready export's identifier header is the lowercase content-importer
+ * key `"id"`, not the Standard export's display label `"ID"`.
+ */
 export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
 
 /** Maximum number of asset change rows to display in the preview */
@@ -45,9 +51,13 @@ export function validateCsvClientSide(text: string): ClientValidation {
   const headers = parseSimpleCsvLine(lines[0]);
   const headerTrimmed = headers.map((h) => h.trim());
 
-  // Find best available identifier column (priority order)
+  // Find best available identifier column (priority order). Case-insensitive
+  // so the Import-ready export's lowercase "id" header is recognized here
+  // the same way `analyzeUpdateHeaders` recognizes it server-side.
   const idColumnFound =
-    ACCEPTED_ID_COLUMNS.find((col) => headerTrimmed.includes(col)) ?? null;
+    ACCEPTED_ID_COLUMNS.find((col) =>
+      headerTrimmed.some((h) => h.toLowerCase() === col.toLowerCase())
+    ) ?? null;
 
   const rowCount = Math.max(0, lines.length - 1);
   const warnings: string[] = [];

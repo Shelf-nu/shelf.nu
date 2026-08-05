@@ -18,7 +18,10 @@ import { AssetType, ConsumptionType } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { updateAsset } from "~/modules/asset/service.server";
-import { applyBulkUpdatesFromImport } from "./import-update.server";
+import {
+  applyBulkUpdatesFromImport,
+  buildUpdatePreview,
+} from "./import-update.server";
 
 // why: we drive the apply path end-to-end. The real DB + the real `updateAsset`
 // would require a fully migrated test DB; mocking lets us assert behaviour
@@ -622,5 +625,51 @@ describe("applyBulkUpdatesFromImport — description (Task 2 fix round 1)", () =
     const payload = vi.mocked(updateAsset).mock.calls[0][0];
     expect(payload.title).toBe("New Name");
     expect(payload.description).toBeUndefined();
+  });
+});
+
+describe("wrong-format detection — identifier found, zero updatable columns (Task 3 fix)", () => {
+  // why: "Status" is a known-but-read-only field (lands in ignoredColumns)
+  // and "Some Random Column" doesn't match any field or custom field (lands
+  // in unrecognizedColumns) — combined, the identifier column resolves but
+  // headerAnalysis.updatableColumns is empty. Before this fix both call
+  // sites silently returned an empty preview / no-op apply instead of
+  // explaining that the file has nothing this flow can write.
+  const csvData = [
+    ["Asset ID", "Status", "Some Random Column"],
+    ["SAM-0001", "Available", "foo"],
+  ];
+
+  it("buildUpdatePreview throws a specific, actionable error instead of an empty preview", async () => {
+    await expect(
+      buildUpdatePreview({ csvData, organizationId })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Import-ready"),
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("applyBulkUpdatesFromImport throws the same error (stateless re-parse guard)", async () => {
+    await expect(
+      applyBulkUpdatesFromImport({ csvData, organizationId, userId, request })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Import-ready"),
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("does not throw when at least one column is updatable", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset(),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const validCsvData = [
+      ["Asset ID", "Status", "Name"],
+      ["SAM-0001", "Available", "New Name"],
+    ];
+
+    await expect(
+      buildUpdatePreview({ csvData: validCsvData, organizationId })
+    ).resolves.toMatchObject({ updatableColumns: ["Name"] });
   });
 });

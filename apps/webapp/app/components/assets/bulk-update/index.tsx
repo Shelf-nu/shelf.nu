@@ -63,9 +63,9 @@ export const ImportUpdateContent = () => {
               <div>
                 <h5 className="font-semibold">What you can update</h5>
                 <p className="text-[14px] text-gray-600">
-                  Name, Category, Location, Tags, Value, Available to book,{" "}
-                  <b>Asset model</b>, and your custom fields (Text, Boolean,
-                  Date, Option, Number, Currency).
+                  Name, Description, Category, Location, Tags, Value, Available
+                  to book, <b>Asset model</b>, and your custom fields (Text,
+                  Boolean, Date, Option, Number, Currency).
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
                   <b>Asset model</b> is matched by name (case-insensitive) and
@@ -90,10 +90,9 @@ export const ImportUpdateContent = () => {
                   header names.
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
-                  <b>Not supported yet:</b> Description, Status, Kit, and
-                  Custody can't be bulk-updated via CSV — Status and Custody
-                  have their own workflows, and Description can lose formatting
-                  during export. Tracking method is fixed once an asset is
+                  <b>Not supported yet:</b> Status, Kit, and Custody can't be
+                  bulk-updated via CSV — they have their own dedicated workflows
+                  elsewhere in Shelf. Tracking method is fixed once an asset is
                   created. These columns will be safely skipped if present in
                   your file.
                 </p>

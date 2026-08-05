@@ -171,7 +171,12 @@ export function PreviewDisplay({
         </div>
       )}
 
-      {/* Unrecognized columns — the user added columns that don't exist */}
+      {/* Unrecognized columns — headers that don't match any Shelf field or
+          custom field in this workspace. Genuinely-unknown-only by
+          construction (see analyzeUpdateHeaders): a recognized-but-not-
+          updatable field like Status or Kit lands in `ignoredColumns`
+          below instead, so the custom-field suggestion here never fires
+          for a core field like Title or Category. */}
       {preview.unrecognizedColumns.length > 0 && (
         <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4">
           <p className="mb-1 font-medium text-blue-800">
@@ -179,7 +184,7 @@ export function PreviewDisplay({
             {preview.unrecognizedColumns.length === 1
               ? "a column"
               : `${preview.unrecognizedColumns.length} columns`}{" "}
-            we don't recognize
+            that don't match a field in your workspace
           </p>
           <div className="mb-2 flex flex-wrap gap-1.5">
             {preview.unrecognizedColumns.map((col) => (
@@ -192,11 +197,12 @@ export function PreviewDisplay({
             ))}
           </div>
           <p className="text-sm text-blue-700">
-            To import data for these columns, first create them as{" "}
+            Double-check these for typos against your column headers. If they're
+            meant to hold custom data, create matching{" "}
             <Button variant="link" to="/settings/custom-fields" target="_blank">
               Custom Fields
             </Button>{" "}
-            in your workspace, then come back and re-analyze.
+            first, then come back and re-analyze.
           </p>
           <Button
             type="button"
@@ -210,18 +216,23 @@ export function PreviewDisplay({
         </div>
       )}
 
-      {/* Known but unsupported columns */}
+      {/* Known but unsupported columns — recognized Shelf fields (Status,
+          Kit, Custody, …) that this tool intentionally doesn't write.
+          Framed as "recognized but read-only" rather than an error: the
+          file is fine, these columns just have their own dedicated
+          workflows elsewhere in Shelf. */}
       {preview.ignoredColumns.length > 0 && (
         <details className="mb-4">
           <summary className="cursor-pointer text-sm text-gray-500">
-            Your file has {preview.ignoredColumns.length} column
-            {preview.ignoredColumns.length !== 1 ? "s" : ""} that can't be
-            bulk-updated (click to see which)
+            Your file also has {preview.ignoredColumns.length} column
+            {preview.ignoredColumns.length !== 1 ? "s" : ""} Shelf recognizes
+            but doesn't update through bulk import (click to see which)
           </summary>
           <p className="mt-1 text-xs text-gray-500">
-            {preview.ignoredColumns.join(", ")} — these columns are present in
-            your file but are read-only in this tool. Any edits you made to them
-            won't be applied.
+            {preview.ignoredColumns.join(", ")} — these are valid asset fields,
+            but they have their own dedicated workflows (e.g. Status, Kit,
+            Custody) and aren't changed by this tool. Any edits you made to them
+            in this file are kept in the file but won't be applied.
           </p>
         </details>
       )}
