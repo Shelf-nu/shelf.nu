@@ -35,7 +35,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
-import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -92,7 +92,7 @@ vitest.mock("~/utils/emitter/send-notification.server", () => ({
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   computeAvailableQuantity: vitest.fn(),
 }));
-vitest.mock("~/modules/booking/service.server", () => ({
+vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
