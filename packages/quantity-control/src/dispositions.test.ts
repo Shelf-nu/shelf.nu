@@ -13,6 +13,7 @@ import {
   capExceeded,
   defaultDisposition,
   poolDecrement,
+  releaseCategory,
   sumDisposition,
 } from "./dispositions.js";
 
@@ -62,4 +63,29 @@ test("capExceeded: true only when the claimed sum exceeds cap", () => {
 test("capExceeded: the default disposition never exceeds its own cap", () => {
   assert.equal(capExceeded(defaultDisposition("ONE_WAY", 5), 5), false);
   assert.equal(capExceeded(defaultDisposition("TWO_WAY", 5), 5), false);
+});
+
+/* ----------------------------- releaseCategory ---------------------------- */
+
+test("releaseCategory: a ONE_WAY consumable's units are used up", () => {
+  assert.equal(releaseCategory("ONE_WAY"), "CONSUME");
+});
+
+test("releaseCategory: a TWO_WAY asset's units return to the pool", () => {
+  assert.equal(releaseCategory("TWO_WAY"), "RETURN");
+});
+
+test("releaseCategory: legacy rows without a consumptionType are returnable", () => {
+  // Rows created before the column existed must keep the pre-consumable
+  // behaviour — silently consuming their stock would be a data-loss bug.
+  assert.equal(releaseCategory(null), "RETURN");
+  assert.equal(releaseCategory(undefined), "RETURN");
+});
+
+test("defaultDisposition agrees with releaseCategory for every consumption type", () => {
+  // The two must never diverge: defaultDisposition is built on the predicate.
+  assert.deepEqual(defaultDisposition("ONE_WAY", 3), { consumed: 3 });
+  assert.equal(releaseCategory("ONE_WAY"), "CONSUME");
+  assert.deepEqual(defaultDisposition("TWO_WAY", 3), { returned: 3 });
+  assert.equal(releaseCategory("TWO_WAY"), "RETURN");
 });

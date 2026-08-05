@@ -10,18 +10,20 @@
  * on Vite's SSR pipeline — bundle it because it is listed in `ssr.noExternal`
  * (see `apps/webapp/vite.config.ts`); TypeScript resolves it via this package's
  * `exports` `src` entrypoint and type-checks the source through its own module
- * resolution (`tsc` never reads the Vite config). When the companion app
- * (Metro, which cannot
- * consume raw TS) is wired to this package in the mobile lane, add a compiled
- * output THEN — do not reintroduce a `prepare` script: it runs during the
- * turbo-pruned Docker `deps` install where the source/tsconfig are absent and
- * breaks the image build.
+ * resolution (`tsc` never reads the Vite config). The companion app consumes
+ * this same raw `src` entrypoint through Metro, which transpiles workspace
+ * TypeScript via babel-preset-expo — `@shelf/datetime` ships the identical
+ * `exports` map and is imported across the companion. Do NOT add a `prepare`
+ * script to produce a compiled output: it runs during the turbo-pruned Docker
+ * `deps` install where the source and tsconfig are absent, and breaks the
+ * image build.
  *
  * @see {@link file://./types.ts} — shared enums + value-objects.
  * @see {@link file://./availability.ts} — peak/sweep/formula primitives.
  * @see {@link file://./guards.ts} — pure availability verdicts + cause/cure copy.
  * @see {@link file://./low-stock.ts} — low-stock threshold predicates.
- * @see {@link file://./dispositions.ts} — check-in disposition arithmetic.
+ * @see {@link file://./dispositions.ts} — check-in disposition arithmetic and
+ *   the shared release-category predicate.
  * @see {@link file://./format.ts} — unit-count formatting.
  */
 

@@ -11,7 +11,7 @@
  * @see {@link file://./types.ts}
  */
 
-import type { QtConsumptionType } from "./types.js";
+import type { QtConsumptionCategory, QtConsumptionType } from "./types.js";
 
 /**
  * A per-row check-in disposition: how many of the checked-in units were
@@ -30,6 +30,42 @@ export type Disposition = {
 };
 
 /**
+ * The two terminal categories a custody release can resolve to. Narrowed from
+ * {@link QtConsumptionCategory} so the literals can never drift from the
+ * database enum — the enum-parity test in `./enums.test.ts` guards that union
+ * against `schema.prisma`.
+ */
+export type ReleaseCategory = Extract<
+  QtConsumptionCategory,
+  "RETURN" | "CONSUME"
+>;
+
+/**
+ * What ending a hold on a QUANTITY_TRACKED asset's units MEANS for a given
+ * consumption type.
+ *
+ * `ONE_WAY` assets (gloves, batteries, cable ties) are used up in the field:
+ * the units never come back, so the pool must shrink. `TWO_WAY` assets are
+ * returnable and their units go back into the available pool. A `null` /
+ * `undefined` type is a legacy row that predates the column and is treated as
+ * returnable — the pre-existing behaviour, because silently consuming that
+ * stock would destroy data.
+ *
+ * This is the ONE place the rule is encoded. The webapp service, the webapp
+ * custody list and the companion asset screen all import it: a `.server`
+ * module cannot be reached by a client component, and neither can be reached
+ * by React Native, so the shared package is the only common ground.
+ *
+ * @param consumptionType - The asset's `consumptionType` (nullable on legacy rows).
+ * @returns `"CONSUME"` for a one-way consumable, `"RETURN"` otherwise.
+ */
+export function releaseCategory(
+  consumptionType: QtConsumptionType | null | undefined
+): ReleaseCategory {
+  return consumptionType === "ONE_WAY" ? "CONSUME" : "RETURN";
+}
+
+/**
  * The auto-default disposition for a given consumption type, claiming exactly
  * `cap` units (the remaining amount on the booking slice):
  *   - `ONE_WAY`  → consume all remaining (nothing comes back).
@@ -43,7 +79,9 @@ export function defaultDisposition(
   consumptionType: QtConsumptionType,
   cap: number
 ): Disposition {
-  return consumptionType === "ONE_WAY" ? { consumed: cap } : { returned: cap };
+  return releaseCategory(consumptionType) === "CONSUME"
+    ? { consumed: cap }
+    : { returned: cap };
 }
 
 /**
