@@ -22,6 +22,7 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatDue } from "@/lib/audit-format";
+import { useDateFormatter, useFormatPrefs } from "@/lib/use-date-formatter";
 import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
@@ -417,16 +418,10 @@ const BookingCard = memo(function BookingCard({
 }) {
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
   const badge = bookingStatusBadge[booking.status] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
-  };
-
-  const formatShortDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
   };
 
   return (
@@ -457,7 +452,10 @@ const BookingCard = memo(function BookingCard({
             color={colors.mutedLight}
           />
           <Text style={styles.metaText}>
-            {formatShortDate(booking.from)} – {formatShortDate(booking.to)}
+            {/* Compact month/day range (no year) to keep the dashboard card
+                glanceable, still in the user's timezone + format order. */}
+            {formatDate(booking.from, { month: "short", day: "numeric" })} –{" "}
+            {formatDate(booking.to, { month: "short", day: "numeric" })}
           </Text>
         </View>
         <View style={styles.metaItem}>
@@ -545,6 +543,7 @@ const AuditCard = memo(function AuditCard({
 }) {
   const { colors, auditStatusBadge } = useTheme();
   const styles = useStyles();
+  const prefs = useFormatPrefs();
   const badge = auditStatusBadge[audit.status] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
@@ -561,7 +560,7 @@ const AuditCard = memo(function AuditCard({
   // here vs "Due tomorrow" there). Home only ever shows active audits, but
   // pass the real flag so the helper stays honest if that changes.
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
-  const due = formatDue(audit.dueDate, isActive);
+  const due = formatDue(audit.dueDate, isActive, prefs);
   const dueColor =
     due.tier === "overdue"
       ? colors.error

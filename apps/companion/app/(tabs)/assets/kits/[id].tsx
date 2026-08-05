@@ -35,9 +35,9 @@ import {
   spacing,
   borderRadius,
   formatStatus,
-  formatDate,
   formatCurrency,
 } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
@@ -72,6 +72,7 @@ export default function KitDetailScreen() {
   const { currentOrg } = useOrg();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
 
   // Role-aware UI — the server re-enforces these on every API call.
   const roles = currentOrg?.roles;

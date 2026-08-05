@@ -30,11 +30,11 @@ import {
   borderRadius,
   formatStatus,
   getQuantityStatusLabel,
-  formatDate,
   formatCurrency,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -94,6 +94,8 @@ export default function AssetDetailScreen() {
   const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  // Render dates in the acting user's format preferences + timezone.
+  const { formatDate } = useDateFormatter();
 
   // Asset data
   const {
