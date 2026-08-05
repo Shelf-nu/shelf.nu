@@ -118,6 +118,10 @@ export default {
             text: "Security Review Agent",
             link: "/security-review-agent",
           },
+          {
+            text: "PR Review Loop",
+            link: "/pr-review-loop",
+          },
         ],
       },
       {

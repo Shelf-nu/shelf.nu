@@ -1,0 +1,802 @@
+[
+  {
+    "id": 4816727914,
+    "node_id": "PRR_kwDOI8UBac8AAAABHxlvag",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816727914",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816727914"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T08:11:27Z",
+    "commit_id": "a3293f170eadb42d57e66135e61df85515e2845b"
+  },
+  {
+    "id": 4816754288,
+    "node_id": "PRR_kwDOI8UBac8AAAABHxnWcA",
+    "user": {
+      "login": "chatgpt-codex-connector[bot]",
+      "id": 199175422,
+      "node_id": "BOT_kgDOC98s_g",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1144995?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D",
+      "html_url": "https://github.com/apps/chatgpt-codex-connector",
+      "followers_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "\n### 💡 Codex Review\n\nHere are some automated review suggestions for this pull request.\n\n**Reviewed commit:** `a3293f170e`\n    \n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\n[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n- Open a pull request for review\n- Mark a draft as ready\n- Comment \"@codex review\".\n\nIf Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\nCodex can also answer questions or update the PR. Try commenting \"@codex address that feedback\".\n            \n</details>",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816754288",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "NONE",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816754288"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T08:15:04Z",
+    "commit_id": "a3293f170eadb42d57e66135e61df85515e2845b"
+  },
+  {
+    "id": 4816835588,
+    "node_id": "PRR_kwDOI8UBac8AAAABHxsUBA",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "**Actionable comments posted: 10**\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to platform limitations.\n> \n> \n> \n> <details>\n> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>\n> \n> <details>\n> <summary>apps/webapp/app/components/booking/adjust-booking-asset-quantity-dialog.tsx (1)</summary><blockquote>\n> \n> `213-277`: _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n> \n> **Wire the new helper text to the quantity input via `aria-describedby`.**\n> \n> None of the new helper paragraphs (\"Max: N\", \"{maxQuantity} of {totalQuantity} … available\", the date-range line, the \"reserved by other bookings\" note) are associated with the `Input` above them. Screen reader users won't hear this constraint context when focusing the field.\n> \n> <details>\n> <summary>♿ Proposed fix — associate the helper block with the input</summary>\n> \n> ```diff\n>              <Input\n>                ref={quantityInputRef}\n>                name=\"quantity\"\n>                type=\"number\"\n>                label={`Quantity (${unitLabel})`}\n>                min={1}\n>                max={maxQuantity ?? undefined}\n>                step={1}\n>                required\n>                defaultValue={currentQuantity}\n>                error={quantityError || serverError || undefined}\n>                onChange={() => setQuantityError(null)}\n> +              aria-describedby={maxQuantity != null ? \"adjust-qty-helper\" : undefined}\n>              />\n>              {maxQuantity != null ? (\n>                totalQuantity != null ? (\n> -                <div className=\"-mt-2 flex flex-col gap-0.5\">\n> +                <div id=\"adjust-qty-helper\" className=\"-mt-2 flex flex-col gap-0.5\">\n>                    ...\n>                  </div>\n>                ) : (\n> -                <p className=\"-mt-2 text-xs text-gray-500\">\n> +                <p id=\"adjust-qty-helper\" className=\"-mt-2 text-xs text-gray-500\">\n>                    Max: {maxQuantity} {unitLabel}\n>                  </p>\n>                )\n>              ) : null}\n> ```\n> </details>\n> \n> As per coding guidelines, \"UI implementations must meet WCAG 2.1 AA, including ... `aria-describedby` for helper/error text ...\".\n> \n> <details>\n> <summary>🤖 Prompt for AI Agents</summary>\n> \n> ```\n> Verify each finding against current code. Fix only still-valid issues, skip the\n> rest with a brief reason, keep changes minimal, and validate.\n> \n> In `@apps/webapp/app/components/booking/adjust-booking-asset-quantity-dialog.tsx`\n> around lines 213 - 277, Associate the quantity helper text with the input by\n> adding a stable description ID to the helper block rendered alongside the\n> quantity field and passing that ID through the Input’s aria-describedby prop.\n> Ensure all variants—booking availability, date range, reservation note, and\n> non-booking “Max” text—remain within the referenced container, while preserving\n> the existing error association.\n> ```\n> \n> </details>\n> \n> <!-- cr-comment:v1:383ba2fc9fd677d8c7392e16 -->\n> \n> _Source: Coding guidelines_\n> \n> </blockquote></details>\n> \n> </blockquote></details>\n\n<details>\n<summary>🧹 Nitpick comments (10)</summary><blockquote>\n\n<details>\n<summary>apps/webapp/app/modules/consumption-log/service.server.test.ts (1)</summary><blockquote>\n\n`89-97`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _⚡ Quick win_\n\n**Move `resetMocks()` into a `beforeEach`.**\n\nEvery test starts with a manual `resetMocks()` call; hoisting it to `beforeEach(resetMocks)` removes the repetition and makes it impossible for a future test to forget it (and inherit `mockRejectedValue` from the 400-propagation test).\n\n<details>\n<summary>♻️ Suggested change</summary>\n\n```diff\n describe(\"adjustQuantity — stock-lowering guard wiring\", () => {\n+  beforeEach(resetMocks);\n+\n   it(\"calls the guard with the post-subtraction total on a subtract\", async () => {\n-    resetMocks();\n-\n     await adjustQuantity({\n```\n(and drop the remaining `resetMocks()` calls; import `beforeEach` from `vitest`)\n</details>\n\n\n\n\n\n\nAlso applies to: 99-216\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/consumption-log/service.server.test.ts` around lines\n89 - 97, Move resetMocks into a beforeEach hook by importing beforeEach from\nvitest and registering beforeEach(resetMocks). Remove all explicit resetMocks()\ncalls from the tests while preserving the existing mock setup and per-test\noverrides.\n```\n\n</details>\n\n<!-- cr-comment:v1:e9fd9e8a799e2cdf8b5a40fa -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/modules/asset/service.server.ts (1)</summary><blockquote>\n\n`37-37`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Consider importing the guard from the dependency-free leaf for consistency.**\n\n`consumption-log/service.server.ts` deliberately imports `assertAssetQuantityNotBelowReservations` from `~/modules/asset/availability-primitives.server` to dodge the `availability.server → booking/service.server → consumption-log` cycle. Importing it from `availability.server` here keeps this module coupled to that heavier graph; using the leaf would be uniform and cheaper to load. (Worth confirming this module isn't already inside that cycle.)\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/asset/service.server.ts` at line 37, Update the\nimport of assertAssetQuantityNotBelowReservations in service.server.ts to use\nthe dependency-free availability-primitives.server leaf, matching\nconsumption-log/service.server.ts and avoiding the heavier availability.server\ndependency graph.\n```\n\n</details>\n\n<!-- cr-comment:v1:d3f33407c7b8522230eac6f4 -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/routes/_layout+/assets.$assetId.overview.add-to-existing-booking.tsx (1)</summary><blockquote>\n\n`165-172`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Stale block doc above this branch.**\n\nThe JSDoc introducing this block still says the quantity is validated \"before writing to the booking\" with `excludeBookingId`, which no longer happens here — the branch just forwards the value. Worth updating that comment so the two don't contradict each other.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn\n`@apps/webapp/app/routes/_layout`+/assets.$assetId.overview.add-to-existing-booking.tsx\naround lines 165 - 172, Update the stale JSDoc immediately above the quantities\nassignment branch to remove claims that it validates quantities before writing\nor uses excludeBookingId. Describe that the requested quantity is forwarded to\nupdateBookingAssets, where the authoritative availability validation occurs.\n```\n\n</details>\n\n<!-- cr-comment:v1:e35a226b0f889ff7b8afdf63 -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/modules/asset/service.server.test.ts (1)</summary><blockquote>\n\n`1507-1508`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Comment claims ordering is verified, but the assertion doesn't check ordering.**\n\n`expect(db.asset.update).toHaveBeenCalled()` only proves the write happened. Either drop the comment or assert ordering via invocation order, e.g. compare `mock.invocationCallOrder` between the guard and `db.asset.update`.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/asset/service.server.test.ts` around lines 1507 -\n1508, The test assertion beneath the “BEFORE the write” comment does not verify\ncall ordering. Update the relevant test to compare the guard mock’s\ninvocationCallOrder with db.asset.update’s invocationCallOrder, asserting the\nguard occurred first; alternatively remove the ordering comment if ordering is\nnot intended to be tested.\n```\n\n</details>\n\n<!-- cr-comment:v1:610f5a1fcedc91aaa5aacba8 -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/modules/booking/stock-conflicts.server.ts (2)</summary><blockquote>\n\n`189-189`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**`as unknown as` double casts defeat the structural typing this module sets up.**\n\nBoth client resolutions launder `db` through `unknown`. Per repo precedent (`OrgValidationTxClient`, `RecordEventTxClient`), a `Pick<ExtendedPrismaClient, …>`-based type is normally satisfied by both `db` and an interactive `tx` without any assertion. If a direct cast (or none) doesn't compile, it usually signals the declared shape diverges from the real delegate signature — worth resolving rather than silencing.\n\nBased on learnings: \"prefer a structural type using `Pick<ExtendedPrismaClient, ...>` … so that both the root `db` client and the interactive `tx` object satisfy the parameter type without casts/type assertions.\"\n\n\n\n\n\n\n\nAlso applies to: 432-432\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/stock-conflicts.server.ts` at line 189,\nRemove the `as unknown as StockConflictDbClient` assertions from both\nclient-resolution sites in the stock-conflict flow. Define or adjust\n`StockConflictDbClient` as a structural `Pick<ExtendedPrismaClient, …>` matching\nthe required delegates so `dbOrTx ?? db` is accepted directly for both the root\nclient and interactive transaction; resolve any delegate-shape mismatch rather\nthan adding another assertion.\n```\n\n</details>\n\n<!-- cr-comment:v1:32949ef7b63ff09c912a8ca7 -->\n\n_Source: Learnings_\n\n---\n\n`198-218`: _🩺 Stability & Availability_ | _🔵 Trivial_\n\n**Unbounded org-wide reservation read on a list-loader hot path.**\n\nThis intentionally fetches the *full* active-reservation timeline (`window: null`) for every QT asset on the page — correct for the sweep, but for a workspace with heavily-booked assets the row count grows with history rather than page size, on a query that runs for every bookings-list render. Worth confirming a composite index supports `BookingAsset(assetId, assetKitId)` + the joined booking status filter, and consider caching or a `Booking.to >= now()` floor if the sweep tolerates it.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/stock-conflicts.server.ts` around lines 198 -\n218, The asset reservation query in the conflict-detection sweep is unbounded\nand may load excessive historical rows on every bookings-list render. Review the\ndatabase indexes for the BookingAsset lookup and joined active-booking filter,\nthen constrain or cache the full timeline where compatible with the sweep’s\ncorrectness, using a Booking.to >= now() floor only if past reservations are\nsafely irrelevant.\n```\n\n</details>\n\n<!-- cr-comment:v1:55646ac6edf0cf11de58ef1a -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/routes/_layout+/bookings._index.tsx (1)</summary><blockquote>\n\n`198-213`: _🚀 Performance & Scalability_ | _🔵 Trivial_ | _⚡ Quick win_\n\n**Batch the three page-bounded follow-up queries.**\n\n`getStockConflictedBookingIds`, the `consumptionLog.groupBy` (Line 229) and the `partialBookingCheckout.findMany` (Line 300) are all independent and page-bounded, but run serially after the main `Promise.all`. Running them concurrently removes two round trips from the loader's critical path.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/bookings._index.tsx around lines 198 - 213,\nRun getStockConflictedBookingIds, consumptionLog.groupBy, and\npartialBookingCheckout.findMany concurrently in a single Promise.all after the\nmain query, preserving each query’s existing inputs and result mappings. Update\nthe loader flow to await the combined results rather than executing these\npage-bounded follow-up queries serially.\n```\n\n</details>\n\n<!-- cr-comment:v1:8482b293f695cd21ecd26aaa -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/modules/booking/service.server.test.ts (1)</summary><blockquote>\n\n`2003-2024`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Type the mock router args instead of `any` (also Lines 2442-2463 and 2972-2998).**\n\nEach helper already spells out the exact branch shapes it reads, so the parameter can be typed structurally — the `any` only defeats the narrowing that follows it. As per coding guidelines, \"Never use `any` merely as a shortcut; use the correct type or `unknown` with type narrowing for dynamic data.\"\n\n<details>\n<summary>♻️ Suggested shape</summary>\n\n```diff\n+      type ReservedRowsArgs = {\n+        where?: {\n+          bookingId?: { not?: string };\n+          booking?: {\n+            status?: { in?: string[] };\n+            OR?: Array<\n+              | { status: string }\n+              | { AND: [{ from: { lte: Date } }, { to: { gte: Date } }] }\n+            >;\n+          };\n+        };\n+      };\n       (\n         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>\n-      ).mockImplementation((args?: any) => {\n+      ).mockImplementation((args?: ReservedRowsArgs) => {\n         const statuses: string[] = args?.where?.booking?.status?.in ?? [];\n```\n</details>\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/service.server.test.ts` around lines 2003 -\n2024, Replace the any-typed mockImplementation arguments in the helpers at the\nshown locations with structural types matching the where/status, bookingId, and\nOR branch properties each helper reads. Apply the same typed-router-args\napproach in computeCheckedOutBatch-related mocks at the referenced locations,\npreserving the existing narrowing and behavior without using any.\n```\n\n</details>\n\n<!-- cr-comment:v1:7aaed0556966cf18a95f3f06 -->\n\n_Source: Coding guidelines_\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/components/booking/booking-assets-sidebar.tsx (1)</summary><blockquote>\n\n`219-222`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Availability-map value shape is re-declared inline in several places.** `QtyStockAvailability` already exists in `~/utils/booking-assets`; the `{ bookable; physicalNow; reserved }` literal is repeated across the sidebar props, `AssetTitleAndStatus`, and the overview row, so the loader payload and consumers can drift independently.\n- `apps/webapp/app/components/booking/booking-assets-sidebar.tsx#L219-L222`: replace the inline literal (and the duplicate at L324-L327) with a shared exported type.\n- `apps/webapp/app/components/booking/list-asset-content.tsx#L85-L91`: use the same shared type in the `useLoaderData` generic instead of re-declaring the shape.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/components/booking/booking-assets-sidebar.tsx` around lines\n219 - 222, The availability-map value shape is duplicated across the booking\nasset consumers. In\napps/webapp/app/components/booking/booking-assets-sidebar.tsx#L219-L222, replace\nthe inline value type and its duplicate in AssetTitleAndStatus with the shared\nexported QtyStockAvailability type; in\napps/webapp/app/components/booking/list-asset-content.tsx#L85-L91, use\nQtyStockAvailability in the useLoaderData generic, importing it from\n~/utils/booking-assets.\n```\n\n</details>\n\n<!-- cr-comment:v1:f95ecc29edc9cead7be824a7 -->\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/components/booking/list-asset-content.test.tsx (1)</summary><blockquote>\n\n`648-651`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Fixtures omit `reserved`, drifting from the loader contract.** The component types `availableUnitsByAsset` values as `{ bookable; physicalNow; reserved }` and forwards `availability.reserved` into `qtyAvailability` for `AssetRowActionsDropdown`; these mocks leave it `undefined`. Adding `reserved` keeps the fixtures aligned with what the loader actually ships (the sidebar tests already do this).\n\n\n\n<details>\n<summary>♻️ Suggested fixture alignment</summary>\n\n```diff\n         availableUnitsByAsset: {\n-          [qtRow.id]: { bookable: 10, physicalNow: 3 },\n+          [qtRow.id]: { bookable: 10, physicalNow: 3, reserved: 7 },\n         },\n```\n</details>\n\n\nAlso applies to: 709-711\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/components/booking/list-asset-content.test.tsx` around lines\n648 - 651, Update the availableUnitsByAsset fixtures in the affected tests to\ninclude the required reserved field alongside bookable and physicalNow, using\nthe same fixture shape already established by the sidebar tests. Apply this\nconsistently to both the fixture near the current diff and the additional\noccurrence around the other referenced test.\n```\n\n</details>\n\n<!-- cr-comment:v1:86203caf55bc82cd4dc80ee8 -->\n\n</blockquote></details>\n\n</blockquote></details>\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nInline comments:\nIn `@apps/webapp/app/components/booking/list-bookings-content.tsx`:\n- Around line 56-78: Update StockConflictPill so its TooltipTrigger is\nkeyboard-focusable and exposes the explanation to assistive technology, while\npreserving the existing mouse hover behavior and badge appearance. Add an\nappropriate accessible label or description and a visible focus indicator to the\ntrigger element, ensuring the \"Stock conflict\" control can be reached and\nunderstood via keyboard and screen readers.\n- Around line 150-151: Remove the no-op from and to keys from the Prisma include\npayload in the booking query near the Booking include configuration. Keep only\nsupported relation keys, since Booking scalar fields are included by default and\nthe SDK BookingInclude contract does not accept these scalar entries.\n\nIn `@apps/webapp/app/modules/asset/availability.server.ts`:\n- Around line 348-356: Update computeAvailableQuantity to accept a Prisma client\nor transaction and use it for the total and inCustody query instead of the\nglobal db. In getAssetAvailability, pass the active client into\ncomputeAvailableQuantity so all availability terms read from the same\ntransaction context.\n\nIn `@apps/webapp/app/modules/booking/service.server.ts`:\n- Around line 7775-7849: Update the QUANTITY_TRACKED guard around\nrequestedQtyByAssetId and assertAssetQuantitiesAvailable to include this\nbooking’s existing BookingAsset quantities for each affected asset, using one\ntx.bookingAsset.groupBy query. Exclude rows overwritten by this call and rows\nwhose kit insert uses ON CONFLICT DO NOTHING, so only the booking’s final\ncommitted demand is added before passing excludeBookingId: id to\nassertAssetQuantitiesAvailable.\n\nIn `@apps/webapp/app/routes/_layout`+/assets.$assetId.bookings.tsx:\n- Around line 125-141: Wrap the getStockConflictedBookingIds call in the loader\nwith error handling so failures yield an empty conflictedBookingIds result and\nthe bookings list still renders without stock-conflict pills. Keep the existing\nbooking inputs and successful-query behavior unchanged.\n\nIn `@apps/webapp/app/routes/_layout`+/bookings._index.tsx:\n- Around line 198-213: The repeated stock-conflict decoration is duplicated and\nunguarded across five booking loaders. Add a shared withStockConflictFlags\nhelper alongside getStockConflictedBookingIds that maps booking fields, performs\nthe lookup, and returns bookings with hasStockConflict flags while keeping this\nadvisory decoration non-fatal; replace the inline lookup and items mappings in\napps/webapp/app/routes/_layout+/bookings._index.tsx (198-213),\napps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx (125-141),\napps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx (115-127),\napps/webapp/app/routes/_layout+/me.bookings.tsx (79-91), and\napps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx\n(101-113) with the helper.\n\nIn `@apps/webapp/app/routes/_layout`+/kits.$kitId.bookings.tsx:\n- Around line 115-127: Guard the getStockConflictedBookingIds call in the kit\nbookings loader so a stock-conflict lookup failure does not prevent the Bookings\ntab from loading. Preserve normal conflict IDs when the lookup succeeds, but\nfall back to an empty set/list on failure, matching the resilient handling used\nby the assets bookings loader.\n\nIn `@apps/webapp/app/routes/_layout`+/me.bookings.tsx:\n- Around line 79-91: The bookings loader duplicates the stock-conflict\ndecoration and lets failures propagate. Extract the shared booking decoration\ninto the existing common helper used by the other bookings loaders, invoke it\nfrom this loader, and ensure stock-conflict lookup failures are handled\nnon-fatally while preserving the booking list response.\n\nIn `@apps/webapp/app/routes/_layout`+/settings.team.users.$userId.bookings.tsx:\n- Around line 101-113: Update the stock-conflict lookup around\ngetStockConflictedBookingIds in this loader to reuse the shared stock-conflict\nhandling used by the sibling loaders instead of duplicating the block. Preserve\norganizationId scoping and ensure lookup failures degrade gracefully without\nfailing the loader.\n\nIn\n`@apps/webapp/app/routes/api`+/bookings.$bookingId.adjust-asset-quantity.test.server.ts:\n- Around line 291-332: Correct the setup comments in the test around\nbookingAsset and the asserted error message so they consistently describe\navailable as the absolute bookable quantity of 3, not currentQuantity + bookable\n= 5. Preserve the existing fixture values and assertion.\n\n---\n\nOutside diff comments:\nIn `@apps/webapp/app/components/booking/adjust-booking-asset-quantity-dialog.tsx`:\n- Around line 213-277: Associate the quantity helper text with the input by\nadding a stable description ID to the helper block rendered alongside the\nquantity field and passing that ID through the Input’s aria-describedby prop.\nEnsure all variants—booking availability, date range, reservation note, and\nnon-booking “Max” text—remain within the referenced container, while preserving\nthe existing error association.\n\n---\n\nNitpick comments:\nIn `@apps/webapp/app/components/booking/booking-assets-sidebar.tsx`:\n- Around line 219-222: The availability-map value shape is duplicated across the\nbooking asset consumers. In\napps/webapp/app/components/booking/booking-assets-sidebar.tsx#L219-L222, replace\nthe inline value type and its duplicate in AssetTitleAndStatus with the shared\nexported QtyStockAvailability type; in\napps/webapp/app/components/booking/list-asset-content.tsx#L85-L91, use\nQtyStockAvailability in the useLoaderData generic, importing it from\n~/utils/booking-assets.\n\nIn `@apps/webapp/app/components/booking/list-asset-content.test.tsx`:\n- Around line 648-651: Update the availableUnitsByAsset fixtures in the affected\ntests to include the required reserved field alongside bookable and physicalNow,\nusing the same fixture shape already established by the sidebar tests. Apply\nthis consistently to both the fixture near the current diff and the additional\noccurrence around the other referenced test.\n\nIn `@apps/webapp/app/modules/asset/service.server.test.ts`:\n- Around line 1507-1508: The test assertion beneath the “BEFORE the write”\ncomment does not verify call ordering. Update the relevant test to compare the\nguard mock’s invocationCallOrder with db.asset.update’s invocationCallOrder,\nasserting the guard occurred first; alternatively remove the ordering comment if\nordering is not intended to be tested.\n\nIn `@apps/webapp/app/modules/asset/service.server.ts`:\n- Line 37: Update the import of assertAssetQuantityNotBelowReservations in\nservice.server.ts to use the dependency-free availability-primitives.server\nleaf, matching consumption-log/service.server.ts and avoiding the heavier\navailability.server dependency graph.\n\nIn `@apps/webapp/app/modules/booking/service.server.test.ts`:\n- Around line 2003-2024: Replace the any-typed mockImplementation arguments in\nthe helpers at the shown locations with structural types matching the\nwhere/status, bookingId, and OR branch properties each helper reads. Apply the\nsame typed-router-args approach in computeCheckedOutBatch-related mocks at the\nreferenced locations, preserving the existing narrowing and behavior without\nusing any.\n\nIn `@apps/webapp/app/modules/booking/stock-conflicts.server.ts`:\n- Line 189: Remove the `as unknown as StockConflictDbClient` assertions from\nboth client-resolution sites in the stock-conflict flow. Define or adjust\n`StockConflictDbClient` as a structural `Pick<ExtendedPrismaClient, …>` matching\nthe required delegates so `dbOrTx ?? db` is accepted directly for both the root\nclient and interactive transaction; resolve any delegate-shape mismatch rather\nthan adding another assertion.\n- Around line 198-218: The asset reservation query in the conflict-detection\nsweep is unbounded and may load excessive historical rows on every bookings-list\nrender. Review the database indexes for the BookingAsset lookup and joined\nactive-booking filter, then constrain or cache the full timeline where\ncompatible with the sweep’s correctness, using a Booking.to >= now() floor only\nif past reservations are safely irrelevant.\n\nIn `@apps/webapp/app/modules/consumption-log/service.server.test.ts`:\n- Around line 89-97: Move resetMocks into a beforeEach hook by importing\nbeforeEach from vitest and registering beforeEach(resetMocks). Remove all\nexplicit resetMocks() calls from the tests while preserving the existing mock\nsetup and per-test overrides.\n\nIn\n`@apps/webapp/app/routes/_layout`+/assets.$assetId.overview.add-to-existing-booking.tsx:\n- Around line 165-172: Update the stale JSDoc immediately above the quantities\nassignment branch to remove claims that it validates quantities before writing\nor uses excludeBookingId. Describe that the requested quantity is forwarded to\nupdateBookingAssets, where the authoritative availability validation occurs.\n\nIn `@apps/webapp/app/routes/_layout`+/bookings._index.tsx:\n- Around line 198-213: Run getStockConflictedBookingIds, consumptionLog.groupBy,\nand partialBookingCheckout.findMany concurrently in a single Promise.all after\nthe main query, preserving each query’s existing inputs and result mappings.\nUpdate the loader flow to await the combined results rather than executing these\npage-bounded follow-up queries serially.\n```\n\n</details>\n\n<details>\n<summary>🪄 Autofix (Beta)</summary>\n\nFix all unresolved CodeRabbit comments on this PR:\n\n- [ ] <!-- {\"checkboxId\": \"4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9\"} --> Push a commit to this branch (recommended)\n- [ ] <!-- {\"checkboxId\": \"ff5b1114-7d8c-49e6-8ac1-43f82af23a33\"} --> Create a new PR with the fixes\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: CHILL\n\n**Plan**: Pro Plus\n\n**Run ID**: `97e6c1c8-c0e4-4317-a33c-17f3350c3e2a`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between 1fcd257f1e80d8c27bed615f4e580fb9dae3367e and bf61f09e5c5fda058f5e85315ea63203322b096a.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (48)</summary>\n\n* `.claude/rules/no-server-module-in-route-client-exports.md`\n* `CLAUDE.md`\n* `apps/webapp/app/components/assets/quantity-overview-card.test.tsx`\n* `apps/webapp/app/components/assets/quantity-overview-card.tsx`\n* `apps/webapp/app/components/booking/adjust-booking-asset-quantity-dialog.test.tsx`\n* `apps/webapp/app/components/booking/adjust-booking-asset-quantity-dialog.tsx`\n* `apps/webapp/app/components/booking/asset-row-actions-dropdown.tsx`\n* `apps/webapp/app/components/booking/availability-label.tsx`\n* `apps/webapp/app/components/booking/booking-assets-sidebar.test.tsx`\n* `apps/webapp/app/components/booking/booking-assets-sidebar.tsx`\n* `apps/webapp/app/components/booking/list-asset-content.test.tsx`\n* `apps/webapp/app/components/booking/list-asset-content.tsx`\n* `apps/webapp/app/components/booking/list-bookings-content.test.tsx`\n* `apps/webapp/app/components/booking/list-bookings-content.tsx`\n* `apps/webapp/app/modules/asset/availability-primitives.server.ts`\n* `apps/webapp/app/modules/asset/availability.server.test.ts`\n* `apps/webapp/app/modules/asset/availability.server.ts`\n* `apps/webapp/app/modules/asset/checked-out-batch-parity.test.server.ts`\n* `apps/webapp/app/modules/asset/data.server.test.ts`\n* `apps/webapp/app/modules/asset/quantity-overview.server.test.ts`\n* `apps/webapp/app/modules/asset/quantity-overview.server.ts`\n* `apps/webapp/app/modules/asset/service.server.test.ts`\n* `apps/webapp/app/modules/asset/service.server.ts`\n* `apps/webapp/app/modules/booking/booking-overview-availability.server.test.ts`\n* `apps/webapp/app/modules/booking/booking-overview-availability.server.ts`\n* `apps/webapp/app/modules/booking/service.server.test.ts`\n* `apps/webapp/app/modules/booking/service.server.ts`\n* `apps/webapp/app/modules/booking/stock-conflicts.server.test.ts`\n* `apps/webapp/app/modules/booking/stock-conflicts.server.ts`\n* `apps/webapp/app/modules/consumption-log/service.server.test.ts`\n* `apps/webapp/app/modules/consumption-log/service.server.ts`\n* `apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/assets.$assetId.overview.add-to-existing-booking.tsx`\n* `apps/webapp/app/routes/_layout+/assets.$assetId.overview.tsx`\n* `apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.manage-assets.tsx`\n* `apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.tsx`\n* `apps/webapp/app/routes/_layout+/bookings._index.tsx`\n* `apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/me.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx`\n* `apps/webapp/app/routes/api+/bookings.$bookingId.adjust-asset-quantity.test.server.ts`\n* `apps/webapp/app/routes/api+/bookings.$bookingId.adjust-asset-quantity.ts`\n* `apps/webapp/app/utils/booking-assets.test.ts`\n* `apps/webapp/app/utils/booking-assets.ts`\n* `apps/webapp/test/routes-tests/_layout+/bookings.$bookingId.overview.availability.test.ts`\n* `apps/webapp/test/routes-tests/_layout+/bookings.$bookingId.overview.manage-assets.test.ts`\n* `apps/webapp/test/routes-tests/_layout+/bookings.$bookingId.overview.manage-kits.test.ts`\n* `apps/webapp/test/routes-tests/api+/bookings.$bookingId.adjust-asset-quantity.test.ts`\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816835588",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4816835588"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T08:26:10Z",
+    "commit_id": "bf61f09e5c5fda058f5e85315ea63203322b096a"
+  },
+  {
+    "id": 4817059495,
+    "node_id": "PRR_kwDOI8UBac8AAAABHx5-pw",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817059495",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817059495"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T08:55:32Z",
+    "commit_id": "e388680cf520966df0c8a88cffc2cd9ae632d76f"
+  },
+  {
+    "id": 4817136532,
+    "node_id": "PRR_kwDOI8UBac8AAAABHx-rlA",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817136532",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817136532"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T09:04:44Z",
+    "commit_id": "0dac8d06b9d7c73de93c6503dea6342e0cb6ade7"
+  },
+  {
+    "id": 4817382924,
+    "node_id": "PRR_kwDOI8UBac8AAAABHyNuDA",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817382924",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817382924"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T09:33:08Z",
+    "commit_id": "779fb60befb7fcdded19f688c8aef5325bc5bc4a"
+  },
+  {
+    "id": 4817446544,
+    "node_id": "PRR_kwDOI8UBac8AAAABHyRmkA",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to platform limitations.\n> \n> \n> \n> <details>\n> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>\n> \n> <details>\n> <summary>apps/webapp/app/modules/booking/service.server.ts (1)</summary><blockquote>\n> \n> `1733-1735`: _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n> \n> **Lock assets in a deterministic order to avoid deadlocks.**\n> \n> Both this loop and `updateBookingAssets`' loop (Line 7833) acquire per-asset row locks in an arbitrary order — `uniqueQtyTrackedAssetIds` follows `bookingAssets` order, `affectedAssetIds` follows map-insertion order. Two concurrent transactions touching assets `A` and `B` in opposite orders will deadlock; Postgres will abort one with a 40P01 that surfaces as a generic \"Could not reserve the booking.\" Sorting the ids before locking gives a global ordering and removes the cycle.\n> \n> \n> \n> \n> \n> <details>\n> <summary>🔒️ Proposed fix (apply the same sort in <code>updateBookingAssets</code>)</summary>\n> \n> ```diff\n> -        for (const assetId of uniqueQtyTrackedAssetIds) {\n> +        // Deterministic lock order across all callers prevents ABBA deadlocks\n> +        // when two transactions lock the same assets concurrently.\n> +        for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {\n>            await lockAssetForQuantityUpdate(tx, assetId);\n>          }\n> ```\n> \n> ```diff\n> -            for (const assetId of affectedAssetIds) {\n> +            for (const assetId of [...affectedAssetIds].sort()) {\n>                await lockAssetForQuantityUpdate(tx, assetId);\n>              }\n> ```\n> </details>\n> \n> <details>\n> <summary>🤖 Prompt for AI Agents</summary>\n> \n> ```\n> Verify each finding against current code. Fix only still-valid issues, skip the\n> rest with a brief reason, keep changes minimal, and validate.\n> \n> In `@apps/webapp/app/modules/booking/service.server.ts` around lines 1733 - 1735,\n> Sort uniqueQtyTrackedAssetIds before the lockAssetForQuantityUpdate loop so\n> locks are acquired in a deterministic global order. Apply the same ordering to\n> affectedAssetIds in updateBookingAssets, preserving the existing locking\n> behavior otherwise.\n> ```\n> \n> </details>\n> \n> <!-- cr-comment:v1:f527e8455da30feef937e673 -->\n> \n> </blockquote></details>\n> \n> </blockquote></details>\n\n<details>\n<summary>🧹 Nitpick comments (2)</summary><blockquote>\n\n<details>\n<summary>apps/webapp/app/modules/consumption-log/service.server.ts (1)</summary><blockquote>\n\n`237-243`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _⚡ Quick win_\n\n**Prefer a narrow structural client type over `any`.**\n\n`client: any` drops all type checking on the two reads below (`asset.quantity`, `custodySum._sum.quantity`) and lets any object through. Picking just the delegates this function needs keeps both the root `db` and an interactive `tx` assignable without casts or the eslint suppression.\n\nBased on learnings: prefer a structural type using `Pick<ExtendedPrismaClient, ...>` for Prisma-like transaction-client parameters, narrowly picking only the delegate(s) the helper needs (repo precedent: `OrgValidationTxClient`, `RecordEventTxClient`). As per coding guidelines: \"never use `any` as a shortcut; use correct types or `unknown` with narrowing for dynamic data.\"\n\n\n\n\n\n\n\n<details>\n<summary>♻️ Proposed refactor</summary>\n\n```diff\n+/** Minimal client surface this read needs — satisfied by both `db` and an interactive `tx`. */\n+type ComputeAvailableQuantityClient = Pick<\n+  ExtendedPrismaClient,\n+  \"asset\" | \"custody\"\n+>;\n+\n export async function computeAvailableQuantity(\n   assetId: string,\n-  // Typed `any` for the same reason `createConsumptionLog.tx` is: the extended\n-  // client's interactive-tx type doesn't reduce to a clean `typeof db`.\n-  // eslint-disable-next-line `@typescript-eslint/no-explicit-any`\n-  client: any = db\n+  client: ComputeAvailableQuantityClient = db\n ): Promise<AvailableQuantity> {\n```\n</details>\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/consumption-log/service.server.ts` around lines 237 -\n243, Replace the any-typed client parameter in computeAvailableQuantity with a\nnarrow structural type derived from ExtendedPrismaClient, picking only the\ndelegate used by the function’s asset and custody reads. Remove the eslint\nsuppression and ensure both the root db client and interactive transaction\nclient remain assignable without casts.\n```\n\n</details>\n\n<!-- cr-comment:v1:95d3cb183c2cf4a95d7e5550 -->\n\n_Sources: Coding guidelines, Learnings_\n\n</blockquote></details>\n<details>\n<summary>apps/webapp/app/modules/booking/stock-conflicts.server.ts (1)</summary><blockquote>\n\n`492-553`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _⚡ Quick win_\n\n**Cover the new non-fatal decoration contract with focused tests.**\n\nThe new helper owns two behaviors used by five loaders: preserving booking rows while adding `hasStockConflict`, and falling back to all-false flags when conflict detection fails. Add or verify behavior-driven tests for both paths so this resilience contract cannot regress silently.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/stock-conflicts.server.ts` around lines 492 -\n553, Add focused behavior-driven tests for decorateBookingsWithStockConflicts\ncovering successful conflict detection and error fallback. Verify both paths\npreserve every original booking field, add hasStockConflict correctly from\ngetStockConflictedBookingIds results, and return false for every row when that\nlookup rejects.\n```\n\n</details>\n\n<!-- cr-comment:v1:92d8c7cea9d3e8a600c98ad0 -->\n\n</blockquote></details>\n\n</blockquote></details>\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nOutside diff comments:\nIn `@apps/webapp/app/modules/booking/service.server.ts`:\n- Around line 1733-1735: Sort uniqueQtyTrackedAssetIds before the\nlockAssetForQuantityUpdate loop so locks are acquired in a deterministic global\norder. Apply the same ordering to affectedAssetIds in updateBookingAssets,\npreserving the existing locking behavior otherwise.\n\n---\n\nNitpick comments:\nIn `@apps/webapp/app/modules/booking/stock-conflicts.server.ts`:\n- Around line 492-553: Add focused behavior-driven tests for\ndecorateBookingsWithStockConflicts covering successful conflict detection and\nerror fallback. Verify both paths preserve every original booking field, add\nhasStockConflict correctly from getStockConflictedBookingIds results, and return\nfalse for every row when that lookup rejects.\n\nIn `@apps/webapp/app/modules/consumption-log/service.server.ts`:\n- Around line 237-243: Replace the any-typed client parameter in\ncomputeAvailableQuantity with a narrow structural type derived from\nExtendedPrismaClient, picking only the delegate used by the function’s asset and\ncustody reads. Remove the eslint suppression and ensure both the root db client\nand interactive transaction client remain assignable without casts.\n```\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: CHILL\n\n**Plan**: Pro Plus\n\n**Run ID**: `fad01535-efd5-48b9-a129-8101010d1f14`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between bf61f09e5c5fda058f5e85315ea63203322b096a and 779fb60befb7fcdded19f688c8aef5325bc5bc4a.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (17)</summary>\n\n* `apps/webapp/app/components/booking/list-bookings-content.tsx`\n* `apps/webapp/app/modules/asset/availability-primitives.server.ts`\n* `apps/webapp/app/modules/asset/availability.server.test.ts`\n* `apps/webapp/app/modules/asset/availability.server.ts`\n* `apps/webapp/app/modules/asset/service.server.test.ts`\n* `apps/webapp/app/modules/asset/service.server.ts`\n* `apps/webapp/app/modules/booking/service.server.test.ts`\n* `apps/webapp/app/modules/booking/service.server.ts`\n* `apps/webapp/app/modules/booking/stock-conflicts.server.test.ts`\n* `apps/webapp/app/modules/booking/stock-conflicts.server.ts`\n* `apps/webapp/app/modules/consumption-log/service.server.ts`\n* `apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/bookings._index.tsx`\n* `apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/me.bookings.tsx`\n* `apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx`\n* `apps/webapp/app/routes/api+/bookings.$bookingId.adjust-asset-quantity.test.server.ts`\n\n</details>\n\n<details>\n<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>\n\n* apps/webapp/app/modules/booking/stock-conflicts.server.test.ts\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817446544",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4817446544"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T09:40:17Z",
+    "commit_id": "779fb60befb7fcdded19f688c8aef5325bc5bc4a"
+  },
+  {
+    "id": 4818506827,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzSUSw",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818506827",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818506827"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:00:07Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818550423,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzU-lw",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to platform limitations.\n> \n> \n> \n> <details>\n> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>\n> \n> <details>\n> <summary>apps/webapp/app/modules/booking/service.server.ts (1)</summary><blockquote>\n> \n> `1717-1754`: _🗄️ Data Integrity & Integration_ | _🟠 Major_ | _🏗️ Heavy lift_\n> \n> **Serialize booking edits with reservation.** `reserveBooking` validates an unlocked, pre-transaction asset snapshot, while `updateBookingAssets` decides whether to skip its guard from an unlocked `DRAFT` status. A concurrent edit can therefore commit extra `BookingAsset` quantity after the reservation check has passed, leaving a newly RESERVED booking over-committed.\n> \n> - `apps/webapp/app/modules/booking/service.server#L1717-L1754`: acquire a booking-level lock first, then re-read the booking’s current QT rows inside the transaction before validating and reserving.\n> - `apps/webapp/app/modules/booking/service.server#L7816-L7883`: acquire that same booking-level lock before reading status; re-read it after the lock and apply the active-booking guard before issuing raw `BookingAsset` writes.\n> \n> <details>\n> <summary>🤖 Prompt for AI Agents</summary>\n> \n> ```\n> Verify each finding against current code. Fix only still-valid issues, skip the\n> rest with a brief reason, keep changes minimal, and validate.\n> \n> In `@apps/webapp/app/modules/booking/service.server.ts` around lines 1717 - 1754,\n> The reservation transaction around the existing quantity validation must\n> serialize with concurrent booking edits: in\n> apps/webapp/app/modules/booking/service.server.ts:1717-1754, acquire the\n> booking-level lock first, then re-read the booking’s current quantity-tracked\n> BookingAsset rows inside the transaction and validate those rows before\n> reserving. In apps/webapp/app/modules/booking/service.server.ts:7816-7883,\n> acquire the same booking-level lock before reading status, re-read status after\n> locking, and apply the active-booking guard before raw BookingAsset writes.\n> ```\n> \n> </details>\n> \n> <!-- cr-comment:v1:7e0f12c1516f1068be052e03 -->\n> \n> </blockquote></details>\n> \n> </blockquote></details>\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nOutside diff comments:\nIn `@apps/webapp/app/modules/booking/service.server.ts`:\n- Around line 1717-1754: The reservation transaction around the existing\nquantity validation must serialize with concurrent booking edits: in\napps/webapp/app/modules/booking/service.server.ts:1717-1754, acquire the\nbooking-level lock first, then re-read the booking’s current quantity-tracked\nBookingAsset rows inside the transaction and validate those rows before\nreserving. In apps/webapp/app/modules/booking/service.server.ts:7816-7883,\nacquire the same booking-level lock before reading status, re-read status after\nlocking, and apply the active-booking guard before raw BookingAsset writes.\n```\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: CHILL\n\n**Plan**: Pro Plus\n\n**Run ID**: `9e516fad-761d-429b-9096-ebe474bafd68`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between 779fb60befb7fcdded19f688c8aef5325bc5bc4a and 231962abe89984c25b487ccdc853e2b1f18bcee7.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (5)</summary>\n\n* `apps/webapp/app/modules/asset/availability.server.ts`\n* `apps/webapp/app/modules/booking/service.server.ts`\n* `apps/webapp/app/modules/booking/stock-conflicts.server.test.ts`\n* `apps/webapp/app/modules/consumption-log/service.server.ts`\n* `apps/webapp/test/routes-tests/_layout+/bookings.$bookingId.overview.availability.test.ts`\n\n</details>\n\n<details>\n<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>\n\n* apps/webapp/app/modules/consumption-log/service.server.ts\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818550423",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818550423"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:05:53Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818555081,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVQyQ",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555081",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555081"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:32Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818555387,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVR-w",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555387",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555387"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:34Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818555660,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVTDA",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555660",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555660"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:36Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818555946,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVUKg",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555946",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818555946"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:39Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818556218,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVVOg",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818556218",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818556218"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:41Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818556496,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVWUA",
+    "user": {
+      "login": "DonKoko",
+      "id": 7840007,
+      "node_id": "MDQ6VXNlcjc4NDAwMDc=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7840007?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DonKoko",
+      "html_url": "https://github.com/DonKoko",
+      "followers_url": "https://api.github.com/users/DonKoko/followers",
+      "following_url": "https://api.github.com/users/DonKoko/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DonKoko/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DonKoko/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DonKoko/subscriptions",
+      "organizations_url": "https://api.github.com/users/DonKoko/orgs",
+      "repos_url": "https://api.github.com/users/DonKoko/repos",
+      "events_url": "https://api.github.com/users/DonKoko/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DonKoko/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818556496",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "MEMBER",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818556496"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:06:44Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818558652,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVevA",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818558652",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818558652"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:07:02Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818559196,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzVg3A",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818559196",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818559196"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:07:07Z",
+    "commit_id": "231962abe89984c25b487ccdc853e2b1f18bcee7"
+  },
+  {
+    "id": 4818626832,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzZpEA",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818626832",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818626832"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:16:30Z",
+    "commit_id": "265273167547a9cbc78b2adab7bbdb0b4954e833"
+  },
+  {
+    "id": 4818717773,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzfMTQ",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "node_id": "BOT_kgDOCnlnWA",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+      "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+      "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818717773",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818717773"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:29:07Z",
+    "commit_id": "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c"
+  },
+  {
+    "id": 4818756518,
+    "node_id": "PRR_kwDOI8UBac8AAAABHzhjpg",
+    "user": {
+      "login": "coderabbitai[bot]",
+      "id": 136622811,
+      "node_id": "BOT_kgDOCCSy2w",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/coderabbitai%5Bbot%5D",
+      "html_url": "https://github.com/apps/coderabbitai",
+      "followers_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/coderabbitai%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "\n\n<details>\n<summary>🧹 Nitpick comments (1)</summary><blockquote>\n\n<details>\n<summary>apps/webapp/app/modules/booking/service.server.test.ts (1)</summary><blockquote>\n\n`8213-8237`: _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _⚡ Quick win_\n\n**Use asset factories for mocked rows.**\n\nReplace the inline asset fixtures with the repository test factory so these tests do not hardcode model data.\n\n\n\n\nAs per coding guidelines: “Avoid hardcoding data within tests; use factories to keep tests clean and maintainable.”\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/service.server.test.ts` around lines 8213 -\n8237, Replace the inline asset objects in the tests around\ngetAvailableAssetsIdsForBooking with the repository’s asset test factory,\nconfiguring each generated asset with the required ids, status, and assetKits\nvalues. Preserve the existing scenarios: assets without kit membership and an\nasset belonging to kit-1.\n```\n\n</details>\n\n<!-- cr-comment:v1:e1a21f11c76ea084863361a8 -->\n\n_Source: Coding guidelines_\n\n</blockquote></details>\n\n</blockquote></details>\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nNitpick comments:\nIn `@apps/webapp/app/modules/booking/service.server.test.ts`:\n- Around line 8213-8237: Replace the inline asset objects in the tests around\ngetAvailableAssetsIdsForBooking with the repository’s asset test factory,\nconfiguring each generated asset with the required ids, status, and assetKits\nvalues. Preserve the existing scenarios: assets without kit membership and an\nasset belonging to kit-1.\n```\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: CHILL\n\n**Plan**: Pro Plus\n\n**Run ID**: `26ba0b9d-66dd-48a1-843c-533e44342d27`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between 265273167547a9cbc78b2adab7bbdb0b4954e833 and 15a4e0a58707a8db432eba9ac4e3b5e31d136b7c.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (2)</summary>\n\n* `apps/webapp/app/modules/booking/service.server.test.ts`\n* `apps/webapp/app/modules/booking/service.server.ts`\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818756518",
+    "pull_request_url": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770",
+    "author_association": "CONTRIBUTOR",
+    "_links": {
+      "html": {
+        "href": "https://github.com/Shelf-nu/shelf.nu/pull/2770#pullrequestreview-4818756518"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/Shelf-nu/shelf.nu/pulls/2770"
+      }
+    },
+    "submitted_at": "2026-07-30T12:34:17Z",
+    "commit_id": "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c"
+  }
+]

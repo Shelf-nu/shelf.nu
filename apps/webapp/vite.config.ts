@@ -34,6 +34,33 @@ if (!existsSync(prismaClientIndexBrowser)) {
   );
 }
 
+// Fail fast when a `workspace:*` dependency has no node_modules link — i.e.
+// `pnpm install` has not been run since that package was added. Without this
+// check the only symptom is a wall of repeated, easily-missed
+// `Failed to resolve import "@shelf/<pkg>"` pre-transform errors that look
+// like a Vite/config bug rather than a stale install. Common in long-lived
+// git worktrees, which each carry their own node_modules.
+const webappPkg = require("./package.json") as {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
+const missingWorkspaceLinks = Object.entries({
+  ...webappPkg.dependencies,
+  ...webappPkg.devDependencies,
+})
+  .filter(([, version]) => version.startsWith("workspace:"))
+  .map(([name]) => name)
+  .filter((name) => !existsSync(resolve(__dirname, "node_modules", name)));
+
+if (missingWorkspaceLinks.length > 0) {
+  throw new Error(
+    `Missing node_modules link for workspace package(s): ` +
+      `${missingWorkspaceLinks.join(", ")}.\n` +
+      `Run "pnpm install" from the monorepo root — this checkout was installed ` +
+      `before those packages existed.`
+  );
+}
+
 // Use HTTPS when cert files are present (mkcert / local dev).
 // Skip HTTPS with DISABLE_HTTPS=true (e.g. mobile companion testing over LAN).
 const certKeyPath = resolve(__dirname, ".cert/key.pem");
@@ -48,18 +75,33 @@ const httpsConfig =
 export default defineConfig({
   envDir: "../..",
   ssr: {
-    noExternal: ["@shelf/database", "@shelf/labels", "@shelf/quantity-control"],
+    noExternal: [
+      "@shelf/database",
+      "@shelf/datetime",
+      "@shelf/labels",
+      "@shelf/quantity-control",
+    ],
   },
   server: {
     port: 3000,
     https: httpsConfig,
     warmup: {
+      // These globs pull files into the CLIENT module graph. Anything under
+      // `app/routes/` that is not a route (a test, a fixture) gets warmed too,
+      // and if it imports a `*.server` module React Router rejects it with
+      // "Server-only module referenced by client" — breaking the dev server
+      // even though the file is excluded from the route tree.
+      //
+      // The negation MUST stay a superset of `ignoredRouteFiles` in
+      // `app/routes.ts`. It is defense in depth only: test files are barred
+      // from `app/routes/` outright by `local-rules/no-test-files-in-routes`.
       clientFiles: [
         "./app/entry.client.tsx",
         "./app/root.tsx",
         "./app/routes/**/*.tsx",
         "./app/routes/**/*.ts",
-        "!./app/routes/**/*.test.server.ts",
+        "!./app/routes/**/*.test.*",
+        "!./app/routes/**/*.spec.*",
       ],
     },
   },

@@ -2,7 +2,8 @@ import { memo } from "react";
 import { View, Text } from "react-native";
 import type { AssetDetail } from "@/lib/api";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius, formatDate } from "@/lib/constants";
+import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 
 type CustomField = AssetDetail["customFields"][0];
 
@@ -11,7 +12,13 @@ interface CustomFieldsSectionProps {
   currency: string;
 }
 
-function formatCustomFieldValue(cf: CustomField): string {
+function formatCustomFieldValue(
+  cf: CustomField,
+  // Bound to the acting user's date format + timezone via useDateFormatter().
+  // DATE custom fields are absolute calendar dates, so the bare raw value is
+  // passed through unchanged (the date-only path does not tz-shift).
+  formatDate: (v: string | Date) => string
+): string {
   const val = cf.value;
   if (val === null || val === undefined) return "\u2014";
 
@@ -39,6 +46,7 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
 
   if (customFields.length === 0) return null;
 
@@ -50,7 +58,7 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
           <View key={cf.id} style={styles.customFieldRow}>
             <Text style={styles.customFieldLabel}>{cf.customField.name}</Text>
             <Text style={styles.customFieldValue} numberOfLines={3}>
-              {formatCustomFieldValue(cf)}
+              {formatCustomFieldValue(cf, formatDate)}
             </Text>
           </View>
         ))}
