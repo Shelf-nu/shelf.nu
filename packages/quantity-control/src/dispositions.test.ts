@@ -15,7 +15,7 @@ import {
   poolDecrement,
   releaseCategory,
   sumDisposition,
-} from "./dispositions.js";
+} from "./dispositions";
 
 /* ----------------------------- defaultDisposition ------------------------- */
 

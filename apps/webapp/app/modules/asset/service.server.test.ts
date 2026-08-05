@@ -1212,8 +1212,14 @@ describe("releaseQuantity — consumptionType disposition", () => {
       expect.objectContaining({ category: "RETURN", quantity: 10 })
     );
     // No quantity write at all — the returnable path stays byte-identical.
+    // Match ANY `quantity` payload rather than `decrement: 0`: the service
+    // gates the whole decrement block on `consumedUnits > 0`, so asserting
+    // the zero case alone could never fail even if it wrongly decremented.
+    // (The status-flip write carries no `quantity` key, so it can't match.)
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
-      expect.objectContaining({ data: { quantity: { decrement: 0 } } })
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
     );
     expect(mockRecordEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
