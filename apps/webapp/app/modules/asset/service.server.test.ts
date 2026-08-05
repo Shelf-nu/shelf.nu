@@ -35,7 +35,6 @@ import {
   placeUnplacedUnits,
   refreshExpiredAssetImages,
   releaseQuantity,
-  resolveReleaseDisposition,
   relinkAssetQrCode,
   renderBulkAssetTitle,
   updateAsset,
@@ -966,9 +965,9 @@ describe("releaseQuantity — activity events", () => {
         assetId: "asset-1",
         teamMemberId: "tm-1",
         targetUserId: "user-42",
-        // `disposition` records whether the units went back to the pool or
-        // were consumed — see the consumptionType suite below.
-        meta: { quantity: 4, viaQuantity: true, disposition: "RETURN" },
+        // The split is recorded on the event so reports can tell a return
+        // from a consume without re-deriving it from the asset row.
+        meta: { quantity: 4, viaQuantity: true, consumed: 0, returned: 4 },
       }),
       expect.anything()
     );
@@ -1031,23 +1030,6 @@ describe("releaseQuantity — activity events", () => {
   });
 });
 
-describe("resolveReleaseDisposition", () => {
-  it("maps ONE_WAY to CONSUME", () => {
-    expect(resolveReleaseDisposition("ONE_WAY")).toBe("CONSUME");
-  });
-
-  it("maps TWO_WAY to RETURN", () => {
-    expect(resolveReleaseDisposition("TWO_WAY")).toBe("RETURN");
-  });
-
-  it("treats a legacy null/undefined consumptionType as returnable", () => {
-    // Rows created before `consumptionType` existed must keep the old
-    // behaviour — silently consuming their stock would be a data-loss bug.
-    expect(resolveReleaseDisposition(null)).toBe("RETURN");
-    expect(resolveReleaseDisposition(undefined)).toBe("RETURN");
-  });
-});
-
 /**
  * Ending a custodian's hold means something different per `consumptionType`:
  * a TWO_WAY asset's units go back in the pool, a ONE_WAY consumable's units
@@ -1099,7 +1081,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
     });
   });
 
-  it("writes a CONSUME log and permanently decrements Asset.quantity for a ONE_WAY consumable", async () => {
+  it("consumes the whole release for a ONE_WAY consumable by default", async () => {
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
       consumptionType: "ONE_WAY",
@@ -1113,9 +1095,8 @@ describe("releaseQuantity — consumptionType disposition", () => {
       organizationId: "org-1",
     });
 
-    // The audit log must classify this as consumption, not a return. Writing
-    // RETURN here is the shipped bug: consumption reporting counts the units
-    // as back on the shelf.
+    // Exactly one log, classified as consumption. Writing RETURN here is the
+    // shipped bug: consumption reporting counts the units as back on the shelf.
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1125,22 +1106,51 @@ describe("releaseQuantity — consumptionType disposition", () => {
         custodianId: "tm-1",
       })
     );
-
-    // …and the units must leave the pool. Without the decrement the 10 gloves
-    // that were used up stay bookable forever.
     expect(mockAssetUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "asset-1" },
         data: { quantity: { decrement: 10 } },
       })
     );
-
-    // The caller is told which branch ran so the audit note it writes cannot
-    // drift from the persisted log.
-    expect(result.disposition).toBe("CONSUME");
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(0);
   });
 
-  it("emits ASSET_QUANTITY_CHANGED with the true from/to alongside CUSTODY_RELEASED on consume", async () => {
+  it("splits a partial consume: two logs, and only the consumed units leave stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      consumed: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // 10 gloves used up, 30 handed back in good condition. Destroying all 40
+    // is the over-correction this split exists to prevent.
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    );
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 30 })
+    );
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1" },
+        data: { quantity: { decrement: 10 } },
+      })
+    );
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(30);
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED for the consumed units only", async () => {
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
       consumptionType: "ONE_WAY",
@@ -1149,12 +1159,14 @@ describe("releaseQuantity — consumptionType disposition", () => {
     await releaseQuantity({
       assetId: "asset-1",
       teamMemberId: "tm-1",
-      quantity: 10,
+      quantity: 40,
+      consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
     });
 
-    // One event per field that changed: stock dropped …
+    // One event per field that changed: stock dropped by the consumed
+    // amount, not by the full release.
     expect(mockRecordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: "org-1",
@@ -1170,21 +1182,50 @@ describe("releaseQuantity — consumptionType disposition", () => {
       // Second arg is the tx client — the event must commit with the write.
       expect.anything()
     );
-    // … and the custodian stopped holding the units.
     expect(mockRecordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "CUSTODY_RELEASED",
-        meta: { quantity: 10, viaQuantity: true, disposition: "CONSUME" },
+        meta: { quantity: 40, viaQuantity: true, consumed: 10, returned: 30 },
       }),
       expect.anything()
     );
     expect(mockRecordEvent).toHaveBeenCalledTimes(2);
   });
 
+  it("an explicit consumed of 0 on a consumable returns everything and never touches stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      consumed: 0,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    // No quantity write at all — the returnable path stays byte-identical.
+    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { quantity: { decrement: 0 } } })
+    );
+    expect(mockRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
   it("leaves TWO_WAY behaviour untouched: RETURN log, no stock decrement", async () => {
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
-      title: "Tripods",
       consumptionType: "TWO_WAY",
     });
 
@@ -1197,23 +1238,17 @@ describe("releaseQuantity — consumptionType disposition", () => {
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "RETURN" })
-    );
-    // The returnable pool must not shrink — this is the guard that the
-    // consumable fix did not over-reach into normal returns.
-    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ quantity: expect.anything() }),
-      })
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
     );
     expect(mockRecordEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
       expect.anything()
     );
-    expect(result.disposition).toBe("RETURN");
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
   });
 
-  it("treats a legacy asset with a null consumptionType as returnable", async () => {
+  it("treats a legacy null consumptionType as returnable", async () => {
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
       consumptionType: null,
@@ -1228,14 +1263,51 @@ describe("releaseQuantity — consumptionType disposition", () => {
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "RETURN" })
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
     );
-    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ quantity: expect.anything() }),
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("rejects consuming a returnable asset", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "TWO_WAY",
+    });
+
+    // A client must never be able to destroy stock that is meant to come back.
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 5,
+        userId: "user-1",
+        organizationId: "org-1",
       })
-    );
-    expect(result.disposition).toBe("RETURN");
+    ).rejects.toThrow(/consumable/i);
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects a consumed amount larger than the release", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 11,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
   });
 
   it("does not touch AssetLocation on consume (documented deferral, matches booking check-in)", async () => {
