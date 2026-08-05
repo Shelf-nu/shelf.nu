@@ -1029,35 +1029,36 @@ async function computeCheckedOutBreakdownBatch(
 
   for (const [bookingId, byAsset] of slicesByBookingByAsset) {
     const sessionsForBooking = sessionsByBooking.get(bookingId) ?? [];
-    // A booking with zero sessions was checked out via the legacy
-    // all-at-once flow (the partial flow always writes a session row) —
-    // since these pivots are already scoped to ONGOING/OVERDUE, every
-    // booked unit that was on the booking AT THAT POINT is physically off
-    // the shelf. Which assets those are is decided per asset below; an
-    // asset added later is still AVAILABLE and holds no units.
-    const bookingIsLegacyAllAtOnce = sessionsForBooking.length === 0;
-    // Safe to build unconditionally: a legacy booking has no sessions, so
-    // this is an empty map and the non-legacy path naturally yields 0.
     const logsByAsset = checkoutSessionsToLogsByAsset(
       sessionsForBooking,
       (id) => byAsset.has(id)
     );
 
     for (const [assetId, slices] of byAsset) {
+      const claimedBySlice = attributeDispositionsByBookingAsset({
+        bookingAssetRows: slices,
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+
+      // Legacy all-at-once checkout, decided PER ASSET — mirror of
+      // `computeCheckedOutBreakdownForAsset`. This asset is flagged off the
+      // shelf and has NO recorded claims on this booking, so its zeroed
+      // counters are the all-at-once flow's silence rather than "still on the
+      // shelf". Keying on the asset (not on the booking having zero sessions)
+      // keeps it correct once a later batch records a session for a DIFFERENT
+      // asset, and leaves an asset added after the checkout — still AVAILABLE —
+      // holding no units (GitHub #2815).
+      const assetHasClaims = slices.some(
+        (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
+      );
       const assetIsLegacyAllAtOnce =
-        bookingIsLegacyAllAtOnce && checkedOutAssetIds.has(assetId);
-      const claimedBySlice = assetIsLegacyAllAtOnce
-        ? null
-        : attributeDispositionsByBookingAsset({
-            bookingAssetRows: slices,
-            consumptionLogs: logsByAsset.get(assetId) ?? [],
-          });
+        checkedOutAssetIds.has(assetId) && !assetHasClaims;
 
       const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
       for (const slice of slices) {
         const checkedOutSlice = assetIsLegacyAllAtOnce
           ? slice.quantity
-          : Math.min(slice.quantity, claimedBySlice?.get(slice.id) ?? 0);
+          : Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0);
         acc.total += checkedOutSlice;
         // Standalone (free-pool) iff no kit FK — `!= null` matches
         // `attributeDispositionsByBookingAsset`'s kit-driven test.

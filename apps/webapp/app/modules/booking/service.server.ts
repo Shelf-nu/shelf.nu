@@ -3441,15 +3441,15 @@ export async function computeBookingAssetsRemainingToCheckOut(
     quantities: number[];
     bookingAssetIds: string[];
   }>;
-  // Booking-level half of the legacy signal (see JSDoc): an ONGOING/OVERDUE
-  // booking with ZERO PartialBookingCheckout rows was checked out via the
-  // all-at-once flow. Computed once here since it does not vary per asset; the
-  // per-asset CHECKED_OUT guard below decides which rows it actually covers.
+  // Booking-level half of the legacy signal (see JSDoc): only an active booking
+  // can have units physically off the shelf. Deliberately NOT "the booking has
+  // zero sessions" — one progressive batch for ONE asset would otherwise
+  // switch every OTHER all-at-once asset back to "fully remaining" and invite a
+  // duplicate checkout. The per-asset test below is what decides coverage.
   const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
-  const isLegacyAllAtOnceBooking =
-    sessionsArr.length === 0 &&
-    (bookingStatus === BookingStatus.ONGOING ||
-      bookingStatus === BookingStatus.OVERDUE);
+  const isActiveBooking =
+    bookingStatus === BookingStatus.ONGOING ||
+    bookingStatus === BookingStatus.OVERDUE;
 
   // Parse every session ONCE into per-asset checkout logs through the shared
   // positional-array parser, scoped to the requested assets via set membership
@@ -3460,29 +3460,38 @@ export async function computeBookingAssetsRemainingToCheckOut(
 
   for (const assetId of uniqueAssetIds) {
     const booked = bookedByAsset.get(assetId) ?? 0;
+    const claimed = (logsByAsset.get(assetId) ?? []).reduce(
+      (sum, log) => sum + log.quantity,
+      0
+    );
 
-    // Legacy fallback — guarded on `booked > 0` so an asset that isn't actually
-    // on the booking (no pivots) short-circuits through the normal
-    // `Math.max(0, 0 - claimed)` rather than synthesizing "fully checked out",
-    // AND on the asset's own live CHECKED_OUT status. The status guard is what
-    // keeps the inference honest: the all-at-once flow flipped every asset it
-    // processed to CHECKED_OUT, but an asset ADDED to the booking afterwards is
-    // still AVAILABLE (updateBookingAssets deliberately does not auto-check-out
-    // on an ONGOING booking). Zeroing those too made them permanently
-    // un-checkoutable on that booking (GitHub #2815).
+    // Legacy all-at-once fallback, decided entirely PER ASSET:
+    //   - `booked > 0`: an asset that isn't on the booking (no pivots) falls
+    //     through to the normal math rather than synthesizing "fully out".
+    //   - `claimed === 0`: nothing was ever progressively checked out for this
+    //     asset, so its zeroed counters are the all-at-once flow's silence
+    //     rather than a real "still on the shelf" reading. An asset WITH claims
+    //     needs no fallback — `booked − claimed` is already exact.
+    //   - live `CHECKED_OUT`: the flag the all-at-once flow actually writes.
+    //     An asset ADDED to the booking afterwards is still AVAILABLE
+    //     (updateBookingAssets deliberately does not auto-check-out on an
+    //     ONGOING booking), so it keeps its real remaining (GitHub #2815).
+    //
+    // Keying on the ASSET rather than "the booking has zero sessions" is what
+    // makes this survive a later batch: once "check out remaining" records the
+    // first session for a newly-added asset, a booking-level test would flip
+    // every already-out asset back to "fully remaining" and allow a duplicate
+    // checkout of stock that is already in the field.
     if (
       booked > 0 &&
-      isLegacyAllAtOnceBooking &&
+      claimed === 0 &&
+      isActiveBooking &&
       statusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
     ) {
       remainingByAsset.set(assetId, 0);
       continue;
     }
 
-    const claimed = (logsByAsset.get(assetId) ?? []).reduce(
-      (sum, log) => sum + log.quantity,
-      0
-    );
     remainingByAsset.set(assetId, Math.max(0, booked - claimed));
   }
 
@@ -3737,18 +3746,15 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
   }>;
 
   // Booking-level half of the legacy signal — the per-slice mirror of the
-  // branch in {@link computeBookingAssetsRemainingToCheckOut}. An
-  // ONGOING/OVERDUE booking with ZERO PartialBookingCheckout rows was checked
-  // out via the all-at-once flow (the progressive flow writes a session row on
-  // every batch). The per-slice `quantity > 0` + live-CHECKED_OUT guards below
-  // decide which slices it actually covers, exactly as the asset-level sibling
-  // does — so a slice whose asset was added AFTER that checkout keeps its real
-  // remaining instead of being zeroed (GitHub #2815).
+  // branch in {@link computeBookingAssetsRemainingToCheckOut}. Only an active
+  // booking can have units physically off the shelf; everything else about the
+  // decision is per slice below. Deliberately NOT "the booking has zero
+  // sessions": one progressive batch for one asset would otherwise flip every
+  // other already-out slice back to "fully remaining".
   const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
-  const isLegacyAllAtOnceBooking =
-    sessionsArr.length === 0 &&
-    (bookingStatus === BookingStatus.ONGOING ||
-      bookingStatus === BookingStatus.OVERDUE);
+  const isActiveBooking =
+    bookingStatus === BookingStatus.ONGOING ||
+    bookingStatus === BookingStatus.OVERDUE;
 
   // Group each involved asset's slices so the attributor sees its full set.
   const slicesByAsset = new Map<
@@ -3801,20 +3807,23 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
     const requested = requestedById.get(sliceId);
     // Unknown slice (not on the booking) → keep the seeded 0.
     if (!requested) continue;
-    // Legacy fallback — guarded on `quantity > 0` so a zero-unit slice
-    // short-circuits through the normal math rather than synthesizing "fully
-    // checked out", and on the asset's own live CHECKED_OUT status so a slice
-    // added after the all-at-once checkout keeps its real remaining. Mirrors
-    // the asset-level helper's `booked > 0` + status guards.
+    const claimed = claimedBySliceId.get(sliceId) ?? 0;
+    // Legacy all-at-once fallback, decided per SLICE — mirror of the
+    // asset-level sibling's `booked > 0` + `claimed === 0` + live-CHECKED_OUT
+    // guards. A slice with claims needs no fallback (`quantity − claimed` is
+    // exact), and a slice whose asset was added after the checkout is still
+    // AVAILABLE so it keeps its real remaining (GitHub #2815). Keying on the
+    // slice rather than the booking is what keeps an already-out slice at 0
+    // after a later batch records the booking's first session row.
     if (
-      isLegacyAllAtOnceBooking &&
+      isActiveBooking &&
       requested.quantity > 0 &&
+      claimed === 0 &&
       requested.status === AssetStatus.CHECKED_OUT
     ) {
       remainingBySlice.set(sliceId, 0);
       continue;
     }
-    const claimed = claimedBySliceId.get(sliceId) ?? 0;
     remainingBySlice.set(sliceId, Math.max(0, requested.quantity - claimed));
   }
 

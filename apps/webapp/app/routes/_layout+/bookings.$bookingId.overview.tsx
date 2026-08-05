@@ -859,33 +859,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
     // checkout in the bulk-checkout dialog + scanner drawer.
     //
-    // Gated per asset on the live CHECKED_OUT status, NOT on the booking alone:
-    // an asset ADDED to the booking after that checkout is still AVAILABLE and
-    // genuinely has units left to check out. Zeroing those made them impossible
-    // to check out on this booking (GitHub #2815).
+    // Decided PER ASSET, not per booking: an asset ADDED after that checkout is
+    // still AVAILABLE and genuinely has units left (GitHub #2815), and an asset
+    // that already has progressive claims needs no fallback at all. Keying on
+    // the booking having zero sessions would also flip every already-out asset
+    // back to "fully remaining" the moment one later batch records a session.
     //
     // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
     // (modules/booking/service.server.ts), which the checkout-assets route uses;
     // this loader mirrors that logic in-memory to avoid an extra query per asset.
-    const isLegacyAllAtOnceCheckout =
-      checkoutSessions.length === 0 &&
-      (booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE);
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
 
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
+      let totalCheckedOut = 0;
+      for (const row of rows) {
+        totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
       if (
-        isLegacyAllAtOnceCheckout &&
+        isActiveBooking &&
         totalBooked > 0 &&
+        totalCheckedOut === 0 &&
         assetStatusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
       ) {
         remainingToCheckOutByAsset[assetId] = 0;
         continue;
-      }
-      let totalCheckedOut = 0;
-      for (const row of rows) {
-        totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
       }
       remainingToCheckOutByAsset[assetId] = Math.max(
         0,

@@ -241,26 +241,29 @@ export async function computeCheckedOutBreakdownForAsset(
 
   for (const [bookingId, bookingSlices] of slicesByBooking) {
     const bookingSessions = sessionsByBooking.get(bookingId) ?? [];
-    // Legacy all-at-once checkout: a booking with ZERO sessions (these slices
-    // are already scoped to ONGOING/OVERDUE) had every booked unit flipped off
-    // the shelf at once — mirrors the parent's legacy branch, INCLUDING its
-    // per-asset CHECKED_OUT guard, so an asset added to the booking after that
-    // checkout is not counted as off the shelf (GitHub #2815).
-    const isLegacyOngoing = bookingSessions.length === 0 && assetIsCheckedOut;
-
     // Claimed-per-slice map: exact for tagged logs, standalone-first greedy for
-    // untagged/legacy-attribution logs. Skipped for legacy-ONGOING bookings,
-    // where every slice is fully off the shelf regardless of session data.
-    const claimedBySlice = isLegacyOngoing
-      ? null
-      : attributeDispositionsByBookingAsset({
-          bookingAssetRows: bookingSlices,
-          consumptionLogs:
-            checkoutSessionsToLogsByAsset(
-              bookingSessions,
-              (id) => id === assetId
-            ).get(assetId) ?? [],
-        });
+    // untagged/legacy-attribution logs. Built first so the legacy test below can
+    // ask whether THIS asset has any claims at all.
+    const claimedBySlice = attributeDispositionsByBookingAsset({
+      bookingAssetRows: bookingSlices,
+      consumptionLogs:
+        checkoutSessionsToLogsByAsset(
+          bookingSessions,
+          (id) => id === assetId
+        ).get(assetId) ?? [],
+    });
+    const assetHasClaims = bookingSlices.some(
+      (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
+    );
+
+    // Legacy all-at-once checkout — mirrors the parent's per-asset branch: this
+    // asset is flagged off the shelf and has NO recorded claims on this
+    // booking, so the zeroed counters are the all-at-once flow's silence rather
+    // than "still on the shelf". Keyed on the asset, not on the booking having
+    // zero sessions, so a later batch for a DIFFERENT asset can't resurrect it,
+    // and an asset added after the checkout (still AVAILABLE) is never counted
+    // as out (GitHub #2815).
+    const isLegacyOngoing = assetIsCheckedOut && !assetHasClaims;
 
     for (const slice of bookingSlices) {
       const checkedOutSlice = isLegacyOngoing

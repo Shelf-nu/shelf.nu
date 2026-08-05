@@ -276,6 +276,31 @@ vitest.mock("~/modules/note/service.server", () => ({
 type IdInArgs = { where?: { id?: { in?: string[] } } };
 
 /**
+ * The stateful `PartialBookingCheckout` escape hatches the `~/database/db.server`
+ * mock hangs off the `db` object (see the top-of-mock comment). They exist only
+ * in this suite, so the real `PrismaClient` type has no knowledge of them —
+ * naming them structurally here keeps the call sites typed instead of casting
+ * the whole client to `any` at every use.
+ */
+type PbcTestHooks = {
+  /** Clears the in-memory session log between tests. */
+  __resetPbcState?: () => void;
+  /** Pre-populates sessions to model "a prior batch already claimed X units". */
+  __seedPbcSessions?: (
+    sessions: Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds?: string[];
+    }>
+  ) => void;
+  /** Re-installs the stateful create/findMany impls after `clearAllMocks`. */
+  __installStatefulPbcMocks?: (db_: unknown) => void;
+};
+
+/** The mocked `db` viewed through its test-only hooks. */
+const pbcHooks = db as unknown as PbcTestHooks;
+
+/**
  * The slice of a `bookingAsset.findMany` argument the #2815 mocks read. Both
  * remaining-to-check-out readers narrow by one of these two filters, so a mock
  * standing in for that query has to honour whichever one it was handed.
@@ -379,10 +404,8 @@ describe("partialCheckoutBooking", () => {
     // calculations, and re-install the stateful PBC impls (clearAllMocks does
     // NOT restore a prior test's mockResolvedValue / mockImplementation
     // overrides). See the top-of-file mock comment for full rationale.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
 
     // why: clearAllMocks resets call history but not mockResolvedValue overrides
     // set by a prior test. Restore the default "echo requested ids, no conflicts"
@@ -731,8 +754,7 @@ describe("partialCheckoutBooking", () => {
     // appends to the same log — the post-write `remainingAssetCount` loop
     // must see ALL three assets as checked out to report isComplete=true.
     // (mockResolvedValue would freeze findMany at the prior session.)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-1", "asset-2"], quantities: [1, 1] },
     ]);
 
@@ -1107,10 +1129,8 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     // calculations, and re-install the stateful PBC impls (clearAllMocks does
     // NOT restore a prior test's mockResolvedValue / mockImplementation
     // overrides). See the top-of-file mock comment for full rationale.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
 
     // Default echo-no-conflicts for the scanned-batch lookup; tests that
     // need conflicts/custody override per-call.
@@ -1697,8 +1717,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       ).mockResolvedValue(makeGlovesBooking());
 
       // Prior session: 20 boxes of the STANDALONE slice already checked out.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (db as any).__seedPbcSessions?.([
+      pbcHooks.__seedPbcSessions?.([
         {
           assetIds: ["asset-gloves"],
           quantities: [20],
@@ -1933,8 +1952,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     // `partialBookingCheckout.findMany` so the test infra still tracks the
     // current-batch writes for downstream reads (and so this override doesn't
     // leak into later tests via the persistent impl).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [45] },
     ]);
 
@@ -2064,8 +2082,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     // Seed via the stateful helper so the new top-off write appends to the
     // session log (mockResolvedValue would freeze findMany and the post-write
     // remaining lookup would miss the new row).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [5] },
     ]);
 
@@ -2153,8 +2170,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     // Seed the prior 10-unit consumption through the stateful helper so the
     // in-tx remaining lookup sees the same row as the outer alreadyCheckedOut
     // detection.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [10] },
     ]);
 
@@ -2208,8 +2224,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 10 });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [10] },
     ]);
 
@@ -2518,10 +2533,8 @@ describe("getRemainingCheckoutAssetIds", () => {
 describe("computeBookingAssetSliceRemainingToCheckOut", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
   });
 
   it("subtracts prior PartialBookingCheckout claims from the slice cap on a single-slice asset", async () => {
@@ -2551,8 +2564,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
         assetKitId: null,
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [5] },
     ]);
 
@@ -2626,8 +2638,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
       },
     ]);
     // Legacy seed — no `bookingAssetIds` → the whole 30-unit pool is greedy.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-qty-1"], quantities: [30] },
     ]);
 
@@ -2694,8 +2705,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
       },
     ]);
     // Tagged session: 10 units checked out against the standalone slice.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       {
         assetIds: ["asset-batt"],
         quantities: [10],
@@ -2766,8 +2776,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
         assetKitId: null,
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       {
         assetIds: ["asset-batt"],
         quantities: [5],
@@ -2829,10 +2838,8 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
 describe("getRemainingCheckoutPayload", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
   });
 
   it("emits per-slice remaining (NOT full booked qty) for a partially-checked-out QT asset", async () => {
@@ -2882,8 +2889,7 @@ describe("getRemainingCheckoutPayload", () => {
         assetKitId: null,
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-pencils"], quantities: [5] },
     ]);
 
@@ -2943,8 +2949,7 @@ describe("getRemainingCheckoutPayload", () => {
         assetKitId: null,
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__seedPbcSessions?.([
+    pbcHooks.__seedPbcSessions?.([
       { assetIds: ["asset-pencils"], quantities: [5] },
     ]);
 
@@ -3046,10 +3051,8 @@ describe("getRemainingCheckoutPayload", () => {
 describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
     // The shape under test: an all-at-once "Check out" flips every asset to
     // CHECKED_OUT but writes NO PartialBookingCheckout rows, so the booking is
     // ONGOING with zero sessions. That is the ONLY way this state is reachable
@@ -3231,13 +3234,65 @@ describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
   });
 });
 
+describe("legacy fallback survives a later checkout session (PR #2816 review)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+    });
+  });
+
+  it("keeps an already-out QT slice at 0 once a later batch records a session", async () => {
+    expect.assertions(2);
+
+    // The exact sequence the fix for #2814 creates: the booking starts with
+    // ZERO PartialBookingCheckout rows (all-at-once checkout), then a
+    // successful "check out remaining" for a newly-added asset writes the
+    // booking's FIRST session row — for a DIFFERENT asset.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-pencils-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+        asset: { status: AssetStatus.CHECKED_OUT },
+      },
+    ]);
+
+    await expect(
+      computeBookingAssetSliceRemainingToCheckOut(
+        db,
+        "booking-1",
+        "ba-pencils-1"
+      )
+    ).resolves.toBe(0);
+
+    pbcHooks.__seedPbcSessions?.([
+      { assetIds: ["asset-camera"], quantities: [1], bookingAssetIds: [""] },
+    ]);
+
+    // Pencils has no claims of its own and is still flagged CHECKED_OUT, so it
+    // must stay at 0. A booking-level test read 50 here, which would have
+    // offered stock that is already in the field for a duplicate checkout.
+    await expect(
+      computeBookingAssetSliceRemainingToCheckOut(
+        db,
+        "booking-1",
+        "ba-pencils-1"
+      )
+    ).resolves.toBe(0);
+  });
+});
+
 describe("assets added after an all-at-once checkout (GitHub #2815)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__resetPbcState?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).__installStatefulPbcMocks?.(db);
+    pbcHooks.__resetPbcState?.();
+    pbcHooks.__installStatefulPbcMocks?.(db);
     (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       status: BookingStatus.ONGOING,
     });
