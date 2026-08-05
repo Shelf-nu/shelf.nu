@@ -8,6 +8,7 @@ import {
   buildImportReadyCsvFromAssets,
   buildImportReadyRows,
 } from "./import-ready-export.server";
+import { analyzeUpdateHeaders } from "./import-update-diff";
 import { extractCSVDataFromContentImport } from "./import.server";
 
 // why: avoid Prisma connections when importing server utilities — importing
@@ -38,6 +39,7 @@ describe("buildImportReadyColumns", () => {
     const headers = columns.map((c) => c.header);
 
     expect(headers).toEqual([
+      "id",
       "title",
       "description",
       "category",
@@ -84,6 +86,7 @@ describe("buildImportReadyColumns", () => {
     // Required fields are always present…
     expect(headers).toEqual(
       expect.arrayContaining([
+        "id",
         "title",
         "type",
         "quantity",
@@ -122,6 +125,27 @@ describe("buildImportReadyColumns", () => {
     const headers = columns.map((c) => c.header);
     expect(headers).not.toContain("qrId");
     expect(headers).not.toContain("imageUrl");
+  });
+
+  it("emits id in both 'visible' and 'all' scope (row matcher for the update importer)", () => {
+    // why: `id` has no `columnName`, so it must never be gated on the user's
+    // column-visibility settings in either scope — a "visible" export must
+    // still round-trip through the update importer.
+    const allScope = buildImportReadyColumns({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+    }).map((c) => c.header);
+    const visibleScope = buildImportReadyColumns({
+      columnScope: "visible",
+      settingsColumns: VISIBLE_ONLY_COLUMNS,
+      activeCustomFields: [],
+      barcodesEnabled: false,
+    }).map((c) => c.header);
+
+    expect(allScope).toContain("id");
+    expect(visibleScope).toContain("id");
   });
 });
 
@@ -177,12 +201,31 @@ describe("resolveImportReadyCell / value encoding", () => {
     });
     const row = rows[1]; // row 0 is headers
 
+    expect(row[headerIndex("id")]).toBe("asset-1");
     expect(row[headerIndex("title")]).toBe("AMD Ryzen");
     expect(row[headerIndex("category")]).toBe("CPU");
     expect(row[headerIndex("tags")]).toBe("High priority,small");
     expect(row[headerIndex("bookable")]).toBe("yes");
     expect(row[headerIndex("valuation")]).toBe("100"); // plain number, no "$"
     expect(row[headerIndex("type")]).toBe("INDIVIDUAL"); // enum, not "Individual"
+  });
+
+  it("emits the asset's cuid for the id column, not sequentialId", () => {
+    // why: sequentialId is a display-only per-org counter; the update
+    // importer matches rows by primary key, so the cell must be asset.id.
+    const rows = buildImportReadyRows({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [
+        makeAsset({
+          id: "jssg2196xk3lqgk5sszhb413r",
+          sequentialId: "SAM-0042",
+        }),
+      ],
+    });
+    expect(rows[1][headerIndex("id")]).toBe("jssg2196xk3lqgk5sszhb413r");
   });
 
   it("uses empty string for an uncategorized asset (not 'Uncategorized')", () => {
@@ -383,6 +426,7 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     const parsed = extractCSVDataFromContentImport(rows, [
       ...ASSET_CSV_HEADERS,
     ]);
+    expect(parsed[0].id).toBe("asset-1"); // makeAsset()'s default id
     expect(parsed[0].type).toBe("QUANTITY_TRACKED");
     expect(parsed[0].consumptionType).toBe("ONE_WAY");
     expect(parsed[0]["cf:Brand,type:OPTION"]).toBe("amd");
@@ -397,6 +441,73 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
       assets: [makeAsset()],
     });
     expect(csv.split("\r\n")).toHaveLength(2); // header + 1 row
-    expect(csv.startsWith('"title"')).toBe(true);
+    expect(csv.startsWith('"id"')).toBe(true);
+  });
+});
+
+describe("export -> update-importer round trip (final review fix)", () => {
+  // why: `import-update-diff.test.ts`'s headline regression test pins a
+  // HAND-EDITED copy of the customer's header row, not the header row
+  // `buildImportReadyRows` actually produces. That test would stay green
+  // even if a `CORE_IMPORT_FIELDS` header got renamed, or `alwaysInclude`
+  // got dropped from `id` — both would silently break the real
+  // export -> update contract. This feeds the REAL export output into the
+  // REAL classifier (`analyzeUpdateHeaders`) so a header rename or dropped
+  // `alwaysInclude` fails a test immediately.
+  it("the real Import-ready 'all columns' header row is fully recognized by the update importer", () => {
+    const orgCustomFields = [
+      { id: "cf1", name: "Serial", type: CustomFieldType.TEXT },
+    ];
+
+    const [headerRow] = buildImportReadyRows({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [{ name: "Serial", type: CustomFieldType.TEXT }],
+      barcodesEnabled: true,
+      assets: [],
+    });
+
+    const result = analyzeUpdateHeaders(headerRow, orgCustomFields);
+
+    // Zero unrecognized columns — every header the export emits is either
+    // updatable or a known-but-read-only field, never a mystery column.
+    expect(result.unrecognizedColumns).toEqual([]);
+    // `id` (the export's row matcher) is the identifier column.
+    expect(result.idDbField).toBe("id");
+    expect(result.idColumnIndex).toBe(0);
+
+    // The full updatable core set, not just "is non-empty" — this fails if
+    // a field silently moves from updatable to ignored (or vice versa).
+    const updatableCsvHeaders = result.updatableColumns.map((c) => c.csvHeader);
+    expect(updatableCsvHeaders).toEqual([
+      "title",
+      "description",
+      "category",
+      "tags",
+      "location",
+      "bookable",
+      "valuation",
+      "assetModel",
+      "quantity",
+      "minQuantity",
+      "unitOfMeasure",
+      "consumptionType",
+      "cf:Serial,type:TEXT",
+    ]);
+
+    // Known-but-read-only fields land in ignoredColumns, not
+    // unrecognizedColumns: kit/custodian/type are permanently non-updatable
+    // (custody + booking side-effects, immutable type), and barcode_*
+    // columns aren't round-trippable through this flow yet.
+    expect(result.ignoredColumns).toEqual([
+      "kit",
+      "custodian",
+      "type",
+      "barcode_Code128",
+      "barcode_Code39",
+      "barcode_DataMatrix",
+      "barcode_ExternalQR",
+      "barcode_EAN13",
+    ]);
   });
 });

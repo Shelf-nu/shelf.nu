@@ -26,15 +26,14 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
     computeAvailableQuantityMock(...args),
 }));
 
-// why: computeCheckedOutBreakdownForAsset lives in the very large booking
-// service module and has its own dedicated test coverage there (Wave-B partial
-// checkout attribution + the #2790 ③ standalone/kit split). Stubbing it keeps
-// this test file focused on how getAssetAvailability *uses* the checked-out
-// breakdown (`total` for display, `standalone` for `physicalAvailable`), not
-// how it's derived. It returns `{ total, standalone }` — the split the
-// availability primitive consumes.
+// why: computeCheckedOutBreakdownForAsset has its own dedicated test coverage
+// (Wave-B partial checkout attribution + the #2790 ③ standalone/kit split).
+// Stubbing it keeps this test file focused on how getAssetAvailability *uses*
+// the checked-out breakdown (`total` for display, `standalone` for
+// `physicalAvailable`), not how it's derived. It returns `{ total, standalone }`
+// — the split the availability primitive consumes.
 const computeCheckedOutBreakdownForAssetMock = vitest.fn();
-vitest.mock("~/modules/booking/service.server", () => ({
+vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: (...args: unknown[]) =>
     computeCheckedOutBreakdownForAssetMock(...args),
 }));

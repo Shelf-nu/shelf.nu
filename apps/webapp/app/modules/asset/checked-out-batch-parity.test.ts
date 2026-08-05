@@ -38,7 +38,7 @@
  */
 import { BookingStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
 

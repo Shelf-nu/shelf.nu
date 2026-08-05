@@ -663,8 +663,11 @@ export type PdfBookingAssetSlice = {
    * The slice's `BookingAsset.assetKitId`: `null` for a standalone (free-pool)
    * slice, otherwise the `AssetKit.id` this slice was booked under. Matched
    * against `assetKits[].id` on the joined asset to resolve the slice's kit.
+   * Distinct from the projected `kitId` (the shared `Kit.id`, used for search
+   * re-expansion and grouping) — a QT asset in two kits has two slices with the
+   * SAME asset id but different `assetKitId`s and different `kitId`s.
    */
-  kitId: string | null;
+  assetKitId: string | null;
   /** Booked units for THIS slice (`BookingAsset.quantity`). */
   quantity: number;
   /** Unique `BookingAsset.id`, used as the rendered row's React key. */
@@ -673,14 +676,14 @@ export type PdfBookingAssetSlice = {
 
 /**
  * Minimal shape of the full per-asset data joined onto each slice. `assetKits`
- * carries each membership's `AssetKit.id` so a slice's `kitId` can be resolved
- * to the specific kit (name + location) it was booked under — a QT asset can
- * belong to several kits, so `assetKits[0]` is NOT necessarily the right one.
+ * carries each membership's `AssetKit.id` so a slice's `assetKitId` can be
+ * resolved to the specific kit (name + location) it was booked under — a QT
+ * asset can belong to several kits, so `assetKits[0]` is NOT necessarily right.
  */
 type PdfRawAssetShape = {
   id: string;
   assetKits: Array<{
-    /** `AssetKit.id` — matched against a slice's `kitId`. */
+    /** `AssetKit.id` — matched against a slice's `assetKitId`. */
     id: string;
     kit: {
       id: string;
@@ -719,7 +722,7 @@ type PdfSliceOverrides = {
  * asset ids), keeping each kit's slices contiguous.
  *
  * The join is done by asset id: `rawAssetsById` holds the full (deduped) asset
- * payload, and each slice's kit is resolved by matching the slice's `kitId`
+ * payload, and each slice's kit is resolved by matching the slice's `assetKitId`
  * (a `BookingAsset.assetKitId`) against the asset's `assetKits[].id`. A slice
  * whose asset didn't resolve is skipped defensively rather than crashing — it
  * cannot normally happen, since the visible slices are the source of the asset
@@ -745,10 +748,10 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
     }
 
     // Resolve THIS slice's kit (with location) from the full asset data. A
-    // standalone slice (`kitId === null`) has no kit; a kit-driven slice
+    // standalone slice (`assetKitId === null`) has no kit; a kit-driven slice
     // matches its `AssetKit.id` against the asset's memberships.
-    const sliceKit = slice.kitId
-      ? raw.assetKits.find((ak) => ak.id === slice.kitId)?.kit ?? null
+    const sliceKit = slice.assetKitId
+      ? raw.assetKits.find((ak) => ak.id === slice.assetKitId)?.kit ?? null
       : null;
 
     rows.push({
@@ -766,4 +769,77 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
   }
 
   return rows;
+}
+
+/**
+ * Source shape the PDF slice projection reads off each `BookingAsset.asset`.
+ * `assetKits` supplies the membership → `Kit.id` mapping (already selected by
+ * `BOOKING_WITH_ASSETS_INCLUDE`); `assetLocations` feeds the primary location.
+ */
+type PdfSliceSourceAsset = {
+  assetKits: Array<{
+    id: string;
+    kit: { id: string; name: string; location: { name: string } | null } | null;
+  }>;
+  assetLocations?: Array<{ location?: { name: string } | null }>;
+};
+
+/** The per-slice fields layered onto each source asset by the projection. */
+type PdfBookingAssetSliceProjection = {
+  /**
+   * The shared `Kit.id` of the slice's kit (`null` for a standalone slice) —
+   * NOT the per-membership `AssetKit.id`. `filterBookingAssets` re-expands a
+   * search match into its whole kit by grouping on this, so it MUST be the
+   * `Kit.id` or an asset's kit siblings never surface on search.
+   */
+  kitId: string | null;
+  /** The slice's `AssetKit.id` — the discriminator {@link buildPdfAssetRows} joins on. */
+  assetKitId: string | null;
+  kit: { id: string; name: string; location: { name: string } | null } | null;
+  location: { name: string } | null;
+  quantity: number;
+  bookingAssetId: string;
+};
+
+/**
+ * Projects a booking's `BookingAsset` rows into the PER-SLICE list the PDF
+ * export renders and searches over — one entry per slice (a standalone slice
+ * plus one per kit the asset is booked under), each carrying its own booked
+ * quantity and unique key.
+ *
+ * The load-bearing detail: `kitId` is set to the resolved **`Kit.id`**, not the
+ * per-membership `AssetKit.id`. {@link filterBookingAssets} groups a search
+ * match's kit siblings by `kitId`; setting it to the `AssetKit.id` (unique per
+ * asset-in-kit) meant searching one kit member never surfaced the rest of the
+ * kit in the exported PDF. The `AssetKit.id` is preserved separately as
+ * `assetKitId` for {@link buildPdfAssetRows}'s per-slice kit join.
+ *
+ * @param bookingAssets - The booking's `BookingAsset` rows (each with its
+ *   `assetKitId`, booked `quantity`, id, and the joined `asset` whose
+ *   `assetKits` supply the `AssetKit.id` → `Kit.id` mapping).
+ * @returns One projected slice per `BookingAsset` row.
+ */
+export function buildPdfBookingAssetSlices<TAsset extends PdfSliceSourceAsset>(
+  bookingAssets: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    asset: TAsset;
+  }>
+): Array<TAsset & PdfBookingAssetSliceProjection> {
+  return bookingAssets.map((ba) => {
+    const membership = ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId);
+    const kit = membership?.kit ?? null;
+    return {
+      ...ba.asset,
+      // Kit.id (shared across the kit) — drives search re-expansion + grouping.
+      kitId: kit?.id ?? null,
+      // AssetKit.id (per membership) — the per-slice join discriminator.
+      assetKitId: ba.assetKitId,
+      kit,
+      location: getPrimaryLocation<{ name: string }>(ba.asset),
+      quantity: ba.quantity,
+      bookingAssetId: ba.id,
+    };
+  });
 }
