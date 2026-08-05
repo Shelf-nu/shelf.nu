@@ -13,11 +13,14 @@
  * with `hints.timeZone`) this assertion FAILS because it would produce the
  * Moscow instant.
  *
- * @see {@link file://./audits.start.ts}
+ * The `.action` infix distinguishes this from `audits.start.test.ts` (the
+ * `StartAuditSchema` unit tests) — both cover the same route.
+ *
+ * @see {@link file://../../../app/routes/api+/audits.start.ts}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { action } from "./audits.start";
+import { action } from "~/routes/api+/audits.start";
 
 // why: assert on the UTC instant handed to the persistence layer; also lets us
 // short-circuit the reminder-scheduling / email branches with a null dueDate on

@@ -26,14 +26,16 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
     computeAvailableQuantityMock(...args),
 }));
 
-// why: computeCheckedOutForAsset lives in the very large booking service
-// module and has its own dedicated test coverage there (Wave-B partial
-// checkout attribution). Stubbing it keeps this test file focused on how
-// getAssetAvailability *uses* the checked-out figure, not how it's derived.
-const computeCheckedOutForAssetMock = vitest.fn();
-vitest.mock("~/modules/booking/service.server", () => ({
-  computeCheckedOutForAsset: (...args: unknown[]) =>
-    computeCheckedOutForAssetMock(...args),
+// why: computeCheckedOutBreakdownForAsset has its own dedicated test coverage
+// (Wave-B partial checkout attribution + the #2790 ③ standalone/kit split).
+// Stubbing it keeps this test file focused on how getAssetAvailability *uses*
+// the checked-out breakdown (`total` for display, `standalone` for
+// `physicalAvailable`), not how it's derived. It returns `{ total, standalone }`
+// — the split the availability primitive consumes.
+const computeCheckedOutBreakdownForAssetMock = vitest.fn();
+vitest.mock("~/modules/booking/checked-out.server", () => ({
+  computeCheckedOutBreakdownForAsset: (...args: unknown[]) =>
+    computeCheckedOutBreakdownForAssetMock(...args),
 }));
 
 vitest.mock("~/database/db.server", () => ({
@@ -280,7 +282,10 @@ describe("getAssetAvailability", () => {
   function resetMocks() {
     vitest.clearAllMocks();
     computeAvailableQuantityMock.mockResolvedValue({ total: 10, inCustody: 0 });
-    computeCheckedOutForAssetMock.mockResolvedValue(0);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 0,
+      standalone: 0,
+    });
     // @ts-expect-error mocked
     db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
     // @ts-expect-error mocked
@@ -379,7 +384,10 @@ describe("getAssetAvailability", () => {
     // checkedOut 4 from an OVERDUE booking whose window is in the past —
     // the requested window below is in the future, proving checkedOut is
     // window-independent.
-    computeCheckedOutForAssetMock.mockResolvedValue(4);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 4,
+      standalone: 4,
+    });
 
     const a = await getAssetAvailability({
       assetId: ASSET_ID,
@@ -573,7 +581,10 @@ describe("getAssetAvailability", () => {
       // bb1: ONGOING, 7 units checked out, window Jul27–29 (already returning
       // before bb2 even starts). checkedOut mirrors bb1's units being
       // physically off the shelf right now.
-      computeCheckedOutForAssetMock.mockResolvedValue(7);
+      computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+        total: 7,
+        standalone: 7,
+      });
       // A real Postgres query for bb2's OWN window (Jul30–Aug1) — with the
       // new `booking.OR: [{status: OVERDUE}, {dateOverlap}]` filter — would
       // exclude bb1 entirely: it's ONGOING (not OVERDUE) and its dates don't
@@ -634,7 +645,10 @@ describe("getAssetAvailability", () => {
       // background report, but called WITHOUT a window (informational mode,
       // as the asset-overview loader does) — both active rows are returned
       // regardless of date.
-      computeCheckedOutForAssetMock.mockResolvedValue(7);
+      computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+        total: 7,
+        standalone: 7,
+      });
       // @ts-expect-error mocked
       db.bookingAsset.findMany.mockResolvedValue([
         {
@@ -683,7 +697,10 @@ describe("getAssetAvailability", () => {
     // Overdue booking's own window already elapsed (early July); the target
     // window is two months later. Since there's no known return date, the
     // sentinel-extended interval must still occupy it.
-    computeCheckedOutForAssetMock.mockResolvedValue(4);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 4,
+      standalone: 4,
+    });
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
@@ -716,7 +733,10 @@ describe("getAssetAvailability", () => {
 
   it("(c) a window genuinely overlapping an ONGOING booking still counts it", async () => {
     resetMocks();
-    computeCheckedOutForAssetMock.mockResolvedValue(5);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 5,
+      standalone: 5,
+    });
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
@@ -779,7 +799,10 @@ describe("getAssetAvailabilityBatch", () => {
   function resetSingularMocks() {
     vitest.clearAllMocks();
     computeAvailableQuantityMock.mockResolvedValue({ total: 10, inCustody: 0 });
-    computeCheckedOutForAssetMock.mockResolvedValue(0);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 0,
+      standalone: 0,
+    });
     // @ts-expect-error mocked
     db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
     // @ts-expect-error mocked
@@ -970,7 +993,8 @@ describe("getAssetAvailabilityBatch", () => {
       ]);
       // First call (inside computeCheckedOutBatch) returns no ONGOING/OVERDUE
       // pivots for either asset — checkedOut is 0 for both, matching the
-      // singular calls above (`computeCheckedOutForAssetMock` resolves 0).
+      // singular calls above (`computeCheckedOutBreakdownForAssetMock`
+      // resolves { total: 0, standalone: 0 }).
       client.bookingAsset.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([...asset1Rows, ...asset2Rows]);
@@ -1147,7 +1171,10 @@ describe("getAssetAvailabilityBatch", () => {
         total: 10,
         inCustody: 0,
       });
-      computeCheckedOutForAssetMock.mockResolvedValue(4);
+      computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+        total: 4,
+        standalone: 4,
+      });
       // @ts-expect-error mocked
       db.bookingAsset.findMany.mockResolvedValue([
         {
@@ -1232,7 +1259,10 @@ describe("assertAssetQuantityAvailable", () => {
   function resetMocks() {
     vitest.clearAllMocks();
     computeAvailableQuantityMock.mockResolvedValue({ total: 10, inCustody: 0 });
-    computeCheckedOutForAssetMock.mockResolvedValue(0);
+    computeCheckedOutBreakdownForAssetMock.mockResolvedValue({
+      total: 0,
+      standalone: 0,
+    });
     // @ts-expect-error mocked
     db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
     // @ts-expect-error mocked

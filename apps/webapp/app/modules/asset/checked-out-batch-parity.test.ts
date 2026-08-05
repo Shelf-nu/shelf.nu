@@ -38,7 +38,7 @@
  */
 import { BookingStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
 
@@ -54,8 +54,29 @@ const ORG_ID = "org1";
 
 /** One `BookingAsset` row in the in-memory fixture. */
 type FixtureBookingAsset = {
+  /**
+   * `BookingAsset.id` — needed to attribute checkout claims per slice. Optional
+   * in fixtures: single-slice rows can omit it (a stable id is synthesized);
+   * multi-slice rows for the SAME (asset, booking) MUST set distinct ids so the
+   * standalone-first greedy attribution can tell them apart.
+   */
+  id?: string;
   assetId: string;
   bookingId: string;
+  quantity: number;
+  /** `null`/omitted = standalone (free-pool) slice; a value = kit-driven slice. */
+  assetKitId?: string | null;
+};
+
+/** One `Asset` row in the in-memory fixture (only `quantity`, the availability `total`). */
+type FixtureAsset = {
+  id: string;
+  quantity: number;
+};
+
+/** One `AssetKit` membership row in the in-memory fixture (feeds `inKits`). */
+type FixtureAssetKit = {
+  assetId: string;
   quantity: number;
 };
 
@@ -89,26 +110,65 @@ function matchesFilter(value: string, filter: ScalarFilter): boolean {
 /**
  * Builds an in-memory fake satisfying both {@link AvailabilityBatchClient}
  * (what `getAssetAvailabilityBatch` needs) and the `tx: any` surface
- * `computeCheckedOutForAsset` / `computeBookingAssetsRemainingToCheckOut`
- * need — driven by the SAME fixture rows, so both real implementations read
- * identical underlying data. `asset`/`custody`/`assetKit`/`consumptionLog`
- * are stubbed to empty results: this suite only compares `checkedOut`, which
- * never touches them.
+ * `computeCheckedOutForAsset` / `computeCheckedOutBreakdownForAsset` need —
+ * driven by the SAME fixture rows, so both real implementations read identical
+ * underlying data. `asset`/`assetKit` are backed by optional fixtures so tests
+ * that assert `physicalAvailable` (which needs `total` and `inKits`) can supply
+ * them; `custody`/`consumptionLog` stay stubbed empty (not exercised here).
  *
- * @param fixture - The booking-assets, bookings, and checkout sessions both
- *   formulas under test will query.
+ * @param fixture - The booking-assets, bookings, checkout sessions, and
+ *   (optionally) assets + kit memberships both formulas under test will query.
  */
 function createFakeClient(fixture: {
   bookingAssets: FixtureBookingAsset[];
   bookings: FixtureBooking[];
   sessions: FixtureSession[];
+  assets?: FixtureAsset[];
+  assetKits?: FixtureAssetKit[];
 }) {
   const bookingById = new Map(fixture.bookings.map((b) => [b.id, b]));
+  const assets = fixture.assets ?? [];
+  const assetKits = fixture.assetKits ?? [];
+
+  // Pre-assign every BookingAsset row a stable id (synthesized when the fixture
+  // omits one) and normalize `assetKitId` to `null` — so both reads return the
+  // SAME id for the same row and the per-slice attributor sees unique keys.
+  const bookingAssetRows = fixture.bookingAssets.map((row, i) => ({
+    id: row.id ?? `ba-${i}`,
+    assetId: row.assetId,
+    bookingId: row.bookingId,
+    quantity: row.quantity,
+    assetKitId: row.assetKitId ?? null,
+  }));
 
   return {
-    asset: { findMany: vitest.fn().mockResolvedValue([]) },
+    asset: {
+      findMany: vitest.fn(({ where }: { where: { id?: { in: string[] } } }) =>
+        assets
+          .filter((a) => !where.id || where.id.in.includes(a.id))
+          .map((a) => ({ id: a.id, quantity: a.quantity }))
+      ),
+    },
     custody: { groupBy: vitest.fn().mockResolvedValue([]) },
-    assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
+    assetKit: {
+      groupBy: vitest.fn(
+        ({ where }: { where: { assetId?: { in: string[] } } }) => {
+          const sumByAsset = new Map<string, number>();
+          for (const k of assetKits) {
+            if (where.assetId && !where.assetId.in.includes(k.assetId))
+              continue;
+            sumByAsset.set(
+              k.assetId,
+              (sumByAsset.get(k.assetId) ?? 0) + k.quantity
+            );
+          }
+          return [...sumByAsset].map(([assetId, quantity]) => ({
+            assetId,
+            _sum: { quantity },
+          }));
+        }
+      ),
+    },
     consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
     bookingAsset: {
       findMany: vitest.fn(
@@ -118,13 +178,19 @@ function createFakeClient(fixture: {
           where: {
             assetId?: ScalarFilter;
             bookingId?: ScalarFilter;
+            assetKitId?: null;
             booking?: { status?: ScalarFilter; organizationId?: string };
           };
         }) =>
-          fixture.bookingAssets
+          bookingAssetRows
             .filter((row) => {
               if (!matchesFilter(row.assetId, where.assetId)) return false;
               if (!matchesFilter(row.bookingId, where.bookingId)) return false;
+              // The reserved-rows read filters `assetKitId: null` (standalone
+              // only); the checked-out reads omit it (all slices).
+              if (where.assetKitId === null && row.assetKitId !== null) {
+                return false;
+              }
               if (where.booking) {
                 const booking = bookingById.get(row.bookingId);
                 if (!booking) return false;
@@ -140,9 +206,11 @@ function createFakeClient(fixture: {
               return true;
             })
             .map((row) => ({
+              id: row.id,
               assetId: row.assetId,
               bookingId: row.bookingId,
               quantity: row.quantity,
+              assetKitId: row.assetKitId,
               // Neither formula under test reads `booking.from`/`.to` for the
               // checked-out computation (that's only consulted by the
               // `reserved` side of `getAssetAvailabilityBatch`, which this
@@ -301,5 +369,98 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
 
     expect(batch.get("a1")?.checkedOut).toBe(real1);
     expect(batch.get("a2")?.checkedOut).toBe(real2);
+  });
+
+  // #2790 ③: a QT asset checked out ENTIRELY via a kit must not have its
+  // kit-driven checked-out units subtracted twice in `physicalAvailable`
+  // (once via `inKits`, once via `checkedOut`). Before the fix this asset
+  // showed `physicalAvailable === -10`.
+  it("kit-only checkout: physicalAvailable stays non-negative while checkedOut is the full count", async () => {
+    const client = createFakeClient({
+      // total 10, fully allocated into one kit (inKits = 10).
+      assets: [{ id: "a1", quantity: 10 }],
+      assetKits: [{ assetId: "a1", quantity: 10 }],
+      // One kit-driven slice (assetKitId set), qty 10, no standalone slice.
+      bookingAssets: [
+        {
+          id: "ba-kit",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          assetKitId: "kit1",
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      // Legacy all-at-once checkout (zero sessions) → all 10 units off the shelf.
+      sessions: [],
+    });
+
+    const real = await computeCheckedOutForAsset(client, "a1", ORG_ID);
+    const batch = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+
+    const a1 = batch.get("a1");
+    // Displayed "Checked out" is the FULL count (kit + standalone), unchanged.
+    expect(real).toBe(10);
+    expect(a1?.checkedOut).toBe(10);
+    // physicalAvailable = 10 − 0(custody) − 10(inKits) − 0(standaloneCheckedOut)
+    // = 0. Was −10 before the fix (full 10 subtracted on top of inKits).
+    expect(a1?.inKits).toBe(10);
+    expect(a1?.physicalAvailable).toBe(0);
+  });
+
+  // #2790 ③: a QT asset with BOTH a standalone free-pool slice and a kit-driven
+  // slice on the same booking. Only the standalone checked-out units feed
+  // `physicalAvailable`; the displayed `checkedOut` is still the full sum.
+  it("mixed standalone + kit: only standalone checked-out feeds physicalAvailable", async () => {
+    const client = createFakeClient({
+      // total 20, kit membership qty 5 (inKits = 5).
+      assets: [{ id: "a1", quantity: 20 }],
+      assetKits: [{ assetId: "a1", quantity: 5 }],
+      // One ONGOING booking with a standalone slice (qty 8) + a kit-driven
+      // slice (qty 5). 10 units are claimed untagged → standalone-first greedy
+      // gives standalone 8, kit 2.
+      bookingAssets: [
+        { id: "ba-standalone", assetId: "a1", bookingId: "b1", quantity: 8 },
+        {
+          id: "ba-kit",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          assetKitId: "kit1",
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [10],
+          bookingAssetIds: [""],
+        },
+      ],
+    });
+
+    const real = await computeCheckedOutForAsset(client, "a1", ORG_ID);
+    const batch = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+
+    const a1 = batch.get("a1");
+    // Full checked-out = standalone(8) + kit(2) = 10 — the displayed number.
+    expect(real).toBe(10);
+    expect(a1?.checkedOut).toBe(10);
+    // physicalAvailable = 20 − 0 − 5(inKits) − 8(standaloneCheckedOut) = 7.
+    expect(a1?.inKits).toBe(5);
+    expect(a1?.physicalAvailable).toBe(7);
   });
 });
