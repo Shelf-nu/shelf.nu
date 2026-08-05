@@ -1,6 +1,7 @@
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
+  buildPdfAssetRows,
   countRemainingCheckoutAssets,
   filterBookingAssets,
   groupAndSortAssetsByKit,
@@ -8,6 +9,7 @@ import {
   isAssetCheckoutEligible,
   isBookingArchivable,
   shouldPromptEarlyCheckout,
+  type PdfBookingAssetSlice,
   type SearchableBookingAsset,
 } from "./helpers";
 
@@ -636,5 +638,160 @@ describe("hasAssetBookingConflicts", () => {
       );
       expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(false);
     });
+  });
+});
+
+describe("buildPdfAssetRows", () => {
+  /** Full per-asset data joined onto each slice by {@link buildPdfAssetRows}. */
+  type RawPdfAsset = {
+    id: string;
+    title: string;
+    status: string;
+    /** Workspace stock — must NOT leak into a row's booked quantity. */
+    quantity: number | null;
+    category: { name: string } | null;
+    assetKits: Array<{
+      id: string;
+      kit: {
+        id: string;
+        name: string;
+        location: { name: string } | null;
+      } | null;
+    }>;
+    assetLocations: Array<{ location: { name: string } | null }>;
+  };
+
+  const rawAsset = (over: Partial<RawPdfAsset> = {}): RawPdfAsset => ({
+    id: "asset",
+    title: "Asset",
+    status: "AVAILABLE",
+    quantity: null,
+    category: null,
+    assetKits: [],
+    assetLocations: [],
+    ...over,
+  });
+
+  it("renders one row per BookingAsset slice for a QT asset booked standalone + via two kits", () => {
+    // Boards = 4 standalone + 3 via kit b1 + 3 via kit b2. The PDF must mirror
+    // the on-screen overview: THREE rows, each with its own quantity and kit,
+    // never one summed row. `Asset.quantity` (workspace stock = 100) must not
+    // become the booked quantity.
+    const boards = rawAsset({
+      id: "boards",
+      title: "Boards",
+      quantity: 100,
+      assetKits: [
+        {
+          id: "ak-b1", // AssetKit.id (the slice discriminator)
+          kit: { id: "kit-b1", name: "b1", location: { name: "Warehouse" } },
+        },
+        { id: "ak-b2", kit: { id: "kit-b2", name: "b2", location: null } },
+      ],
+      assetLocations: [{ location: { name: "Shelf A" } }],
+    });
+    const rawAssetsById = new Map([["boards", boards]]);
+
+    // `kitId` here is the slice's `BookingAsset.assetKitId` (an AssetKit.id).
+    const slices: PdfBookingAssetSlice[] = [
+      {
+        id: "boards",
+        kitId: null,
+        quantity: 4,
+        bookingAssetId: "ba-standalone",
+      },
+      { id: "boards", kitId: "ak-b1", quantity: 3, bookingAssetId: "ba-b1" },
+      { id: "boards", kitId: "ak-b2", quantity: 3, bookingAssetId: "ba-b2" },
+    ];
+
+    const rows = buildPdfAssetRows(slices, rawAssetsById);
+
+    expect(
+      rows.map((r) => ({
+        bookingAssetId: r.bookingAssetId,
+        quantity: r.quantity,
+        kitId: r.kitId,
+        kitName: r.kit?.name ?? null,
+      }))
+    ).toEqual([
+      {
+        bookingAssetId: "ba-standalone",
+        quantity: 4,
+        kitId: null,
+        kitName: null,
+      },
+      { bookingAssetId: "ba-b1", quantity: 3, kitId: "kit-b1", kitName: "b1" },
+      { bookingAssetId: "ba-b2", quantity: 3, kitId: "kit-b2", kitName: "b2" },
+    ]);
+    // Booked slice quantity wins over the asset's 100-unit workspace stock.
+    expect(rows.some((r) => r.quantity === 100)).toBe(false);
+    // Primary location resolves from the `AssetLocation` pivot.
+    expect(rows[0].location).toEqual({ name: "Shelf A" });
+  });
+
+  it("renders a single quantity-1 row for an INDIVIDUAL asset", () => {
+    const laptop = rawAsset({ id: "laptop", title: "Laptop" });
+    const rows = buildPdfAssetRows(
+      [{ id: "laptop", kitId: null, quantity: 1, bookingAssetId: "ba-laptop" }],
+      new Map([["laptop", laptop]])
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      title: "Laptop",
+      quantity: 1,
+      kit: null,
+      kitId: null,
+      bookingAssetId: "ba-laptop",
+    });
+  });
+
+  it("skips a slice whose asset didn't resolve instead of crashing", () => {
+    const rows = buildPdfAssetRows(
+      [{ id: "ghost", kitId: null, quantity: 2, bookingAssetId: "ba-ghost" }],
+      new Map<string, RawPdfAsset>()
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  it("produces rows that group by kit without collapsing duplicate asset ids", () => {
+    // End-to-end: the per-slice rows must survive `groupAndSortAssetsByKit`
+    // (which groups by the resolved kit id and never dedupes asset ids), so
+    // all three Boards slices remain distinct rows.
+    const boards = rawAsset({
+      id: "boards",
+      title: "Boards",
+      assetKits: [
+        { id: "ak-b1", kit: { id: "kit-b1", name: "b1", location: null } },
+        { id: "ak-b2", kit: { id: "kit-b2", name: "b2", location: null } },
+      ],
+    });
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "boards",
+          kitId: null,
+          quantity: 4,
+          bookingAssetId: "ba-standalone",
+        },
+        { id: "boards", kitId: "ak-b1", quantity: 3, bookingAssetId: "ba-b1" },
+        { id: "boards", kitId: "ak-b2", quantity: 3, bookingAssetId: "ba-b2" },
+      ],
+      new Map([["boards", boards]])
+    );
+
+    const sorted = groupAndSortAssetsByKit(rows, "title", "asc");
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted.map((r) => r.bookingAssetId).sort()).toEqual([
+      "ba-b1",
+      "ba-b2",
+      "ba-standalone",
+    ]);
+  });
+
+  it("returns an empty array for no slices", () => {
+    expect(buildPdfAssetRows([], new Map<string, RawPdfAsset>())).toEqual([]);
   });
 });
