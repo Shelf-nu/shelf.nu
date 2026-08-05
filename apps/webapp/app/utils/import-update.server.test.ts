@@ -218,6 +218,68 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     );
   });
 
+  it("zero-edit round trip: an assetModel cell matching the current model's name produces no change (Bug 1 fix)", async () => {
+    // Regression guard: the diff previously compared the CSV cell (a model
+    // NAME, per the export) against `assetModelId` (a cuid) — the two can
+    // never be string-equal, so this row would have falsely reported a
+    // change. With the fix, `db.asset.findMany` returns the `assetModel`
+    // relation (name), and the diff compares name-to-name.
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "MacBook pro 2022" },
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Asset model"],
+      ["SAM-I1", "MacBook pro 2022"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.updated).toBe(0);
+    expect(result.summary.skipped).toBe(1);
+    expect(updateAsset).not.toHaveBeenCalled();
+    expect(db.assetModel.findMany).not.toHaveBeenCalled();
+    expect(db.assetModel.create).not.toHaveBeenCalled();
+  });
+
+  it("is a case-insensitive no-op, matching batchResolveAssetModelNames's own resolution (Bug 1 fix)", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "MacBook pro 2022" },
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Asset model"],
+      ["SAM-I1", "macbook PRO 2022"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.updated).toBe(0);
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
   it("warns + skips assetModel on a QUANTITY_TRACKED row, other cells still apply", async () => {
     // QUANTITY_TRACKED existing asset. Row carries BOTH `Asset model` (warned
     // + dropped) AND `Quantity` (applied). The row should land in `updated`
@@ -473,6 +535,110 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
   });
 });
 
+describe("applyBulkUpdatesFromImport — multi-placement location guard (Bug 2 fix)", () => {
+  // Reproduces the "Gloves" scenario: a QUANTITY_TRACKED asset with units
+  // split across three AssetLocation rows. The exact placement shape
+  // doesn't matter here — only the COUNT — since `getPrimaryLocation` is
+  // mocked to always return null for this suite; `locationPlacementCount`
+  // is computed directly from `assetLocations.length` in
+  // `fetchAssetsForUpdate`, independent of that mock.
+  const threePlacements = [{}, {}, {}];
+
+  it("warns and skips a location cell naming a different location — never calls updateAsset", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-gloves",
+        sequentialId: "SAM-GLOVES",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 910,
+        assetLocations: threePlacements,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Location"],
+      ["SAM-GLOVES", "Christmas Event"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({
+      id: "SAM-GLOVES",
+      message: expect.stringMatching(/multiple locations/i),
+    });
+    expect(updateAsset).not.toHaveBeenCalled();
+    // The bogus "different location" name must never reach the entity
+    // resolver — it's not actually being applied.
+    expect(db.location.findMany).not.toHaveBeenCalled();
+  });
+
+  it("warns and skips an EMPTY location cell — never wipes placements", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-gloves",
+        sequentialId: "SAM-GLOVES",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 910,
+        assetLocations: threePlacements,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Location"],
+      ["SAM-GLOVES", ""],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].message).toMatch(/multiple locations/i);
+    // Critically: no call ever carries `newLocationId: null` for this asset.
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("still applies a location change normally for a single-placement asset (regression guard)", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-single",
+        sequentialId: "SAM-SINGLE",
+        assetLocations: [{}],
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.location.findMany).mockResolvedValueOnce([
+      { id: "loc-warehouse", name: "Warehouse" },
+    ] as unknown as Awaited<ReturnType<typeof db.location.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Location"],
+      ["SAM-SINGLE", "Warehouse"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.summary.updated).toBe(1);
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ newLocationId: "loc-warehouse" })
+    );
+  });
+});
+
 describe("applyBulkUpdatesFromImport — custom field clearing (SHELF-WEBAPP-21W)", () => {
   it("clears a custom field by emitting `undefined`, never a `{ raw: '' }` value", async () => {
     // why: give the org one TEXT custom field ("Notes") so the "Notes" CSV
@@ -709,5 +875,146 @@ describe("wrong-format detection — no identifier column (status 400 fix round 
       status: 400,
       shouldBeCaptured: false,
     });
+  });
+});
+
+describe("wrong-format detection — workspace backup export (final review fix)", () => {
+  // why: before this branch, this file was already rejected — identifier
+  // matching was case-sensitive, so the backup export's lowercase "id"
+  // header never resolved. This branch's case-insensitive matching +
+  // `sequentialId` alias means it now WOULD resolve, so without a dedicated
+  // guard the backup file's JSON-blob `category`/`tags`/`assetModel` cells
+  // would be proposed as literal new entities (a category named `{}`, etc).
+  const backupCsvData = [
+    [
+      "id",
+      "title",
+      "description",
+      "category",
+      "tags",
+      "assetModel",
+      "assetLocations",
+      "customFields",
+      "notes",
+      "createdAt",
+      "updatedAt",
+    ],
+    [
+      "uuid-1",
+      "Laptop",
+      "desc",
+      "{}",
+      "[]",
+      "{}",
+      "[]",
+      "[]",
+      "[]",
+      "2024-01-01T00:00:00.000Z",
+      "2024-01-01T00:00:00.000Z",
+    ],
+  ];
+
+  it("buildUpdatePreview throws a specific, actionable 400 instead of proposing JSON entities", async () => {
+    await expect(
+      buildUpdatePreview({ csvData: backupCsvData, organizationId })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("workspace backup export"),
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("applyBulkUpdatesFromImport throws the same 400 (stateless re-parse guard)", async () => {
+    await expect(
+      applyBulkUpdatesFromImport({
+        csvData: backupCsvData,
+        organizationId,
+        userId,
+        request,
+      })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("workspace backup export"),
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("does not fire a false positive on a normal Import-ready export", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset(),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const importReadyCsvData = [
+      ["id", "title", "description", "category"],
+      ["uuid-1", "New Name", "New description", "Electronics"],
+    ];
+
+    await expect(
+      buildUpdatePreview({ csvData: importReadyCsvData, organizationId })
+    ).resolves.toMatchObject({
+      updatableColumns: expect.arrayContaining(["title"]),
+    });
+  });
+});
+
+describe("preview counts exclude warning-marked changes", () => {
+  // why: the apply layer skips any FieldChange carrying `.warning`, so
+  // counting those toward `totalFieldChanges` promised writes that never
+  // happen. Found in manual testing: a zero-edit round trip of a workspace
+  // containing multi-location quantity-tracked assets rendered
+  // "Apply 2 changes to 2 assets" when the real answer was zero.
+  const threePlacements = [{}, {}, {}];
+
+  it("reports 0 field changes when every change is warning-marked", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-gloves",
+        sequentialId: "SAM-GLOVES",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 910,
+        assetLocations: threePlacements,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Location"],
+        ["SAM-GLOVES", "Christmas Event"],
+      ],
+      organizationId,
+    });
+
+    // The row still surfaces so the user can see what was flagged...
+    expect(preview.assetsToUpdate).toHaveLength(1);
+    expect(preview.assetsToUpdate[0].changes[0].warning).toMatch(
+      /multiple locations/i
+    );
+    // ...but nothing is actually applicable.
+    expect(preview.totalFieldChanges).toBe(0);
+  });
+
+  it("counts only the applicable change when warning and real changes mix", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-gloves",
+        sequentialId: "SAM-GLOVES",
+        title: "Old title",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 910,
+        assetLocations: threePlacements,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Name", "Location"],
+        ["SAM-GLOVES", "New title", "Christmas Event"],
+      ],
+      organizationId,
+    });
+
+    // Two changes recorded (name + warning-marked location), one applicable.
+    expect(preview.assetsToUpdate[0].changes).toHaveLength(2);
+    expect(preview.totalFieldChanges).toBe(1);
   });
 });

@@ -40,11 +40,20 @@ export async function fetchAssetsForUpdate(
       category: { select: { name: true } },
       // Pull location through the pivot and flatten to a singular `location`
       // below so the CSV-update diff logic keeps its `asset.location` contract.
+      // Ordered deterministically (oldest placement first) so "primary" is
+      // stable across the export query and this update-preview query — an
+      // unordered `assetLocations[0]` let the two disagree on which
+      // placement was "current" for a multi-placement asset (Bug 2).
       assetLocations: {
+        orderBy: { createdAt: "asc" },
         select: { location: { select: { id: true, name: true } } },
       },
       tags: { select: { id: true, name: true } },
       customFields: { include: { customField: true } },
+      // Needed so the diff can compare the CSV `assetModel` cell (a NAME,
+      // per the export) against the asset's current model NAME rather than
+      // its cuid — see `AssetForUpdate.assetModel`.
+      assetModel: { select: { id: true, name: true } },
     },
   });
 
@@ -60,11 +69,14 @@ export async function fetchAssetsForUpdate(
           value: unknown;
           customField: CustomField;
         }[];
+        assetModel: { id: string; name: string } | null;
       };
       // Synthesise the singular `location` the diff code expects.
       const asset = {
         ...raw,
         location: getPrimaryLocation(raw),
+        // Multi-placement guard input — see AssetForUpdate.locationPlacementCount.
+        locationPlacementCount: raw.assetLocations.length,
       };
       const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
       return [key, asset];
@@ -96,6 +108,14 @@ export async function detectNewEntities(
 
   for (const asset of assetsToUpdate) {
     for (const change of asset.changes) {
+      // A warning-marked change (e.g. the multi-placement `location`
+      // guard, or assetModel-on-QUANTITY_TRACKED) is never written by the
+      // apply layer — skip it here too, or the preview would falsely
+      // advertise creating an entity (e.g. a location) that will never
+      // actually be created. Mirrors the apply pre-pass's own
+      // `if (change.warning) continue;` guard in `import-update.server.ts`.
+      if (change.warning) continue;
+
       const col = headerAnalysis.updatableColumns.find(
         (c) => c.csvHeader === change.field
       );

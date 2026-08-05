@@ -85,6 +85,59 @@ export function parseYesNo(value: string): boolean | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Backup-Export Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Raw Prisma field/relation names that only ever appear TOGETHER as headers
+ * in the workspace **backup** export (`exportAssetsBackupToCsv` in
+ * `~/utils/csv.server.ts`). That export writes `Object.keys(asset)`
+ * verbatim as the header row — a fixed shape (same `include` on every row)
+ * — including relation keys whose cells are raw JSON blobs (`{}`, `[]`,
+ * `{"name":"Foo"}`) rather than plain values.
+ *
+ * Before this branch, that file was rejected outright by the update
+ * importer because identifier matching was case-sensitive. This branch's
+ * case-insensitive matching + `sequentialId` alias means a backup file can
+ * now slip past the identifier check — and if it does, its `category`,
+ * `tags`, and `assetModel` cells would be proposed as literal new entities
+ * (a category named `{}`, a tag named `[]`, an AssetModel with a JSON
+ * name).
+ *
+ * `isBackupExportHeaderRow` requires ALL of these to be present, not just
+ * one: a single marker like `notes` is a plausible name for a workspace's
+ * own custom field (a real regression caught in review — a custom field
+ * literally named "Notes" false-positived a single-marker version of this
+ * guard). All five only co-occur when the file really is a raw backup
+ * export; they never appear in the asset-index export (which uses display
+ * labels like "Created at", with a space) or the import-ready export
+ * (which never emits them at all).
+ */
+const BACKUP_EXPORT_ONLY_HEADERS = [
+  "assetLocations",
+  "customFields",
+  "notes",
+  "createdAt",
+  "updatedAt",
+];
+
+/**
+ * Detects a workspace backup export (Settings → General → Export backup)
+ * fed into the update importer by mistake.
+ * See {@link BACKUP_EXPORT_ONLY_HEADERS} for why requiring ALL markers
+ * (not just one) is what makes this a safe, unambiguous signal.
+ *
+ * @param headers - Trimmed header row from the uploaded CSV
+ * @returns `true` if the header row looks like a backup export
+ */
+export function isBackupExportHeaderRow(headers: string[]): boolean {
+  const lowerHeaders = new Set(headers.map((h) => h.trim().toLowerCase()));
+  return BACKUP_EXPORT_ONLY_HEADERS.every((h) =>
+    lowerHeaders.has(h.toLowerCase())
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Header Analysis
 // ---------------------------------------------------------------------------
 
@@ -294,6 +347,54 @@ export function analyzeUpdateHeaders(
 }
 
 // ---------------------------------------------------------------------------
+// Multi-Placement Location Guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared guard for the `location` column, used by BOTH `compareCoreField`
+ * (non-empty cell) and `detectClearing` (empty cell) so it fires
+ * regardless of the CSV cell's content.
+ *
+ * A QUANTITY_TRACKED asset can have units split across several
+ * `AssetLocation` placement rows (see
+ * .claude/rules/quantity-semantics-per-surface.md and
+ * kit-location-owns-member-placement.md). The CSV export can only ever
+ * write ONE `location` cell — there is no way to tell, from that single
+ * cell, whether the user's intent was "leave every placement alone" or
+ * "collapse everything into this one location". Applying it anyway calls
+ * `updateAsset` with `newLocationId` + `currentLocationId`, which would
+ * silently move units out of one placement into another — destroying
+ * placement structure the user never touched.
+ *
+ * Mirrors the QUANTITY_TRACKED `assetModel` branch below: returns a
+ * warning-marked `FieldChange` (skipped by the apply layer, surfaced in
+ * `result.warnings`) instead of either a silent no-op or a destructive
+ * write.
+ *
+ * @param asset - Existing asset loaded from the database
+ * @param csvValue - Trimmed CSV cell value (may be empty — the empty-cell
+ *   clearing path must also be guarded, since an empty cell would
+ *   otherwise wipe every placement)
+ * @param displayName - Human-readable column name for the change record
+ * @returns A warning-marked `FieldChange`, or `null` if the asset has 0 or 1 placements
+ */
+export function buildMultiPlacementLocationWarning(
+  asset: AssetForUpdate,
+  csvValue: string,
+  displayName: string
+): FieldChange | null {
+  if ((asset.locationPlacementCount ?? 0) <= 1) return null;
+  return {
+    field: displayName,
+    currentValue: "(multiple locations)",
+    newValue: csvValue || "(empty)",
+    warning:
+      "This asset has units in multiple locations — bulk location update " +
+      "isn't supported. Move units from the asset's location panel instead.",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Field Comparison
 // ---------------------------------------------------------------------------
 
@@ -356,6 +457,15 @@ export function compareCoreField(
     }
 
     case "location": {
+      // Multi-placement assets can't be safely diffed against a single
+      // "current" location — see `buildMultiPlacementLocationWarning`.
+      const multiPlacementWarning = buildMultiPlacementLocationWarning(
+        asset,
+        csvValue,
+        displayName
+      );
+      if (multiPlacementWarning) return multiPlacementWarning;
+
       const current = asset.location?.name ?? "";
       if (csvValue.toLowerCase() !== current.toLowerCase()) {
         return {
@@ -558,11 +668,17 @@ export function compareCoreField(
             "Asset model can only be set on INDIVIDUAL assets — this asset is quantity-tracked, so the cell was ignored.",
         };
       }
-      // Preview can't pre-resolve the model name → id; surface the cell
-      // value vs current model id so the user sees a change is queued.
-      // The apply path does the real resolution.
-      const current = asset.assetModelId ?? "";
-      if (csvValue !== current) {
+      // Compare NAME to NAME. The export writes the model's NAME to the
+      // CSV cell (`asset.assetModelName` in import-ready-export.server.ts),
+      // so comparing it against `assetModelId` (a cuid) can never match —
+      // that was Bug 1: EVERY row with a non-empty assetModel cell
+      // reported a phantom change, even on an untouched zero-edit round
+      // trip. Case-insensitive to mirror `batchResolveAssetModelNames`,
+      // which resolves model names case-insensitively at apply time, so a
+      // re-imported export with different casing is still correctly a
+      // no-op here. The apply path does the actual name → id resolution.
+      const current = asset.assetModel?.name ?? "";
+      if (csvValue.toLowerCase() !== current.toLowerCase()) {
         return {
           field: displayName,
           currentValue: current || "(none)",
@@ -765,6 +881,18 @@ export function detectClearing(
         return null;
       }
       case "location": {
+        // Same multi-placement guard as `compareCoreField` — MUST run
+        // before the clearing logic below. Without this, an empty
+        // `location` cell on a multi-placement asset would fall through
+        // to `newLocationId: null`, wiping every placement rather than
+        // just being a no-op on an untouched cell.
+        const multiPlacementWarning = buildMultiPlacementLocationWarning(
+          asset,
+          "",
+          displayName
+        );
+        if (multiPlacementWarning) return multiPlacementWarning;
+
         if (asset.location?.name) {
           return {
             field: displayName,

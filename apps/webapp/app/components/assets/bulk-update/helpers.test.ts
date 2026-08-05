@@ -7,7 +7,10 @@
  * @see {@link file://./helpers.ts}
  */
 import { describe, expect, it } from "vitest";
-import { validateCsvClientSide } from "./helpers";
+import {
+  formatUnrecognizedColumnLabel,
+  validateCsvClientSide,
+} from "./helpers";
 
 describe("validateCsvClientSide — identifier column detection", () => {
   it("recognizes the Standard export's 'Asset ID' header", () => {
@@ -39,5 +42,28 @@ describe("validateCsvClientSide — identifier column detection", () => {
     expect(result.warnings).toContain(
       "No identifier column found. Your CSV needs an Asset ID or ID column to match rows to existing assets."
     );
+  });
+});
+
+describe("formatUnrecognizedColumnLabel (final review fix)", () => {
+  // why: a `cf:<Name>,type:<TYPE>` header naming a field absent from the
+  // workspace lands in `unrecognizedColumns` (see analyzeUpdateHeaders).
+  // Rendering it raw made the "create a matching Custom Field" advice
+  // point at creating a field literally named `cf:Serial,type:TEXT`.
+  it("parses a cf: header down to just the field name", () => {
+    expect(formatUnrecognizedColumnLabel("cf:Serial,type:TEXT")).toBe("Serial");
+    expect(formatUnrecognizedColumnLabel("cf:Purchase Date,type:DATE")).toBe(
+      "Purchase Date"
+    );
+  });
+
+  it("leaves a plain (non cf:) header unchanged", () => {
+    expect(formatUnrecognizedColumnLabel("Some Random Column")).toBe(
+      "Some Random Column"
+    );
+  });
+
+  it("leaves a malformed short 'cf:' header unchanged (guards the non-null assertion)", () => {
+    expect(formatUnrecognizedColumnLabel("cf:")).toBe("cf:");
   });
 });

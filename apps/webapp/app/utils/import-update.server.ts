@@ -30,6 +30,7 @@ import {
   analyzeUpdateHeaders,
   computeAssetDiffs,
   describeBulkUpdateRowFailure,
+  isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -102,6 +103,24 @@ const NO_UPDATABLE_COLUMNS_MESSAGE =
   'shaped for updates. Export "Import-ready" from the Asset Index and ' +
   "re-import that file to update these assets.";
 
+/**
+ * "Workspace backup export detected" error message. Fires when the header
+ * row carries raw Prisma field/relation names that only the workspace
+ * backup export (Settings → General → Export backup) emits — see
+ * `isBackupExportHeaderRow` in `./import-update-diff`. That file's
+ * `category`, `tags`, and `assetModel` cells are JSON blobs, not plain
+ * values, so letting it through would propose creating entities literally
+ * named `{}` / `[]` / a raw JSON string. Checked BEFORE the identifier
+ * check below: the backup file's `id` header now resolves as a valid
+ * identifier column (case-insensitive matching, added by this branch), so
+ * without this guard the file would sail past that check too.
+ */
+const BACKUP_EXPORT_MESSAGE =
+  "This looks like a workspace backup export. Use Export → Import-ready " +
+  "from the Asset Index instead — the backup file's category, tags, and " +
+  "asset model cells are stored as raw data and can't be matched to real " +
+  "entities here.";
+
 // ---------------------------------------------------------------------------
 // Build Full Preview
 // ---------------------------------------------------------------------------
@@ -146,6 +165,20 @@ export async function buildUpdatePreview({
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
+
+  // Reject a workspace backup export before it can be misread as a normal
+  // update CSV — see BACKUP_EXPORT_MESSAGE. Checked before the identifier
+  // check below because the backup file's `id` header now resolves as a
+  // valid (case-insensitive) identifier column.
+  if (isBackupExportHeaderRow(headers)) {
+    throw new ShelfError({
+      cause: null,
+      message: BACKUP_EXPORT_MESSAGE,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   // Validate: must have at least one identifier column
   if (headerAnalysis.idColumnIndex === -1) {
@@ -208,9 +241,16 @@ export async function buildUpdatePreview({
     fallbackAssets,
   });
 
-  // Compute field change stats
+  // Compute field change stats.
+  //
+  // Only changes WITHOUT a `.warning` are counted: the apply layer skips
+  // warning-marked fields (invalid number/date/enum, assetModel on a
+  // quantity-tracked row, location on a multi-placement asset), so counting
+  // them here would promise the user changes that will never be written —
+  // e.g. a zero-edit round trip of a workspace with multi-location assets
+  // rendered "Apply 2 changes to 2 assets" when the answer was zero.
   const totalFieldChanges = diffs.assetsToUpdate.reduce(
-    (sum, a) => sum + a.changes.length,
+    (sum, a) => sum + a.changes.filter((c) => !c.warning).length,
     0
   );
   // Total possible fields = rows with found assets × updatable columns
@@ -289,6 +329,19 @@ export async function applyBulkUpdatesFromImport({
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
+
+  // Same "workspace backup export" guard as `buildUpdatePreview` — kept in
+  // sync here since this function re-parses the CSV independently
+  // (stateless apply). See BACKUP_EXPORT_MESSAGE.
+  if (isBackupExportHeaderRow(headers)) {
+    throw new ShelfError({
+      cause: null,
+      message: BACKUP_EXPORT_MESSAGE,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   if (headerAnalysis.idColumnIndex === -1) {
     throw new ShelfError({

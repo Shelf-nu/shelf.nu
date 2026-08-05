@@ -12,6 +12,7 @@ import {
   compareCustomField,
   computeAssetDiffs,
   describeBulkUpdateRowFailure,
+  isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -353,6 +354,57 @@ describe("compareCoreField", () => {
       const result = compareCoreField("location", "Office", asset, "Location");
       expect(result?.currentValue).toBe("(none)");
     });
+
+    describe("multi-placement guard (Bug 2 fix)", () => {
+      // Bug 2: a QUANTITY_TRACKED asset can have units split across
+      // several AssetLocation rows. The CSV can only carry one `location`
+      // cell, so diffing against an arbitrary "primary" placement either
+      // lies in the preview or — worse — collapses real placement
+      // structure on apply. Multi-placement assets get a warning-marked
+      // change instead, which the apply layer always skips.
+      it("warns and skips instead of diffing when the asset has multiple placements", () => {
+        const asset = makeAsset({
+          location: { id: "loc-1", name: "Christmas Event" },
+          locationPlacementCount: 3,
+        });
+        const result = compareCoreField(
+          "location",
+          "Mithril Dragons",
+          asset,
+          "Location"
+        );
+        expect(result?.warning).toMatch(/multiple locations/i);
+        expect(result?.newValue).toBe("Mithril Dragons");
+      });
+
+      it("does not warn for a single-placement asset (regression guard)", () => {
+        const asset = makeAsset({
+          location: { id: "loc-1", name: "Office A" },
+          locationPlacementCount: 1,
+        });
+        const result = compareCoreField(
+          "location",
+          "Warehouse",
+          asset,
+          "Location"
+        );
+        expect(result?.warning).toBeUndefined();
+        expect(result?.newValue).toBe("Warehouse");
+      });
+
+      it("does not warn when locationPlacementCount is unset (pre-existing fixtures)", () => {
+        const asset = makeAsset({
+          location: { id: "loc-1", name: "Office A" },
+        });
+        const result = compareCoreField(
+          "location",
+          "Warehouse",
+          asset,
+          "Location"
+        );
+        expect(result?.warning).toBeUndefined();
+      });
+    });
   });
 
   describe("tags", () => {
@@ -673,6 +725,60 @@ describe("compareCoreField", () => {
       expect(result?.warning).toMatch(/quantity-tracked/i);
       expect(result?.warning).toMatch(/INDIVIDUAL/);
       expect(result?.newValue).toBe("Dell Latitude");
+    });
+  });
+
+  describe("assetModel — name comparison (Bug 1 fix)", () => {
+    // Bug 1: the preview compared the CSV cell (a model NAME, per the
+    // export) against `asset.assetModelId` (a cuid) — the two can never
+    // be string-equal, so EVERY row with a non-empty assetModel cell
+    // reported a phantom change, even on an untouched zero-edit round
+    // trip. Fixed to compare name-to-name via `asset.assetModel.name`.
+    it("is a no-op when the csv cell matches the current model's name (zero-edit round trip)", () => {
+      const asset = makeAsset({
+        type: "INDIVIDUAL",
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "MacBook pro 2022" },
+      });
+      const result = compareCoreField(
+        "assetModel",
+        "MacBook pro 2022",
+        asset,
+        "Asset model"
+      );
+      expect(result).toBeNull();
+    });
+
+    it("is a no-op case-insensitively, matching batchResolveAssetModelNames's own case-insensitive resolution", () => {
+      const asset = makeAsset({
+        type: "INDIVIDUAL",
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "MacBook pro 2022" },
+      });
+      const result = compareCoreField(
+        "assetModel",
+        "macbook PRO 2022",
+        asset,
+        "Asset model"
+      );
+      expect(result).toBeNull();
+    });
+
+    it("shows the model NAME — never the cuid — as currentValue when a real change is detected", () => {
+      const asset = makeAsset({
+        type: "INDIVIDUAL",
+        assetModelId: "model-x",
+        assetModel: { id: "model-x", name: "Dell Latitude" },
+      });
+      const result = compareCoreField(
+        "assetModel",
+        "ThinkPad X1",
+        asset,
+        "Asset model"
+      );
+      expect(result?.currentValue).toBe("Dell Latitude");
+      expect(result?.currentValue).not.toBe("model-x");
+      expect(result?.newValue).toBe("ThinkPad X1");
     });
   });
 
@@ -1375,6 +1481,117 @@ describe("computeAssetDiffs", () => {
       }
     });
   });
+
+  describe("multi-placement location guard (Bug 2 fix)", () => {
+    // Reproduces the "Gloves" scenario: a QUANTITY_TRACKED asset with
+    // units split across three AssetLocation rows (Christmas Event,
+    // Mithril Dragons, God Wars Dungeon). Any `location` cell on such a
+    // row — populated OR empty — must warn-and-skip, never propose (or
+    // apply) a single-location collapse.
+    function makeLocationHeaderAnalysis(): HeaderAnalysis {
+      const columnIndexMap = new Map<number, any>();
+      columnIndexMap.set(1, {
+        csvHeader: "Location",
+        internalKey: "location",
+        kind: "core",
+        csvIndex: 1,
+      });
+      return makeHeaderAnalysis({
+        columnIndexMap,
+        updatableColumns: [
+          {
+            csvHeader: "Location",
+            internalKey: "location",
+            kind: "core" as const,
+            csvIndex: 1,
+          },
+        ],
+      });
+    }
+
+    it("warns and skips when a location cell names a different location on a multi-placement asset", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set(
+        "SAM-0001",
+        makeAsset({
+          location: { id: "loc-mithril", name: "Mithril Dragons" },
+          locationPlacementCount: 3,
+        })
+      );
+
+      const csvData = [
+        ["Asset ID", "Location"],
+        ["SAM-0001", "Christmas Event"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeLocationHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(1);
+      const change = result.assetsToUpdate[0].changes[0];
+      expect(change.warning).toMatch(/multiple locations/i);
+      expect(change.newValue).toBe("Christmas Event");
+    });
+
+    it("warns and skips on an EMPTY location cell on a multi-placement asset (does not wipe placements)", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set(
+        "SAM-0001",
+        makeAsset({
+          location: { id: "loc-mithril", name: "Mithril Dragons" },
+          locationPlacementCount: 3,
+        })
+      );
+
+      const csvData = [
+        ["Asset ID", "Location"],
+        ["SAM-0001", ""],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeLocationHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(1);
+      const change = result.assetsToUpdate[0].changes[0];
+      expect(change.warning).toMatch(/multiple locations/i);
+      // Must NOT be routed through the clearing path (which would signal
+      // "wipe the location" to the apply layer).
+      expect(change.clearing).toBeUndefined();
+    });
+
+    it("still updates location normally for a single-placement asset (regression guard)", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set(
+        "SAM-0001",
+        makeAsset({
+          location: { id: "loc-office", name: "Office A" },
+          locationPlacementCount: 1,
+        })
+      );
+
+      const csvData = [
+        ["Asset ID", "Location"],
+        ["SAM-0001", "Warehouse"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeLocationHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(1);
+      const change = result.assetsToUpdate[0].changes[0];
+      expect(change.warning).toBeUndefined();
+      expect(change.newValue).toBe("Warehouse");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1600,5 +1817,117 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
     expect(updatableKeys).toContain("description");
     expect(result.ignoredColumns).toContain("kit");
     expect(result.ignoredColumns).toContain("custodian");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isBackupExportHeaderRow — workspace backup export detection (final review)
+//
+// The workspace backup export (`exportAssetsBackupToCsv`) writes raw Prisma
+// field/relation names as headers, with `category` / `tags` / `assetModel`
+// cells containing JSON blobs. This branch's case-insensitive identifier
+// matching + `sequentialId` alias means that file can now slip past the
+// "no identifier column" guard — this predicate catches it before its JSON
+// cells get proposed as literal new entities.
+// ---------------------------------------------------------------------------
+
+describe("isBackupExportHeaderRow", () => {
+  it("detects a raw backup-export header row", () => {
+    // Representative subset of `Object.keys(asset)` from
+    // `exportAssetsBackupToCsv` — id/title plus relation keys whose cells
+    // are JSON blobs.
+    const headers = [
+      "id",
+      "title",
+      "description",
+      "category",
+      "tags",
+      "assetModel",
+      "assetLocations",
+      "customFields",
+      "notes",
+      "createdAt",
+      "updatedAt",
+    ];
+    expect(isBackupExportHeaderRow(headers)).toBe(true);
+  });
+
+  it("matches case-insensitively when all five markers are present", () => {
+    expect(
+      isBackupExportHeaderRow([
+        "id",
+        "NOTES",
+        "CreatedAt",
+        "assetlocations",
+        "CUSTOMFIELDS",
+        "updatedat",
+      ])
+    ).toBe(true);
+  });
+
+  it("requires ALL five markers together — a subset is not enough", () => {
+    // why: guards against a false positive. A real backup export always
+    // carries all five (fixed `include` shape); a partial match is more
+    // likely a coincidental header name from a different file.
+    expect(isBackupExportHeaderRow(["id", "notes"])).toBe(false);
+    expect(isBackupExportHeaderRow(["id", "notes", "createdAt"])).toBe(false);
+    expect(
+      isBackupExportHeaderRow([
+        "id",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "customFields",
+        // missing "assetLocations"
+      ])
+    ).toBe(false);
+  });
+
+  it("does not false-positive on a workspace custom field literally named 'Notes'", () => {
+    // why: regression guard — an earlier version of this predicate matched
+    // on ANY single marker, which broke a real customer scenario: a custom
+    // field named "Notes" collided with the backup export's raw `notes`
+    // relation key and rejected a perfectly normal update CSV.
+    expect(isBackupExportHeaderRow(["Asset ID", "Notes"])).toBe(false);
+  });
+
+  it("does not fire for a normal import-ready export header row", () => {
+    const headers = [
+      "id",
+      "title",
+      "description",
+      "category",
+      "kit",
+      "tags",
+      "location",
+      "custodian",
+      "bookable",
+      "valuation",
+      "assetModel",
+      "type",
+      "quantity",
+      "minQuantity",
+      "unitOfMeasure",
+      "consumptionType",
+      "cf:Serial,type:TEXT",
+    ];
+    expect(isBackupExportHeaderRow(headers)).toBe(false);
+  });
+
+  it("does not fire for a normal Standard-export header row", () => {
+    // Standard export uses display labels ("Created at", with a space) —
+    // not the raw camelCase key ("createdAt") the backup export emits.
+    const headers = [
+      "Asset ID",
+      "Name",
+      "Description",
+      "Category",
+      "Tags",
+      "Location",
+      "Created at",
+      "Updated at",
+      "Asset model",
+    ];
+    expect(isBackupExportHeaderRow(headers)).toBe(false);
   });
 });

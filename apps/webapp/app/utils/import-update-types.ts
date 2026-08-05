@@ -323,8 +323,32 @@ export type AssetForUpdate = {
   consumptionType?: ConsumptionType | null;
   /** Current AssetModel link; INDIVIDUAL only. */
   assetModelId?: string | null;
+  /**
+   * Full AssetModel relation (id + name), when linked. The update-preview
+   * diff needs the NAME (not just the id) because the export writes the
+   * model's name to the CSV cell — comparing that cell against
+   * `assetModelId` (a cuid) can never match, which was the Bug 1 root
+   * cause (every row with a model reported a phantom change). See
+   * `compareCoreField` case "assetModel" in `import-update-diff.ts`.
+   * Optional so pre-existing test fixtures that only set `assetModelId`
+   * still compile.
+   */
+  assetModel?: { id: string; name: string } | null;
   category: { name: string } | null;
   location: { id: string; name: string } | null;
+  /**
+   * Count of `AssetLocation` placement rows for this asset. A
+   * QUANTITY_TRACKED asset can have units split across multiple
+   * locations (see .claude/rules/quantity-semantics-per-surface.md) — a
+   * CSV `location` cell can only ever carry ONE value, so there's no way
+   * to safely represent (or collapse) a multi-placement asset through
+   * this flow. `compareCoreField` / `detectClearing` use this to
+   * warn-and-skip a `location` cell instead of silently proposing (and
+   * potentially applying) a destructive single-location collapse.
+   * `undefined` or `<= 1` means "single placement or unknown" — the
+   * normal update path is unaffected.
+   */
+  locationPlacementCount?: number;
   tags: { id: string; name: string }[];
   customFields: {
     id: string;

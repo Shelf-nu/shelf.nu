@@ -8,6 +8,7 @@ import {
   buildImportReadyCsvFromAssets,
   buildImportReadyRows,
 } from "./import-ready-export.server";
+import { analyzeUpdateHeaders } from "./import-update-diff";
 import { extractCSVDataFromContentImport } from "./import.server";
 
 // why: avoid Prisma connections when importing server utilities — importing
@@ -441,5 +442,72 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     });
     expect(csv.split("\r\n")).toHaveLength(2); // header + 1 row
     expect(csv.startsWith('"id"')).toBe(true);
+  });
+});
+
+describe("export -> update-importer round trip (final review fix)", () => {
+  // why: `import-update-diff.test.ts`'s headline regression test pins a
+  // HAND-EDITED copy of the customer's header row, not the header row
+  // `buildImportReadyRows` actually produces. That test would stay green
+  // even if a `CORE_IMPORT_FIELDS` header got renamed, or `alwaysInclude`
+  // got dropped from `id` — both would silently break the real
+  // export -> update contract. This feeds the REAL export output into the
+  // REAL classifier (`analyzeUpdateHeaders`) so a header rename or dropped
+  // `alwaysInclude` fails a test immediately.
+  it("the real Import-ready 'all columns' header row is fully recognized by the update importer", () => {
+    const orgCustomFields = [
+      { id: "cf1", name: "Serial", type: CustomFieldType.TEXT },
+    ];
+
+    const [headerRow] = buildImportReadyRows({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [{ name: "Serial", type: CustomFieldType.TEXT }],
+      barcodesEnabled: true,
+      assets: [],
+    });
+
+    const result = analyzeUpdateHeaders(headerRow, orgCustomFields);
+
+    // Zero unrecognized columns — every header the export emits is either
+    // updatable or a known-but-read-only field, never a mystery column.
+    expect(result.unrecognizedColumns).toEqual([]);
+    // `id` (the export's row matcher) is the identifier column.
+    expect(result.idDbField).toBe("id");
+    expect(result.idColumnIndex).toBe(0);
+
+    // The full updatable core set, not just "is non-empty" — this fails if
+    // a field silently moves from updatable to ignored (or vice versa).
+    const updatableCsvHeaders = result.updatableColumns.map((c) => c.csvHeader);
+    expect(updatableCsvHeaders).toEqual([
+      "title",
+      "description",
+      "category",
+      "tags",
+      "location",
+      "bookable",
+      "valuation",
+      "assetModel",
+      "quantity",
+      "minQuantity",
+      "unitOfMeasure",
+      "consumptionType",
+      "cf:Serial,type:TEXT",
+    ]);
+
+    // Known-but-read-only fields land in ignoredColumns, not
+    // unrecognizedColumns: kit/custodian/type are permanently non-updatable
+    // (custody + booking side-effects, immutable type), and barcode_*
+    // columns aren't round-trippable through this flow yet.
+    expect(result.ignoredColumns).toEqual([
+      "kit",
+      "custodian",
+      "type",
+      "barcode_Code128",
+      "barcode_Code39",
+      "barcode_DataMatrix",
+      "barcode_ExternalQR",
+      "barcode_EAN13",
+    ]);
   });
 });

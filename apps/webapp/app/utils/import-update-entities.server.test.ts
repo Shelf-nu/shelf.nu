@@ -265,3 +265,93 @@ describe("fetchAssetsForUpdate — org scoping (lock, not a fix)", () => {
     expect(result.get("asset-org-a")?.id).toBe("asset-org-a");
   });
 });
+
+/**
+ * @description Regression guards for the two round-trip bugs fixed
+ * alongside this suite:
+ *  - Bug 1 (assetModel phantom change): the diff needs the AssetModel
+ *    relation's NAME, not just its cuid, to compare against the CSV cell.
+ *  - Bug 2 (multi-placement location collapse): the diff needs to know
+ *    HOW MANY AssetLocation rows an asset has, and the "primary" one must
+ *    be picked deterministically (oldest first), not by arbitrary
+ *    unordered Prisma result order.
+ */
+describe("fetchAssetsForUpdate — assetModel + locationPlacementCount (Bug 1 / Bug 2 support)", () => {
+  it("surfaces the assetModel relation and computes locationPlacementCount from assetLocations.length", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        sequentialId: "SAM-0001",
+        organizationId: "org-1",
+        title: "Gloves",
+        category: null,
+        assetLocations: [
+          { location: { id: "loc-a", name: "Christmas Event" } },
+          { location: { id: "loc-b", name: "Mithril Dragons" } },
+          { location: { id: "loc-c", name: "God Wars Dungeon" } },
+        ],
+        tags: [],
+        customFields: [],
+        assetModel: { id: "model-1", name: "MacBook pro 2022" },
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const result = await fetchAssetsForUpdate(
+      ["SAM-0001"],
+      "org-1",
+      "sequentialId"
+    );
+
+    const asset = result.get("SAM-0001");
+    expect(asset?.locationPlacementCount).toBe(3);
+    expect(asset?.assetModel).toEqual({
+      id: "model-1",
+      name: "MacBook pro 2022",
+    });
+  });
+
+  it("queries with the assetModel relation included and assetLocations ordered deterministically (oldest first)", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce(
+      [] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>
+    );
+
+    await fetchAssetsForUpdate(["SAM-0001"], "org-1", "sequentialId");
+
+    const callArg = vi.mocked(db.asset.findMany).mock.calls.at(-1)?.[0] as {
+      include?: {
+        assetModel?: unknown;
+        assetLocations?: { orderBy?: unknown };
+      };
+    };
+    expect(callArg?.include?.assetModel).toEqual({
+      select: { id: true, name: true },
+    });
+    expect(callArg?.include?.assetLocations?.orderBy).toEqual({
+      createdAt: "asc",
+    });
+  });
+
+  it("computes locationPlacementCount as 1 for a single-placement asset (regression guard)", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      {
+        id: "asset-2",
+        sequentialId: "SAM-0002",
+        organizationId: "org-1",
+        title: "Laptop",
+        category: null,
+        assetLocations: [{ location: { id: "loc-a", name: "Office A" } }],
+        tags: [],
+        customFields: [],
+        assetModel: null,
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const result = await fetchAssetsForUpdate(
+      ["SAM-0002"],
+      "org-1",
+      "sequentialId"
+    );
+
+    expect(result.get("SAM-0002")?.locationPlacementCount).toBe(1);
+  });
+});
