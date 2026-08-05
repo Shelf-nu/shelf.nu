@@ -97,21 +97,30 @@ export function QuantityInputSheet({
   const [secondaryValue, setSecondaryValue] = useState("0");
   const inputRef = useRef<TextInput>(null);
 
-  // Re-seed the input every time the sheet opens: each open targets a fresh
+  // The secondary field's presence and seed are read out as primitives so the
+  // re-seed effect below can depend on THEM rather than on the `secondary`
+  // object. Callers build that object inline, giving it a fresh identity on
+  // every parent render — as a dependency it would turn "re-seed on open" into
+  // "re-seed on every parent render", silently discarding a split the operator
+  // had already typed.
+  const hasSecondaryField = secondary != null;
+  const secondaryDefaultValue = secondary?.defaultValue;
+
+  // Re-seed the inputs every time the sheet opens: each open targets a fresh
   // action (different member/holder), so stale values must not leak across.
   useEffect(() => {
     if (visible) {
       const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
       setValue(String(seed));
-      if (secondary) {
+      if (hasSecondaryField) {
         // Clamp the secondary seed to the primary seed — the two fields move
         // together and the secondary can never exceed the units being released.
         setSecondaryValue(
-          String(Math.min(Math.max(secondary.defaultValue ?? 0, 0), seed))
+          String(Math.min(Math.max(secondaryDefaultValue ?? 0, 0), seed))
         );
       }
     }
-  }, [visible, defaultValue, max, secondary]);
+  }, [visible, defaultValue, max, hasSecondaryField, secondaryDefaultValue]);
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);

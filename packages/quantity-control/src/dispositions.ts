@@ -11,7 +11,7 @@
  * @see {@link file://./types.ts}
  */
 
-import type { QtConsumptionCategory, QtConsumptionType } from "./types.js";
+import type { QtConsumptionCategory, QtConsumptionType } from "./types";
 
 /**
  * A per-row check-in disposition: how many of the checked-in units were
