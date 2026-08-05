@@ -14,11 +14,11 @@ import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 import {
   buildPdfAssetRows,
+  buildPdfBookingAssetSlices,
   filterBookingAssets,
   groupAndSortAssetsByKit,
 } from "./helpers";
 import { getBooking } from "./service.server";
-import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
@@ -129,17 +129,7 @@ export async function fetchAllPdfRelatedData(
     // (used later as the row key); the asset ids are deduped only for the
     // efficiency of the `rawAssets` fetch below, not for the render list.
     const visibleBookingAssets = filterBookingAssets(
-      (booking?.bookingAssets ?? []).map((ba) => ({
-        ...ba.asset,
-        kitId: ba.assetKitId,
-        kit:
-          ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null,
-        location: getPrimaryLocation(ba.asset),
-        // Slice-level fields carried through search filtering so each slice
-        // renders as its own PDF row with the correct quantity/key.
-        quantity: ba.quantity,
-        bookingAssetId: ba.id,
-      })),
+      buildPdfBookingAssetSlices(booking?.bookingAssets ?? []),
       sortParams?.search
     );
     const visibleAssetIds = [...new Set(visibleBookingAssets.map((a) => a.id))];
