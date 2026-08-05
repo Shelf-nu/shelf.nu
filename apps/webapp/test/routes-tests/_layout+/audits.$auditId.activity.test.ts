@@ -8,7 +8,7 @@
  * currently holds `auditNote:read` (asserted below, so the day that changes
  * these tests speak up) — but the gate belongs on the server either way.
  *
- * @see {@link file://./audits.$auditId.activity.tsx}
+ * @see {@link file://../../../app/routes/_layout+/audits.$auditId.activity.tsx}
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,7 +41,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   requireAuditAssigneeForBaseSelfService,
 }));
 
-import { loader } from "./audits.$auditId.activity";
+import { loader } from "~/routes/_layout+/audits.$auditId.activity";
 
 /** Minimal loader args for `/audits/audit-1/activity`. */
 function loaderArgs() {

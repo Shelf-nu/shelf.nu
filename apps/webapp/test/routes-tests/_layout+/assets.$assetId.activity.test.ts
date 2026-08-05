@@ -13,7 +13,7 @@
  * a role without `note:read` must be rejected BEFORE any note is read, and a
  * role with it must still get its notes.
  *
- * @see {@link file://./assets.$assetId.activity.tsx}
+ * @see {@link file://../../../app/routes/_layout+/assets.$assetId.activity.tsx}
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,7 +51,7 @@ vi.mock("~/utils/cookies.server", () => ({
   userPrefs: { serialize: vi.fn().mockResolvedValue("perPage=20") },
 }));
 
-import { loader } from "./assets.$assetId.activity";
+import { loader } from "~/routes/_layout+/assets.$assetId.activity";
 
 /**
  * Points the `requirePermission` stub at a role, resolving each call against
