@@ -1,3 +1,9 @@
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@shelf/datetime";
+
 // ── Types ──────────────────────────────────────────────
 
 export type Organization = {
@@ -23,6 +29,17 @@ export type MeResponse = {
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
+    /**
+     * The user's date/time format preferences (raw, nullable — an unset column
+     * means "not chosen yet"). Resolved on the client via `resolveFormatPrefs`
+     * (`@shelf/datetime`) with a device-hint fallback so every date/time in the
+     * companion renders in the user's chosen format + timezone. Absent on older
+     * servers (pre-format-prefs) — the resolver then falls back to device hints.
+     */
+    dateFormat?: DateFormatPreference | null;
+    timeFormat?: TimeFormatPreference | null;
+    weekStart?: WeekStartPreference | null;
+    timeZone?: string | null;
   };
   organizations: Organization[];
 };

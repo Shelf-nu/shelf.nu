@@ -7,8 +7,15 @@
  * @see {@link file://./form.tsx} Consumer of these helpers
  * @see {@link file://./../../../utils/csv.server.ts} Server-side CSV parsing
  */
+import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 
-/** Identifier columns we accept, in order of preference */
+/**
+ * Identifier columns we accept, in order of preference. Matched
+ * case-insensitively (see `validateCsvClientSide` below) to mirror the
+ * server-side `analyzeUpdateHeaders` — this matters because the
+ * Import-ready export's identifier header is the lowercase content-importer
+ * key `"id"`, not the Standard export's display label `"ID"`.
+ */
 export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
 
 /** Maximum number of asset change rows to display in the preview */
@@ -45,9 +52,13 @@ export function validateCsvClientSide(text: string): ClientValidation {
   const headers = parseSimpleCsvLine(lines[0]);
   const headerTrimmed = headers.map((h) => h.trim());
 
-  // Find best available identifier column (priority order)
+  // Find best available identifier column (priority order). Case-insensitive
+  // so the Import-ready export's lowercase "id" header is recognized here
+  // the same way `analyzeUpdateHeaders` recognizes it server-side.
   const idColumnFound =
-    ACCEPTED_ID_COLUMNS.find((col) => headerTrimmed.includes(col)) ?? null;
+    ACCEPTED_ID_COLUMNS.find((col) =>
+      headerTrimmed.some((h) => h.toLowerCase() === col.toLowerCase())
+    ) ?? null;
 
   const rowCount = Math.max(0, lines.length - 1);
   const warnings: string[] = [];
@@ -104,6 +115,31 @@ export function parseSimpleCsvLine(line: string): string[] {
   }
   result.push(stripQuotes(current.trim()));
   return result;
+}
+
+/**
+ * Formats an unrecognized-column header for display in the preview's
+ * "we skipped these columns" chips.
+ *
+ * A `cf:<Name>,type:<TYPE>` header (content-importer / import-ready export
+ * vocabulary) landing in `unrecognizedColumns` means it names a custom
+ * field that doesn't exist in THIS workspace (see `analyzeUpdateHeaders`).
+ * Rendering the raw header there made the "create a matching Custom Field"
+ * advice point at creating a field literally named `cf:Serial,type:TEXT`
+ * instead of `Serial`. Parse it down to just the field name so the chip
+ * (and the advice next to it) reflect what the user should actually create.
+ *
+ * @param header - Raw unrecognized CSV header
+ * @returns The custom-field name for a `cf:` header, or the header unchanged
+ */
+export function formatUnrecognizedColumnLabel(header: string): string {
+  // Same length + prefix guard as `analyzeUpdateHeaders` — avoids the
+  // non-null assertion inside `getDefinitionFromCsvHeader` for a
+  // malformed `cf:` header with no name segment.
+  if (header.length > 3 && header.slice(0, 3).toLowerCase() === "cf:") {
+    return getDefinitionFromCsvHeader(header).name;
+  }
+  return header;
 }
 
 /** Strip enclosing double-quotes from a CSV value */
