@@ -1452,6 +1452,33 @@ describe("computeAssetDiffs", () => {
       expect(result.skippedAssets[0].reason).toBe("No changes detected");
     });
 
+    it("preserves a REAL category literally named 'Uncategorized'", () => {
+      // why: an org can genuinely have a category called "Uncategorized".
+      // The guard reads that cell as "empty", so without excluding assets
+      // already in such a category a zero-edit Standard round trip would
+      // silently strip it from every one of them.
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set(
+        "SAM-0001",
+        makeAsset({ category: { name: "Uncategorized" } })
+      );
+
+      const csvData = [
+        ["Asset ID", "Category"],
+        ["SAM-0001", "Uncategorized"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeCategoryHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(0);
+      expect(result.skippedAssets).toHaveLength(1);
+      expect(result.skippedAssets[0].reason).toBe("No changes detected");
+    });
+
     it("matches case-insensitively ('uncategorized', 'UNCATEGORIZED')", () => {
       const assets = new Map<string, AssetForUpdate>();
       assets.set(

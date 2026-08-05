@@ -44,8 +44,14 @@ export async function fetchAssetsForUpdate(
       // stable across the export query and this update-preview query — an
       // unordered `assetLocations[0]` let the two disagree on which
       // placement was "current" for a multi-placement asset (Bug 2).
+      // The `id` tiebreak mirrors the export query's
+      // `ORDER BY al."createdAt" ASC, al.id ASC` exactly. `AssetLocation.createdAt`
+      // defaults to `now()`, which is transaction-start time, so placements
+      // written in one transaction (kit cascade, bulk placement) share a
+      // timestamp — without the tiebreak the two queries can still disagree
+      // on which row is first.
       assetLocations: {
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: { location: { select: { id: true, name: true } } },
       },
       tags: { select: { id: true, name: true } },
@@ -77,6 +83,13 @@ export async function fetchAssetsForUpdate(
         location: getPrimaryLocation(raw),
         // Multi-placement guard input — see AssetForUpdate.locationPlacementCount.
         locationPlacementCount: raw.assetLocations.length,
+        // Every placement's name, so the guard can recognise an untouched
+        // round-trip cell whichever placement the export happened to pick as
+        // "primary" — matching only against `location.name` would re-introduce
+        // the noise intermittently when the two orderings disagree.
+        locationPlacementNames: raw.assetLocations.map(
+          (al) => al.location.name
+        ),
       };
       const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
       return [key, asset];

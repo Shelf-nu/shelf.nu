@@ -349,6 +349,16 @@ export type AssetForUpdate = {
    * normal update path is unaffected.
    */
   locationPlacementCount?: number;
+  /**
+   * Names of every `AssetLocation` placement, in the same deterministic
+   * order the export resolves its own "primary" with. The multi-placement
+   * guard matches the CSV cell against ALL of these rather than just
+   * `location.name`: the export flattens N placements into one cell and may
+   * pick a different row than this query does, so an untouched round trip
+   * must be recognised as a no-op whichever one it wrote. A cell naming a
+   * location the asset is NOT at — and an empty cell — still warn.
+   */
+  locationPlacementNames?: string[];
   tags: { id: string; name: string }[];
   customFields: {
     id: string;

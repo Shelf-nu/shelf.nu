@@ -537,12 +537,15 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
 
 describe("applyBulkUpdatesFromImport — multi-placement location guard (Bug 2 fix)", () => {
   // Reproduces the "Gloves" scenario: a QUANTITY_TRACKED asset with units
-  // split across three AssetLocation rows. The exact placement shape
-  // doesn't matter here — only the COUNT — since `getPrimaryLocation` is
-  // mocked to always return null for this suite; `locationPlacementCount`
-  // is computed directly from `assetLocations.length` in
-  // `fetchAssetsForUpdate`, independent of that mock.
-  const threePlacements = [{}, {}, {}];
+  // split across three AssetLocation rows. The placement NAMES matter as
+  // well as the count — `fetchAssetsForUpdate` derives
+  // `locationPlacementNames` from them, and the guard suppresses its warning
+  // for a cell naming any location the asset already has units at.
+  const threePlacements = [
+    { location: { id: "loc-1", name: "Christmas Event" } },
+    { location: { id: "loc-2", name: "Mithril Dragons" } },
+    { location: { id: "loc-3", name: "God Wars Dungeon" } },
+  ];
 
   it("warns and skips a location cell naming a different location — never calls updateAsset", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValueOnce([
@@ -557,7 +560,7 @@ describe("applyBulkUpdatesFromImport — multi-placement location guard (Bug 2 f
 
     const csvData = [
       ["Asset ID", "Location"],
-      ["SAM-GLOVES", "Christmas Event"],
+      ["SAM-GLOVES", "Somewhere Else"],
     ];
 
     const result = await applyBulkUpdatesFromImport({
@@ -612,7 +615,7 @@ describe("applyBulkUpdatesFromImport — multi-placement location guard (Bug 2 f
       makeDbAsset({
         id: "uuid-single",
         sequentialId: "SAM-SINGLE",
-        assetLocations: [{}],
+        assetLocations: [{ location: { id: "loc-1", name: "Party Drop" } }],
       }),
     ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
     vi.mocked(db.location.findMany).mockResolvedValueOnce([
@@ -963,7 +966,11 @@ describe("preview counts exclude warning-marked changes", () => {
   // happen. Found in manual testing: a zero-edit round trip of a workspace
   // containing multi-location quantity-tracked assets rendered
   // "Apply 2 changes to 2 assets" when the real answer was zero.
-  const threePlacements = [{}, {}, {}];
+  const threePlacements = [
+    { location: { id: "loc-1", name: "Christmas Event" } },
+    { location: { id: "loc-2", name: "Mithril Dragons" } },
+    { location: { id: "loc-3", name: "God Wars Dungeon" } },
+  ];
 
   it("reports 0 field changes when every change is warning-marked", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValueOnce([
@@ -979,7 +986,7 @@ describe("preview counts exclude warning-marked changes", () => {
     const preview = await buildUpdatePreview({
       csvData: [
         ["Asset ID", "Location"],
-        ["SAM-GLOVES", "Christmas Event"],
+        ["SAM-GLOVES", "Somewhere Else"],
       ],
       organizationId,
     });
@@ -1008,7 +1015,7 @@ describe("preview counts exclude warning-marked changes", () => {
     const preview = await buildUpdatePreview({
       csvData: [
         ["Asset ID", "Name", "Location"],
-        ["SAM-GLOVES", "New title", "Christmas Event"],
+        ["SAM-GLOVES", "New title", "Somewhere Else"],
       ],
       organizationId,
     });
@@ -1016,5 +1023,69 @@ describe("preview counts exclude warning-marked changes", () => {
     // Two changes recorded (name + warning-marked location), one applicable.
     expect(preview.assetsToUpdate[0].changes).toHaveLength(2);
     expect(preview.totalFieldChanges).toBe(1);
+  });
+});
+
+describe("multi-placement location guard — untouched round trip is a no-op", () => {
+  // why: the guard originally fired on placement COUNT alone, so a zero-edit
+  // re-upload reported every multi-location asset as "needs fixing" even
+  // though its location cell was a faithful round trip. Matching against ALL
+  // placement names (not just the primary) is what makes this reliable: the
+  // export flattens N placements into one cell and can pick a different row
+  // than `fetchAssetsForUpdate` does when placements share a `createdAt`.
+  const threePlacements = [
+    { location: { id: "loc-1", name: "Christmas Event" } },
+    { location: { id: "loc-2", name: "Mithril Dragons" } },
+    { location: { id: "loc-3", name: "God Wars Dungeon" } },
+  ];
+
+  function mockGloves() {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-gloves",
+        sequentialId: "SAM-GLOVES",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 910,
+        assetLocations: threePlacements,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+  }
+
+  it.each([
+    ["the placement the export would call primary", "Christmas Event"],
+    ["a non-primary placement (ordering disagreement)", "God Wars Dungeon"],
+    ["a differently-cased placement name", "mithril dragons"],
+  ])("no-ops when the cell names %s", async (_label, cell) => {
+    mockGloves();
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Location"],
+        ["SAM-GLOVES", cell],
+      ],
+      organizationId,
+    });
+
+    // No FieldChange at all — not a warning, not a change.
+    expect(preview.assetsToUpdate).toHaveLength(0);
+    expect(preview.skippedAssets).toHaveLength(1);
+    expect(preview.totalFieldChanges).toBe(0);
+  });
+
+  it("still warns when the cell names a location the asset is NOT at", async () => {
+    mockGloves();
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Location"],
+        ["SAM-GLOVES", "Somewhere Else"],
+      ],
+      organizationId,
+    });
+
+    expect(preview.assetsToUpdate).toHaveLength(1);
+    expect(preview.assetsToUpdate[0].changes[0].warning).toMatch(
+      /multiple locations/i
+    );
   });
 });

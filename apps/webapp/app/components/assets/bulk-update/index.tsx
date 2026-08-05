@@ -115,7 +115,8 @@ export const ImportUpdateContent = () => {
                 <p className="text-[14px] text-gray-600">
                   If a field currently has a value and you leave the cell empty,
                   that value will be cleared. Fields that are already empty stay
-                  unchanged. Name and boolean fields (Yes/No) cannot be cleared.
+                  unchanged. Name, Description and boolean fields (Yes/No)
+                  cannot be cleared.
                 </p>
                 <p className="mt-1 text-[14px] text-gray-600">
                   <b>Exceptions:</b> Asset model, Quantity, Min quantity, Unit

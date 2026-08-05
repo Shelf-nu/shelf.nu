@@ -384,6 +384,19 @@ export function buildMultiPlacementLocationWarning(
   displayName: string
 ): FieldChange | null {
   if ((asset.locationPlacementCount ?? 0) <= 1) return null;
+  // A cell naming a location the asset already has units at proposes no
+  // write, so there is nothing to warn about — an untouched round-trip
+  // export must stay a silent no-op rather than reporting "needs fixing".
+  // Matched against EVERY placement, not just the primary: the export picks
+  // one of N and can disagree with this query's ordering.
+  if (
+    csvValue &&
+    (asset.locationPlacementNames ?? []).some(
+      (name) => name.toLowerCase() === csvValue.toLowerCase()
+    )
+  ) {
+    return null;
+  }
   return {
     field: displayName,
     currentValue: "(multiple locations)",
@@ -458,13 +471,16 @@ export function compareCoreField(
 
     case "location": {
       // Multi-placement assets can't be safely diffed against a single
-      // "current" location — see `buildMultiPlacementLocationWarning`.
-      const multiPlacementWarning = buildMultiPlacementLocationWarning(
-        asset,
-        csvValue,
-        displayName
-      );
-      if (multiPlacementWarning) return multiPlacementWarning;
+      // "current" location — see `buildMultiPlacementLocationWarning`. This
+      // branch is TERMINAL: the helper returns either a warning, or `null`
+      // meaning the cell names a placement the asset already has (an
+      // untouched round trip). Falling through to the single-location
+      // comparison below would compare against the PRIMARY placement only,
+      // so a cell naming a non-primary placement would read as a real change
+      // and propose the destructive unit move this guard exists to prevent.
+      if ((asset.locationPlacementCount ?? 0) > 1) {
+        return buildMultiPlacementLocationWarning(asset, csvValue, displayName);
+      }
 
       const current = asset.location?.name ?? "";
       if (csvValue.toLowerCase() !== current.toLowerCase()) {
@@ -1120,9 +1136,17 @@ export function computeAssetDiffs({
       // for every previously-uncategorized asset. Treat that cell exactly
       // like an empty cell (same clearing / no-op semantics below) rather
       // than inventing new behaviour here.
+      //
+      // Excluded when the asset's CURRENT category is itself literally named
+      // "Uncategorized" — an org can genuinely have one. For those assets the
+      // cell is a faithful round trip, so fall through to `compareCoreField`,
+      // whose display-value equality already no-ops it. Without this
+      // exclusion the guard read a correct cell as "empty" and silently
+      // stripped the real category on a zero-edit re-upload.
       const isUncategorizedCell =
         column.internalKey === "category" &&
-        csvValue.toLowerCase() === "uncategorized";
+        csvValue.toLowerCase() === "uncategorized" &&
+        (existingAsset.category?.name ?? "").toLowerCase() !== "uncategorized";
       const isEmpty =
         csvValue === "" || csvValue === '""' || isUncategorizedCell;
 

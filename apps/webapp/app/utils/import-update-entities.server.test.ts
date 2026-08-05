@@ -326,9 +326,14 @@ describe("fetchAssetsForUpdate — assetModel + locationPlacementCount (Bug 1 / 
     expect(callArg?.include?.assetModel).toEqual({
       select: { id: true, name: true },
     });
-    expect(callArg?.include?.assetLocations?.orderBy).toEqual({
-      createdAt: "asc",
-    });
+    // The `id` tiebreak mirrors the export query's
+    // `ORDER BY al."createdAt" ASC, al.id ASC`. Placements written in one
+    // transaction share a `createdAt`, so without it the two queries can
+    // still disagree on which placement is "primary".
+    expect(callArg?.include?.assetLocations?.orderBy).toEqual([
+      { createdAt: "asc" },
+      { id: "asc" },
+    ]);
   });
 
   it("computes locationPlacementCount as 1 for a single-placement asset (regression guard)", async () => {
