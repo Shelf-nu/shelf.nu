@@ -8,23 +8,29 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: the resolver's own branching is covered by its co-located test; here
-// we only assert how the audit-scanner route propagates the discriminated
-// results — the reason field must be additive (same status + message).
+// we only assert how THIS route propagates the resolver's discriminated
+// results into the wire payload the companion consumes.
 vi.mock("~/modules/api/mobile-code-resolve.server", () => ({
   resolveMobileScannedCode: vi.fn(),
 }));
 
+// why: scan provenance writes hit the DB; the route's contract under test is
+// the error payload shape, not recording (which stays unchanged).
+vi.mock("~/modules/scan/service.server", () => ({
+  createScan: vi.fn(),
+}));
+
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
-import { loader } from "./get-scanned-item.$qrId";
+import { createScan } from "~/modules/scan/service.server";
+import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 
 /**
- * Tests for GET /api/mobile/get-scanned-item/:qrId error-payload propagation.
- * The audit scanner consumes this route: an unclaimed code must still be the
- * exact same 404 + message it always was, with `reason`/`qrId` strictly
- * additive on top.
+ * Tests for GET /api/mobile/qr/:qrId error-payload propagation — the
+ * structured `reason`/`qrId` discriminator must reach the wire for unclaimed
+ * codes, and must be absent for plain failures (additive contract).
  *
- * @see {@link file://./get-scanned-item.$qrId.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
 
 /** Shape of the `data()` result the route loader returns. */
@@ -32,9 +38,7 @@ type DataResult<T> = { data: T; init: ResponseInit | null };
 
 /** Runs the loader and unwraps the data() envelope. */
 async function callLoader(qrId = "qr-1") {
-  const request = new Request(
-    `http://localhost/api/mobile/get-scanned-item/${qrId}`
-  );
+  const request = new Request(`http://localhost/api/mobile/qr/${qrId}`);
   const result = await loader({
     request,
     params: { qrId },
@@ -54,8 +58,8 @@ beforeEach(() => {
   } as any);
 });
 
-describe("GET /api/mobile/get-scanned-item/:qrId error payload", () => {
-  it("keeps the audit-scanner 404 contract for unclaimed codes, with reason additive", async () => {
+describe("GET /api/mobile/qr/:qrId error payload", () => {
+  it("propagates reason + qrId for an unclaimed code and records nothing", async () => {
     vi.mocked(resolveMobileScannedCode).mockResolvedValue({
       ok: false,
       status: 404,
@@ -66,27 +70,28 @@ describe("GET /api/mobile/get-scanned-item/:qrId error payload", () => {
 
     const { body, status } = await callLoader();
 
-    // Unchanged for existing callers: same status, same message.
     expect(status).toBe(404);
-    expect(body.error?.message).toBe(
-      "This QR code is not linked to any organization"
-    );
-    // Additive discriminator for reason-aware callers.
-    expect(body.error?.reason).toBe("unclaimed");
-    expect(body.error?.qrId).toBe("qr-1");
+    expect(body.error).toEqual({
+      message: "This QR code is not linked to any organization",
+      reason: "unclaimed",
+      qrId: "qr-1",
+    });
+    expect(createScan).not.toHaveBeenCalled();
   });
 
   it("omits reason/qrId entirely for plain failures (additive contract)", async () => {
     vi.mocked(resolveMobileScannedCode).mockResolvedValue({
       ok: false,
-      status: 404,
-      message: "QR code not found",
+      status: 403,
+      message: "This QR code belongs to a different organization",
     });
 
     const { body, status } = await callLoader();
 
-    expect(status).toBe(404);
-    expect(body.error).toEqual({ message: "QR code not found" });
+    expect(status).toBe(403);
+    expect(body.error).toEqual({
+      message: "This QR code belongs to a different organization",
+    });
     expect(body.error).not.toHaveProperty("reason");
     expect(body.error).not.toHaveProperty("qrId");
   });
