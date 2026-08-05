@@ -38,19 +38,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   try {
     /**
-     * Gate on `auditNote:read`, not `audit:read`. The parent route
-     * (`audits.$auditId.tsx`) already enforces `audit:read`; this child's
-     * payload contains the audit notes, so it must require the right to read
-     * them rather than checking that client-side after shipping them.
+     * Two-step gate, ordered deliberately — same reasoning as the asset
+     * activity route.
      *
-     * Every role currently holds `auditNote:read`, so this is not a live
-     * exposure today — it is the same shape as the asset gap, one permission
-     * edit away from becoming one. Mirrors bookings / locations.
+     * Step 1 is `audit:read` against the SELECTED workspace, because
+     * `getAuditSessionDetails` uses `userOrganizations` to detect an audit
+     * living in a different workspace of the same user and hand off to the
+     * switch-workspace path. Gating on `auditNote:read` here would 403 that
+     * deep link before the hand-off could happen.
      */
     const permissionResult = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.auditNote,
+      entity: PermissionEntity.audit,
       action: PermissionAction.read,
     });
 
@@ -69,6 +69,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       isSelfServiceOrBase,
       auditId,
+    });
+
+    /**
+     * Step 2: `auditNote:read`, enforced BEFORE any note is fetched, so the
+     * notes never reach the payload of a user without the right to read them.
+     *
+     * Every role currently holds `auditNote:read`, so this is not a live
+     * exposure today — it is the same shape as the asset gap, one permission
+     * edit away from becoming one.
+     */
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
     });
 
     // Fetch audit notes

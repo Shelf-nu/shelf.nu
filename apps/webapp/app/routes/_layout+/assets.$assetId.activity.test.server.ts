@@ -124,19 +124,49 @@ describe("asset activity loader — note:read is enforced server-side", () => {
     });
   });
 
-  it("asks for note:read, not asset:read", async () => {
+  it("requires note:read for the data it returns", async () => {
     actAs(OrganizationRoles.OWNER);
 
     await loader(loaderArgs());
 
-    // The parent route already enforces `asset:read`; this child must require
-    // the permission for the data it actually returns.
     expect(requirePermission).toHaveBeenCalledWith(
       expect.objectContaining({
         entity: PermissionEntity.note,
         action: PermissionAction.read,
       })
     );
+  });
+
+  it("gates asset:read BEFORE note:read, and resolves the asset in between", async () => {
+    actAs(OrganizationRoles.OWNER);
+
+    await loader(loaderArgs());
+
+    /**
+     * Ordering is load-bearing, not incidental. `getAsset` is what detects an
+     * asset living in another of the user's workspaces and hands off to the
+     * switch-workspace path. If `note:read` were checked first, a deep link to
+     * such an asset would 403 for a role without note rights in the SELECTED
+     * workspace, even when they hold them in the asset's own workspace.
+     *
+     * Asserting on call order rather than on the calls existing is the only
+     * way this regression gets caught — the previous shape passed every other
+     * assertion in this file.
+     */
+    const entities = vi
+      .mocked(requirePermission)
+      .mock.calls.map(([args]) => args.entity);
+
+    expect(entities).toEqual([PermissionEntity.asset, PermissionEntity.note]);
+
+    const assetGateOrder =
+      vi.mocked(requirePermission).mock.invocationCallOrder[0];
+    const noteGateOrder =
+      vi.mocked(requirePermission).mock.invocationCallOrder[1];
+    const getAssetOrder = vi.mocked(getAsset).mock.invocationCallOrder[0];
+
+    expect(assetGateOrder).toBeLessThan(getAssetOrder);
+    expect(getAssetOrder).toBeLessThan(noteGateOrder);
   });
 
   it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
