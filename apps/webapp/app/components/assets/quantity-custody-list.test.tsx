@@ -51,19 +51,16 @@ vi.mock("react-router", async () => {
     ),
     useFetcher: () => ({
       ...mockFetcherState,
+      // No submit handling: these tests drive the response state directly and
+      // never fire a submit, and the component passes no `onSubmit` to
+      // `fetcher.Form`, so there is nothing to intercept.
       Form: ({
         children,
-        onSubmit,
         ...rest
       }: {
         children: ReactNode;
-        onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
         [key: string]: unknown;
-      }) => (
-        <form {...rest} onSubmit={(e) => e.preventDefault()}>
-          {children}
-        </form>
-      ),
+      }) => <form {...rest}>{children}</form>,
       submit: vi.fn(),
       load: vi.fn(),
     }),
