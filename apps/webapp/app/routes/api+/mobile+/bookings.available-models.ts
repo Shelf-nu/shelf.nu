@@ -54,6 +54,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // first page — the web picker searches server-side, so the app must too.
     const search = url.searchParams.get("s") ?? undefined;
 
+    // Pagination. The app's picker scrolls infinitely, so it must be able to
+    // walk the WHOLE model list, not just the seed page the web loaders use.
+    const page = Math.max(
+      1,
+      parseInt(url.searchParams.get("page") || "1", 10) || 1
+    );
+    const perPage = Math.min(
+      100,
+      Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
+    );
+
     // Self-service / base users may only see their OWN bookings — scope the
     // lookup by custodian exactly like the booking detail read, so a booking
     // they don't own 404s instead of leaking its models/reservations.
@@ -97,6 +108,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       organizationId,
       booking,
       search,
+      page,
+      perPage,
     });
 
     // Trim to a mobile-friendly payload. Drop the web-only `initialAssetModels`
@@ -105,7 +118,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({
       // Whether the workspace has any AssetModel at all (hides the picker).
       showModelsTab: modelTabData.showModelsTab,
-      // Per-model availability for this booking's window (first 50 by name).
+      // Per-model availability for this booking's window, for THIS page.
       assetModels: modelTabData.assetModels.map((m) => ({
         id: m.id,
         name: m.name,
@@ -115,9 +128,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         reservedConcrete: m.reservedConcrete,
         reservedViaRequest: m.reservedViaRequest,
       })),
-      // Full workspace model count (the list above is capped) so the app can
-      // show a "showing 50 of N — search to narrow" hint.
+      // Full workspace model count, regardless of any search.
       totalAssetModels: modelTabData.totalAssetModels,
+      // Pagination metadata. `matchedAssetModels` counts rows matching the
+      // current search, so the client knows when it has loaded everything and
+      // can stop asking for more pages.
+      page,
+      perPage,
+      matchedAssetModels: modelTabData.matchedAssetModels,
+      totalPages: Math.max(
+        1,
+        Math.ceil(modelTabData.matchedAssetModels / perPage)
+      ),
       // This booking's existing model-level reservations (outstanding +
       // fulfilled), so the picker can pre-fill current amounts.
       modelRequests: modelTabData.modelRequests,

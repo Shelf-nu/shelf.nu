@@ -1,22 +1,20 @@
 import type { Organization, SsoDetails } from "@prisma/client";
+import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
 } from "~/modules/auth/service.server";
-import {
-  emailMatchesDomains,
-  parseDomains,
-} from "~/modules/organization/service.server";
 import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
   updateUserFromSSO,
 } from "~/modules/user/service.server";
+import type { DetectedFormatPrefs } from "./date-format";
 import { DISABLE_SSO } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
-import { isValidDomain } from "./misc";
+import { emailMatchesDomains, isValidDomain, parseDomains } from "./misc";
 
 /**
  * This resolves the correct org we should redirect the user to
@@ -48,6 +46,7 @@ export async function resolveUserAndOrgForSsoCallback({
   lastName,
   groups,
   contactInfo,
+  formatPrefs,
 }: {
   authSession: AuthSession;
   firstName: string;
@@ -61,6 +60,8 @@ export async function resolveUserAndOrgForSsoCallback({
     zipPostalCode?: string;
     countryRegion?: string;
   };
+  /** Browser-detected prefs; only applied on the new-user (createUserFromSSO) branch. */
+  formatPrefs?: DetectedFormatPrefs;
 }) {
   try {
     // First check if user exists
@@ -73,7 +74,22 @@ export async function resolveUserAndOrgForSsoCallback({
 
     // If user exists, check if they're trying to convert from email to SSO
     if (user) {
-      const authUser = await getAuthUserById(user.id);
+      // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
+      // Supabase auth account yet). Only swallow a genuine 404 — rethrow
+      // transient Supabase/admin errors so they aren't misread as a missing
+      // user and trigger the destructive ID rewrite below.
+      let authUser;
+      try {
+        authUser = await getAuthUserById(user.id);
+      } catch (error) {
+        const innerCause = isLikeShelfError(error) ? error.cause : error;
+        if (isAuthApiError(innerCause) && innerCause.status === 404) {
+          authUser = null;
+        } else {
+          throw error;
+        }
+      }
+
       if (authUser?.app_metadata?.provider === "email") {
         throw new ShelfError({
           cause: null,
@@ -83,6 +99,30 @@ export async function resolveUserAndOrgForSsoCallback({
           label: "Auth",
           shouldBeCaptured: false,
         });
+      }
+
+      // SCIM-provisioned user: Shelf user exists but has no Supabase auth
+      // account (user.id is a placeholder cuid). Update the user's ID to
+      // match the Supabase SSO auth UUID. FKs use ON UPDATE CASCADE so all
+      // related rows update automatically.
+      if (!authUser && user.id !== authSession.userId) {
+        await db.$executeRawUnsafe(
+          `UPDATE "User" SET id = $1 WHERE id = $2`,
+          authSession.userId,
+          user.id
+        );
+        // Re-fetch user with updated ID
+        const updatedUser = await db.user.findUniqueOrThrow({
+          where: { id: authSession.userId },
+          select: USER_WITH_SSO_DETAILS_SELECT,
+        });
+        const response = await updateUserFromSSO(authSession, updatedUser, {
+          firstName,
+          lastName,
+          groups,
+          contactInfo,
+        });
+        return { user: response.user, org: response.org };
       }
 
       // Existing SSO user - update their info
@@ -97,12 +137,16 @@ export async function resolveUserAndOrgForSsoCallback({
 
     // New user case - create them with SSO
     try {
-      const response = await createUserFromSSO(authSession, {
-        firstName,
-        lastName,
-        groups,
-        contactInfo,
-      });
+      const response = await createUserFromSSO(
+        authSession,
+        {
+          firstName,
+          lastName,
+          groups,
+          contactInfo,
+        },
+        formatPrefs
+      );
       return { user: response.user, org: response.org };
     } catch (createError) {
       // If user creation fails, clean up the auth account

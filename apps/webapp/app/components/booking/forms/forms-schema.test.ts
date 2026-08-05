@@ -1,5 +1,6 @@
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import {
   BookingFormSchema,
   DuplicateBookingSchema,
@@ -1005,5 +1006,127 @@ describe("DuplicateBookingSchema - date validation", () => {
       expect(dupResult.success).toBe(false);
       expect(formResult.success).toBe(dupResult.success);
     });
+  });
+});
+
+/**
+ * Timezone-source regression (configurable date format).
+ *
+ * ROOT CAUSE: date DISPLAY uses the user's stored `timeZone` preference, but
+ * date INPUT parsing / edit-form seeding used the BROWSER's timezone hint. When
+ * the two differ, the wall-clock the user types is interpreted in the wrong
+ * zone and the stored UTC instant is offset wrong.
+ *
+ * FIX: every booking action feeds `BookingFormSchema`/`coerceLocalDate` the
+ * acting user's RESOLVED pref timezone (via a hints-like object whose
+ * `timeZone` is overridden), and the edit form seeds its datetime-local inputs
+ * with `toIsoDateTimeToUserTimezone(utc, prefTimeZone).slice(0, 16)` — the SAME
+ * zone display uses — instead of the browser-zone `dateForDateTimeInputValue`.
+ *
+ * Scenario: user pref = Europe/London (BST = UTC+1 in July); browser = UTC+3.
+ * Typed wall-clock 15:48 must store as 14:48Z (London), NOT 12:48Z (browser).
+ */
+describe("BookingFormSchema - pref timezone drives the stored UTC (config date format)", () => {
+  const baseBookingSettings = {
+    bufferStartTime: 0,
+    tagsRequired: false,
+    maxBookingLength: null,
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  const disabledWorkingHours = {
+    enabled: false,
+    weeklySchedule: {},
+    overrides: [],
+  };
+
+  const validCustodian = JSON.stringify({
+    id: "tm-1",
+    name: "Test User",
+    userId: "user-1",
+  });
+
+  // A far-future July wall-clock so validateFutureDate always passes and July
+  // is unambiguously BST (UTC+1) for Europe/London.
+  const WALL_CLOCK_START = "2099-07-15T15:48";
+  const WALL_CLOCK_END = "2099-07-15T17:48";
+
+  // The pref zone the FIX must use.
+  const PREF_ZONE = "Europe/London";
+  // A different browser-hint zone (UTC+3, no DST) — what the OLD code used.
+  const BROWSER_ZONE = "Europe/Moscow";
+
+  function parseStart(timeZone: string): Date {
+    const schema = BookingFormSchema({
+      hints: { timeZone },
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+    const result = schema.safeParse({
+      name: "TZ Booking",
+      startDate: WALL_CLOCK_START,
+      endDate: WALL_CLOCK_END,
+      custodian: validCustodian,
+    });
+    if (!result.success) {
+      throw new Error(
+        `Unexpected validation failure: ${JSON.stringify(
+          result.error.errors.map((e) => e.message)
+        )}`
+      );
+    }
+    return result.data.startDate as Date;
+  }
+
+  it("parses the typed wall-clock in the PREF zone (Europe/London → 14:48Z)", () => {
+    // With the fix the action feeds the schema the pref zone, so 15:48 BST
+    // stores as 14:48Z. Under the old behavior it fed the browser zone (UTC+3)
+    // and stored 12:48Z — the assertion below pins the correct instant.
+    expect(parseStart(PREF_ZONE).toISOString()).toBe(
+      "2099-07-15T14:48:00.000Z"
+    );
+  });
+
+  it("browser-zone parse yields the WRONG instant (12:48Z) — proving the source matters", () => {
+    // This is the OLD, buggy result. It must differ from the pref-zone result;
+    // if a future change reverts the wiring back to the browser hint, the
+    // stored UTC regresses to this value.
+    const browserInstant = parseStart(BROWSER_ZONE).toISOString();
+    expect(browserInstant).toBe("2099-07-15T12:48:00.000Z");
+    expect(browserInstant).not.toBe(parseStart(PREF_ZONE).toISOString());
+  });
+
+  it("round-trips: stored UTC → pref-zone seed → parse back to the same UTC", () => {
+    const storedUtc = "2099-07-15T14:48:00.000Z";
+
+    // 1. Seed the edit form's datetime-local input the way edit-booking-form now
+    //    does: convert the stored UTC to the pref-zone wall-clock.
+    const seeded = toIsoDateTimeToUserTimezone(storedUtc, PREF_ZONE).slice(
+      0,
+      16
+    );
+    expect(seeded).toBe("2099-07-15T15:48"); // BST wall-clock the user sees
+
+    // 2. Submit that wall-clock and parse it back with the pref zone.
+    const schema = BookingFormSchema({
+      hints: { timeZone: PREF_ZONE },
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+    const result = schema.safeParse({
+      name: "TZ Booking",
+      startDate: seeded,
+      endDate: WALL_CLOCK_END,
+      custodian: validCustodian,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Round-trip is lossless: back to the exact stored instant.
+      expect((result.data.startDate as Date).toISOString()).toBe(storedUtc);
+    }
   });
 });

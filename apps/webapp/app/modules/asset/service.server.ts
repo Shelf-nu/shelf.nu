@@ -18,6 +18,7 @@ import {
   AssetStatus,
   AssetType,
   BookingStatus,
+  ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
   OrganizationRoles,
@@ -34,6 +35,13 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+// Imported from the dependency-free leaf (NOT `availability.server`) so that
+// importing asset/service.server does NOT drag in the heavy
+// `availability.server → booking/service.server` graph (which transitively
+// pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
+// the reports `*.server.test.ts` files import this module via
+// `refreshExpiredAssetImages`). See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
@@ -71,6 +79,7 @@ import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -95,6 +104,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -104,6 +114,7 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
@@ -167,6 +178,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -1139,6 +1151,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   canUseBarcodes = false,
   availableToBookOnly = false,
   preParsedFilters,
+  timeZone = "UTC",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1151,6 +1164,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly?: boolean;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
+  /**
+   * IANA timezone the acting user displays dates in. Threaded into
+   * `generateWhereClause` so built-in date-column filters truncate the day in
+   * the user's tz (avoids an off-by-one for non-UTC users). Defaults to "UTC"
+   * for callers that don't resolve the acting user's prefs.
+   */
+  timeZone?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1160,6 +1180,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   const { page, perPageParam, search } = paramsValues;
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
+
+  /** "Low stock" quick filter toggle — a `lowStockOnly=true` URL param set
+   * via the assets-index UI toggle, not a `settings.columns` field. See
+   * {@link generateWhereClause}'s `lowStockOnly` param for the predicate. */
+  const lowStockOnly = searchParams.get("lowStockOnly") === "true";
 
   const settingColumns = settings?.columns as Column[];
 
@@ -1185,7 +1210,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone,
+      lowStockOnly
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -2160,10 +2187,12 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
-      // Quantity-tracked fields (type is immutable, never updated here)
-      // TODO(Phase 2): Route quantity changes through an audited adjustment
-      // path that writes to ConsumptionLog. Direct mutation here bypasses
-      // the full-attribution audit trail required by the PRD.
+      // Quantity-tracked fields (type is immutable, never updated here).
+      // The direct `quantity` write is audited below: the quantity/placement
+      // transaction writes a `ConsumptionLog` ADJUSTMENT for the stock delta
+      // and the `fieldChangeEvents` block emits `ASSET_QUANTITY_CHANGED` /
+      // `ASSET_MIN_QUANTITY_CHANGED`, so the full-attribution trail the PRD
+      // requires is preserved.
       quantity,
       minQuantity,
       consumptionType,
@@ -2514,7 +2543,39 @@ export async function updateAsset({
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
+    // Captured from the locked pre-update row so the post-update
+    // ConsumptionLog ADJUSTMENT (below) can compute the stock delta, AND so
+    // the post-transaction low-stock check can tell whether this patch LOWERED
+    // a QUANTITY_TRACKED asset's total. Hoisted out of the tx callback so both
+    // signals survive past the commit. Only populated when a quantity write is
+    // actually part of this patch.
+    let quantityBeforeUpdate: number | null = null;
+    let lockedAssetType: AssetType | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // Block lowering a QUANTITY_TRACKED asset's total below the units
+      // already committed to custody, kits, or overlapping bookings. Lock the
+      // asset row first so the read-then-write is race-safe (mirrors
+      // `adjustQuantity` and the booking write guards). Also covers the CSV
+      // update-existing import, which routes through `updateAsset`.
+      if (quantity != null) {
+        const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        quantityBeforeUpdate = locked.quantity ?? 0;
+        lockedAssetType = locked.type;
+        if (
+          locked.type === AssetType.QUANTITY_TRACKED &&
+          quantity < (locked.quantity ?? 0)
+        ) {
+          await assertAssetQuantityNotBelowReservations({
+            assetId: id,
+            organizationId,
+            tx,
+            newTotal: quantity,
+            assetTitle: locked.title,
+            unitOfMeasure: locked.unitOfMeasure,
+          });
+        }
+      }
+
       const updated = await tx.asset.update({
         where: { id, organizationId },
         data,
@@ -2525,6 +2586,32 @@ export async function updateAsset({
           organization: true,
         },
       });
+
+      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
+      // through the asset-edit form. The form has no consumption-category
+      // input, so a manual total correction is an `ADJUSTMENT` (schema
+      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
+      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
+      // IN this tx (not via `adjustQuantity`, which opens its own tx and
+      // re-locks the row we already hold). Skipped for a no-op edit
+      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
+      if (
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+      ) {
+        const delta = Math.abs(quantity - quantityBeforeUpdate);
+        if (delta > 0) {
+          await createConsumptionLog({
+            assetId: id,
+            category: ConsumptionCategory.ADJUSTMENT,
+            quantity: delta,
+            userId,
+            note: "Quantity adjusted via asset edit",
+            tx,
+          });
+        }
+      }
 
       if (shouldUpdatePlacement) {
         if (newLocationId) {
@@ -2941,6 +3028,42 @@ export async function updateAsset({
           toValue: asset.valuation ?? null,
         });
       }
+      // Quantity is stock; minQuantity is the reorder threshold. Each emits
+      // its own event so reports can aggregate them independently. The stock
+      // ConsumptionLog ADJUSTMENT is written in the tx above; minQuantity is a
+      // threshold (not stock), so it never writes a ConsumptionLog.
+      if (
+        typeof quantity !== "undefined" &&
+        (assetBeforeUpdate.quantity ?? null) !== (asset.quantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "quantity",
+          fromValue: assetBeforeUpdate.quantity ?? null,
+          toValue: asset.quantity ?? null,
+        });
+      }
+      if (
+        typeof minQuantity !== "undefined" &&
+        (assetBeforeUpdate.minQuantity ?? null) !== (asset.minQuantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: assetBeforeUpdate.minQuantity ?? null,
+          toValue: asset.minQuantity ?? null,
+        });
+      }
       if (fieldChangeEvents.length > 0) {
         await recordEvents(fieldChangeEvents);
       }
@@ -3049,8 +3172,63 @@ export async function updateAsset({
       }
     }
 
+    /**
+     * Low-stock check — on any QUANTITY change OR any MIN-QUANTITY (threshold)
+     * change to a QUANTITY_TRACKED asset.
+     * - A quantity DROP may cross INTO the low-stock band (fire the alert); a
+     *   raise (restock via the edit form / CSV update-import) may cross back OUT
+     *   (clear the `lowStockNotifiedAt` marker + send the "back in stock" notice).
+     * - A THRESHOLD change must also run — including CLEARING `minQuantity`.
+     *   Otherwise removing a threshold while an asset is low leaves the marker
+     *   set, and re-adding a threshold later would let that stale marker suppress
+     *   the next genuine alert. The notifier only performs its clear/recovery
+     *   transition when it is actually called (it clears a stale marker when the
+     *   asset has no threshold).
+     * Mirrors the adjust-quantity route (unconditional on add/subtract). Runs
+     * OUTSIDE the committed transaction (best-effort — a notification failure
+     * must never roll back a successful asset edit). The min-quantity branch
+     * relies on `asset.type` (not the hoisted `lockedAssetType`, which is only
+     * set when a quantity write took the row lock).
+     */
+    const isQuantityTrackedAsset =
+      lockedAssetType === AssetType.QUANTITY_TRACKED ||
+      asset.type === AssetType.QUANTITY_TRACKED;
+    const quantityChanged =
+      quantity != null &&
+      quantityBeforeUpdate != null &&
+      quantity !== quantityBeforeUpdate;
+    const minQuantityChanged =
+      typeof minQuantity !== "undefined" &&
+      (assetBeforeUpdate?.minQuantity ?? null) !== (asset.minQuantity ?? null);
+    if (isQuantityTrackedAsset && (quantityChanged || minQuantityChanged)) {
+      try {
+        await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
+      } catch (lowStockError) {
+        Logger.error(
+          new ShelfError({
+            cause: lowStockError,
+            message:
+              "Failed to run low-stock check after asset quantity/threshold edit",
+            label: "Assets",
+            additionalData: { assetId: id, organizationId },
+          })
+        );
+      }
+    }
+
     return asset;
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400. updateAsset writes AssetLocation pivot rows
+    // in its transaction; a submitted quantity can pass the pre-check yet trip
+    // the DEFERRED trigger at COMMIT if a concurrent request lowered
+    // Asset.quantity in between. No-ops for every other error. See
+    // SHELF-WEBAPP-219 / 21N (race backstop, matching replaceAssetPlacements).
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { userId, id, organizationId },
+    });
+
     // If it's already a ShelfError (kit guard, qty validator, org-scope
     // guard, etc.), re-throw as-is so the upstream status / title /
     // message survive. `isLikeShelfError` includes a duck-type fallback
@@ -3516,6 +3694,16 @@ export async function replaceAssetPlacements({
 
     return { ok: true as const };
   } catch (cause) {
+    // Backstop: the sum-within-total pre-check above (step 5) rejects most
+    // over-submissions with a friendly 400, but a concurrent placement / qty
+    // edit can still trip the DEFERRED `AssetLocation ... exceeds
+    // Asset.quantity` trigger at COMMIT. Translate that race to the same
+    // friendly 400 instead of a generic 500. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { assetId, userId, organizationId },
+    });
+
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
@@ -5276,16 +5464,40 @@ export async function refreshExpiredAssetImages<
   /** Short backoff to prevent retry storms when refresh fails */
   const BACKOFF_SECONDS = 30;
 
-  const applyBackoff = async (asset: (typeof expiredAssets)[number]) => {
-    try {
-      const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
+  /**
+   * DB persist payloads collected while re-signing. Every write this function
+   * would previously `await` inline (the re-signed URLs AND the retry-storm
+   * backoff bumps) is buffered here and flushed OFF the awaited path in a
+   * single background batch after the response value is built — the concurrent
+   * `db.asset.update` burst on this read path was part of what exhausted the
+   * Prisma pool (P2024). The response already carries the fresh URLs, so a
+   * failed background write is harmless: the next load simply re-signs
+   * (idempotent). Each entry is an `updateMany` guarded on the original
+   * `mainImage`, so a deferred write can never overwrite an image that changed
+   * between the read and the flush.
+   */
+  const pendingWrites: Array<{
+    assetId: string;
+    args: Prisma.AssetUpdateManyArgs;
+  }> = [];
+
+  // Buffer a backoff bump instead of writing it inline. Synchronous now (no DB
+  // round-trip on the critical path); the actual write happens in the flush.
+  // Guarded on the original `mainImage` (optimistic concurrency) so a stale
+  // backoff can't land on an image that was replaced between read and flush.
+  const applyBackoff = (asset: (typeof expiredAssets)[number]) => {
+    const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+    pendingWrites.push({
+      assetId: asset.id,
+      args: {
+        where: {
+          id: asset.id,
+          organizationId: asset.organizationId,
+          mainImage: asset.mainImage,
+        },
         data: { mainImageExpiration: backoffExpiration },
-      });
-    } catch {
-      // If even the backoff update fails, just move on
-    }
+      },
+    });
   };
 
   const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
@@ -5293,7 +5505,7 @@ export async function refreshExpiredAssetImages<
       const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
       if (!mainImagePath) {
         // Can't extract path — apply backoff to avoid retrying every load
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5338,9 +5550,30 @@ export async function refreshExpiredAssetImages<
         updateData.thumbnailImage = newThumbnailUrl;
       }
 
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
-        data: updateData,
+      // Defer the persist off the awaited path — buffer the payload and let the
+      // single background flush below write it. The response value returned here
+      // is independent of whether/when this write lands, so the fresh URLs are
+      // served immediately even if the write later fails. The guard makes the
+      // write optimistic: if the image was replaced (e.g. by
+      // updateAssetMainImage) between this read and the flush, the guard no
+      // longer matches and the stale re-signed URL is silently skipped instead
+      // of clobbering the newer image. We guard on thumbnailImage too, but only
+      // when this write actually sets one — otherwise a mainImage-only refresh
+      // (thumbnail re-sign failed) would be needlessly skipped by a thumbnail
+      // that changed independently.
+      pendingWrites.push({
+        assetId: asset.id,
+        args: {
+          where: {
+            id: asset.id,
+            organizationId: asset.organizationId,
+            mainImage: asset.mainImage,
+            ...(updateData.thumbnailImage !== undefined
+              ? { thumbnailImage: asset.thumbnailImage }
+              : {}),
+          },
+          data: updateData,
+        },
       });
 
       return {
@@ -5350,20 +5583,17 @@ export async function refreshExpiredAssetImages<
         ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
     } catch (error) {
-      // Asset deleted between query and update — not an error
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
-        return null;
-      }
+      // This block only wraps extractStoragePath + createSignedUrl now — the DB
+      // persist was deferred to the background flush — so no Prisma P2025 can
+      // surface here; the flush's guarded updateMany handles deleted/changed
+      // rows (count 0, no throw).
 
       // File deleted from storage — expected, not a bug
       if (isStorageObjectNotFound(error)) {
         Logger.info(
           `Image file not found in storage for asset ${asset.id}, applying backoff`
         );
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5386,7 +5616,7 @@ export async function refreshExpiredAssetImages<
         })
       );
 
-      await applyBackoff(asset);
+      applyBackoff(asset);
       throw error;
     }
   };
@@ -5429,6 +5659,48 @@ export async function refreshExpiredAssetImages<
       }
       refreshedMap.set(result.value.id, entry);
     }
+  }
+
+  // Flush all buffered writes (re-signed URLs + backoff bumps) OFF the awaited
+  // path in a fire-and-forget background task. Each write goes through the
+  // shared, process-wide background-write limiter (withBackgroundWriteSlot), so
+  // no matter how many /assets index loads run concurrently — or how many other
+  // features defer background writes — the aggregate can never exceed
+  // MAX_CONCURRENT_BACKGROUND_WRITES connections at once and starve the reads
+  // this deferral protects (P2024). Running on a long-lived Node server (Fly),
+  // the writes still complete after the response is sent — which is the intent.
+  // Every failure is swallowed and logged (never rethrown): the fresh URL is
+  // already served and the next load simply re-signs, so the write is
+  // idempotent and non-critical.
+  if (pendingWrites.length > 0) {
+    void Promise.all(
+      pendingWrites.map(({ assetId, args }) =>
+        // updateMany (not update) applies the guard in args.where: count 0 means
+        // the row was deleted OR its image changed since the read, so there is
+        // nothing safe to persist. Both are expected no-ops, and updateMany
+        // returns count 0 rather than throwing P2025, so those cases need no
+        // per-write error handling.
+        withBackgroundWriteSlot(() => db.asset.updateMany(args)).catch(
+          (error: unknown) => {
+            // why: URL already served; log as a warning so a persist failure
+            // never becomes an unhandled rejection or a Sentry error.
+            Logger.warn(
+              new ShelfError({
+                cause: error,
+                message:
+                  "Background persist of refreshed asset image URLs failed",
+                additionalData: { assetId },
+                label: "Assets",
+                shouldBeCaptured: false,
+              })
+            );
+          }
+        )
+      )
+    ).catch(() => {
+      // Extra guard: per-write errors are already swallowed above, but keep the
+      // outer background promise from ever surfacing as an unhandled rejection.
+    });
   }
 
   return assets.map((a) => {
@@ -5504,12 +5776,19 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5518,6 +5797,7 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5630,6 +5910,7 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -5646,6 +5927,12 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5654,6 +5941,7 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5794,7 +6082,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -5859,6 +6148,7 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -5872,6 +6162,12 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5880,6 +6176,7 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5992,14 +6289,20 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
+          // Actor name, custodian name and asset title are all user-supplied
+          // and render as literal text in this Markdoc note.
+          const actorName = stripMarkdocDelimiters(
+            `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
+          );
+          const custodianName = stripMarkdocDelimiters(
+            primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
+              : "Unknown Custodian"
+          );
           return {
-            content: `**${user.firstName?.trim()} ${
-              user.lastName
-            }** has released **${
-              primaryCustody
-                ? resolveTeamMemberName(primaryCustody.custodian)
-                : "Unknown Custodian"
-            }'s** custody over **${asset.title?.trim()}**`,
+            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
+              asset.title ?? ""
+            )}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -6053,6 +6356,7 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -6060,6 +6364,12 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6068,6 +6378,7 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /** We have to create notes for all the assets so we have make this query */
@@ -6359,6 +6670,7 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6366,6 +6678,12 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6374,6 +6692,7 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6484,6 +6803,7 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6492,6 +6812,12 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6500,6 +6826,7 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6650,12 +6977,19 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6664,6 +6998,7 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     // Simple, consistent where clause
@@ -7203,7 +7538,11 @@ export async function checkOutQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7438,7 +7777,11 @@ export async function releaseQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7689,14 +8032,19 @@ export async function moveAssetLocationUnits(
       );
 
       /** Step 2: Lock the asset row so concurrent placement edits serialize. */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
-       * Step 3: Defense-in-depth org check. The `assertAssetsBelongToOrg`
-       * above already guards request input, but `lockAssetForQuantityUpdate`
-       * does NOT scope by org — so we re-check the locked row's
-       * `organizationId` to make absolutely sure we're not mutating
-       * another tenant's data.
+       * Step 3: Defense-in-depth org check. Both `assertAssetsBelongToOrg`
+       * above AND the org-scoped `lockAssetForQuantityUpdate` (which now
+       * filters `FOR UPDATE` on `organizationId`) already guarantee the row
+       * belongs to this org — a foreign-org id would have 404'd at the lock.
+       * We keep this re-check as belt-and-braces to make absolutely sure we're
+       * not mutating another tenant's data.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -8065,7 +8413,11 @@ export async function placeUnplacedUnits(
         tx
       );
 
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -8265,6 +8617,22 @@ export async function placeUnplacedUnits(
       moveCorrelationId,
     };
   } catch (cause) {
+    // Backstop: the `quantity > unplaced` pre-check above rejects most
+    // over-submissions with a friendly 400, but two concurrent place-units
+    // requests can each pass their own check and still trip the DEFERRED
+    // `AssetLocation ... exceeds Asset.quantity` trigger at COMMIT. Translate
+    // that race to the same friendly 400. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        toLocationId,
+        quantity,
+      },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }

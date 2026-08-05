@@ -32,7 +32,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const result = await resolveMobileScannedCode({ request, params, user });
     if (!result.ok) {
       return data(
-        { error: { message: result.message } },
+        {
+          error: {
+            message: result.message,
+            // Additive structured discriminator (e.g. "unclaimed") + the
+            // scanned QR id, so the companion can branch into the native
+            // claim flow without string-matching the message.
+            ...(result.reason
+              ? { reason: result.reason, qrId: result.qrId }
+              : {}),
+          },
+        },
         { status: result.status }
       );
     }

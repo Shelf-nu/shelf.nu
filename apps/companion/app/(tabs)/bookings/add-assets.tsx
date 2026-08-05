@@ -46,6 +46,12 @@ import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 type Mode = "assets" | "kits" | "models";
 
 const assetKeyExtractor = (item: AvailableAsset) => item.id;
+/**
+ * Rows fetched per page. Every tab pages through the whole list, so this is a
+ * latency/-payload tradeoff, not a cap: nothing is unreachable at any size.
+ */
+const PICKER_PAGE_SIZE = 50;
+
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
 
@@ -79,10 +85,13 @@ export default function AddBookingAssetsScreen() {
   const [modelRequestsById, setModelRequestsById] = useState<
     Record<string, AvailableModelExistingRequest>
   >({});
-  const [totalModelCount, setTotalModelCount] = useState(0);
   // The model whose quantity sheet is open (null = closed).
   const [activeModel, setActiveModel] = useState<AvailableModel | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  /** True while a "load more" page is in flight (footer spinner only). */
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  /** Whether the active tab has further pages to pull in. */
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState("");
@@ -103,62 +112,142 @@ export default function AddBookingAssetsScreen() {
   // Monotonic id so a slow earlier fetch (e.g. an old search/mode) can't
   // overwrite the newest results with stale availability.
   const requestIdRef = useRef(0);
-  const load = useCallback(async () => {
-    if (!currentOrg || !from || !to) return;
-    const reqId = ++requestIdRef.current;
-    setIsLoading(true);
-    setError(null);
-    if (mode === "assets") {
-      const { data, error: err } = await api.availableAssets(currentOrg.id, {
-        bookingFrom: from,
-        bookingTo: to,
-        // Keep THIS booking's own assets selectable when editing (otherwise they
-        // filter out as "unavailable" against their own reservation).
-        unhideBookingId: bookingId,
-        search: debouncedSearch || undefined,
-      });
-      if (reqId !== requestIdRef.current) return; // superseded by a newer load
-      if (err) setError(err);
-      else if (data) setAssets(data.assets);
-    } else if (mode === "kits") {
-      const { data, error: err } = await api.availableKits(currentOrg.id, {
-        bookingFrom: from,
-        bookingTo: to,
-        // REQUIRED: enables the kit conflict filter (else already-booked kits
-        // show as available) and keeps this booking's own kits selectable.
-        currentBookingId: bookingId,
-        search: debouncedSearch || undefined,
-      });
-      if (reqId !== requestIdRef.current) return; // superseded by a newer load
-      if (err) setError(err);
-      else if (data) setKits(data.kits);
-    } else {
-      // Book-by-model: availability is computed server-side over the booking's
-      // window. Search is ALSO server-side (the list is capped at ~50, so a
-      // client-only filter could never reach a model that sorts past the cap).
-      const { data, error: err } = await api.availableModels(
-        currentOrg.id,
-        bookingId,
-        debouncedSearch || undefined
-      );
-      if (reqId !== requestIdRef.current) return; // superseded by a newer load
-      if (err) setError(err);
-      else if (data) {
-        setModels(data.assetModels ?? []);
-        setTotalModelCount(data.totalAssetModels ?? 0);
-        setModelRequestsById(
-          Object.fromEntries(
-            (data.modelRequests ?? []).map((mr) => [mr.assetModelId, mr])
-          )
-        );
-      }
-    }
-    if (reqId === requestIdRef.current) setIsLoading(false);
-  }, [currentOrg, from, to, mode, debouncedSearch, bookingId]);
+  /** Highest page currently held, so `loadMore` knows what to ask for next. */
+  const pageRef = useRef(1);
 
+  /**
+   * Fetch one page for the active tab.
+   *
+   * Every tab is paginated: the operator must be able to reach EVERY asset,
+   * kit and model that is valid for this booking, not just the first page.
+   * A capped list silently hides inventory — a workspace whose first page is
+   * all one category looks like it owns nothing else.
+   *
+   * `append` distinguishes "load more" (concatenate) from a fresh load after a
+   * tab switch or a new search (replace). The request-id guard makes a slow
+   * earlier page lose to a newer one rather than clobber it.
+   */
+  const fetchPage = useCallback(
+    async (targetPage: number, append: boolean) => {
+      if (!currentOrg || !from || !to) return;
+      const reqId = ++requestIdRef.current;
+      if (append) {
+        setIsLoadingMore(true);
+      } else {
+        setIsLoading(true);
+        setError(null);
+      }
+
+      if (mode === "assets") {
+        const { data, error: err } = await api.availableAssets(currentOrg.id, {
+          bookingFrom: from,
+          bookingTo: to,
+          // Keep THIS booking's own assets selectable when editing (otherwise they
+          // filter out as "unavailable" against their own reservation).
+          unhideBookingId: bookingId,
+          search: debouncedSearch || undefined,
+          page: targetPage,
+          perPage: PICKER_PAGE_SIZE,
+        });
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          setAssets((prev) =>
+            append ? [...prev, ...data.assets] : data.assets
+          );
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+        }
+      } else if (mode === "kits") {
+        const { data, error: err } = await api.availableKits(currentOrg.id, {
+          bookingFrom: from,
+          bookingTo: to,
+          // REQUIRED: enables the kit conflict filter (else already-booked kits
+          // show as available) and keeps this booking's own kits selectable.
+          currentBookingId: bookingId,
+          search: debouncedSearch || undefined,
+          page: targetPage,
+          perPage: PICKER_PAGE_SIZE,
+        });
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          setKits((prev) => (append ? [...prev, ...data.kits] : data.kits));
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+        }
+      } else {
+        // Book-by-model: availability is computed server-side over the booking's
+        // window, and so is search. Paginated like the other tabs so a model
+        // sorting past the first page is still reachable by scrolling.
+        const { data, error: err } = await api.availableModels(
+          currentOrg.id,
+          bookingId,
+          debouncedSearch || undefined,
+          { page: targetPage, perPage: PICKER_PAGE_SIZE }
+        );
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          const rows = data.assetModels ?? [];
+          setModels((prev) => (append ? [...prev, ...rows] : rows));
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+          // Reservations are the same on every page — only seed them once, so a
+          // "load more" can't clobber edits made since the first page landed.
+          if (!append) {
+            setModelRequestsById(
+              Object.fromEntries(
+                (data.modelRequests ?? []).map((mr) => [mr.assetModelId, mr])
+              )
+            );
+          }
+        }
+      }
+      if (reqId === requestIdRef.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
+    },
+    [currentOrg, from, to, mode, debouncedSearch, bookingId]
+  );
+
+  // Reset to page 1 whenever the tab, search or booking window changes.
+  // `fetchPage`'s identity already tracks exactly those inputs.
   useEffect(() => {
-    load();
-  }, [load]);
+    pageRef.current = 1;
+    setHasMore(false);
+    void fetchPage(1, false);
+  }, [fetchPage]);
+
+  /** Pull the next page in when the list nears its end. */
+  const loadMore = useCallback(() => {
+    if (isLoading || isLoadingMore || !hasMore) return;
+    void fetchPage(pageRef.current + 1, true);
+  }, [isLoading, isLoadingMore, hasMore, fetchPage]);
+
+  /**
+   * Reload the active tab from page 1. Used after a mutation (reserving or
+   * clearing a model) and by the error retry — both invalidate availability,
+   * so any pages already held are stale and must be dropped, not appended to.
+   */
+  const reload = useCallback(() => {
+    pageRef.current = 1;
+    setHasMore(false);
+    void fetchPage(1, false);
+  }, [fetchPage]);
+
+  /**
+   * Footer shared by all three tabs: a spinner while the next page loads.
+   * Deliberately renders nothing once everything is loaded — reaching the end
+   * of a fully-loaded list needs no explanation, whereas the old "showing 50
+   * of N, search to find the rest" copy existed only to excuse a hard cap.
+   */
+  const listFooter = isLoadingMore ? (
+    <View style={styles.listFooter}>
+      <ActivityIndicator size="small" color={colors.muted} />
+    </View>
+  ) : null;
 
   const toggleAsset = useCallback((assetId: string) => {
     setSelectedAssetIds((prev) => {
@@ -230,7 +319,7 @@ export default function AddBookingAssetsScreen() {
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     markBookingDirty(bookingId);
-    load(); // refresh availability + the reserved amounts
+    reload(); // refresh availability + the reserved amounts
   };
 
   // Memoized so `renderModel` (which references it) keeps a stable identity
@@ -263,13 +352,13 @@ export default function AddBookingAssetsScreen() {
                 Haptics.NotificationFeedbackType.Success
               );
               markBookingDirty(bookingId);
-              load();
+              reload();
             },
           },
         ]
       );
     },
-    [currentOrg, bookingId, load]
+    [currentOrg, bookingId, reload]
   );
 
   const renderAsset = useCallback(
@@ -498,7 +587,7 @@ export default function AddBookingAssetsScreen() {
           <Text style={styles.emptyText}>{error}</Text>
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={load}
+            onPress={reload}
             accessibilityRole="button"
             accessibilityLabel="Retry"
           >
@@ -512,6 +601,9 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={assetKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Ionicons
@@ -532,6 +624,9 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={kitKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Ionicons
@@ -552,17 +647,9 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={modelKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          ListFooterComponent={
-            // The picker returns the first 50 (by name); when there are more and
-            // the user hasn't searched, nudge them to search — which now filters
-            // server-side, so any model past the cap is reachable.
-            !debouncedSearch && totalModelCount > models.length ? (
-              <Text style={styles.modelsFooter}>
-                Showing {models.length} of {totalModelCount} models. Search by
-                name to find the rest.
-              </Text>
-            ) : null
-          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Ionicons name="cube-outline" size={40} color={colors.border} />
@@ -761,11 +848,9 @@ const useStyles = createStyles((colors, shadows) => ({
   modelRemoveButton: {
     padding: spacing.xs,
   },
-  modelsFooter: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
-    textAlign: "center",
-    paddingVertical: spacing.md,
+  listFooter: {
+    paddingVertical: spacing.lg,
+    alignItems: "center",
   },
   checkbox: {
     width: 22,

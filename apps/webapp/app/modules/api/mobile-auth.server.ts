@@ -78,6 +78,14 @@ export async function requireMobileAuth(request: Request) {
       lastName: true,
       profilePicture: true,
       onboarded: true,
+      // Date/time format preferences (raw, nullable). Surfaced on
+      // `/api/mobile/me` so the companion renders every date/time in the user's
+      // chosen format + timezone instead of device-local. Resolved client-side
+      // via `resolveFormatPrefs` (@shelf/datetime) with a device-hint fallback.
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
     },
@@ -328,6 +336,12 @@ export const MOBILE_ASSET_SELECT = {
   mainImage: true,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // why: the fulfil-and-check-out scanner matches each scan against the
+  // booking's outstanding BookingModelRequests. Without the model id the
+  // client cannot tell a matching unit from an off-model one, and can only
+  // count scans — which reads as progress toward a reservation it may not
+  // actually fulfil.
+  assetModelId: true,
   // Quantity fields (additive). INDIVIDUAL assets carry `type: "INDIVIDUAL"`
   // and null quantity columns; QUANTITY_TRACKED assets surface the totals the
   // companion will use to DISPLAY quantity. The shaper passes these through
@@ -463,6 +477,8 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
+  assetModelId?: string | null;
   mainImage: string | null;
   availableToBook: boolean;
   category: { name: string } | null;

@@ -52,6 +52,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      ENABLE_SCIM: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -322,6 +323,29 @@ export const DISABLE_SSO =
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
+
+/**
+ * Opt-in flag for SCIM user provisioning (RFC 7643/7644).
+ *
+ * Deliberately inverted relative to `DISABLE_SSO`: SCIM is OFF unless a
+ * deployment explicitly turns it on. The feature is usable for self-hosters but
+ * is not yet ready for Shelf Cloud (pending premium-plan gating and a decision
+ * on push vs. manual vs. nightly sync), so the safe default is disabled.
+ *
+ * Server-side only — intentionally absent from `getBrowserEnv()`. Surfaces that
+ * need it in the browser must receive it through a loader.
+ */
+export const ENABLE_SCIM =
+  getEnv("ENABLE_SCIM", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DEFAULT_SSO_DOMAIN =
+  getEnv("DEFAULT_SSO_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  }) || "";
 
 export const SEND_ONBOARDING_EMAIL =
   getEnv("SEND_ONBOARDING_EMAIL", {

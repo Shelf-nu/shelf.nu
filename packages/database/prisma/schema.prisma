@@ -68,6 +68,15 @@ model User {
   // recently-active member (join via UserOrganization). Null until first use.
   lastMobileActiveAt DateTime?
 
+  // User datetime-formatting preferences. Nullable: null = not yet detected, so
+  // the resolver falls back to live browser hints (today's behavior) until the
+  // user's next authenticated load lazily backfills concrete values. See
+  // ~/utils/date-format (resolveFormatPrefs / detectFormatPrefsFromHints).
+  dateFormat DateFormatPreference? // null → not yet detected
+  timeFormat TimeFormatPreference? // null → not yet detected
+  weekStart  WeekStartPreference?  // null → not yet detected
+  timeZone   String?               // IANA name; null → not yet detected
+
   // Relationships
   assets             Asset[]
   categories         Category[]
@@ -123,6 +132,9 @@ model User {
   assetFilterPresets AssetFilterPreset[]
   assetModels        AssetModel[]
   consumptionLogs    ConsumptionLog[]
+
+  // Org-scoped SCIM external IDs (one per org, managed by the org's identity provider)
+  scimExternalIds UserScimExternalId[]
 
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
@@ -217,6 +229,10 @@ model Asset {
   minQuantity     Int? // Low-stock alert threshold
   consumptionType ConsumptionType? // How consumption is tracked
   unitOfMeasure   String? // e.g., "pcs", "boxes", "liters"
+  // Debounce marker for low-stock alerting: set when available first crosses
+  // to/below minQuantity (alert sent), cleared when it recovers above. Prevents
+  // re-alerting on every subsequent decrement while already low.
+  lowStockNotifiedAt DateTime?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -960,9 +976,13 @@ model Organization {
   auditImages        AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  roleChangeLogs      RoleChangeLog[]
+  
+  scimTokens      ScimToken[]
+  scimExternalIds UserScimExternalId[]
+  roleChangeLogs  RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
   activityEvents      ActivityEvent[]
+
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1021,6 +1041,29 @@ enum QrIdDisplayPreference {
   EAN13
 }
 
+// User date-format preference — controls day/month/year ordering in rendered
+// dates. Stored per-User (nullable); null resolves from live browser hints.
+enum DateFormatPreference {
+  DD_MM_YYYY // e.g. 03/04/2026
+  MM_DD_YYYY // e.g. 04/03/2026
+  YYYY_MM_DD // e.g. 2026-04-03
+  MMM_DD_YYYY // e.g. Jul 20, 2026
+  DD_MMM_YYYY // e.g. 20 Jul 2026
+}
+
+// User time-format preference — 12-hour (AM/PM) vs 24-hour clock.
+enum TimeFormatPreference {
+  H12 // 1:30 PM
+  H24 // 13:30
+}
+
+// User "start of week" preference for calendar/date-picker rendering.
+enum WeekStartPreference {
+  MONDAY
+  SUNDAY
+  SATURDAY
+}
+
 enum OrganizationRoles {
   ADMIN
   BASE
@@ -1043,6 +1086,46 @@ model SsoDetails {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ScimToken {
+  id        String @id @default(cuid())
+  tokenHash String @unique // SHA-256 hash of the raw bearer token
+
+  label String // Human-friendly label, e.g. "Entra ID Production"
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  createdById String // User ID of the admin who created this token
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([organizationId])
+}
+
+/**
+ * Org-scoped SCIM external ID linking a Shelf user to an identity-provider
+ * object within a specific organization.  A single Shelf user can appear in
+ * multiple organizations, each managed by a different identity provider, so the
+ * external ID must be scoped to the (user, organization) pair.
+ */
+model UserScimExternalId {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  scimExternalId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, organizationId])
+  // The SCIM-facing resource id is the per-org external id (the IdP object id),
+  // so it must be unique within an org and safe to resolve `/Users/{id}` against.
+  @@unique([organizationId, scimExternalId])
+  @@index([organizationId])
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
@@ -2318,6 +2401,8 @@ enum ActivityAction {
   ASSET_TAGS_CHANGED
   ASSET_STATUS_CHANGED
   ASSET_VALUATION_CHANGED
+  ASSET_QUANTITY_CHANGED
+  ASSET_MIN_QUANTITY_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED

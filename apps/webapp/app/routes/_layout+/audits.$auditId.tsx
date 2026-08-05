@@ -36,6 +36,7 @@ import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { parseData } from "~/utils/http.server";
@@ -81,11 +82,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const parsedData = parseData(formData, EditAuditSchema);
       const hints = getClientHint(request);
 
-      // Parse due date using Luxon (same pattern as create audit)
+      // Convert dueDate from the acting user's stored timezone preference to UTC.
+      // Parse against the SAME resolved timezone that date DISPLAY uses (the
+      // user's `timeZone` preference), NOT the browser hint — otherwise a
+      // browser/preference zone mismatch offsets the stored instant, and the
+      // edit path would store a different instant than the create path for the
+      // same typed wall-clock time. Resolve the preference lazily — only when a
+      // due date was actually submitted (no date → no parse → no DB lookup).
       const dueDateString = formData.get("dueDate")?.toString();
       const dueDateUTC = dueDateString
         ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-            zone: hints.timeZone,
+            zone: (await resolveUserFormatPrefsById(userId, hints)).timeZone,
           }).toJSDate()
         : null;
 

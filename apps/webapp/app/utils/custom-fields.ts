@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/utils/client-hints";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
@@ -460,16 +460,17 @@ export const buildCustomFieldValue = (
 export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage };
 
 /**
- * Returns a display value for a custom field based on its type
- * For dates, uses the raw date string to avoid timezone conversions
+ * Produce the human-readable display value for a stored custom-field value.
  *
- * @param value - The custom field value to display
- * @param hints - Client hints containing locale information
- * @returns Formatted display value as string or markdown node
+ * @param value - The stored custom-field value shape
+ * @param prefs - Optional resolved format prefs; when supplied, DATE values
+ *   render in the user's configured order (absolute, no tz conversion).
+ *   When omitted, falls back to `PPP` (server / prefs-less contexts).
+ * @returns A string or renderable Markdoc node
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  hints?: ClientHint
+  prefs?: ResolvedFormatPrefs
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
     return parseMarkdownToReact(value.raw as string);
@@ -482,8 +483,8 @@ export const getCustomFieldDisplayValue = (
   if (value.valueDate) {
     // Use raw date string directly for formatting
     // This ensures the date displayed matches the date entered
-    return hints
-      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+    return prefs
+      ? formatDateBasedOnLocaleOnly(value.raw as string, prefs)
       : format(parseDateOnlyString(value.raw as string), "PPP");
   }
 

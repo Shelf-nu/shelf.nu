@@ -32,6 +32,7 @@ import {
 } from "~/modules/auth/service.server";
 
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import type { DetectedFormatPrefs } from "~/utils/date-format";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -228,12 +229,15 @@ export async function createUserOrAttachOrg({
   firstName,
   lastName,
   createdWithInvite = false,
+  formatPrefs,
 }: Pick<User, "email" | "firstName"> &
   Partial<Pick<User, "lastName">> & {
     organizationId: Organization["id"];
     roles: OrganizationRoles[];
     password: string;
     createdWithInvite: boolean;
+    /** Browser-detected prefs threaded down from the invite-accept action. */
+    formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
     const shelfUser = await db.user.findFirst({
@@ -276,6 +280,7 @@ export async function createUserOrAttachOrg({
         firstName,
         lastName,
         createdWithInvite,
+        formatPrefs,
       });
 
       await ensureAssetIndexModeForRole({
@@ -347,7 +352,9 @@ export async function createUserFromSSO(
       zipPostalCode?: string;
       countryRegion?: string;
     };
-  }
+  },
+  /** Browser-detected prefs from the SSO callback action; stamped on the new row. */
+  formatPrefs?: DetectedFormatPrefs
 ) {
   try {
     const { email, userId } = authSession;
@@ -362,6 +369,7 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
+      formatPrefs,
     });
 
     // Update contact information if provided
@@ -519,6 +527,46 @@ async function handleSCIMTransition(
  * Updates an existing SSO user on subsequent logins.
  * Handles both Pure SSO and SCIM SSO scenarios for multiple domains.
  */
+/**
+ * Whether SCIM has deliberately deactivated this user in this organization.
+ *
+ * SCIM represents deactivation as "mapping row survives, membership removed"
+ * (see `~/modules/scim/service.server`), so a `UserScimExternalId` with no
+ * matching `UserOrganization` is a user the IdP has switched off — not one who
+ * was never provisioned.
+ *
+ * The distinction matters on SSO login: without it, group claims that still
+ * grant a role would immediately re-create the membership SCIM just removed,
+ * letting a deprovisioned user back in — potentially as an admin — whenever
+ * group propagation lags behind the SCIM deactivation, or whenever group
+ * membership is managed separately from SCIM scoping. A user SCIM never touched
+ * has no mapping, so normal SSO provisioning is unaffected.
+ *
+ * This infers state rather than reading it; an explicit SCIM lifecycle column is
+ * the robust fix and is deferred to the lifecycle-state work.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organizationId - The org whose group mapping matched
+ * @returns `true` when SCIM manages this user here and has removed their access
+ */
+async function isScimDeactivated(
+  userId: string,
+  organizationId: string
+): Promise<boolean> {
+  const mapping = await db.userScimExternalId.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { id: true },
+  });
+
+  if (mapping) {
+    Logger.info(
+      `SSO login: skipping role grant for user ${userId} in org ${organizationId} — SCIM has deactivated them`
+    );
+  }
+
+  return !!mapping;
+}
+
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
@@ -586,10 +634,6 @@ export async function updateUserFromSSO(
           (uo) => uo.organization.id === org.id
         );
 
-        if (desiredRole) {
-          firstMatchedOrg ??= org;
-        }
-
         if (existingOrgAccess) {
           const transition = await handleSCIMTransition(
             userId,
@@ -598,7 +642,14 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
-        } else if (desiredRole) {
+
+          // The user keeps access only when a role still maps; a null
+          // desiredRole makes handleSCIMTransition revoke it, so that org must
+          // not become the post-login landing org.
+          if (desiredRole) {
+            firstMatchedOrg ??= org;
+          }
+        } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -618,7 +669,13 @@ export async function updateUserFromSSO(
             newRole: desiredRole,
             transitionType: "ACCESS_GRANTED",
           });
+
+          // Access was just granted, so this org is a valid landing org.
+          firstMatchedOrg ??= org;
         }
+        // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
+        // (SCIM-deactivated user): returning an org the user cannot access sends
+        // the SSO callback to a 403 instead of /sso-pending-assignment.
       }
     }
 
@@ -657,6 +714,9 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    /** Browser-detected prefs to stamp on the new row; undefined → resolved at read time. */
+    formatPrefs?: DetectedFormatPrefs;
+    skipPersonalOrg?: boolean;
   }
 ) {
   const {
@@ -669,12 +729,15 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    formatPrefs,
+    skipPersonalOrg,
   } = payload;
 
   /**
    * We only create a personal org if the signup is not disabled
-   * */
-  const shouldCreatePersonalOrg = !config.disableSignup;
+   * and the caller hasn't opted out (e.g. SCIM provisioning)
+   */
+  const shouldCreatePersonalOrg = !skipPersonalOrg && !config.disableSignup;
 
   try {
     const createdUser = await db.$transaction(
@@ -687,6 +750,9 @@ export async function createUser(
             firstName,
             lastName,
             createdWithInvite,
+            // Stamp browser-detected date/time/week/timezone prefs when supplied.
+            // `{...undefined}` is a no-op, so unset prefs leave the columns null.
+            ...formatPrefs,
             roles: {
               connect: {
                 name: Roles["USER"],
@@ -795,6 +861,65 @@ export async function createUser(
   } catch (cause) {
     const isUniqueViolation =
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
+
+    /**
+     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
+     * violation raised on the primary key means a `User` row already exists for
+     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
+     * stored email differs from the OTP email, so the route's email-keyed race
+     * guard missed it. The `user.create` and ALL its side-effects (personal
+     * org, org association, team member, asset index settings) run inside one
+     * `$transaction`, so the P2002 rolled the whole thing back. Return the
+     * pre-existing row (using the exact same select shape the create returns)
+     * instead of failing the signup.
+     *
+     * ONE piece of state still needs reconciling: for invite/SSO callers
+     * (`organizationId` present), the rolled-back transaction never created the
+     * requested org association, so a concurrent P2002 race would otherwise
+     * return the existing user un-attached to the org they were invited to. We
+     * re-attach that association idempotently below (only when they aren't
+     * already a member). The personal-org / OTP self-signup case has no
+     * `organizationId`, so there is nothing to reconcile there.
+     *
+     * We deliberately do NOT re-fire the `signup_completed` analytics event on
+     * this path: no new account was created. If the lookup unexpectedly finds
+     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
+     * this `id`), that is a genuine conflict — fall through and throw.
+     */
+    if (isUniqueViolation) {
+      const existingUser = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+          ...USER_WITH_SSO_DETAILS_SELECT,
+          organizations: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (existingUser) {
+        // The rolled-back transaction never created the org association. For
+        // invite/SSO callers (organizationId present), a concurrent P2002 race
+        // would otherwise leave the existing user un-attached to the requested
+        // org. Reconcile idempotently — only attach when not already a member
+        // (the membership check avoids re-pushing roles via the upsert's
+        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        if (
+          organizationId &&
+          !existingUser.organizations.some((org) => org.id === organizationId)
+        ) {
+          await createUserOrgAssociation(db, {
+            userId,
+            organizationIds: [organizationId],
+            roles: roles ?? [],
+          });
+          existingUser.organizations.push({ id: organizationId });
+        }
+        return existingUser;
+      }
+    }
 
     throw new ShelfError({
       cause,

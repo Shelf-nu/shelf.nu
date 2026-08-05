@@ -1,3 +1,4 @@
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
@@ -330,7 +331,11 @@ export async function createAuditUpdateNote({
   // Build the content describing the changes
   const changeDescriptions = changes.map((change) => {
     const fieldLabel = change.field === "name" ? "audit name" : change.field;
-    return `- **${fieldLabel}**: "${change.from}" → "${change.to}"`;
+    // `from`/`to` are user-supplied values (the audit name, for one) rendered
+    // as literal text in a Markdoc note.
+    return `- **${fieldLabel}**: "${stripMarkdocDelimiters(
+      String(change.from ?? "")
+    )}" → "${stripMarkdocDelimiters(String(change.to ?? ""))}"`;
   });
 
   const content = `${wrapUserLinkForNote({

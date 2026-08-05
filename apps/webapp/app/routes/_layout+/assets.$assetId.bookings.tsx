@@ -7,6 +7,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -121,6 +122,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
+    /**
+     * Same amber "Stock conflict" pill as the main bookings index — this
+     * route shares `ListBookingsContent` via `<BookingsIndexPage />` below,
+     * so it needs the same per-booking flag wired in its own loader (see
+     * `.claude/rules/quantity-semantics-per-surface.md` / the module doc in
+     * `~/modules/booking/stock-conflicts.server`).
+     */
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
+      organizationId,
+    });
+
     const header: HeaderData = {
       title: "Bookings",
     };
@@ -132,7 +145,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: bookings,
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

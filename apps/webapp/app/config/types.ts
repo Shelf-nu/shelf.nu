@@ -47,6 +47,15 @@ export interface Config {
   disableSSO: boolean;
 
   /**
+   * Enable SCIM user provisioning (RFC 7643/7644).
+   *
+   * Opt-in — disabled unless `ENABLE_SCIM="true"` is set. When off, the SCIM API
+   * responds 404 and the SCIM settings section is hidden. Not yet available on
+   * Shelf Cloud.
+   */
+  enableScim: boolean;
+
+  /**
    * Show the "How did you find us?" field in the onboarding process
    * This is useful for gathering feedback on how users discover the platform.
    * @deprecated Use collectBusinessIntel instead. Kept for backwards compatibility.

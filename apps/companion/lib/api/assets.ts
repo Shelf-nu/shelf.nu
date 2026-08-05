@@ -5,6 +5,7 @@ import type {
   AssetDetail,
   AssetNote,
   QrResponse,
+  QrMutationResponse,
   BarcodeResponse,
   TeamMembersResponse,
   LocationsResponse,
@@ -91,6 +92,55 @@ export const assetsApi = {
       }`
     ),
 
+  /**
+   * Claim an unclaimed QR code into the caller's CURRENT organization
+   * (`POST /api/mobile/qr/claim`) — the mobile twin of the web claim route.
+   * The server claims into the org resolved from `orgId` only; mobile
+   * deliberately offers no org picker (web does).
+   *
+   * Admin/owner only: the server gates on `qr:update`, which no role below
+   * ADMIN holds. A 403 also covers the already-claimed race (the server wraps
+   * it with a generic "Failed to claim qr code"), so callers should re-resolve
+   * the code on failure instead of trusting the message text.
+   *
+   * @param orgId - Caller's current workspace id (the claim target).
+   * @param qrId - The unclaimed QR id (echoed by the resolve error payload).
+   * @returns `{ qr }` summary on success (assetId/kitId null) or `{ error }`.
+   */
+  claimQr: (orgId: string, qrId: string) =>
+    apiFetch<QrMutationResponse>(`/api/mobile/qr/claim?orgId=${orgId}`, {
+      method: "POST",
+      body: JSON.stringify({ qrId }),
+      // why: not retried — a timed-out-but-landed claim would 403 on the
+      // retry ("already claimed"), turning a success into a scary error.
+      // The caller's re-resolve fallback recovers the landed case instead.
+      retry: false,
+    }),
+
+  /**
+   * Link a claimed-but-unlinked QR code to an existing asset
+   * (`POST /api/mobile/qr/link-asset`). Replaces the asset's current QR codes
+   * (web parity — the web confirm dialog carries the same warning), so the
+   * picker's confirm step must warn about that. A 400 whose
+   * `errorDetails.reason === "unclaimed"` means the claim didn't stick —
+   * re-run {@link claimQr} and retry.
+   *
+   * Admin/owner only (server gates on `qr:update`, same as the web link flow).
+   *
+   * @param orgId - Caller's current workspace id (must own the QR).
+   * @param qrId - The claimed, unlinked QR id.
+   * @param assetId - The asset (in the caller's org) to link the code to.
+   * @returns `{ qr }` summary on success (assetId set) or `{ error }`.
+   */
+  linkQrToAsset: (orgId: string, qrId: string, assetId: string) =>
+    apiFetch<QrMutationResponse>(`/api/mobile/qr/link-asset?orgId=${orgId}`, {
+      method: "POST",
+      body: JSON.stringify({ qrId, assetId }),
+      // why: not retried — a timed-out-but-landed link would 403 on the
+      // retry ("already linked"), reporting failure for a landed success.
+      retry: false,
+    }),
+
   /** Resolve a barcode (additional code) to an asset */
   barcode: (value: string, orgId: string) =>
     apiFetch<BarcodeResponse>(
@@ -98,9 +148,15 @@ export const assetsApi = {
     ),
 
   /** Get team members for an organization (for custody picker) */
-  teamMembers: (orgId: string, search?: string) => {
+  teamMembers: (
+    orgId: string,
+    search?: string,
+    params?: { page?: number; perPage?: number }
+  ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (search) searchParams.set("search", search);
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     const path = `/api/mobile/team-members?${searchParams}`;
     // Only cache non-search requests (full list)
     return search
@@ -109,9 +165,15 @@ export const assetsApi = {
   },
 
   /** Get locations for an organization (for location picker) */
-  locations: (orgId: string, search?: string) => {
+  locations: (
+    orgId: string,
+    search?: string,
+    params?: { page?: number; perPage?: number }
+  ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (search) searchParams.set("search", search);
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     const path = `/api/mobile/locations?${searchParams}`;
     // Only cache non-search requests (full list)
     return search

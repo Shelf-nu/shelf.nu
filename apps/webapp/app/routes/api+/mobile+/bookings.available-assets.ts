@@ -60,10 +60,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * The companion's picker has NO pagination UI — `add-assets.tsx` renders a
      * FlatList with no `onEndReached` and no page state, so whatever this one
      * response contains is the entire set the operator can ever browse. The
-     * shared service defaults to `perPage = 8`, and the client never sends a
-     * `per_page`, so every live 1.1.0 install has been silently capped at 8
-     * assets — a workspace with 20 tablecloths could not reach anything else
-     * except via search.
+     * client never sends a `per_page`, so the size comes from
+     * `updateCookieWithPerPage`, whose default is 20 for a request with no
+     * cookie — and mobile never sends one. Every live 1.1.0 install was
+     * therefore capped at 20 assets: a workspace holding exactly 20
+     * tablecloths could reach nothing else except via search.
      *
      * Until the app ships real infinite scroll (which needs a store release,
      * and there is no OTA channel), request the service's maximum page size

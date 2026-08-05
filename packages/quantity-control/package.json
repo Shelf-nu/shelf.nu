@@ -1,0 +1,23 @@
+{
+  "name": "@shelf/quantity-control",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, dependency-free quantity/availability domain for QUANTITY_TRACKED assets, shared by the webapp (and, later, the companion app) so their availability math never drifts.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test"
+  },
+  "devDependencies": {
+    "@shelf/typescript-config": "workspace:*",
+    "@types/node": "^22.19.17",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

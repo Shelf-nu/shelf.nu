@@ -11,8 +11,11 @@ import { Pagination } from "~/components/list/pagination";
 import { DateS } from "~/components/shared/date";
 import { Td, Th } from "~/components/table";
 import { config } from "~/config/shelf.config";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { formatDate } from "~/utils/date-format";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -111,7 +114,10 @@ type UserWithSubscription = UserFromService & {
  * Determines account status prioritizing team workspaces over personal ones.
  * Admins need to see billing-relevant status for conversion tracking.
  */
-function getAccountStatus(user: UserWithSubscription): string {
+function getAccountStatus(
+  user: UserWithSubscription,
+  prefs: ResolvedFormatPrefs
+): string {
   // Priority 1: Team workspace owner (billing decision maker)
   const teamOrgWhereOwner = user.userOrganizations.find(
     (uo) =>
@@ -121,7 +127,7 @@ function getAccountStatus(user: UserWithSubscription): string {
   );
 
   if (teamOrgWhereOwner) {
-    return formatOwnerStatus(user);
+    return formatOwnerStatus(user, prefs);
   }
 
   // Priority 2: Team workspace member (invited user)
@@ -143,7 +149,10 @@ function getAccountStatus(user: UserWithSubscription): string {
   return "Owner (Free)";
 }
 
-function formatOwnerStatus(user: UserWithSubscription): string {
+function formatOwnerStatus(
+  user: UserWithSubscription,
+  prefs: ResolvedFormatPrefs
+): string {
   // Note: This function is only called for team workspace owners
 
   // Check if on trial
@@ -152,7 +161,7 @@ function formatOwnerStatus(user: UserWithSubscription): string {
 
   if (isTrial && user.subscription?.trial_end) {
     const trialEndDate = new Date(user.subscription.trial_end * 1000);
-    const formattedDate = trialEndDate.toLocaleDateString("en-US", {
+    const formattedDate = formatDate(trialEndDate, prefs, {
       month: "short",
       day: "numeric",
     });
@@ -219,24 +228,29 @@ export default function Area51() {
   );
 }
 
-const ListUserContent = ({ item }: { item: UserWithSubscription }) => (
-  <>
-    <Td>{resolveUserDisplayName(item)}</Td>
-    <Td>{item.email}</Td>
-    <Td>
-      <span className="capitalize">{item.tier.name}</span>
-    </Td>
-    <Td>{getAccountStatus(item)}</Td>
-    <Td>
-      <DateS
-        date={item.createdAt}
-        options={{
-          dateStyle: "short",
-          timeStyle: "long",
-        }}
-      />
-    </Td>
-  </>
-);
+const ListUserContent = ({ item }: { item: UserWithSubscription }) => {
+  // Trial-end labels in the account status are formatted via the acting
+  // admin's resolved date-format prefs (no hardcoded en-US).
+  const { prefs } = useDateFormatter();
+  return (
+    <>
+      <Td>{resolveUserDisplayName(item)}</Td>
+      <Td>{item.email}</Td>
+      <Td>
+        <span className="capitalize">{item.tier.name}</span>
+      </Td>
+      <Td>{getAccountStatus(item, prefs)}</Td>
+      <Td>
+        <DateS
+          date={item.createdAt}
+          options={{
+            dateStyle: "short",
+            timeStyle: "long",
+          }}
+        />
+      </Td>
+    </>
+  );
+};
 
 export const ErrorBoundary = () => <ErrorContent />;

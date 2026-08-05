@@ -35,6 +35,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
@@ -47,13 +48,19 @@ import {
 } from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
 } from "~/modules/asset/move-units.types";
+import {
+  buildQuantityData,
+  type QuantityData,
+} from "~/modules/asset/quantity-overview.server";
 import {
   getActiveCustomFieldsForAsset,
   getAsset,
@@ -72,7 +79,6 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
@@ -203,168 +209,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
     /**
-     * Compute quantity availability for QUANTITY_TRACKED assets.
-     * Sums custody records AND booking reservations to determine how many
-     * units are currently available. Booking reservations split into two
-     * disjoint buckets so the sidebar surfaces both at a glance:
-     *
-     *   - `reserved` — units committed to bookings but NOT yet physically
-     *     gone. Combines RESERVED-booking quantities (future bookings)
-     *     with the ONGOING/OVERDUE "booked but not yet checked out"
-     *     remainder. Subtracts from `available` (booking-aware) but not
-     *     from `custodyAvailable` (physical-only).
-     *   - `checkedOut` — units actively off the shelf via an ONGOING /
-     *     OVERDUE booking, computed via the shared OUT-flow primitive.
-     *     Subtracts from both `available` and `custodyAvailable`.
+     * Compute quantity availability for QUANTITY_TRACKED assets via the
+     * shared `getAssetAvailability` primitive, called with NO `window` —
+     * "current state" mode. This is the #2724 fix: the headline `available`
+     * below is `physicalAvailable` (total − inCustody − inKits −
+     * checkedOut), which can never be dragged negative by far-future
+     * reservations the way the old inline formula could (it summed EVERY
+     * active reservation, all-time, and subtracted the lot). Reservations
+     * still surface on their own "Reserved (bookings)" row
+     * (`reservedTotal`), just no longer baked into the headline.
      */
-    let quantityData: {
-      total: number;
-      /**
-       * Operator-only custody — sum of `Custody.quantity` where
-       * `kitCustodyId IS NULL`. Kit-allocated custody rows mirror
-       * `AssetKit.quantity` and are already counted via `inKits`;
-       * including them here would double-count.
-       */
-      inCustody: number;
-      /**
-       * Sum of `AssetKit.quantity` across every kit this asset
-       * participates in. Surfaced on the sidebar so users can see how
-       * many units are earmarked for kit use, and used in the
-       * `available` / `custodyAvailable` formulas so kit-earmarked
-       * units don't masquerade as free stock.
-       */
-      inKits: number;
-      /**
-       * Sum of `AssetLocation.quantity` across every location this
-       * asset is placed at. Surfaced on the sidebar Quantity Overview
-       * so users see the placed / unplaced split at a glance. Does NOT
-       * subtract from `available` — placements are orthogonal to
-       * custody / bookings (per the PRD design principle and the
-       * orthogonal-MAX formula in `getLocationPickerMeta`).
-       */
-      inLocations: number;
-      /**
-       * Units committed to bookings but NOT yet physically off the shelf.
-       * Covers RESERVED bookings (future) + the ONGOING/OVERDUE
-       * booked-but-not-yet-checked-out remainder. Disjoint from
-       * `checkedOut` — every booked unit appears in exactly one bucket.
-       */
-      reserved: number;
-      /**
-       * Units actively off the shelf via ONGOING/OVERDUE bookings,
-       * computed via the shared OUT-flow primitive
-       * (`computeCheckedOutForAsset`).
-       */
-      checkedOut: number;
-      /**
-       * Booking-aware availability: how many units can be reserved for a
-       * *future* booking. Subtracts everything that's already spoken for —
-       * kits + operator custody + reserved in other bookings + checked-out.
-       */
-      available: number;
-      /**
-       * Physical availability: how many units are *actually* on the shelf
-       * right now — not in a kit, not held by a custodian, and not
-       * currently checked out on an active booking. Used to cap custody
-       * assignment and total-quantity adjustments. Reservations (future
-       * bookings) do NOT subtract from this because the units are still
-       * physically present until that booking is checked out.
-       */
-      custodyAvailable: number;
-    } | null = null;
+    let quantityData: QuantityData | null = null;
 
     if (isQuantityTracked(asset)) {
-      // "Reserved (bookings)" on the overview card surfaces every unit
-      // that is committed to a booking but NOT yet physically off the
-      // shelf — so users instantly see the chunk that's neither truly
-      // free nor already gone. That single bucket has two contributors:
-      //
-      //   1. RESERVED bookings — no progressive-checkout component, the
-      //      naive `Σ BookingAsset.quantity` is the whole earmarked count.
-      //   2. ONGOING / OVERDUE bookings — the booked total MINUS what's
-      //      already been scanned out via PartialBookingCheckout. The
-      //      OUT-side primitive (`computeCheckedOutForAsset`) gives us
-      //      the truly-out count; subtracting it from the active-booking
-      //      booked total yields the booked-but-not-yet-out remainder.
-      //
-      // "Checked out (bookings)" is computed via the shared helper so
-      // the overview sidebar stays in lock-step with the OUT-flow's
-      // per-slice math.
-      const [reservedSum, ongoingBookedSum, checkedOut] = await Promise.all([
-        db.bookingAsset.aggregate({
-          where: {
-            assetId: asset.id,
-            booking: { status: "RESERVED", organizationId },
-          },
-          _sum: { quantity: true },
-        }),
-        // Active-booking booked total — sum of every `BookingAsset.quantity`
-        // slice on an ONGOING/OVERDUE booking. The not-yet-out remainder
-        // is this minus `checkedOut`.
-        db.bookingAsset.aggregate({
-          where: {
-            assetId: asset.id,
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-              organizationId,
-            },
-          },
-          _sum: { quantity: true },
-        }),
-        // Org-scope: pass the caller's organizationId so the helper can
-        // never accidentally surface checked-out counts from another
-        // workspace if a cross-org asset id were ever supplied.
-        computeCheckedOutForAsset(db, asset.id, organizationId),
-      ]);
-
-      const total = asset.quantity ?? 0;
-      // Floor at 0 defensively — pathological data (PartialBookingCheckout
-      // claims exceeding the booked total) could otherwise produce a
-      // negative remainder.
-      const ongoingBookedNotYetOut = Math.max(
-        0,
-        (ongoingBookedSum._sum?.quantity ?? 0) - checkedOut
-      );
-      // Combine RESERVED bookings + the ONGOING-not-yet-out remainder
-      // so the "Reserved (bookings)" row reflects every unit committed
-      // to a booking but still physically present.
-      const reserved =
-        (reservedSum._sum?.quantity ?? 0) + ongoingBookedNotYetOut;
-      // Sum each kit's slice — the asset's pool earmarked for kit use.
-      const inKits = (asset.assetKits ?? []).reduce(
-        (sum: number, ak) => sum + (ak.quantity ?? 0),
-        0
-      );
-      // Sum each location's slice — the asset's pool that has a
-      // physical placement. The remainder (`total − inLocations`) is
-      // the "unplaced" pool: units the org owns but haven't been put
-      // anywhere yet (in transit, just received, etc.).
+      // Sum each location's slice — the asset's pool that has a physical
+      // placement. Not part of `getAssetAvailability` (placements are
+      // orthogonal to custody/bookings), so it's computed here from the
+      // already-loaded `asset.assetLocations`, same as before.
       const inLocations = (asset.assetLocations ?? []).reduce(
         (sum: number, al) => sum + (al.quantity ?? 0),
         0
       );
-      // Operator-only custody (see field comment above).
-      const operatorCustody = (asset.custody ?? []).reduce(
-        (sum: number, c) =>
-          c.kitCustodyId == null ? sum + (c.quantity ?? 0) : sum,
-        0
-      );
 
-      quantityData = {
-        total,
-        inCustody: operatorCustody,
-        inKits,
-        inLocations,
-        reserved,
-        checkedOut,
-        // Strict-available pool: kits + operator + reserved + checked-out
-        // are all separate consumers; what's left is truly free.
-        available: total - inKits - operatorCustody - reserved - checkedOut,
-        // Adjust-cap: reservations don't subtract here (units are still
-        // physically present), but kits do because dropping below
-        // `inKits` would violate the sum-within-total DB trigger.
-        custodyAvailable: total - inKits - operatorCustody - checkedOut,
-      };
+      const availability = await getAssetAvailability({
+        assetId: asset.id,
+        organizationId,
+      });
+
+      quantityData = buildQuantityData({ availability, inLocations });
     }
 
     /**
@@ -854,7 +726,6 @@ export default function AssetOverview() {
   const {
     asset,
     locale,
-    timeZone,
     qrObj,
     lastScan,
     currentOrganization,
@@ -864,6 +735,7 @@ export default function AssetOverview() {
     moveDestinations,
     unplacedQuantity,
   } = useLoaderData<typeof loader>();
+  const { prefs } = useDateFormatter();
 
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
@@ -1368,10 +1240,7 @@ export default function AssetOverview() {
                         ? String(fieldValue.raw)
                         : "";
                     const customFieldDisplayValue = hasValue
-                      ? getCustomFieldDisplayValue(fieldValue!, {
-                          locale,
-                          timeZone,
-                        })
+                      ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
                     /* Hide "Not set" rows from view-only users */
@@ -1401,6 +1270,7 @@ export default function AssetOverview() {
                                   content={
                                     customFieldDisplayValue as RenderableTreeNode
                                   }
+                                  allowExternalLinks
                                 />
                               ) : isLink(customFieldDisplayValue as string) ? (
                                 <Button
@@ -1453,10 +1323,10 @@ export default function AssetOverview() {
                               );
                             case CustomFieldType.DATE:
                               return (
-                                <Input
+                                <DateTimePicker
+                                  mode="date"
                                   label={def.name}
                                   hideLabel
-                                  type="date"
                                   name="fieldValue"
                                   defaultValue={rawValue}
                                   className="w-full"
@@ -1849,6 +1719,7 @@ export default function AssetOverview() {
               inKitsQuantity={quantityData?.inKits}
               inLocationsQuantity={quantityData?.inLocations}
               reservedQuantity={quantityData?.reserved}
+              reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}
             />

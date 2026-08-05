@@ -34,3 +34,10 @@ expo-env.d.ts
 # @end expo-cli
 # Android Play service account key (secret — never commit)
 google-service-account*.json
+
+# EAS Update code-signing PRIVATE key material — must NEVER be committed. Only
+# the PUBLIC certificate under certs/ is committed (embedded in the app). The
+# private key signs updates and must live in a secrets manager / CI secret; a
+# local copy used for signing is fine only while it stays untracked here. If a
+# private key is ever committed or exposed, rotate it (new pair + new build).
+keys/

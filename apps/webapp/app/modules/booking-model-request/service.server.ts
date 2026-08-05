@@ -32,6 +32,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
@@ -253,6 +254,13 @@ export type BookingModelTabData = {
   }>;
   /** Full-org model count (not the truncated `MODEL_PICKER_LIMIT` list). */
   totalAssetModels: number;
+  /**
+   * How many models match the current `search` (equals `totalAssetModels`
+   * when no search is applied). This is the pagination denominator: a client
+   * that pages through the list needs the count of MATCHING rows, not the
+   * full-org count, to know when it has reached the end.
+   */
+  matchedAssetModels: number;
   /** This booking's existing model-level requests, outstanding + fulfilled. */
   modelRequests: Array<{
     assetModelId: string;
@@ -294,10 +302,23 @@ export async function getBookingModelTabData({
   organizationId,
   booking,
   search,
+  page,
+  perPage,
 }: {
   organizationId: string;
   booking: BookingForModelTab;
   search?: string;
+  /**
+   * 1-based page for callers that paginate the model list (the mobile
+   * picker). Omitted by the web loaders, which render a seed list and reach
+   * the rest through search — they keep the historical single-page shape.
+   */
+  page?: number;
+  /**
+   * Page size for paginating callers. Defaults to `MODEL_PICKER_LIMIT` so
+   * omitting both params reproduces the pre-pagination behaviour exactly.
+   */
+  perPage?: number;
 }): Promise<BookingModelTabData> {
   try {
     const assetModelsCount = await db.assetModel.count({
@@ -322,12 +343,34 @@ export async function getBookingModelTabData({
 
     let assetModels: BookingModelTabAssetModel[] = [];
 
+    /**
+     * Count of models matching the search. Paginating callers need this to
+     * know when they've reached the end; without a search it's the same query
+     * as the full-org count, so reuse that rather than issuing a second one.
+     */
+    const matchedAssetModels = trimmedSearch
+      ? await db.assetModel.count({ where: { organizationId, ...searchWhere } })
+      : assetModelsCount;
+
+    // Page size defaults to the historical cap, so callers that pass neither
+    // param (the web loaders) get byte-identical behaviour to before.
+    const effectivePerPage =
+      perPage && perPage > 0 ? Math.min(perPage, 100) : MODEL_PICKER_LIMIT;
+    const effectivePage = page && page > 1 ? page : 1;
+
     if (showModelsTab) {
       const rawModels = await db.assetModel.findMany({
         where: { organizationId, ...searchWhere },
         select: { id: true, name: true },
-        orderBy: { name: "asc" },
-        take: MODEL_PICKER_LIMIT,
+        /**
+         * `AssetModel.name` is NOT unique, so name alone is not a stable sort:
+         * tied rows can repeat on one page and vanish from the next, leaving
+         * models unreachable — exactly what this pagination exists to prevent.
+         * `id` breaks the tie deterministically.
+         */
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        skip: (effectivePage - 1) * effectivePerPage,
+        take: effectivePerPage,
       });
 
       const availabilities = await Promise.all(
@@ -389,6 +432,7 @@ export async function getBookingModelTabData({
       assetModels,
       initialAssetModels,
       totalAssetModels: assetModelsCount,
+      matchedAssetModels,
       modelRequests,
     };
   } catch (cause) {
@@ -574,13 +618,15 @@ export async function upsertBookingModelRequest({
     //   - decrease : "decreased the **Model** reservation from **M** to **N**."
     //   - no-op    : skip the note entirely (nothing actually changed)
     const { assetModel, previousQuantity } = result;
+    // Model names are user-supplied and render as literal text in the note.
+    const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
     if (previousQuantity == null) {
-      content = `{actor} reserved **${quantity} × ${assetModel.name}** for this booking.`;
+      content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
     } else if (quantity > previousQuantity) {
-      content = `{actor} increased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     } else if (quantity < previousQuantity) {
-      content = `{actor} decreased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
     if (content != null) {
@@ -699,7 +745,9 @@ export async function removeBookingModelRequest({
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: `${actor} cancelled the model-level reservation for **${assetModelName}**.`,
+          content: `${actor} cancelled the model-level reservation for **${stripMarkdocDelimiters(
+            assetModelName
+          )}**.`,
         });
       } catch {
         // non-fatal
@@ -822,10 +870,11 @@ export async function materializeModelRequestForAsset({
     // materialization if anything later in the scan pipeline fails.
     const actor = await loadActor(userId);
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
+    const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     await tx.bookingNote.create({
       data: {
         type: "UPDATE",
-        content: `${actor} assigned ${assetLink} (${existing.assetModel.name}) to this booking — ${remaining} × ${existing.assetModel.name} remaining.`,
+        content: `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`,
         booking: { connect: { id: bookingId } },
       },
     });

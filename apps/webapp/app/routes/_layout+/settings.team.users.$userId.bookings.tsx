@@ -6,6 +6,7 @@ import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -97,6 +98,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
       }),
     ]);
+    // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
+    // window, so the shared list renders the amber "Stock conflict" pill here
+    // too (see `~/modules/booking/stock-conflicts.server`).
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
+      organizationId,
+    });
+
     const totalPages = Math.ceil(bookingCount / perPage);
 
     const header: HeaderData = {
@@ -110,7 +119,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: bookings,
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

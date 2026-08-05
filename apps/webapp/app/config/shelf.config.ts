@@ -3,6 +3,7 @@ import {
   DISABLE_SIGNUP,
   DISABLE_SSO,
   ENABLE_PREMIUM_FEATURES,
+  ENABLE_SCIM,
   FREE_TRIAL_DAYS,
   GEOCODING_USER_AGENT,
   SEND_ONBOARDING_EMAIL,
@@ -16,6 +17,7 @@ export const config: Config = {
   freeTrialDays: Number(FREE_TRIAL_DAYS || 7),
   disableSignup: DISABLE_SIGNUP || false,
   disableSSO: DISABLE_SSO || false,
+  enableScim: ENABLE_SCIM || false,
 
   logoPath: {
     fullLogo: "/static/images/logo-full-color(x2).png",

@@ -550,7 +550,11 @@ export async function applyBulkUpdatesFromImport({
       let assetModelIdPatch: UpdateAssetPayload["assetModelId"];
       const customFieldsValues: {
         id: string;
-        value: ICustomFieldValueJson;
+        // `undefined` is the deletion signal updateAsset expects: it routes
+        // falsy-value entries to deleteMany. The clearing branch below emits it
+        // (mirrors the normal form path, where buildCustomFieldValue returns
+        // undefined for empty). See SHELF-WEBAPP-21W.
+        value: ICustomFieldValueJson | undefined;
       }[] = [];
 
       // Pull this asset's qty-tracked patch (may be undefined if no
@@ -670,12 +674,14 @@ export async function applyBulkUpdatesFromImport({
               const fullCf = cfByName.get(col.cfDef.name.toLowerCase());
               if (fullCf) {
                 if (change.clearing) {
-                  // Clear custom field by passing empty value
-                  // buildCustomFieldValue returns undefined for empty,
-                  // which signals deletion in updateAsset
+                  // Clearing = delete the value row. updateAsset routes a
+                  // FALSY value to deleteMany, so emit `undefined`. A truthy
+                  // `{ raw: "" }` was instead routed to create/update and
+                  // violated the `ensure_value_structure_and_types` CHECK
+                  // (Postgres 23514) — see SHELF-WEBAPP-21W.
                   customFieldsValues.push({
                     id: fullCf.id,
-                    value: { raw: "" },
+                    value: undefined,
                   });
                 } else {
                   // For AMOUNT/NUMBER fields, pre-normalize and validate

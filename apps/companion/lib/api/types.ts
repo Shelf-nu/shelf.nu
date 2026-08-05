@@ -1,3 +1,9 @@
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@shelf/datetime";
+
 // ── Types ──────────────────────────────────────────────
 
 export type Organization = {
@@ -23,6 +29,17 @@ export type MeResponse = {
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
+    /**
+     * The user's date/time format preferences (raw, nullable — an unset column
+     * means "not chosen yet"). Resolved on the client via `resolveFormatPrefs`
+     * (`@shelf/datetime`) with a device-hint fallback so every date/time in the
+     * companion renders in the user's chosen format + timezone. Absent on older
+     * servers (pre-format-prefs) — the resolver then falls back to device hints.
+     */
+    dateFormat?: DateFormatPreference | null;
+    timeFormat?: TimeFormatPreference | null;
+    weekStart?: WeekStartPreference | null;
+    timeZone?: string | null;
   };
   organizations: Organization[];
 };
@@ -243,11 +260,47 @@ export type QrResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+       * matches it against the booking's outstanding reservations so it can
+       * count only units that actually fulfil one. Absent on older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
     /** Set when the QR is linked to a kit instead of an asset */
     kit: ScannedKit | null;
+  };
+};
+
+/**
+ * Machine-readable failure discriminator carried by the QR resolve / link
+ * error payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
+ * side via `apiFetch`'s `errorDetails`. Mirrors the server's
+ * `ResolveMobileCodeFailureReason`.
+ *
+ * `"unclaimed"` — the QR row exists, has no organization yet (a printed
+ * Shelf code nobody claimed) and is not linked to an asset or kit. The
+ * scanner offers the native claim → create / link flow for it. Absence of a
+ * reason (plain not-found 404, wrong-org 403, or an orgless-but-linked
+ * corrupted row the web claim flow refuses) MUST keep the existing dead-end /
+ * web-bridge behaviour — never offer claim for those.
+ */
+export type QrResolveFailureReason = "unclaimed";
+
+/**
+ * Response of `POST /api/mobile/qr/claim` and `POST /api/mobile/qr/link-asset`:
+ * the mutated QR summary. After a claim, `assetId`/`kitId` are both `null`
+ * (freshly claimed codes are unlinked); after a link, `assetId` is the linked
+ * asset's id (navigate straight to its detail) and `kitId` stays `null`.
+ */
+export type QrMutationResponse = {
+  qr: {
+    id: string;
+    organizationId: string;
+    assetId: string | null;
+    kitId: string | null;
   };
 };
 
@@ -268,6 +321,12 @@ export type BarcodeResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+       * unit that fulfils a reservation from one that does not. Absent on
+       * older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -362,6 +421,10 @@ export type TeamMember = {
 
 export type TeamMembersResponse = {
   teamMembers: TeamMember[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type Location = {
@@ -374,6 +437,10 @@ export type Location = {
 
 export type LocationsResponse = {
   locations: Location[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type CustodyResponse = {
@@ -768,12 +835,21 @@ export type AvailableModelExistingRequest = {
 export type AvailableModelsResponse = {
   /** False when the workspace has no AssetModel at all — hide the picker. */
   showModelsTab: boolean;
-  /** Per-model availability for this booking's window (first 50 by name). */
+  /** Per-model availability for this booking's window, for THIS page. */
   assetModels: AvailableModel[];
-  /** Full workspace model count (the list above is capped at 50). */
+  /** Full workspace model count, ignoring any search. */
   totalAssetModels: number;
   /** This booking's existing model reservations, to pre-fill the inputs. */
   modelRequests: AvailableModelExistingRequest[];
+  /** 1-based page this response represents. */
+  page?: number;
+  perPage?: number;
+  /**
+   * Models matching the current search — the pagination denominator. The
+   * picker stops requesting pages once it holds this many rows.
+   */
+  matchedAssetModels?: number;
+  totalPages?: number;
 };
 
 /** Response from the model-request upsert/remove endpoint. */

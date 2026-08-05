@@ -7,7 +7,9 @@ import {
   recordEvent,
   recordEvents,
 } from "~/modules/activity-event/service.server";
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -139,9 +141,29 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
 }));
 
+// why: the stock-lowering guard's own committed-peak math (custody + kits +
+// peak-concurrent bookings) is exhaustively unit-tested in
+// `availability.server.test.ts`. Here we only verify updateAsset's WIRING —
+// that it's called with the right args when quantity is lowered on a
+// QUANTITY_TRACKED asset, and that its rejection propagates — so stubbing it
+// avoids re-deriving custody/kit/booking fixtures in this already-large file.
+// `updateAsset` imports the guard from the dependency-free leaf (not
+// `availability.server`) to avoid the heavy transitive import chain — mock the
+// leaf so the stub intercepts.
+vitest.mock("~/modules/asset/availability-primitives.server", () => ({
+  assertAssetQuantityNotBelowReservations: vitest.fn(),
+}));
+
 // why: avoid touching real consumption log writes during checkOutQuantity tests
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: wiring-only — assert that updateAsset invokes the low-stock notifier on
+// a quantity DROP without running the real debounce/email logic (that logic is
+// exhaustively tested in low-stock.server.test.ts).
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -433,7 +455,9 @@ describe("uploadDuplicateAssetMainImage", () => {
 });
 
 describe("refreshExpiredAssetImages", () => {
-  const mockUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+  // The background flush persists via a guarded updateMany (on the original
+  // mainImage), not update — assert on updateMany here.
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
   const mockCreateSignedUrl = createSignedUrl as ReturnType<typeof vitest.fn>;
   const mockExtractStoragePath = extractStoragePath as ReturnType<
     typeof vitest.fn
@@ -443,7 +467,8 @@ describe("refreshExpiredAssetImages", () => {
     vitest.clearAllMocks();
     mockExtractStoragePath.mockReturnValue("org/asset/image.jpg");
     mockCreateSignedUrl.mockResolvedValue("https://new-signed-url.com");
-    mockUpdate.mockResolvedValue({});
+    // Default: the guarded write matches one row (image unchanged since read).
+    mockUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   const makeAsset = (
@@ -474,7 +499,7 @@ describe("refreshExpiredAssetImages", () => {
 
     expect(result).toEqual(assets);
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
   it("refreshes mainImage and thumbnailImage when expired", async () => {
@@ -490,16 +515,31 @@ describe("refreshExpiredAssetImages", () => {
 
     const result = await refreshExpiredAssetImages(assets);
 
+    // The return value carries the fresh URLs synchronously — re-signing stays
+    // awaited, only the DB persist is deferred.
     expect(result[0].mainImage).toBe("https://new-main-url.com");
     expect(result[0].thumbnailImage).toBe("https://new-thumbnail-url.com");
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImage: "https://new-main-url.com",
-          thumbnailImage: "https://new-thumbnail-url.com",
-        }),
-      })
+
+    // The persist now runs in a fire-and-forget background batch, so wait for
+    // the flush before asserting the write happened.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // Guarded on the original mainImage AND thumbnailImage (a thumbnail is
+          // written here) so a concurrent replace of either can't be clobbered
+          // by this deferred write.
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+            thumbnailImage: "https://old-thumbnail-url.com",
+          },
+          data: expect.objectContaining({
+            mainImage: "https://new-main-url.com",
+            thumbnailImage: "https://new-thumbnail-url.com",
+          }),
+        })
+      )
     );
   });
 
@@ -511,16 +551,24 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (no refresh)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Should bump expiration to prevent retry storm
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
-    );
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+
+    // The backoff bump is now persisted in the deferred background batch —
+    // wait for the flush before asserting the write.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+          },
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
+    );
   });
 
   it("logs error and applies backoff when createSignedUrl fails", async () => {
@@ -538,30 +586,47 @@ describe("refreshExpiredAssetImages", () => {
 
     // Asset should be returned unchanged
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Backoff update should have been called
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
+
+    // Backoff update is deferred to the background batch — wait for the flush.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
     );
   });
 
-  it("handles deleted asset (P2025) gracefully without logging error", async () => {
-    const { Prisma: ActualPrisma } = await import("@prisma/client");
-    mockUpdate.mockRejectedValue(
-      new ActualPrisma.PrismaClientKnownRequestError(
-        "Record to update not found",
-        { code: "P2025", clientVersion: "5.0.0" }
-      )
-    );
+  it("returns fresh URLs when the row was deleted or its image changed (updateMany count 0)", async () => {
+    // Regression guard for the deferred-write refactor: the persist is a guarded
+    // updateMany that runs fire-and-forget AFTER the response value is built. If
+    // the asset was deleted OR its image was replaced between the read and the
+    // flush, the guard matches no rows and updateMany resolves { count: 0 }
+    // (never throws P2025). The returned URLs must still be the freshly
+    // re-signed ones — the next load simply re-signs (idempotent).
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+    const assets = [makeAsset()];
+
+    // Resolves (no throw) with the freshly re-signed URL.
+    const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
+
+    // The guarded write was still attempted in the background.
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
+  });
+
+  it("returns fresh URLs even when the background persist throws unexpectedly", async () => {
+    // A non-expected write failure (e.g. a pool timeout) is swallowed + logged
+    // in the background and must not affect the returned URLs or throw.
+    mockUpdateMany.mockRejectedValue(new Error("connection pool timeout"));
     const assets = [makeAsset()];
 
     const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
 
-    // Should return original asset (refresh failed gracefully)
-    expect(result[0].mainImage).toBe("https://old-signed-url.com");
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
   });
 });
 
@@ -668,12 +733,14 @@ describe("checkOutQuantity — availability accounting", () => {
     mockAssetFindUniqueOrThrow.mockResolvedValue({
       ...lockedAsset,
     });
-    // why: the `refreshExpiredAssetImages` suite earlier in this file
-    // sets `db.asset.update.mockRejectedValue(P2025)`. `clearAllMocks`
-    // only resets call history — the rejection implementation persists
-    // and breaks the new symmetric `tx.asset.update` step inside
-    // `checkOutQuantity`. Restore the resolve.
+    // why: the `refreshExpiredAssetImages` suite earlier in this file leaves
+    // `db.asset.updateMany.mockRejectedValue(...)` set (its last test).
+    // `clearAllMocks` only resets call history — the rejection implementation
+    // persists across suites — so restore both write mocks to a resolve.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {
@@ -782,9 +849,12 @@ describe("checkOutQuantity — activity events", () => {
     vitest.clearAllMocks();
     mockLock.mockResolvedValue(lockedAsset);
     // See note on the sibling availability-accounting suite — the
-    // `refreshExpiredAssetImages` test earlier rejects `asset.update`
-    // and that implementation survives `clearAllMocks`.
+    // `refreshExpiredAssetImages` test earlier leaves `asset.updateMany`
+    // rejected, and that implementation survives `clearAllMocks`.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("emits CUSTODY_ASSIGNED with quantity + viaQuantity meta on successful checkout", async () => {
@@ -1387,6 +1457,525 @@ describe("updateAsset newLocationQuantity", () => {
 
     // Validation fires before db.asset.update, so the update never runs.
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring for the STOCK-LOWERING guard: `updateAsset` must not let a
+ * QUANTITY_TRACKED asset's total `quantity` drop below what's already
+ * committed to custody, kits, or bookings. The guard's own committed-peak
+ * math is unit-tested in `availability.server.test.ts` — these tests only
+ * verify updateAsset calls it (with the right args, at the right time) and
+ * correctly propagates its rejection. `db.asset.findUnique` (the
+ * `assetBeforeUpdate` snapshot) is left at its default `null` resolve so the
+ * unrelated note/event-emission block — gated on `assetBeforeUpdate` being
+ * non-null — never runs, keeping each test focused on the guard wiring.
+ */
+describe("updateAsset stock-lowering guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      quantity: 5,
+    });
+  });
+
+  it("locks the asset then calls the guard when lowering quantity on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 5, // 5 < 10 (current) — a genuine reduction
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset-1",
+      "org-1"
+    );
+    expect(assertAssetQuantityNotBelowReservations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        newTotal: 5,
+        assetTitle: "Widget",
+        unitOfMeasure: "boards",
+      })
+    );
+    // The guard must run BEFORE the write.
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("propagates the guard's 400 and never writes when the reduction is below commitments", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          'Cannot reduce "Widget" to 5 boards — 8 boards are committed ' +
+          "(custody, kits, or overlapping bookings). Release or reduce those first.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 5,
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("committed"),
+    });
+
+    // The rejection must land before the write.
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("allows a safe reduction (down to or above what's committed)", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 8,
+      } as any)
+    ).resolves.toMatchObject({ id: "asset-1" });
+
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the lock and the guard entirely when quantity is not being changed", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "Renamed",
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the guard when quantity is being INCREASED, even on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 15, // 15 > 10 — an increase, never a stock-lowering concern
+    } as any);
+
+    // The lock still runs (it's how the guard learns the fresh current
+    // total), but the guard itself is never invoked for an increase.
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+  });
+
+  it("skips the guard for an INDIVIDUAL asset even if a lower quantity is submitted", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      title: "Drill",
+      unitOfMeasure: null,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 0,
+    } as any);
+
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring for the low-stock notifier trigger on the asset-edit path. ANY quantity
+ * change on a QUANTITY_TRACKED asset — a DROP or a RAISE — must run
+ * `checkAndNotifyLowStock` AFTER the write commits: a drop may cross INTO the
+ * low-stock band, and a raise (restock) may cross back OUT and must clear the
+ * debounce marker / send the recovery notice. Only a non-quantity edit (or a
+ * no-op) must not. The notifier's own debounce/recipient logic lives in
+ * low-stock.server.test.ts — here we only assert the call is made (with which args).
+ */
+describe("updateAsset low-stock notifier wiring", () => {
+  const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+  });
+
+  it("runs checkAndNotifyLowStock when a QUANTITY_TRACKED asset's quantity is lowered", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 5, // 5 < 10 → a genuine reduction
+    } as any);
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("runs checkAndNotifyLowStock when a QUANTITY_TRACKED asset's quantity is RAISED (restock → clears the debounce marker / recovery notice)", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 15, // 15 > 10 → a raise; must still run so a recovery clears
+    } as any); // the stale lowStockNotifiedAt marker (else the next alert is suppressed)
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("does NOT run checkAndNotifyLowStock when quantity is not part of the patch", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "Renamed",
+    } as any);
+
+    expect(mockLowStock).not.toHaveBeenCalled();
+  });
+
+  it("runs checkAndNotifyLowStock when only the min-quantity threshold changes (so a stale marker is cleared)", async () => {
+    // No `quantity` in the patch → no row lock; the QT check falls back to the
+    // returned asset's `type`, and the change is detected from the before-snapshot.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 5,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      minQuantity: 8,
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      minQuantity: 8, // threshold 2 → 8; quantity is NOT part of the patch
+      request: new Request("http://localhost"),
+    } as any);
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+});
+
+/**
+ * Audit trail for quantity / min-quantity edits made through the asset-edit
+ * form (`updateAsset`). A real stock change writes an immutable
+ * `ConsumptionLog` ADJUSTMENT *and* an `ASSET_QUANTITY_CHANGED` activity
+ * event; a min-quantity (threshold) change emits only
+ * `ASSET_MIN_QUANTITY_CHANGED` and writes NO ConsumptionLog; a no-op change
+ * writes neither. `db.asset.findUnique` returns the before-snapshot so the
+ * event block (gated on a non-null `assetBeforeUpdate`) runs; `db.asset.update`
+ * returns the post-update row the event reads its `toValue` from.
+ */
+describe("updateAsset quantity audit trail", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Reset any leftover *Once queue so the single before-snapshot resolve
+    // below can't be shadowed by a prior test's queued value.
+    vi.mocked(db.asset.findUnique).mockReset();
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+  });
+
+  it("writes a ConsumptionLog ADJUSTMENT (positive delta) and emits ASSET_QUANTITY_CHANGED with the true direction on a QT quantity edit", async () => {
+    mockLock.mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    // Before-snapshot: quantity 10, so a write down to 4 is a real change.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 4,
+      minQuantity: 2,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 4, // 10 → 4 (a reduction; delta 6)
+      // The valuation-note builder reads `getLocale(request)`; a bare Request
+      // is enough (no accept-language header → default locale).
+      request: new Request("http://localhost"),
+    } as any);
+
+    // ConsumptionLog stores the positive delta (|4 − 10| = 6) as an ADJUSTMENT,
+    // written inside the quantity tx (tx threaded through).
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        category: "ADJUSTMENT",
+        quantity: 6,
+        userId: "user-1",
+      })
+    );
+    // The direction the log can't carry is captured by the event's from/to.
+    expect(mockRecordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: "asset-1",
+          assetId: "asset-1",
+          field: "quantity",
+          fromValue: 10,
+          toValue: 4,
+        }),
+      ])
+    );
+  });
+
+  it("emits ASSET_MIN_QUANTITY_CHANGED and writes NO ConsumptionLog for a min-quantity (threshold) edit", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 5,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      minQuantity: 5, // threshold 2 → 5; no stock movement
+      request: new Request("http://localhost"),
+    } as any);
+
+    // minQuantity is a threshold, not stock — never a ConsumptionLog.
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // The lock is only taken when a `quantity` write is part of the patch.
+    expect(mockLock).not.toHaveBeenCalled();
+    expect(mockRecordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: "asset-1",
+          assetId: "asset-1",
+          field: "minQuantity",
+          fromValue: 2,
+          toValue: 5,
+        }),
+      ])
+    );
+  });
+
+  it("writes neither a ConsumptionLog nor an ASSET_QUANTITY_CHANGED event when the submitted quantity is unchanged", async () => {
+    mockLock.mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 10, // 10 → 10, delta 0
+      request: new Request("http://localhost"),
+    } as any);
+
+    // delta 0 → no stock-movement audit (createConsumptionLog rejects qty 0).
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // No field actually changed, so no quantity event is recorded.
+    const emittedQuantityEvent = mockRecordEvents.mock.calls.some(([events]) =>
+      (events as Array<{ action: string }>).some(
+        (e) => e.action === "ASSET_QUANTITY_CHANGED"
+      )
+    );
+    expect(emittedQuantityEvent).toBe(false);
   });
 });
 

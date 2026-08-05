@@ -293,10 +293,7 @@ const AuditPDFContent = ({
           <div className="flex border-b border-gray-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Due date</span>
             <span className="grow text-gray-600">
-              <DateS
-                date={session.dueDate!}
-                options={{ dateStyle: "short", timeStyle: "short" }}
-              />
+              <DateS date={session.dueDate!} includeTime />
             </span>
           </div>
         </When>
@@ -304,10 +301,7 @@ const AuditPDFContent = ({
           <div className="flex border-b border-gray-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Started</span>
             <span className="grow text-gray-600">
-              <DateS
-                date={session.startedAt!}
-                options={{ dateStyle: "short", timeStyle: "short" }}
-              />
+              <DateS date={session.startedAt!} includeTime />
             </span>
           </div>
         </When>
@@ -315,12 +309,7 @@ const AuditPDFContent = ({
           <div className="flex border-b border-gray-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Completed</span>
             <span className="grow text-gray-600">
-              {pdfMeta.to || (
-                <DateS
-                  date={session.completedAt!}
-                  options={{ dateStyle: "short", timeStyle: "short" }}
-                />
-              )}
+              {pdfMeta.to || <DateS date={session.completedAt!} includeTime />}
             </span>
           </div>
         </When>
@@ -553,10 +542,7 @@ const AuditPDFContent = ({
                   )}
                 >
                   <div className="min-w-[140px] text-xs text-gray-500">
-                    <DateS
-                      date={note.createdAt}
-                      options={{ dateStyle: "short", timeStyle: "short" }}
-                    />
+                    <DateS date={note.createdAt} includeTime />
                   </div>
                   <div className="flex-1">
                     <div className="text-xs">
