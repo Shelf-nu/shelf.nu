@@ -7,29 +7,33 @@
  * best-effort audit note.
  *
  * **What happens to the units is decided server-side** from the asset's
- * `consumptionType` (see `resolveReleaseDisposition`), never by the caller:
+ * `consumptionType` (see `releaseCategory` in `@shelf/quantity-control`), with
+ * an optional operator-supplied split:
  *
  * - `RETURN` (`TWO_WAY`, and legacy rows with no `consumptionType`) — the units
- *   go back into the available pool and `Asset.quantity` is untouched.
- * - `CONSUME` (`ONE_WAY` consumables) — the units were used up, so
- *   `Asset.quantity` is permanently decremented.
+ *   go back into the available pool and `Asset.quantity` is untouched. These
+ *   assets reject a non-zero `consumed`.
+ * - `CONSUME` (`ONE_WAY` consumables) — the units default to used-up, so
+ *   `Asset.quantity` is permanently decremented. A `consumed` field below the
+ *   released quantity hands the remainder back instead.
  *
- * Runs the debounced low-stock notifier (best-effort) for BOTH outcomes,
- * because each crosses the threshold in a different direction: a `RETURN`
- * raises available stock and can move the asset back above its threshold, so
- * the notifier must clear the `lowStockNotifiedAt` marker (and send the "back
- * in stock" notice) or a stale marker suppresses the next genuine alert; a
- * `CONSUME` lowers stock and can trip the threshold. Mirrors the web route.
+ * The audit note is worded from the split the service reports back, so what the
+ * operator reads always matches what was persisted.
  *
- * Body: { assetId: string, teamMemberId: string, quantity: number, note?: string }
+ * Runs the debounced low-stock notifier (best-effort) after every release.
+ * Available stock is `Asset.quantity - SUM(Custody.quantity)`: ending a hold
+ * drops custody by the full release and total by the consumed part, so
+ * available rises by exactly the RETURNED units — and is unchanged when
+ * everything was consumed. The notifier still runs so a recovery clears the
+ * now-stale debounce marker and sends the recovery notice, or the next genuine
+ * alert is suppressed. Mirrors the web route.
+ *
+ * Body: { assetId: string, teamMemberId: string, quantity: number, consumed?: number, note?: string }
  * Org: `?orgId=` query param or `x-shelf-organization` header.
  *
- * Success envelope: `{ success: true, asset, disposition }` where `asset` is
- * the refreshed asset shaped for mobile (custody visibility already filtered
- * for the caller) so the app can update state without a second round trip, and
- * `disposition` is `"RETURN" | "CONSUME"` — what the server actually did, so
- * the app can confirm it without re-deriving the rule. Clients predating the
- * field simply ignore it.
+ * Success envelope: `{ success: true, asset }` where `asset` is the
+ * refreshed asset shaped for mobile (custody visibility already filtered
+ * for the caller) so the app can update state without a second round trip.
  *
  * @see {@link file://./../assets.release-quantity-custody.ts} — the mirrored web route
  * @see {@link file://./../../../modules/asset/service.server.ts} — releaseQuantity
@@ -76,6 +80,12 @@ const ReleaseQuantityCustodySchema = z.object({
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
+  /**
+   * How many of the released units were used up. Optional: when absent the
+   * server derives it from the asset's consumptionType. Only a consumable
+   * accepts a non-zero value, which the service enforces.
+   */
+  consumed: z.coerce.number().int().nonnegative().optional(),
   note: z
     .string()
     .optional()
@@ -124,7 +134,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: 400,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, consumed, note } = parsed.data;
 
     /**
      * Validate that the team member belongs to the same organization.
@@ -167,19 +177,23 @@ export async function action({ request }: ActionFunctionArgs) {
     // lookup, over-release check) lives inside the service. Kit-allocated
     // custody rows are NOT releasable here by design — only the operator
     // row (kitCustodyId: null) is targeted.
-    const { disposition } = await releaseQuantity({
-      assetId,
-      teamMemberId,
-      quantity,
-      userId: user.id,
-      organizationId,
-      note,
-    });
-    // ONE_WAY consumables are used up rather than returned — the service
-    // reports which branch it took so the note matches what was persisted.
-    // The app needs no new build for this: the disposition is decided
-    // server-side from `Asset.consumptionType`.
-    const wasConsumed = disposition === "CONSUME";
+    /**
+     * The service resolves the split from `Asset.consumptionType` when the
+     * caller sends no `consumed`, and reports back what it persisted — so the
+     * audit note below describes reality instead of re-deriving the branch
+     * here. App builds predating the field simply omit it and keep the
+     * server-derived outcome they always had.
+     */
+    const { consumed: consumedUnits, returned: returnedUnits } =
+      await releaseQuantity({
+        assetId,
+        teamMemberId,
+        quantity,
+        consumed,
+        userId: user.id,
+        organizationId,
+        note,
+      });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -205,9 +219,16 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      const baseLine = wasConsumed
-        ? `${actor} marked **${quantity}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
-        : `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
+      /**
+       * Same three shapes the web route writes, so an activity feed reads the
+       * same whichever client performed the release.
+       */
+      const baseLine =
+        consumedUnits > 0 && returnedUnits > 0
+          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
+          : consumedUnits > 0
+          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
+          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
@@ -231,13 +252,14 @@ export async function action({ request }: ActionFunctionArgs) {
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
 
-    // Both dispositions move the asset across its low-stock threshold: a
-    // RETURN raises available stock (clear a now-stale debounce marker and
-    // send the recovery notice, so the next genuine alert isn't suppressed),
-    // a CONSUME lowers `Asset.quantity` and may trip it. Best-effort:
-    // releaseQuantity has already committed, so a notifier failure must NOT
-    // surface as an action error (the client could retry the non-idempotent
-    // release).
+    // Available stock is `Asset.quantity - SUM(Custody.quantity)`. Ending a
+    // hold drops custody by the full release and total by the consumed part,
+    // so available rises by exactly the RETURNED units — and is unchanged when
+    // everything was consumed. Run the notifier so a recovery clears the
+    // now-stale debounce marker and sends the recovery notice, or the next
+    // genuine alert is suppressed. Best-effort: releaseQuantity has already
+    // committed, so a notifier failure must NOT surface as an action error
+    // (the client could retry the non-idempotent release).
     try {
       await checkAndNotifyLowStock({
         assetId,
@@ -280,10 +302,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // `disposition` tells the app what actually happened to the units, so it
-    // can confirm "released" vs "consumed" without re-deriving the rule from
-    // `consumptionType`. Additive: older clients ignore the extra field.
-    return data({ success: true, asset, disposition });
+    return data({ success: true, asset });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(
