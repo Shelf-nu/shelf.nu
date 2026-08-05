@@ -259,19 +259,18 @@ export async function fetchAllPdfRelatedData(
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
-        // Sum per-slice from the `BookingAsset` pivot, scoped to the
-        // search-visible asset ids. Each slice contributes its own
-        // `ba.quantity` (booked units) × per-unit `valuation`, so a QT
-        // asset stocked at 100 with 5 booked contributes value-for-5,
-        // not value-for-100. Multi-slice (standalone + kit) sums each
-        // slice independently — the deduped `sortedAssets` is the
-        // rendered ROW list, not the value-summation list.
-        assets: booking.bookingAssets
-          .filter((ba) => visibleAssetIds.includes(ba.assetId))
-          .map((ba) => ({
-            valuation: ba.asset.valuation,
-            bookedQuantity: ba.quantity,
-          })),
+        // Sum per-slice over EXACTLY the search-visible slices — the same
+        // `visibleBookingAssets` list `buildPdfAssetRows` renders above — so
+        // the total can never diverge from the exported rows. Scoping by asset
+        // id instead folds in an asset's OTHER, non-visible slices: e.g. a QT
+        // item shown only via a re-expanded kit slice would wrongly add its
+        // hidden standalone slice's value (#2811 review). Each slice
+        // contributes its own booked `quantity` × per-unit `valuation`, so a QT
+        // asset stocked at 100 with 5 booked contributes value-for-5, not 100.
+        assets: visibleBookingAssets.map((slice) => ({
+          valuation: slice.valuation,
+          bookedQuantity: slice.quantity,
+        })),
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),
