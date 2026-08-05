@@ -83,7 +83,8 @@ import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
-import { getLastScanForViewer } from "~/modules/scan/service.server";
+import { getScanByQrId } from "~/modules/scan/service.server";
+import { parseScanData } from "~/modules/scan/utils.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
@@ -158,16 +159,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { locale, timeZone } = getClientHint(request);
 
-    /**
-     * The caller's roles in the active org. Derived once here and reused by
-     * every server-side `hasPermission` check in this loader (scan gating
-     * below, edit gating further down) — passing `roles` explicitly avoids
-     * the validator's DB fallback lookup on each call.
-     */
-    const roles = userOrganizations.find(
-      (o) => o.organization.id === organizationId
-    )?.roles;
-
     const asset = await getAsset({
       id,
       organizationId,
@@ -178,21 +169,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan.
-     *
-     * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
-     * returns null without it. The parsed scan carries the scanner's name and
-     * email, GPS coordinates and user-agent; the component renders
-     * `<ScanDetails>` behind the same check, but a client-side check only
-     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
-     * receiving all of it in the page payload.
+     * And using the ID of tha qr code, we find the latest scan
      */
-    const lastScan = await getLastScanForViewer({
-      qrId: asset.qrCodes[0]?.id,
-      userId,
-      organizationId,
-      roles,
-    });
+    const lastScan = asset.qrCodes[0]?.id
+      ? parseScanData({
+          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+          userId,
+        })
+      : null;
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -205,9 +189,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * skip the heavy categories/locations/custom-field-defs queries for
      * users who are view-only. Uses the server-side `hasPermission` because
      * the client-side `userHasPermission` validator file has the `.client.`
-     * suffix and is stripped from the SSR bundle. `roles` is derived once at
-     * the top of the loader.
+     * suffix and is stripped from the SSR bundle. Passing `roles` explicitly
+     * avoids the validator's DB fallback lookup.
      */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
     const canEditAsset = await hasPermission({
       userId,
       organizationId,

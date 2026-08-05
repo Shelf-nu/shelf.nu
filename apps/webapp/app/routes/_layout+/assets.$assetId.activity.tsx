@@ -28,23 +28,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    /**
-     * Gate on `note:read`, not `asset:read`. The parent route
-     * (`assets.$assetId.tsx`) already enforces `asset:read` for the page, so
-     * the only additional right this child needs is the one for the data it
-     * returns: the notes themselves.
-     *
-     * This MUST stay server-side. `asset: [read]` is granted to BASE and
-     * SELF_SERVICE while `note: []` is not, so gating the loader on
-     * `asset:read` and hiding the notes in the component put every asset note
-     * in the page payload of users who are not allowed to read them — visible
-     * to anyone who opens devtools. Mirrors the bookings and locations
-     * activity routes, which gate on `bookingNote:read` / `locationNote:read`.
-     */
     const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.note,
+      entity: PermissionEntity.asset,
       action: PermissionAction.read,
     });
 
