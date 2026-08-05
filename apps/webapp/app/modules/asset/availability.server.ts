@@ -69,12 +69,12 @@ import {
   overCommittedWindows as overCommittedWindowsCore,
 } from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
 import {
   attributeDispositionsByBookingAsset,
   checkoutSessionsToLogsByAsset,
 } from "~/modules/booking/checkout-attribution";
-import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/service.server";
 import {
   computeAvailableQuantity,
   type AvailableQuantityClient,

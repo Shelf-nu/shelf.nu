@@ -26,15 +26,13 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: `~/modules/asset/availability.server` also imports
-// `computeCheckedOutBreakdownForAsset` from the very large booking service
-// module at the top level — that module's own import graph pulls in unrelated
-// client-side dependencies that aren't safe to load in this unit test.
-// Neither `flagBookingStockConflicts` nor anything it calls touches this
-// export (it's only used by the singular `getAssetAvailability`, not the
-// batch primitives this module reuses), so an empty stub is sufficient —
-// mirrors the identical stub in `availability.server.test.ts`.
-vitest.mock("~/modules/booking/service.server", () => ({
+// why: `~/modules/asset/availability.server` imports
+// `computeCheckedOutBreakdownForAsset` from `~/modules/booking/checked-out.server`.
+// Neither `flagBookingStockConflicts` nor anything it calls touches this export
+// (it's only used by the singular `getAssetAvailability`, not the batch
+// primitives this module reuses), so an empty stub is sufficient — mirrors the
+// identical stub in `availability.server.test.ts`.
+vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
