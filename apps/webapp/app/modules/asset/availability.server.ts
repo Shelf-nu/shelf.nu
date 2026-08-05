@@ -62,7 +62,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import {
   checkQuantityAvailable,
   computeAvailability,
@@ -546,6 +546,10 @@ export type AvailabilityBatchClient = {
         quantity: true;
         assetKitId?: true;
         booking: { select: { from: true; to: true; status: true } };
+        // Optional like `id`/`assetKitId`: only the checked-out read needs the
+        // live asset status (to gate the legacy all-at-once branch per asset);
+        // the reserved-rows read leaves it off.
+        asset?: { select: { status: true } };
       };
     }) => Promise<
       Array<{
@@ -555,6 +559,7 @@ export type AvailabilityBatchClient = {
         quantity: number;
         assetKitId?: string | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
+        asset?: { status: AssetStatus } | null;
       }>
     >;
   };
@@ -954,10 +959,28 @@ async function computeCheckedOutBreakdownBatch(
       quantity: true,
       assetKitId: true,
       booking: { select: { from: true, to: true, status: true } },
+      // Live asset status — the per-asset half of the legacy all-at-once
+      // detection below. Must stay in step with the singular
+      // `computeCheckedOutBreakdownForAsset`, which the parity test pins.
+      asset: { select: { status: true } },
     },
   });
 
   if (pivots.length === 0) return breakdownByAsset;
+
+  /**
+   * Assets currently flagged off the shelf. The all-at-once checkout sets
+   * CHECKED_OUT on every asset it processed, so this separates "was on the
+   * booking when it was checked out" from "added afterwards" (which
+   * `updateBookingAssets` leaves AVAILABLE on purpose). Only the former may
+   * take the legacy branch below — see GitHub #2815.
+   */
+  const checkedOutAssetIds = new Set<string>();
+  for (const p of pivots) {
+    if (p.asset?.status === AssetStatus.CHECKED_OUT) {
+      checkedOutAssetIds.add(p.assetId);
+    }
+  }
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = { id: string; quantity: number; assetKitId: string | null };
@@ -1009,25 +1032,30 @@ async function computeCheckedOutBreakdownBatch(
     // A booking with zero sessions was checked out via the legacy
     // all-at-once flow (the partial flow always writes a session row) —
     // since these pivots are already scoped to ONGOING/OVERDUE, every
-    // booked unit on this booking is physically off the shelf.
-    const isLegacyOngoing = sessionsForBooking.length === 0;
-    const logsByAsset = isLegacyOngoing
-      ? null
-      : checkoutSessionsToLogsByAsset(sessionsForBooking, (id) =>
-          byAsset.has(id)
-        );
+    // booked unit that was on the booking AT THAT POINT is physically off
+    // the shelf. Which assets those are is decided per asset below; an
+    // asset added later is still AVAILABLE and holds no units.
+    const bookingIsLegacyAllAtOnce = sessionsForBooking.length === 0;
+    // Safe to build unconditionally: a legacy booking has no sessions, so
+    // this is an empty map and the non-legacy path naturally yields 0.
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      sessionsForBooking,
+      (id) => byAsset.has(id)
+    );
 
     for (const [assetId, slices] of byAsset) {
-      const claimedBySlice = isLegacyOngoing
+      const assetIsLegacyAllAtOnce =
+        bookingIsLegacyAllAtOnce && checkedOutAssetIds.has(assetId);
+      const claimedBySlice = assetIsLegacyAllAtOnce
         ? null
         : attributeDispositionsByBookingAsset({
             bookingAssetRows: slices,
-            consumptionLogs: logsByAsset?.get(assetId) ?? [],
+            consumptionLogs: logsByAsset.get(assetId) ?? [],
           });
 
       const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
       for (const slice of slices) {
-        const checkedOutSlice = isLegacyOngoing
+        const checkedOutSlice = assetIsLegacyAllAtOnce
           ? slice.quantity
           : Math.min(slice.quantity, claimedBySlice?.get(slice.id) ?? 0);
         acc.total += checkedOutSlice;

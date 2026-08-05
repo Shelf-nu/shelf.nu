@@ -275,6 +275,15 @@ vitest.mock("~/modules/note/service.server", () => ({
  */
 type IdInArgs = { where?: { id?: { in?: string[] } } };
 
+/**
+ * The slice of a `bookingAsset.findMany` argument the #2815 mocks read. Both
+ * remaining-to-check-out readers narrow by one of these two filters, so a mock
+ * standing in for that query has to honour whichever one it was handed.
+ */
+type BookingAssetFindManyArgs = {
+  where?: { id?: { in?: string[] }; assetId?: { in?: string[] } };
+};
+
 // why: testing the service without writing real booking notes.
 vitest.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vitest.fn().mockResolvedValue({}),
@@ -3086,6 +3095,10 @@ describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
         assetId: "asset-pencils",
         quantity: 50,
         assetKitId: null,
+        // The all-at-once checkout flipped this asset off the shelf. Both
+        // remaining-to-check-out readers gate their legacy branch on exactly
+        // this, so the pivot join has to carry it.
+        asset: { status: AssetStatus.CHECKED_OUT },
       },
     ]);
   }
@@ -3101,6 +3114,10 @@ describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
         assetId: "asset-pencils",
         quantity: 50,
         assetKitId: null,
+        // The all-at-once checkout flipped this asset off the shelf. Both
+        // remaining-to-check-out readers gate their legacy branch on exactly
+        // this, so the pivot join has to carry it.
+        asset: { status: AssetStatus.CHECKED_OUT },
       },
     ]);
 
@@ -3208,6 +3225,200 @@ describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
         data: expect.objectContaining({
           assetIds: ["asset-camera"],
           quantities: [1],
+        }),
+      })
+    );
+  });
+});
+
+describe("assets added after an all-at-once checkout (GitHub #2815)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__resetPbcState?.();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__installStatefulPbcMocks?.(db);
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+    });
+  });
+
+  /**
+   * Pencils were on the booking when it was checked out all-at-once (so the
+   * asset is CHECKED_OUT); Tape was added to the ongoing booking afterwards and
+   * `updateBookingAssets` deliberately left it AVAILABLE. Both slices live on
+   * the same zero-session ONGOING booking, so only the live asset status tells
+   * them apart.
+   */
+  const PIVOTS = [
+    {
+      id: "ba-pencils-1",
+      assetId: "asset-pencils",
+      quantity: 50,
+      assetKitId: null,
+      asset: { status: AssetStatus.CHECKED_OUT },
+    },
+    {
+      id: "ba-tape-1",
+      assetId: "asset-tape",
+      quantity: 20,
+      assetKitId: null,
+      asset: { status: AssetStatus.AVAILABLE },
+    },
+  ];
+
+  it("keeps the real remaining for a QT asset added after the checkout", async () => {
+    expect.assertions(2);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(PIVOTS);
+
+    // The already-out asset still reads 0 — the legacy branch is intact.
+    await expect(
+      computeBookingAssetSliceRemainingToCheckOut(
+        db,
+        "booking-1",
+        "ba-pencils-1"
+      )
+    ).resolves.toBe(0);
+
+    // The asset added afterwards keeps its full booked quantity. Pre-fix the
+    // fallback was booking-level, so this read 0 too and the asset could never
+    // be checked out on this booking.
+    await expect(
+      computeBookingAssetSliceRemainingToCheckOut(db, "booking-1", "ba-tape-1")
+    ).resolves.toBe(20);
+  });
+
+  it("proposes the newly added QT asset in the Check-out-remaining payload", async () => {
+    expect.assertions(2);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      bookingAssets: [
+        {
+          id: "ba-pencils-1",
+          asset: {
+            id: "asset-pencils",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+        },
+        {
+          id: "ba-tape-1",
+          asset: {
+            id: "asset-tape",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+        },
+      ],
+      partialCheckins: [],
+    });
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(PIVOTS);
+
+    const payload = await getRemainingCheckoutPayload({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(payload.assetIds).toEqual([]);
+    // Only Tape — Pencils is already out and must not be re-proposed.
+    expect(payload.checkouts).toEqual([
+      { assetId: "asset-tape", bookingAssetId: "ba-tape-1", quantity: 20 },
+    ]);
+  });
+
+  it("checks the newly added QT asset out instead of rejecting it", async () => {
+    expect.assertions(1);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFrom,
+      to: futureTo,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-pencils-1",
+          quantity: 50,
+          assetKitId: null,
+          asset: {
+            id: "asset-pencils",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pencils",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-tape-1",
+          quantity: 20,
+          assetKitId: null,
+          asset: {
+            id: "asset-tape",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Tape",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+    // why: both readers narrow this query — the asset-level helper by
+    // `where.assetId.in`, the per-slice helper by `where.id.in`. A mock that
+    // ignores the filter would leak Pencils' CHECKED_OUT row into Tape's
+    // lookup and mask the very behaviour under test, so mirror Prisma here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: BookingAssetFindManyArgs) => {
+      const byAsset = args?.where?.assetId?.in;
+      const bySlice = args?.where?.id?.in;
+      return Promise.resolve(
+        PIVOTS.filter(
+          (row) =>
+            (!byAsset || byAsset.includes(row.assetId)) &&
+            (!bySlice || bySlice.includes(row.id))
+        )
+      );
+    });
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-tape",
+      title: "Tape",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      quantity: 20,
+    });
+
+    // Pre-fix this threw `Only 0 units left to check out for "Tape"` — the
+    // asset-level cap zeroed every asset on the zero-session ONGOING booking.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: [],
+      checkouts: [
+        { assetId: "asset-tape", bookingAssetId: "ba-tape-1", quantity: 20 },
+      ],
+    });
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assetIds: ["asset-tape"],
+          quantities: [20],
         }),
       })
     );

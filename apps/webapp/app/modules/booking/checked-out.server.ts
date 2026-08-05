@@ -12,7 +12,7 @@
  * @see {@link file://./checkout-attribution.ts} — per-slice attribution + the shared session parser.
  * @see {@link file://../asset/availability.server.ts} — the main consumer (`getAssetAvailability`).
  */
-import { BookingStatus, type Asset } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Asset } from "@prisma/client";
 
 import {
   attributeDispositionsByBookingAsset,
@@ -156,15 +156,30 @@ export async function computeCheckedOutBreakdownForAsset(
       quantity: true,
       assetKitId: true,
       bookingId: true,
+      // Live asset status — the per-asset half of the legacy all-at-once
+      // detection below. Joined here so it costs no extra round-trip.
+      asset: { select: { status: true } },
     },
   })) as Array<{
     id: string;
     quantity: number;
     assetKitId: string | null;
     bookingId: string;
+    asset?: { status: AssetStatus } | null;
   }>;
 
   if (slices.length === 0) return { total: 0, standalone: 0 };
+
+  /**
+   * Whether the asset itself is currently flipped off the shelf. The
+   * all-at-once checkout sets `CHECKED_OUT` on every asset it processed, so
+   * this is what distinguishes "was on the booking when it was checked out"
+   * from "added to the booking afterwards" (which `updateBookingAssets` leaves
+   * AVAILABLE on purpose). Only the former may take the legacy branch below.
+   */
+  const assetIsCheckedOut = slices.some(
+    (slice) => slice.asset?.status === AssetStatus.CHECKED_OUT
+  );
 
   // Group this asset's slices by booking — an asset can have multiple slices on
   // one booking (a standalone free-pool slice + one or more kit-driven slices),
@@ -228,8 +243,10 @@ export async function computeCheckedOutBreakdownForAsset(
     const bookingSessions = sessionsByBooking.get(bookingId) ?? [];
     // Legacy all-at-once checkout: a booking with ZERO sessions (these slices
     // are already scoped to ONGOING/OVERDUE) had every booked unit flipped off
-    // the shelf at once — mirrors the parent's legacy-ONGOING branch.
-    const isLegacyOngoing = bookingSessions.length === 0;
+    // the shelf at once — mirrors the parent's legacy branch, INCLUDING its
+    // per-asset CHECKED_OUT guard, so an asset added to the booking after that
+    // checkout is not counted as off the shelf (GitHub #2815).
+    const isLegacyOngoing = bookingSessions.length === 0 && assetIsCheckedOut;
 
     // Claimed-per-slice map: exact for tagged logs, standalone-first greedy for
     // untagged/legacy-attribution logs. Skipped for legacy-ONGOING bookings,
