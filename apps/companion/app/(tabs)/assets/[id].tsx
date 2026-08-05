@@ -15,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { releaseCategory } from "@shelf/quantity-control";
 import {
   api,
   type AssetCustodyListEntry,
@@ -314,12 +315,10 @@ export default function AssetDetailScreen() {
   const releaseMax = releaseQtyEntry
     ? releaseQtyEntry.releasableQuantity ?? releaseQtyEntry.quantity
     : 0;
-  // A ONE_WAY consumable's units are used up rather than returned, so ending a
-  // hold permanently reduces stock. The server decides that from the asset row
-  // (see `resolveReleaseDisposition`); this only changes the wording so the
-  // action never reads as a return. Pre-quantity servers omit the field, which
-  // falls through to the returnable copy — matching the server's own default.
-  const isConsumable = asset.consumptionType === "ONE_WAY";
+  // The shared predicate decides this, so the wording can never disagree with
+  // what the server does. Servers predating the field send no consumptionType,
+  // which falls through to the returnable copy — the server's own default.
+  const isConsumable = releaseCategory(asset.consumptionType) === "CONSUME";
   // Custody holders the server hid from this caller (privacy filtering for
   // roles without view-all-custody). Shown as a muted "+N others" row.
   const custodyOthersCount = isQtyTracked
@@ -505,9 +504,9 @@ export default function AssetDetailScreen() {
                     accessibilityLabel={
                       canReleaseRow
                         ? isConsumable
-                          ? `Mark units held by ${
+                          ? `End hold on units held by ${
                               entry.custodian.name
-                            } as consumed, holds ${qtyLabel ?? entry.quantity}`
+                            }, holds ${qtyLabel ?? entry.quantity}`
                           : `Release custody from ${
                               entry.custodian.name
                             }, holds ${qtyLabel ?? entry.quantity}`
@@ -763,14 +762,16 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={releaseQtyEntry != null}
-                title={isConsumable ? "Mark as consumed" : "Release Quantity"}
+                title={isConsumable ? "End hold" : "Release Quantity"}
                 subtitle={
                   releaseQtyEntry
                     ? isConsumable
-                      ? `How many of ${releaseQtyEntry.custodian.name}'s ${
+                      ? `End the hold on how many of ${
+                          releaseQtyEntry.custodian.name
+                        }'s ${
                           formatQuantity(releaseMax, asset.unitOfMeasure) ??
                           String(releaseMax)
-                        } were used up? This permanently reduces total stock.`
+                        }, and how many were used up? Used-up units permanently reduce total stock.`
                       : `Release how many of ${
                           releaseQtyEntry.custodian.name
                         }'s ${
@@ -783,13 +784,27 @@ export default function AssetDetailScreen() {
                 // Web parity: the release dialog pre-fills a full release.
                 defaultValue={releaseMax}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel={isConsumable ? "Mark as consumed" : "Release"}
+                secondary={
+                  isConsumable
+                    ? {
+                        label: "Of those, how many were used up?",
+                        // Pre-fill a full consume — the common case, and what
+                        // the server defaults to when no split is sent.
+                        defaultValue: releaseMax,
+                      }
+                    : undefined
+                }
+                confirmLabel={isConsumable ? "Confirm" : "Release"}
                 destructive
-                onSubmit={(quantity) => {
+                onSubmit={(quantity, consumed) => {
                   const entry = releaseQtyEntry;
                   setReleaseQtyEntry(null);
                   if (entry) {
-                    void performReleaseQuantity(entry.custodian.id, quantity);
+                    void performReleaseQuantity(
+                      entry.custodian.id,
+                      quantity,
+                      consumed
+                    );
                   }
                 }}
                 onClose={() => setReleaseQtyEntry(null)}

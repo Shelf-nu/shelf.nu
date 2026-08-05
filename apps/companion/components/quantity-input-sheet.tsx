@@ -38,6 +38,18 @@ type Props = {
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
+  /**
+   * Optional second numeric field rendered under the primary one. The ONE_WAY
+   * custody release uses it to ask how many of the released units were used
+   * up. Its value is clamped to the primary quantity, so it can never
+   * over-claim.
+   */
+  secondary?: {
+    /** Field label, e.g. "Of those, how many were used up?". */
+    label: string;
+    /** Initial value when the sheet opens (clamped to [0, primary]). */
+    defaultValue?: number;
+  };
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -46,8 +58,11 @@ type Props = {
    * quick-actions.tsx `primaryActionGreen`). Default is the primary black.
    */
   destructive?: boolean;
-  /** Called with the validated quantity when the user confirms. */
-  onSubmit: (quantity: number) => void;
+  /**
+   * Called with the validated quantity when the user confirms, plus the
+   * secondary value when a `secondary` field is configured.
+   */
+  onSubmit: (quantity: number, secondaryValue?: number) => void;
   /** Called when the user dismisses the sheet without confirming. */
   onClose: () => void;
 };
@@ -69,6 +84,7 @@ export function QuantityInputSheet({
   max,
   defaultValue,
   unitOfMeasure,
+  secondary,
   confirmLabel,
   destructive,
   onSubmit,
@@ -78,6 +94,7 @@ export function QuantityInputSheet({
   const styles = useStyles();
 
   const [value, setValue] = useState("1");
+  const [secondaryValue, setSecondaryValue] = useState("0");
   const inputRef = useRef<TextInput>(null);
 
   // Re-seed the input every time the sheet opens: each open targets a fresh
@@ -86,13 +103,31 @@ export function QuantityInputSheet({
     if (visible) {
       const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
       setValue(String(seed));
+      if (secondary) {
+        // Clamp the secondary seed to the primary seed — the two fields move
+        // together and the secondary can never exceed the units being released.
+        setSecondaryValue(
+          String(Math.min(Math.max(secondary.defaultValue ?? 0, 0), seed))
+        );
+      }
     }
-  }, [visible, defaultValue, max]);
+  }, [visible, defaultValue, max, secondary]);
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const overMax = hasValue && parsed > max;
   const isValid = hasValue && parsed >= 1 && parsed <= max;
+
+  const parsedSecondary = secondaryValue ? parseInt(secondaryValue, 10) : NaN;
+  const hasSecondary = Number.isFinite(parsedSecondary);
+  // With no secondary field the sheet behaves exactly as it always has.
+  const isSecondaryValid =
+    !secondary ||
+    (hasSecondary &&
+      parsedSecondary >= 0 &&
+      hasValue &&
+      parsedSecondary <= parsed);
+  const canConfirm = isValid && isSecondaryValid;
 
   /** Step the current value by `delta`, clamped to [1, max]. */
   const step = (delta: number) => {
@@ -188,20 +223,46 @@ export function QuantityInputSheet({
             </Text>
           )}
 
+          {/* Optional second field, e.g. how many released units were used up */}
+          {secondary ? (
+            <View style={styles.secondaryBlock}>
+              <Text style={styles.secondaryLabel}>{secondary.label}</Text>
+              <TextInput
+                style={styles.input}
+                value={secondaryValue}
+                onChangeText={(text) => {
+                  setSecondaryValue(text.replace(/[^0-9]/g, ""));
+                }}
+                placeholder="0"
+                placeholderTextColor={colors.placeholderText}
+                keyboardType="number-pad"
+                returnKeyType="done"
+                accessibilityLabel={secondary.label}
+              />
+              {!isSecondaryValid ? (
+                <Text style={styles.errorHint}>
+                  Cannot exceed the {hasValue ? parsed : 0} being released.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {/* Confirm */}
           <TouchableOpacity
             style={[
               destructive ? styles.confirmRelease : styles.confirmPrimary,
-              !isValid && styles.confirmDisabled,
+              !canConfirm && styles.confirmDisabled,
             ]}
             onPress={() => {
-              if (isValid) onSubmit(parsed);
+              if (canConfirm) {
+                onSubmit(parsed, secondary ? parsedSecondary : undefined);
+              }
             }}
-            disabled={!isValid}
+            disabled={!canConfirm}
             activeOpacity={0.7}
             accessibilityLabel={`${confirmLabel} ${echo ?? "quantity"}`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !isValid }}
+            accessibilityState={{ disabled: !canConfirm }}
           >
             <Text style={styles.confirmText}>{confirmLabel}</Text>
           </TouchableOpacity>
@@ -279,6 +340,14 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.muted,
     textAlign: "center",
+  },
+  secondaryBlock: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  secondaryLabel: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
   },
   errorHint: {
     fontSize: fontSize.sm,
