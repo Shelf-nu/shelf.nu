@@ -134,6 +134,7 @@ export async function buildUpdatePreview({
       cause: null,
       message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -152,6 +153,7 @@ export async function buildUpdatePreview({
       cause: null,
       message: NO_IDENTIFIER_COLUMN_MESSAGE,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -165,6 +167,7 @@ export async function buildUpdatePreview({
       cause: null,
       message: NO_UPDATABLE_COLUMNS_MESSAGE,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -275,6 +278,7 @@ export async function applyBulkUpdatesFromImport({
       cause: null,
       message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -291,6 +295,7 @@ export async function applyBulkUpdatesFromImport({
       cause: null,
       message: NO_IDENTIFIER_COLUMN_MESSAGE,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -302,6 +307,7 @@ export async function applyBulkUpdatesFromImport({
       cause: null,
       message: NO_UPDATABLE_COLUMNS_MESSAGE,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }

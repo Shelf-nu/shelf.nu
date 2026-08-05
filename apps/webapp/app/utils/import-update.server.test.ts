@@ -640,20 +640,25 @@ describe("wrong-format detection — identifier found, zero updatable columns (T
     ["SAM-0001", "Available", "foo"],
   ];
 
-  it("buildUpdatePreview throws a specific, actionable error instead of an empty preview", async () => {
+  it("buildUpdatePreview throws a specific, actionable 400 instead of an empty preview", async () => {
+    // why: user-input validation failures must be a 400, not the ShelfError
+    // default of 500 — a wrong CSV upload is a client error, not a server
+    // fault (see .claude/rules / reference_shelferror_user_input_400).
     await expect(
       buildUpdatePreview({ csvData, organizationId })
     ).rejects.toMatchObject({
       message: expect.stringContaining("Import-ready"),
+      status: 400,
       shouldBeCaptured: false,
     });
   });
 
-  it("applyBulkUpdatesFromImport throws the same error (stateless re-parse guard)", async () => {
+  it("applyBulkUpdatesFromImport throws the same 400 (stateless re-parse guard)", async () => {
     await expect(
       applyBulkUpdatesFromImport({ csvData, organizationId, userId, request })
     ).rejects.toMatchObject({
       message: expect.stringContaining("Import-ready"),
+      status: 400,
       shouldBeCaptured: false,
     });
   });
@@ -671,5 +676,38 @@ describe("wrong-format detection — identifier found, zero updatable columns (T
     await expect(
       buildUpdatePreview({ csvData: validCsvData, organizationId })
     ).resolves.toMatchObject({ updatableColumns: ["Name"] });
+  });
+});
+
+describe("wrong-format detection — no identifier column (status 400 fix round 1)", () => {
+  // why: covers the OTHER half of the same "wrong file" story — no
+  // Asset ID / ID / id column at all. Pre-existing behaviour (message only),
+  // now also asserting `status: 400` since the fix-round-1 review found
+  // these throws set `shouldBeCaptured: false` but omitted `status`, so
+  // ShelfError's 500 default made a user-input error look like a server
+  // fault.
+  const csvData = [
+    ["Name", "Category"],
+    ["New Name", "Electronics"],
+  ];
+
+  it("buildUpdatePreview throws a 400 when no identifier column is present", async () => {
+    await expect(
+      buildUpdatePreview({ csvData, organizationId })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("No identifier column found"),
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("applyBulkUpdatesFromImport throws a 400 when no identifier column is present", async () => {
+    await expect(
+      applyBulkUpdatesFromImport({ csvData, organizationId, userId, request })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("No identifier column found"),
+      status: 400,
+      shouldBeCaptured: false,
+    });
   });
 });
