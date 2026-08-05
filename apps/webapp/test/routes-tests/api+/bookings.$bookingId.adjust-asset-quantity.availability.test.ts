@@ -2,13 +2,14 @@
  * Route tests for `bookings.$bookingId.adjust-asset-quantity` — the
  * per-asset "Adjust quantity" action for a QUANTITY_TRACKED booking row.
  *
- * Named `*.test.server.ts` (not `*.test.ts`): per the comment in
- * `apps/webapp/vitest.config.ts`, React Router's typegen mirrors route
- * filenames under `.react-router/types`, so a co-located `foo.test.ts`
- * would collide with a generated file of the same name and Vitest would
- * try to run it twice. `**\/*.test.*` is already excluded from the route
- * tree by `ignoredRouteFiles` in `app/routes.ts`, so this file is never
- * mistaken for a route either way.
+ * Lives in `test/routes-tests/` (never under `app/routes/`): the dev server
+ * warms every file under `app/routes/` as a CLIENT module, so a co-located
+ * route test importing a `*.server` module breaks `pnpm webapp:dev`. Enforced
+ * by the `local-rules/no-test-files-in-routes` ESLint rule.
+ *
+ * The `.availability` infix distinguishes this from
+ * `bookings.$bookingId.adjust-asset-quantity.test.ts` (the ownership/IDOR
+ * guard) — both cover the same route from different angles.
  *
  * These tests cover the #2725 fix: the guard used to compare the absolute
  * submitted quantity against an unwindowed, unclamped availability figure,
@@ -28,9 +29,9 @@
  * configured per-test with `// @ts-expect-error mocked` — the same
  * convention used there.
  *
- * @see {@link file://./bookings.$bookingId.adjust-asset-quantity.ts}
- * @see {@link file://./../../modules/asset/availability.server.ts}
- * @see {@link file://./../../modules/asset/availability.server.test.ts}
+ * @see {@link file://../../../app/routes/api+/bookings.$bookingId.adjust-asset-quantity.ts}
+ * @see {@link file://../../../app/modules/asset/availability.server.ts}
+ * @see {@link file://../../../app/modules/asset/availability.server.test.ts}
  */
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
@@ -99,7 +100,7 @@ vitest.mock("~/modules/booking/service.server", () => ({
 // why: `vitest.mock` calls above are hoisted above all imports by Vitest's
 // transform regardless of source position, so importing the module under
 // test here (after the mocks are declared) is only for readability.
-import { action } from "./bookings.$bookingId.adjust-asset-quantity";
+import { action } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 
 /* -------------------------------------------------------------------------- */
 /*                                 Fixtures                                   */
