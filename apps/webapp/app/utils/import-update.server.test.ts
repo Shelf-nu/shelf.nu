@@ -532,3 +532,95 @@ describe("applyBulkUpdatesFromImport — custom field clearing (SHELF-WEBAPP-21W
     );
   });
 });
+
+describe("applyBulkUpdatesFromImport — description (Task 2 fix round 1)", () => {
+  it("updates description via either vocabulary header ('Description' / 'description')", async () => {
+    for (const header of ["Description", "description"]) {
+      vi.clearAllMocks();
+      vi.mocked(db.customField.findMany).mockResolvedValue([]);
+      vi.mocked(db.tag.findMany).mockResolvedValue([]);
+      vi.mocked(db.category.findMany).mockResolvedValue([]);
+      vi.mocked(db.location.findMany).mockResolvedValue([]);
+      vi.mocked(db.assetModel.findMany).mockResolvedValue([]);
+      vi.mocked(updateAsset).mockResolvedValue({ id: "uuid-1" } as Awaited<
+        ReturnType<typeof updateAsset>
+      >);
+      vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+        makeDbAsset({ description: "Old description" }),
+      ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+      const csvData = [
+        ["Asset ID", header],
+        ["SAM-0001", "New description"],
+      ];
+
+      const result = await applyBulkUpdatesFromImport({
+        csvData,
+        organizationId,
+        userId,
+        request,
+      });
+
+      expect(result.summary.updated).toBe(1);
+      expect(result.summary.failed).toBe(0);
+      expect(updateAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "uuid-1",
+          description: "New description",
+        })
+      );
+    }
+  });
+
+  it("is a no-op when the description cell matches the current value", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({ description: "Same description" }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Description"],
+      ["SAM-0001", "Same description"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.updated).toBe(0);
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the description on an empty cell (matches 'name' semantics)", async () => {
+    // Unlike category/location/tags/valuation, description is not
+    // clearable via a blank cell — an empty cell is a no-op, same as
+    // `name`. Pair the (no-op) description cell with a real Name change
+    // (no entity resolution needed) so the row still reaches the apply
+    // payload, and assert `description` is absent from it.
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        title: "Old Name",
+        description: "Keep this description",
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Description", "Name"],
+      ["SAM-0001", "", "New Name"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.updated).toBe(1);
+    const payload = vi.mocked(updateAsset).mock.calls[0][0];
+    expect(payload.title).toBe("New Name");
+    expect(payload.description).toBeUndefined();
+  });
+});

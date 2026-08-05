@@ -537,6 +537,7 @@ export async function applyBulkUpdatesFromImport({
 
       // Build update payload fields from non-location, non-availableToBook changes
       let title: UpdateAssetPayload["title"];
+      let description: UpdateAssetPayload["description"];
       let categoryId: UpdateAssetPayload["categoryId"];
       let tags: UpdateAssetPayload["tags"];
       let valuation: UpdateAssetPayload["valuation"];
@@ -607,6 +608,14 @@ export async function applyBulkUpdatesFromImport({
         switch (col.internalKey) {
           case "name":
             title = change.newValue;
+            break;
+
+          case "description":
+            // Plain scalar, no side-effects. Not clearable via an empty
+            // cell (see compareCoreField's "description" case) — this
+            // branch only runs for a change the diff already produced,
+            // i.e. a non-empty cell that differs from the current value.
+            description = change.newValue;
             break;
 
           case "category": {
@@ -714,6 +723,7 @@ export async function applyBulkUpdatesFromImport({
       // fields that were silently skipped like invalid numbers)
       let changesApplied = 0;
       if (title !== undefined) changesApplied++;
+      if (description !== undefined) changesApplied++;
       if (categoryId !== undefined) changesApplied++;
       if (tags !== undefined) changesApplied++;
       if (valuation !== undefined) changesApplied++;
@@ -726,6 +736,7 @@ export async function applyBulkUpdatesFromImport({
 
       const hasMainChanges =
         title !== undefined ||
+        description !== undefined ||
         categoryId !== undefined ||
         tags !== undefined ||
         valuation !== undefined ||
@@ -743,6 +754,7 @@ export async function applyBulkUpdatesFromImport({
           organizationId,
           request,
           title,
+          description,
           categoryId,
           tags,
           valuation,

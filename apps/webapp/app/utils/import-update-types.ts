@@ -290,6 +290,13 @@ export interface HeaderAnalysis {
 export type AssetForUpdate = {
   id: string;
   title: string;
+  /**
+   * Plain scalar, no side-effects — round-trippable like `title`/`valuation`.
+   * `fetchAssetsForUpdate` already pulls this via Prisma's `include` (which
+   * selects all scalar columns), so no query change was needed to add it
+   * here — only the TS type was missing it.
+   */
+  description: string | null;
   sequentialId: string | null;
   valuation: number | null;
   availableToBook: boolean;

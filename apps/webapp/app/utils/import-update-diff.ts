@@ -325,6 +325,24 @@ export function compareCoreField(
       return null;
     }
 
+    case "description": {
+      // Plain scalar, compared the same way as `name` — a simple
+      // string-equality diff. Unlike `name`, the underlying DB column is
+      // nullable, so an unset description reads as "". This function
+      // never sees an empty CSV cell (computeAssetDiffs branches to
+      // detectClearing first), and `description` isn't handled there
+      // either — like `name`, an empty cell is a no-op, not a clear.
+      const current = asset.description ?? "";
+      if (csvValue !== current) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
+        };
+      }
+      return null;
+    }
+
     case "category": {
       const current = asset.category?.name ?? "Uncategorized";
       if (csvValue.toLowerCase() !== current.toLowerCase()) {
@@ -783,6 +801,12 @@ export function detectClearing(
         }
         return null;
       }
+      // `description` deliberately has no case — it falls through to
+      // `default: return null`, same as `name`/`availableToBook` above
+      // (just reached via the switch's default instead of the
+      // NON_CLEARABLE_CORE_FIELDS short-circuit). An empty description
+      // cell is a no-op, not a clear — see the `compareCoreField`
+      // "description" case for the rationale.
       default:
         return null;
     }

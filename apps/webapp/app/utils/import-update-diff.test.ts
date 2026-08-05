@@ -26,6 +26,7 @@ function makeAsset(overrides: Partial<AssetForUpdate> = {}): AssetForUpdate {
   return {
     id: "uuid-1",
     title: "Test Asset",
+    description: null,
     sequentialId: "SAM-0001",
     valuation: null,
     availableToBook: true,
@@ -261,6 +262,47 @@ describe("compareCoreField", () => {
     it("returns null when name unchanged", () => {
       const asset = makeAsset({ title: "Same Name" });
       expect(compareCoreField("name", "Same Name", asset, "Name")).toBeNull();
+    });
+  });
+
+  describe("description (Task 2 fix round 1)", () => {
+    it("detects a description change", () => {
+      const asset = makeAsset({ description: "Old description" });
+      const result = compareCoreField(
+        "description",
+        "New description",
+        asset,
+        "Description"
+      );
+      expect(result).toEqual({
+        field: "Description",
+        currentValue: "Old description",
+        newValue: "New description",
+      });
+    });
+
+    it("returns null when description unchanged", () => {
+      const asset = makeAsset({ description: "Same description" });
+      expect(
+        compareCoreField(
+          "description",
+          "Same description",
+          asset,
+          "Description"
+        )
+      ).toBeNull();
+    });
+
+    it("treats a null description as empty when comparing", () => {
+      const asset = makeAsset({ description: null });
+      const result = compareCoreField(
+        "description",
+        "New description",
+        asset,
+        "Description"
+      );
+      expect(result?.currentValue).toBe("(none)");
+      expect(result?.newValue).toBe("New description");
     });
   });
 
@@ -1149,6 +1191,89 @@ describe("computeAssetDiffs", () => {
     // Name is exempt from clearing
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
+  });
+
+  it("does not clear description on an empty cell (matches 'name' semantics, Task 2 fix round 1)", () => {
+    const assets = new Map<string, AssetForUpdate>();
+    assets.set("SAM-0001", makeAsset({ description: "Keep this description" }));
+
+    const columnIndexMap = new Map<number, any>();
+    columnIndexMap.set(1, {
+      csvHeader: "Description",
+      internalKey: "description",
+      kind: "core",
+      csvIndex: 1,
+    });
+
+    const headerAnalysis = makeHeaderAnalysis({
+      columnIndexMap,
+      updatableColumns: [
+        {
+          csvHeader: "Description",
+          internalKey: "description",
+          kind: "core" as const,
+          csvIndex: 1,
+        },
+      ],
+    });
+
+    const csvData = [
+      ["Asset ID", "Description"],
+      ["SAM-0001", ""],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis,
+      existingAssets: assets,
+    });
+
+    // Description is not clearable via an empty cell — same as "name".
+    expect(result.assetsToUpdate).toHaveLength(0);
+    expect(result.skippedAssets).toHaveLength(1);
+  });
+
+  it("produces a description diff for a real change", () => {
+    const assets = new Map<string, AssetForUpdate>();
+    assets.set("SAM-0001", makeAsset({ description: "Old description" }));
+
+    const columnIndexMap = new Map<number, any>();
+    columnIndexMap.set(1, {
+      csvHeader: "Description",
+      internalKey: "description",
+      kind: "core",
+      csvIndex: 1,
+    });
+
+    const headerAnalysis = makeHeaderAnalysis({
+      columnIndexMap,
+      updatableColumns: [
+        {
+          csvHeader: "Description",
+          internalKey: "description",
+          kind: "core" as const,
+          csvIndex: 1,
+        },
+      ],
+    });
+
+    const csvData = [
+      ["Asset ID", "Description"],
+      ["SAM-0001", "New description"],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis,
+      existingAssets: assets,
+    });
+
+    expect(result.assetsToUpdate).toHaveLength(1);
+    expect(result.assetsToUpdate[0].changes[0]).toMatchObject({
+      field: "Description",
+      currentValue: "Old description",
+      newValue: "New description",
+    });
   });
 
   describe("'Uncategorized' guard", () => {
