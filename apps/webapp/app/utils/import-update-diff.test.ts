@@ -1150,6 +1150,106 @@ describe("computeAssetDiffs", () => {
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
   });
+
+  describe("'Uncategorized' guard", () => {
+    // The Standard (human/analytics) export writes the literal string
+    // "Uncategorized" for assets with no category
+    // (utils/csv.server.ts:592-594). Without this guard, re-importing
+    // that file would try to set a REAL category literally named
+    // "Uncategorized" for every previously-uncategorized asset. The cell
+    // must behave exactly like an empty cell.
+    function makeCategoryHeaderAnalysis(): HeaderAnalysis {
+      const columnIndexMap = new Map<number, any>();
+      columnIndexMap.set(1, {
+        csvHeader: "Category",
+        internalKey: "category",
+        kind: "core",
+        csvIndex: 1,
+      });
+      return makeHeaderAnalysis({
+        columnIndexMap,
+        updatableColumns: [
+          {
+            csvHeader: "Category",
+            internalKey: "category",
+            kind: "core" as const,
+            csvIndex: 1,
+          },
+        ],
+      });
+    }
+
+    it("clears an existing category instead of creating one literally named 'Uncategorized'", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set("SAM-0001", makeAsset({ category: { name: "Electronics" } }));
+
+      const csvData = [
+        ["Asset ID", "Category"],
+        ["SAM-0001", "Uncategorized"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeCategoryHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(1);
+      const change = result.assetsToUpdate[0].changes[0];
+      expect(change.clearing).toBe(true);
+      expect(change.newValue).toBe("(empty)");
+      expect(change.currentValue).toBe("Electronics");
+    });
+
+    it("is a no-op when the asset already has no category (no category created)", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set("SAM-0001", makeAsset({ category: null }));
+
+      const csvData = [
+        ["Asset ID", "Category"],
+        ["SAM-0001", "Uncategorized"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeCategoryHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(0);
+      expect(result.skippedAssets).toHaveLength(1);
+      expect(result.skippedAssets[0].reason).toBe("No changes detected");
+    });
+
+    it("matches case-insensitively ('uncategorized', 'UNCATEGORIZED')", () => {
+      const assets = new Map<string, AssetForUpdate>();
+      assets.set(
+        "SAM-0001",
+        makeAsset({ id: "uuid-1", category: { name: "Electronics" } })
+      );
+      assets.set(
+        "SAM-0002",
+        makeAsset({ id: "uuid-2", category: { name: "Electronics" } })
+      );
+
+      const csvData = [
+        ["Asset ID", "Category"],
+        ["SAM-0001", "uncategorized"],
+        ["SAM-0002", "UNCATEGORIZED"],
+      ];
+
+      const result = computeAssetDiffs({
+        csvData,
+        headerAnalysis: makeCategoryHeaderAnalysis(),
+        existingAssets: assets,
+      });
+
+      expect(result.assetsToUpdate).toHaveLength(2);
+      for (const asset of result.assetsToUpdate) {
+        expect(asset.changes[0].clearing).toBe(true);
+      }
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1210,5 +1310,170 @@ describe("describeBulkUpdateRowFailure", () => {
       label: "Assets",
     });
     expect(describeBulkUpdateRowFailure(wrapped)).toBe(GENERIC);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// analyzeUpdateHeaders — content-importer vocabulary (Task 2)
+//
+// Shelf has two independent CSV header vocabularies (asset-index export
+// display labels vs. content-importer machine keys, see
+// EXPORT_HEADER_TO_FIELD_MAP). These are the regression guards for the
+// reported bug: feeding an import-ready export into the update importer
+// rejected every column.
+// ---------------------------------------------------------------------------
+
+describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => {
+  it("classifies the reported customer header row with zero unrecognized columns", () => {
+    // The customer's exact 30-header export (see
+    // .superpowers/sdd/drifting-painting-pebble/brian-repro.csv). Before
+    // this fix: 0 updatable, 0 ignored, 29 unrecognized — only `ID`
+    // matched, by coincidence.
+    const headers = [
+      "title",
+      "ID",
+      "description",
+      "category",
+      "kit",
+      "tags",
+      "location",
+      "custodian",
+      "bookable",
+      "valuation",
+      "assetModel",
+      "type",
+      "quantity",
+      "minQuantity",
+      "unitOfMeasure",
+      "consumptionType",
+      "cf:Serial,type:TEXT",
+      "cf:Order Number,type:TEXT",
+      "cf:LACCD #,type:TEXT",
+      "cf:IT Asset #,type:TEXT",
+      "cf:Model #,type:TEXT",
+      "cf:Perkins Purchase,type:TEXT",
+      "cf:Perkins Item Fund ID,type:TEXT",
+      "cf:Manufacturer,type:TEXT",
+      "cf:Supplier,type:TEXT",
+      "cf:Purchase Date,type:DATE",
+      "cf:Perkins Fund #,type:TEXT",
+      "cf:Perkins Fund ID #,type:TEXT",
+      "cf:Perkins Item?,type:BOOLEAN",
+      "cf:Perkins Fiscal Year,type:TEXT",
+    ];
+    const orgCustomFields = [
+      { id: "cf1", name: "Serial", type: "TEXT" as const },
+      { id: "cf2", name: "Order Number", type: "TEXT" as const },
+      { id: "cf3", name: "LACCD #", type: "TEXT" as const },
+      { id: "cf4", name: "IT Asset #", type: "TEXT" as const },
+      { id: "cf5", name: "Model #", type: "TEXT" as const },
+      { id: "cf6", name: "Perkins Purchase", type: "TEXT" as const },
+      { id: "cf7", name: "Perkins Item Fund ID", type: "TEXT" as const },
+      { id: "cf8", name: "Manufacturer", type: "TEXT" as const },
+      { id: "cf9", name: "Supplier", type: "TEXT" as const },
+      { id: "cf10", name: "Purchase Date", type: "DATE" as const },
+      { id: "cf11", name: "Perkins Fund #", type: "TEXT" as const },
+      { id: "cf12", name: "Perkins Fund ID #", type: "TEXT" as const },
+      { id: "cf13", name: "Perkins Item?", type: "BOOLEAN" as const },
+      { id: "cf14", name: "Perkins Fiscal Year", type: "TEXT" as const },
+    ];
+
+    const result = analyzeUpdateHeaders(headers, orgCustomFields);
+
+    expect(result.unrecognizedColumns).toEqual([]);
+    expect(result.idDbField).toBe("id");
+    expect(result.idColumnHeader).toBe("ID");
+
+    const updatableKeys = result.updatableColumns.map((c) => c.internalKey);
+    expect(updatableKeys).toContain("assetModel");
+
+    const cfKeys = result.updatableColumns
+      .filter((c) => c.kind === "customField")
+      .map((c) => c.internalKey);
+    expect(cfKeys).toHaveLength(14);
+    for (const name of orgCustomFields.map((cf) => cf.name)) {
+      expect(cfKeys).toContain(`cf:${name}`);
+    }
+  });
+
+  it("resolves both vocabularies to the same internal field", () => {
+    const contentImporter = analyzeUpdateHeaders(
+      ["title", "bookable", "assetModel", "valuation"],
+      []
+    );
+    const assetIndex = analyzeUpdateHeaders(
+      ["Name", "Available to book", "Asset model", "Value"],
+      []
+    );
+
+    const keysOf = (r: HeaderAnalysis) =>
+      r.updatableColumns.map((c) => c.internalKey).sort();
+
+    expect(keysOf(contentImporter)).toEqual([
+      "assetModel",
+      "availableToBook",
+      "name",
+      "valuation",
+    ]);
+    expect(keysOf(assetIndex)).toEqual(keysOf(contentImporter));
+  });
+
+  it("matches fixed-field and identifier headers case-insensitively", () => {
+    for (const header of ["Asset Model", "asset model", "ASSETMODEL"]) {
+      const result = analyzeUpdateHeaders(["ID", header], []);
+      expect(result.updatableColumns[0]?.internalKey).toBe("assetModel");
+    }
+
+    for (const header of ["id", "ID"]) {
+      const result = analyzeUpdateHeaders([header, "Name"], []);
+      expect(result.idDbField).toBe("id");
+      expect(result.idColumnIndex).toBe(0);
+    }
+  });
+
+  it("resolves cf:<Name>,type:<TYPE>, cf:<Name>, and bare <Name> to the same custom field", () => {
+    const orgCustomFields = [
+      { id: "cf1", name: "Serial", type: "TEXT" as const },
+    ];
+
+    for (const header of ["cf:Serial,type:TEXT", "cf:Serial", "Serial"]) {
+      const result = analyzeUpdateHeaders(["ID", header], orgCustomFields);
+      expect(result.updatableColumns).toHaveLength(1);
+      expect(result.updatableColumns[0].internalKey).toBe("cf:Serial");
+    }
+  });
+
+  it("leaves a cf: header naming an unknown field unrecognized", () => {
+    const result = analyzeUpdateHeaders(
+      ["ID", "cf:DoesNotExist,type:TEXT"],
+      []
+    );
+    expect(result.updatableColumns).toHaveLength(0);
+    expect(result.unrecognizedColumns).toEqual(["cf:DoesNotExist,type:TEXT"]);
+  });
+
+  it("uses the org's stored custom-field type even when the header declares a different one", () => {
+    // The org's "Serial" field is TEXT; the header declares BOOLEAN. The
+    // workspace definition wins — no warning, no branch on the mismatch.
+    const orgCustomFields = [
+      { id: "cf1", name: "Serial", type: "TEXT" as const },
+    ];
+    const result = analyzeUpdateHeaders(
+      ["ID", "cf:Serial,type:BOOLEAN"],
+      orgCustomFields
+    );
+    expect(result.updatableColumns).toHaveLength(1);
+    expect(result.updatableColumns[0].cfDef?.type).toBe("TEXT");
+  });
+
+  it("classifies description as updatable, and kit / custodian as ignored (not updatable)", () => {
+    const result = analyzeUpdateHeaders(
+      ["ID", "description", "kit", "custodian"],
+      []
+    );
+    const updatableKeys = result.updatableColumns.map((c) => c.internalKey);
+    expect(updatableKeys).toContain("description");
+    expect(result.ignoredColumns).toContain("kit");
+    expect(result.ignoredColumns).toContain("custodian");
   });
 });

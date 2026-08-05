@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
@@ -91,9 +92,20 @@ export function parseYesNo(value: string): boolean | undefined {
  * Analyzes CSV headers from an Asset Index export and classifies them
  * for the update import flow.
  *
- * Export CSV headers use human-readable labels from `columnsLabelsMap`
- * (e.g. "Name", "Category", "Available to book").
- * Custom field headers are the field name directly (e.g. "Purchase Date").
+ * Accepts headers from EITHER of Shelf's two CSV vocabularies: the
+ * asset-index export's display labels (e.g. "Name", "Category",
+ * "Available to book") or the content-importer's machine keys (e.g.
+ * "title", "category", "bookable" — see `ASSET_CSV_HEADERS`). Both are
+ * resolved to the same internal field via `EXPORT_HEADER_TO_FIELD_MAP`.
+ * Matching is case-insensitive throughout (fixed fields, identifier
+ * columns, and `cf:` headers) so "Asset Model" / "asset model" /
+ * "ASSETMODEL" and a SIMPLE-mode export's lowercase "id" all resolve.
+ *
+ * Custom field headers are accepted in two forms: a bare field name
+ * (e.g. "Purchase Date", from the asset-index export) or a
+ * self-describing `cf:<Name>,type:<TYPE>` header (from the content
+ * importer / import-ready export). Both resolve against the org's
+ * custom-field definitions by name.
  *
  * @param headers - Array of header strings from the CSV first row
  * @param orgCustomFields - Organization's custom field definitions
@@ -107,17 +119,42 @@ export function analyzeUpdateHeaders(
   const ignoredColumns: string[] = [];
   const unrecognizedColumns: string[] = [];
 
-  // Find all available identifier columns (priority order)
   const headersTrimmed = headers.map((h) => h.trim());
+
+  // Case-insensitive lookup: lowercased header text → first matching
+  // index. Built once, outside any per-header loop, so every lookup
+  // below (identifier columns AND fixed fields) shares it.
+  const headerIndexByLower = new Map<string, number>();
+  headersTrimmed.forEach((h, i) => {
+    const lower = h.toLowerCase();
+    if (!headerIndexByLower.has(lower)) headerIndexByLower.set(lower, i);
+  });
+
+  // Case-insensitive lookup of EXPORT_HEADER_TO_FIELD_MAP (both
+  // vocabularies), built once outside the classification loop below.
+  const fieldByLowerHeader = new Map<string, string>();
+  for (const [label, field] of Object.entries(EXPORT_HEADER_TO_FIELD_MAP)) {
+    fieldByLowerHeader.set(label.toLowerCase(), field);
+  }
+
+  // Find all available identifier columns (priority order). Each slot
+  // (see `IDENTIFIER_COLUMNS`) lists every accepted alias across both
+  // vocabularies — the first alias present in the CSV wins that slot.
   const foundIdCols: IdentifierColumn[] = [];
   for (const idCol of IDENTIFIER_COLUMNS) {
-    const idx = headersTrimmed.indexOf(idCol.header);
-    if (idx >= 0) {
-      foundIdCols.push({
-        index: idx,
-        dbField: idCol.dbField,
-        header: idCol.header,
-      });
+    for (const candidate of idCol.headers) {
+      const idx = headerIndexByLower.get(candidate.toLowerCase());
+      if (idx !== undefined) {
+        foundIdCols.push({
+          index: idx,
+          dbField: idCol.dbField,
+          // Use the header text actually present in the CSV (not the
+          // canonical alias) so downstream error messages reflect what
+          // the user wrote.
+          header: headersTrimmed[idx],
+        });
+        break;
+      }
     }
   }
 
@@ -129,13 +166,14 @@ export function analyzeUpdateHeaders(
   const idColumnHeader = primaryId?.header ?? "";
   const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
 
-  // Set of internal field names used as identifiers — skip them during
-  // column classification so they aren't treated as updatable or ignored.
-  // Typed as `Set<string>` so it accepts the now-widened
-  // `EXPORT_HEADER_TO_FIELD_MAP` lookup result (the map gained
-  // import-only aliases that aren't in `ColumnLabelKey`).
-  const identifierFields = new Set<string>(
-    IDENTIFIER_COLUMNS.map((c) => c.internalField)
+  // Every accepted identifier alias text (lowercased), across all slots —
+  // used below to recognize an identifier-vocabulary header that is
+  // present but wasn't chosen as the primary matcher (e.g. a fallback
+  // "ID" column, or a duplicate alias for the same slot), so it's listed
+  // as ignored rather than misclassified as unrecognized or a stray
+  // custom field.
+  const identifierHeaderLower = new Set<string>(
+    IDENTIFIER_COLUMNS.flatMap((c) => c.headers.map((h) => h.toLowerCase()))
   );
 
   // Build a lookup of org custom fields by name (case-insensitive)
@@ -147,19 +185,26 @@ export function analyzeUpdateHeaders(
     const header = headersTrimmed[i];
     if (!header) continue;
 
-    // Check if it's a known fixed-field header via reverse map
-    const internalField = EXPORT_HEADER_TO_FIELD_MAP[header];
+    if (i === idColumnIndex) {
+      // The chosen primary identifier column — already consumed above.
+      continue;
+    }
+
+    const lowerHeader = header.toLowerCase();
+
+    if (identifierHeaderLower.has(lowerHeader)) {
+      // A recognized identifier-vocabulary header that isn't the chosen
+      // primary (e.g. "ID" when "Asset ID" is also present) — ignored,
+      // mirrors the long-standing fallback-column behaviour.
+      ignoredColumns.push(header);
+      continue;
+    }
+
+    // Check if it's a known fixed-field header via the reverse map
+    // (case-insensitive — see map construction above).
+    const internalField = fieldByLowerHeader.get(lowerHeader);
 
     if (internalField) {
-      // Skip identifier columns — they're handled above
-      if (identifierFields.has(internalField)) {
-        // If this isn't the one we picked as the matcher, list it as ignored
-        if (i !== idColumnIndex) {
-          ignoredColumns.push(header);
-        }
-        continue;
-      }
-
       if (UPDATABLE_FIELDS.has(internalField)) {
         updatableColumns.push({
           csvHeader: header,
@@ -171,33 +216,59 @@ export function analyzeUpdateHeaders(
         // Known field but not updatable (Status, Kit, etc.) — treat as ignored
         ignoredColumns.push(header);
       }
-    } else {
-      // Not a fixed field header — check if it's a custom field name
-      const cf = cfByName.get(header.toLowerCase());
-      if (cf) {
-        if (UPDATABLE_CF_TYPES.has(cf.type)) {
-          updatableColumns.push({
-            csvHeader: header,
-            internalKey: `cf:${cf.name}`,
-            kind: "customField",
-            csvIndex: i,
-            cfDef: {
-              name: cf.name,
-              type: cf.type,
-              helpText: "",
-              required: false,
-              active: true,
-            },
-          });
-        } else {
-          ignoredColumns.push(
-            `${header} (${cf.type.toLowerCase()} fields not supported for update)`
-          );
-        }
+      continue;
+    }
+
+    // Not a fixed field header — check if it's a custom field.
+    // Two forms are accepted: a self-describing `cf:<Name>,type:<TYPE>`
+    // header (content importer / import-ready export) or a bare field
+    // name (asset-index export display label). Both resolve against the
+    // SAME org custom-field lookup below.
+    let cfName = header;
+    if (header.length > 3 && header.slice(0, 3).toLowerCase() === "cf:") {
+      // `getDefinitionFromCsvHeader` is the EXACT parser the create
+      // importer uses (see ASSET_CSV_HEADERS handling) — reused here so
+      // both importers agree on how a `cf:` header decodes. It has a
+      // non-null assertion internally if no `cf:`-prefixed segment is
+      // found, hence the length + prefix guard above.
+      //
+      // Known limitation, shared with the create importer: the parser
+      // splits the header on `,`, so a custom field name containing a
+      // comma is truncated. Pre-existing behaviour — not fixed here.
+      cfName = getDefinitionFromCsvHeader(header).name;
+    }
+    // The declared `,type:` suffix (if any) is informational only — the
+    // workspace's stored custom-field type is the source of truth, so we
+    // deliberately do NOT compare/warn on a mismatch here. Adding that
+    // would require a new warnings channel through
+    // `HeaderAnalysis` → `UpdatePreview` for a case that's rare and
+    // always safely resolved by trusting the org's own schema.
+    const cf = cfByName.get(cfName.toLowerCase());
+    if (cf) {
+      if (UPDATABLE_CF_TYPES.has(cf.type)) {
+        updatableColumns.push({
+          csvHeader: header,
+          internalKey: `cf:${cf.name}`,
+          kind: "customField",
+          csvIndex: i,
+          cfDef: {
+            name: cf.name,
+            type: cf.type,
+            helpText: "",
+            required: false,
+            active: true,
+          },
+        });
       } else {
-        // Unknown column — don't block the import, just skip it
-        unrecognizedColumns.push(header);
+        ignoredColumns.push(
+          `${header} (${cf.type.toLowerCase()} fields not supported for update)`
+        );
       }
+    } else {
+      // Unknown column (including a `cf:` header naming a field that
+      // doesn't exist in this workspace) — don't block the import, just
+      // skip it.
+      unrecognizedColumns.push(header);
     }
   }
 
@@ -889,7 +960,19 @@ export function computeAssetDiffs({
 
     for (const [colIdx, column] of headerAnalysis.columnIndexMap) {
       const csvValue = row[colIdx]?.trim() ?? "";
-      const isEmpty = csvValue === "" || csvValue === '""';
+      // The Standard (human/analytics) export writes the literal string
+      // "Uncategorized" for assets with no category
+      // (`utils/csv.server.ts` — `asset.category?.name ?? "Uncategorized"`).
+      // Without this guard, re-importing that file would attempt to set
+      // the category to a real category literally named "Uncategorized"
+      // for every previously-uncategorized asset. Treat that cell exactly
+      // like an empty cell (same clearing / no-op semantics below) rather
+      // than inventing new behaviour here.
+      const isUncategorizedCell =
+        column.internalKey === "category" &&
+        csvValue.toLowerCase() === "uncategorized";
+      const isEmpty =
+        csvValue === "" || csvValue === '""' || isUncategorizedCell;
 
       // Empty cell handling: detect clearing (had value → now empty)
       // Fields exempt from clearing: name (required), availableToBook (boolean)

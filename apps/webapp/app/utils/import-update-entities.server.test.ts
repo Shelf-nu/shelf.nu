@@ -16,7 +16,10 @@
  */
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
-import { batchResolveAssetModelNames } from "./import-update-entities.server";
+import {
+  batchResolveAssetModelNames,
+  fetchAssetsForUpdate,
+} from "./import-update-entities.server";
 
 // why: the resolver issues raw Prisma calls — we stub them so we can assert
 // the dedupe / create-missing / re-fetch shape without a real DB.
@@ -25,6 +28,9 @@ vitest.mock("~/database/db.server", () => ({
     assetModel: {
       findMany: vitest.fn(),
       create: vitest.fn(),
+    },
+    asset: {
+      findMany: vitest.fn(),
     },
   },
 }));
@@ -170,5 +176,92 @@ describe("batchResolveAssetModelNames", () => {
     // No DB calls needed when only blanks were supplied.
     expect(db.assetModel.findMany).not.toHaveBeenCalled();
     expect(db.assetModel.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * @description Org-scoping regression guard for `fetchAssetsForUpdate`.
+ *
+ * This is a LOCK, not a fix — `fetchAssetsForUpdate` already scopes its
+ * query with `where: { [dbField]: { in: identifierValues }, organizationId }`.
+ * It's pinned here because the import-ready export now emits a first-class
+ * `id` column (Task 1), which means CSV-supplied asset ids are user input
+ * on a multi-tenant system: an attacker in Org A could otherwise supply
+ * Org B's ids and have them silently resolve. See
+ * .claude/rules/org-scope-user-supplied-ids.md.
+ */
+describe("fetchAssetsForUpdate — org scoping (lock, not a fix)", () => {
+  // Minimal shape fetchAssetsForUpdate needs from `db.asset.findMany`:
+  // the relations it destructures (category, assetLocations, tags,
+  // customFields) plus the two identifier fields it can be queried by.
+  const orgAAsset = {
+    id: "asset-org-a",
+    sequentialId: "SAM-0001",
+    organizationId: "org-a",
+    title: "Org A Laptop",
+    category: null,
+    assetLocations: [],
+    tags: [],
+    customFields: [],
+  };
+  const orgBAsset = {
+    id: "asset-org-b",
+    // Same sequentialId as the Org A asset — a realistic collision since
+    // sequential ids are only unique per-organization.
+    sequentialId: "SAM-0001",
+    organizationId: "org-b",
+    title: "Org B Laptop",
+    category: null,
+    assetLocations: [],
+    tags: [],
+    customFields: [],
+  };
+  const allAssets = [orgAAsset, orgBAsset];
+
+  beforeEach(() => {
+    // why: simulates Postgres WHERE filtering (identifier-in-list AND
+    // organizationId equality) so the test exercises the same scoping
+    // logic a real query would enforce, without spinning up a live DB.
+    vi.mocked(db.asset.findMany).mockImplementation(((args: {
+      where: {
+        organizationId: string;
+        id?: { in: string[] };
+        sequentialId?: { in: string[] };
+      };
+    }) => {
+      const { where } = args;
+      const dbField: "id" | "sequentialId" = where.id ? "id" : "sequentialId";
+      const idsIn = where[dbField]?.in ?? [];
+      return Promise.resolve(
+        allAssets.filter(
+          (a) =>
+            idsIn.includes(a[dbField] ?? "") &&
+            a.organizationId === where.organizationId
+        )
+      );
+    }) as unknown as typeof db.asset.findMany);
+  });
+
+  it("does not resolve an id that belongs to a different organization", async () => {
+    // Org A queries by an id (and, separately, a sequentialId) that only
+    // exists under Org B — neither must resolve.
+    const byId = await fetchAssetsForUpdate(["asset-org-b"], "org-a", "id");
+    expect(byId.size).toBe(0);
+
+    const bySequentialId = await fetchAssetsForUpdate(
+      ["SAM-0001"],
+      "org-a",
+      "sequentialId"
+    );
+    // Org A's OWN "SAM-0001" resolves; Org B's same-looking id does not
+    // leak in — the map has exactly the one asset scoped to Org A.
+    expect(bySequentialId.size).toBe(1);
+    expect(bySequentialId.get("SAM-0001")?.id).toBe("asset-org-a");
+  });
+
+  it("resolves an asset id correctly scoped to the requesting organization", async () => {
+    const result = await fetchAssetsForUpdate(["asset-org-a"], "org-a", "id");
+    expect(result.size).toBe(1);
+    expect(result.get("asset-org-a")?.id).toBe("asset-org-a");
   });
 });
