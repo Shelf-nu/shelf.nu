@@ -39,6 +39,7 @@ import {
   payload,
   error,
   getCurrentSearchParams,
+  getRefererPath,
   parseData,
 } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -108,6 +109,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       currency: currentOrganization?.currency,
       customFields,
       nextSequentialId,
+      /** Lets Cancel return the user to wherever they opened the form from
+       * (assets index, a location, a kit, …). Best-effort: `null` when the
+       * Referer header is absent, which the form resolves to its own
+       * fallback. @see AssetForm's `cancelTo` */
+      referer: getRefererPath(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -359,7 +365,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function NewAssetPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { nextSequentialId } = useLoaderData<typeof loader>();
+  const { nextSequentialId, referer } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
 
@@ -385,6 +391,7 @@ export default function NewAssetPage() {
           categoryId={categoryFromUrl}
           sequentialId={nextSequentialId}
           bulkMode={bulkMode}
+          referer={referer}
         />
       </div>
     </div>
