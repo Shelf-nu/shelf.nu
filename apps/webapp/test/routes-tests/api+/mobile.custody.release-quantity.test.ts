@@ -62,6 +62,14 @@ vitest.mock("~/modules/asset/service.server", () => ({
     .mockResolvedValue({ asset: { id: "asset-1" }, consumed: 0, returned: 3 }),
 }));
 
+// why: the per-user rate limiter is an in-process counter that survives across
+// tests in this file, and the route's "bulk" bucket allows only 10 requests a
+// minute — every case here posts as the same user, so without a no-op the
+// suite's own size would start returning 429s.
+vitest.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vitest.fn(),
+}));
+
 // why: external service — we mock the team member lookup without hitting the database
 vitest.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: vitest.fn(),
