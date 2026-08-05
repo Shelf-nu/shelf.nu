@@ -113,7 +113,14 @@ export function ScanBarcodeTab({
           allowNonShelfCodes={true}
           hideBackButtonText={true}
           scanMessage={barcodeForm}
-          className="h-full"
+          // The camera is bounded to 400px but never more than half the
+          // viewport, so on a short window the dialog still fits instead of
+          // running off the bottom. `h-full` did not constrain it: the
+          // percentage never resolved, so the video's intrinsic height (a
+          // 4:3 stream renders ~414px here) drove the dialog's size. The
+          // 200px floor keeps it usable, and `size-full object-cover` on the
+          // video means it crops to whatever height it is given.
+          className="!h-[min(400px,50vh)] min-h-[200px]"
           forceMode="camera"
           overlayPosition="centered"
           errorMessage={errorMessage}
