@@ -3034,6 +3034,186 @@ describe("getRemainingCheckoutPayload", () => {
   });
 });
 
+describe("all-at-once checkout leaves nothing remaining (GitHub #2814)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__resetPbcState?.();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).__installStatefulPbcMocks?.(db);
+    // The shape under test: an all-at-once "Check out" flips every asset to
+    // CHECKED_OUT but writes NO PartialBookingCheckout rows, so the booking is
+    // ONGOING with zero sessions. That is the ONLY way this state is reachable
+    // — the progressive flow writes a session row on every batch.
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+    });
+  });
+
+  /** Booking graph for `getRemainingCheckoutPayload`'s narrower select. */
+  function primePayloadLookup() {
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      bookingAssets: [
+        {
+          id: "ba-pencils-1",
+          asset: {
+            id: "asset-pencils",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+        },
+        {
+          id: "ba-camera-1",
+          asset: {
+            id: "asset-camera",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+          },
+        },
+      ],
+      partialCheckins: [],
+    });
+    // why: the single 50-unit pivot slice the per-slice OUT helper reads to
+    // derive this slice's remaining. Zero PBC sessions + ONGOING booking means
+    // the legacy-ONGOING fallback should report 0, not the raw 50.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-pencils-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
+  }
+
+  it("reports 0 per-slice remaining for a QT slice already out via all-at-once checkout", async () => {
+    expect.assertions(1);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-pencils-1",
+        assetId: "asset-pencils",
+        quantity: 50,
+        assetKitId: null,
+      },
+    ]);
+
+    const remaining = await computeBookingAssetSliceRemainingToCheckOut(
+      db,
+      "booking-1",
+      "ba-pencils-1"
+    );
+
+    // Pre-fix this returned the raw booked 50: the per-slice reader had no
+    // legacy-ONGOING fallback, so it disagreed with its asset-level sibling
+    // (which already reported 0) on exactly this booking shape.
+    expect(remaining).toBe(0);
+  });
+
+  it("keeps the already-out QT slice out of the Check-out-remaining payload", async () => {
+    expect.assertions(2);
+
+    primePayloadLookup();
+
+    const payload = await getRemainingCheckoutPayload({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    // Only the asset that is genuinely still Booked — an INDIVIDUAL asset added
+    // to the booking after it went ONGOING — is proposed.
+    expect(payload.assetIds).toEqual(["asset-camera"]);
+    expect(payload.checkouts).toEqual([]);
+  });
+
+  it("checks out an asset added to the ongoing booking instead of rejecting the batch", async () => {
+    expect.assertions(2);
+
+    primePayloadLookup();
+
+    // Resolve the payload the booking-header "Check out remaining" action
+    // dispatches, then feed it straight into the service — the exact wire the
+    // action follows, minus the response wrapper.
+    const { assetIds, checkouts } = await getRemainingCheckoutPayload({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    // Re-prime for partialCheckoutBooking's wider select (slice quantity, asset
+    // type / title / unitOfMeasure, kit memberships).
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFrom,
+      to: futureTo,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-pencils-1",
+          quantity: 50,
+          assetKitId: null,
+          asset: {
+            id: "asset-pencils",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pencils",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-camera-1",
+          quantity: 1,
+          assetKitId: null,
+          asset: {
+            id: "asset-camera",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+            title: "Camera",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+
+    // Pre-fix this threw `Only 0 units left to check out for "Pencils"`: the
+    // payload carried a ghost 50-unit claim for the already-out QT slice, the
+    // in-transaction cap rejected it, and the rollback took the genuinely
+    // outstanding Camera down with it — the asset stayed AVAILABLE.
+    await partialCheckoutBooking({ ...baseParams, assetIds, checkouts });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["asset-camera"] } }),
+        data: { status: AssetStatus.CHECKED_OUT },
+      })
+    );
+    // The ghost QT claim is absent from the session ledger — only the Camera
+    // was recorded, at the implicit INDIVIDUAL quantity of 1.
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assetIds: ["asset-camera"],
+          quantities: [1],
+        }),
+      })
+    );
+  });
+});
+
 describe("buildOverriddenReservationNotes", () => {
   const current = { id: "booking-1", name: "Loaning things to Carlos" };
 
