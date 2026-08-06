@@ -184,6 +184,26 @@ describe("QuantityOverviewCard", () => {
     expect(screen.queryByText("Unplaced")).not.toBeInTheDocument();
   });
 
+  it("does not call a kit-driven placement over-placed", () => {
+    // 80 manual + 50 kit-driven units of a 100 total is VALID: since
+    // `20260602100000_assetlocation_sum_exclude_kit_driven` the location
+    // trigger sums manual rows only, and the kit axis is capped separately.
+    // Deriving over-placement from the combined 130 would raise a false alarm
+    // on a perfectly healthy asset.
+    render(
+      <QuantityOverviewCard
+        {...baseProps}
+        quantity={100}
+        availableQuantity={100}
+        inLocationsQuantity={130}
+        inLocationsManualQuantity={80}
+        inKitsQuantity={50}
+      />
+    );
+
+    expect(screen.queryByText("Over-placed")).not.toBeInTheDocument();
+  });
+
   it("explains what to do about an over-placed asset", () => {
     render(
       <QuantityOverviewCard

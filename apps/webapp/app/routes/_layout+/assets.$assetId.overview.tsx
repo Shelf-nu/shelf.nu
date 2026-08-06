@@ -243,12 +243,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
+      // Manual rows only (`assetKitId === null`). This is the sum
+      // `enforce_asset_location_sum_within_total` actually bounds — since
+      // `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger
+      // ignores kit-driven rows, which are bounded on their own axis by
+      // `enforce_asset_kit_sum_within_total`. Deriving "over-placed" from the
+      // combined `inLocations` would flag a perfectly valid asset (80 manual +
+      // 50 kit-driven of 100) as over-allocated.
+      const inLocationsManual = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) => sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
+        0
+      );
+
       const availability = await getAssetAvailability({
         assetId: asset.id,
         organizationId,
       });
 
-      quantityData = buildQuantityData({ availability, inLocations });
+      quantityData = buildQuantityData({
+        availability,
+        inLocations,
+        inLocationsManual,
+      });
     }
 
     /**
@@ -1730,6 +1746,7 @@ export default function AssetOverview() {
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}
               inLocationsQuantity={quantityData?.inLocations}
+              inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}

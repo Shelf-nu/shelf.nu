@@ -27,14 +27,19 @@ function txWith(
   placements: Array<{ id: string; locationId: string; quantity: number }>
 ) {
   const update = vi.fn().mockResolvedValue({});
+  const destroy = vi.fn().mockResolvedValue({});
   return {
     tx: {
       assetLocation: {
         findMany: vi.fn().mockResolvedValue(placements),
         update,
+        delete: destroy,
       },
     },
     update,
+    // Named `destroy` locally because `delete` is a reserved word in strict
+    // mode; the delegate method it stands in for is `assetLocation.delete`.
+    destroy,
   };
 }
 
@@ -125,10 +130,36 @@ describe("reconcileManualPlacementsForStockDecrease", () => {
     });
   });
 
+  it("deletes the placement rather than leaving a zero-unit row", async () => {
+    // Consuming the last placed unit must remove the row. Placement lists and
+    // the editor treat row existence as "the asset is here", and
+    // `replaceAssetPlacements` rejects any quantity below 1, so a 0-unit row
+    // would render as a location holding nothing that the user cannot clear.
+    // Mirrors `moveAssetLocationUnits`, which deletes a drained source row.
+    const { tx, update, destroy } = txWith([
+      { id: "p1", locationId: "loc-gear", quantity: 5 },
+    ]);
+
+    const result = await reconcileManualPlacementsForStockDecrease({
+      assetId: "asset-1",
+      newTotal: 0,
+      tx,
+    });
+
+    expect(result).toEqual({
+      outcome: "reduced",
+      locationId: "loc-gear",
+      reducedBy: 5,
+    });
+    expect(destroy).toHaveBeenCalledWith({ where: { id: "p1" } });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("never writes a negative placement", async () => {
     // Defensive: a caller passing a nonsense total must not produce a
-    // negative row, which would breach the pivot's own semantics.
-    const { tx, update } = txWith([
+    // negative row, which would breach the pivot's own semantics. The row is
+    // removed at zero rather than clamped in place.
+    const { tx, update, destroy } = txWith([
       { id: "p1", locationId: "loc-gear", quantity: 5 },
     ]);
 
@@ -143,10 +174,8 @@ describe("reconcileManualPlacementsForStockDecrease", () => {
       locationId: "loc-gear",
       reducedBy: 5,
     });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: "p1" },
-      data: { quantity: 0 },
-    });
+    expect(destroy).toHaveBeenCalledWith({ where: { id: "p1" } });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("reports ambiguity instead of guessing across several placements", async () => {

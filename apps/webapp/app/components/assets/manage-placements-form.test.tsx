@@ -85,6 +85,38 @@ describe("ManagePlacementsForm — over-placed state", () => {
     expect(screen.queryByText("Unplaced")).not.toBeInTheDocument();
   });
 
+  it("does not call a kit-driven placement over-placed", () => {
+    // 80 manual + 50 kit-driven of a 100 total. The location trigger sums
+    // manual rows only, so nothing is breached — but the free manual pool is
+    // gone, which is what "Unplaced 0" correctly says.
+    render(
+      <ManagePlacementsForm
+        isQty
+        assetQuantity={100}
+        unitOfMeasure="pcs"
+        locations={locations}
+        serverErrorMessage={null}
+        initialPlacements={[
+          { locationId: "loc-1", locationName: "Baghdad Store", quantity: 80 },
+        ]}
+        kitDrivenPlacements={[
+          {
+            locationId: "loc-2",
+            locationName: "Erbil Store",
+            quantity: 50,
+            kit: { id: "kit-1", name: "Field Kit" },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.queryByText("Over-placed")).not.toBeInTheDocument();
+    expect(screen.getByText("Unplaced")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Stock was used up while every unit was assigned/)
+    ).not.toBeInTheDocument();
+  });
+
   it("explains an app-created over-allocation rather than blaming the user's input", () => {
     render(
       <ManagePlacementsForm

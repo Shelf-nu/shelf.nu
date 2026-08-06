@@ -144,9 +144,7 @@ export function ManagePlacementsForm({
    */
   const [openedOverPlaced] = useState(
     () =>
-      isQty &&
-      initialPlacements.reduce((s, p) => s + p.quantity, 0) + kitDrivenSum >
-        totalPool
+      isQty && initialPlacements.reduce((s, p) => s + p.quantity, 0) > totalPool
   );
 
   /** Locations not yet picked, so each dropdown only offers fresh options. */
@@ -178,8 +176,11 @@ export function ManagePlacementsForm({
        * reporting the user's untouched numbers back at them as an error.
        */
       if (openedOverPlaced) {
-        return `These locations hold ${projectedSum} ${unit} between them, but the asset's total is now ${totalPool}. Stock was used up while every unit was assigned to a location, so ${
-          projectedSum - totalPool
+        // Manual sum only: kit-driven rows sit on their own axis and never
+        // contribute to this over-allocation, so quoting the combined figure
+        // would misstate how far out the numbers actually are.
+        return `These locations hold ${placedSum} ${unit} between them, but the asset's total is now ${totalPool}. Stock was used up while every unit was assigned to a location, so ${
+          placedSum - totalPool
         } ${unit} are still recorded somewhere they no longer are. Lower the location that lost them, then save.`;
       }
       return kitDrivenSum > 0
@@ -207,12 +208,21 @@ export function ManagePlacementsForm({
 
   // "Unplaced" excludes kit-driven rows from the pool the user can
   // claim with manual placements — they're already spoken for.
-  //
-  // NOT clamped at zero: a negative residual is a state the app can actually
-  // reach, and rounding it up to "0 unplaced" told the user everything was
-  // accounted for at the exact moment it wasn't. It renders on its own row
-  // below.
-  const unplaced = totalPool - placedSum - kitDrivenSum;
+  const unplaced = Math.max(0, totalPool - placedSum - kitDrivenSum);
+
+  /**
+   * How far MANUAL placements exceed the asset total — the only axis
+   * `enforce_asset_location_sum_within_total` bounds (kit-driven rows were
+   * excluded from it by `20260602100000_assetlocation_sum_exclude_kit_driven`
+   * and are capped separately by `enforce_asset_kit_sum_within_total`).
+   *
+   * Computing it from `unplaced` instead would flag a perfectly valid asset:
+   * 80 manual + 50 kit-driven units of a 100 total leaves no free pool, but
+   * breaches nothing. This is a state the app reaches on its own when a
+   * consume lowers `Asset.quantity` with no unplaced residual left to absorb
+   * it, so it gets its own row rather than being clamped out of sight.
+   */
+  const overPlacedBy = Math.max(0, placedSum - totalPool);
 
   const canAddRow = isQty
     ? rows.length < locations.length && unplaced > 0
@@ -374,11 +384,11 @@ export function ManagePlacementsForm({
               </span>
             </div>
           ) : null}
-          {unplaced < 0 ? (
+          {overPlacedBy > 0 ? (
             <div className="flex justify-between text-error-700">
               <span>Over-placed</span>
               <span className="tabular-nums">
-                {-unplaced} {unit}
+                {overPlacedBy} {unit}
               </span>
             </div>
           ) : (

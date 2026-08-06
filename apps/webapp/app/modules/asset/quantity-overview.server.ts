@@ -51,6 +51,17 @@ export type QuantityData = {
    */
   inLocations: number;
   /**
+   * Sum of MANUAL `AssetLocation.quantity` only (`assetKitId IS NULL`).
+   *
+   * This is the sum `enforce_asset_location_sum_within_total` actually
+   * bounds: since `20260602100000_assetlocation_sum_exclude_kit_driven` the
+   * trigger ignores kit-driven rows, which are bounded separately by
+   * `enforce_asset_kit_sum_within_total`. Deriving the placed / unplaced /
+   * over-placed split from {@link inLocations} instead would report a valid
+   * asset (80 manual + 50 kit-driven of 100) as over-allocated.
+   */
+  inLocationsManual: number;
+  /**
    * Window-agnostic sum of every active (non-kit-driven) reservation's
    * remaining quantity — `AssetAvailability.reservedTotal`. Surfaced on
    * the "Reserved (bookings)" row alongside an explanatory tooltip (these
@@ -88,6 +99,8 @@ type BuildQuantityDataArgs = {
   availability: AssetAvailability;
   /** Sum of `AssetLocation.quantity` for this asset — not returned by the primitive, computed separately by the loader. */
   inLocations: number;
+  /** Sum of MANUAL (`assetKitId IS NULL`) `AssetLocation.quantity` — the axis the location trigger bounds. */
+  inLocationsManual: number;
 };
 
 /**
@@ -101,12 +114,14 @@ type BuildQuantityDataArgs = {
 export function buildQuantityData({
   availability,
   inLocations,
+  inLocationsManual,
 }: BuildQuantityDataArgs): QuantityData {
   return {
     total: availability.total,
     inCustody: availability.inCustody,
     inKits: availability.inKits,
     inLocations,
+    inLocationsManual,
     reserved: availability.reservedTotal,
     reservingBookingCount: availability.reservingBookingCount,
     checkedOut: availability.checkedOut,

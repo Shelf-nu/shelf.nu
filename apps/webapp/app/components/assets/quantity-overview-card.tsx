@@ -73,13 +73,25 @@ export interface QuantityOverviewCardProps {
   /**
    * Sum of `AssetLocation.quantity` across every location this asset is
    * placed at. Surfaced on its own "In locations" row when > 0; the
-   * remainder (`quantity − inLocationsQuantity`) is the "unplaced" pool, and
-   * when that remainder goes negative it renders as "Over-placed" instead.
+   * remainder (`quantity − inLocationsQuantity`) is the "unplaced" pool.
    * Does NOT subtract from `available` — placements are orthogonal to
    * custody / bookings, so a unit can be at Location X AND in custody
    * simultaneously without double-counting.
    */
   inLocationsQuantity?: number;
+  /**
+   * Sum of MANUAL placements only (`AssetLocation.assetKitId IS NULL`).
+   *
+   * Drives the placed / unplaced / over-placed split, because this is the
+   * sum `enforce_asset_location_sum_within_total` actually bounds: since
+   * `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger ignores
+   * kit-driven rows, which are bounded on their own axis by
+   * `enforce_asset_kit_sum_within_total`. Using {@link inLocationsQuantity}
+   * here instead would report a valid asset (80 manual + 50 kit-driven units
+   * of a 100 total) as over-allocated. Falls back to `inLocationsQuantity`
+   * when absent, which is exact for the (common) asset with no kits.
+   */
+  inLocationsManualQuantity?: number;
   /**
    * Units committed to bookings but NOT yet physically off the shelf.
    *
@@ -192,6 +204,7 @@ export function QuantityOverviewCard({
   inCustodyQuantity,
   inKitsQuantity,
   inLocationsQuantity,
+  inLocationsManualQuantity,
   reservedQuantity,
   reservingBookingCount,
   checkedOutQuantity,
@@ -205,16 +218,21 @@ export function QuantityOverviewCard({
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
+  const inLocationsManual = inLocationsManualQuantity ?? inLocations;
+  const unplaced = Math.max(0, qty - inLocations);
   /**
-   * Derived residual, NOT clamped. A negative value means locations claim more
-   * units than the asset owns, which is a real state the app can reach: stock
-   * destroyed by a consume lowers `Asset.quantity` without touching placements
-   * once the residual is gone. Clamping it to 0 reported "everything is
-   * placed, nothing spare" — a number that was never true — and hid the drift
-   * from the only person who could correct it.
+   * The honest negative side of the residual, computed on the MANUAL axis
+   * because that is the one `enforce_asset_location_sum_within_total` bounds
+   * (kit-driven rows live on their own axis, so 80 manual + 50 kit-driven of
+   * 100 is valid and must not read as over-placed).
+   *
+   * A positive value means manual placements claim more units than the asset
+   * owns, which is a state the app can reach on its own: a consume lowers
+   * `Asset.quantity` without touching placements once the unplaced residual
+   * is gone. It used to surface as a clamped "Unplaced 0" — a number that was
+   * never true, hiding the drift from the only person who could correct it.
    */
-  const unplaced = qty - inLocations;
-  const overPlacedBy = unplaced < 0 ? -unplaced : 0;
+  const overPlacedBy = Math.max(0, inLocationsManual - qty);
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
   const available =

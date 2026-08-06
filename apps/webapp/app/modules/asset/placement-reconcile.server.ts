@@ -54,6 +54,7 @@ export type PlacementReconcileTxClient = {
       Array<{ id: string; locationId: string; quantity: number }>
     >;
     update: (args: Prisma.AssetLocationUpdateArgs) => Promise<unknown>;
+    delete: (args: Prisma.AssetLocationDeleteArgs) => Promise<unknown>;
   };
 };
 
@@ -156,12 +157,27 @@ export async function reconcileManualPlacementsForStockDecrease({
    * breach the pivot's own semantics, so never write one.
    */
   const reducedBy = Math.min(deficit, only.quantity);
+  const remaining = only.quantity - reducedBy;
 
-  await tx.assetLocation.update({
+  if (remaining === 0) {
+    /**
+     * Drop the row rather than leaving a zero. `moveAssetLocationUnits` does
+     * the same when a move drains its source (step 8 there): placement lists
+     * and the manage-placements editor treat row EXISTENCE as "the asset is
+     * here", so a 0-unit row renders as a location holding nothing, and
+     * `replaceAssetPlacements` rejects any submitted quantity below 1 — so the
+     * user could not clear it from the dialog either. It would also make a
+     * later reconcile look ambiguous the moment a second placement appears.
+     */
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `only.id` is not user input; it comes from the `findMany` above, which is scoped to `assetId` — and every caller reaches this with that asset already org-verified and row-locked via `lockAssetForQuantityUpdate`
-    where: { id: only.id },
-    data: { quantity: only.quantity - reducedBy },
-  });
+    await tx.assetLocation.delete({ where: { id: only.id } });
+  } else {
+    await tx.assetLocation.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+      where: { id: only.id },
+      data: { quantity: remaining },
+    });
+  }
 
   return { outcome: "reduced", locationId: only.locationId, reducedBy };
 }
