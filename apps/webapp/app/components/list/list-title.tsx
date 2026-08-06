@@ -123,7 +123,9 @@ export default function ListTitle({
               </p>
             ) : (
               <span>
-                {totalItems} {items.length > 1 ? plural : singular}
+                {/* Pluralise on the count, not on `> 1` — an empty list read
+                    "0 item". Only exactly one is singular. */}
+                {totalItems} {items.length === 1 ? singular : plural}
               </span>
             )}
           </div>
