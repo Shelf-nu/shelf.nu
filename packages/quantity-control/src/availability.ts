@@ -37,7 +37,7 @@ import type {
   AvailabilityInterval,
   QtBookingStatus,
   QtConsumptionCategory,
-} from "./types.js";
+} from "./types";
 
 /**
  * "No known return date" sentinel used as an OVERDUE booking's effective

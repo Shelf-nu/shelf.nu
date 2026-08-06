@@ -20,7 +20,7 @@ import {
   QT_BOOKING_STATUSES,
   QT_CONSUMPTION_CATEGORIES,
   QT_CONSUMPTION_TYPES,
-} from "./types.js";
+} from "./types";
 
 /** Compares two string lists as sets (order-independent, duplicate-free). */
 function assertSameSet(actual: readonly string[], expected: readonly string[]) {

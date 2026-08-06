@@ -37,6 +37,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    /**
+     * Two-step gate, ordered deliberately — same reasoning as the asset
+     * activity route.
+     *
+     * Step 1 is `audit:read` against the SELECTED workspace, because
+     * `getAuditSessionDetails` uses `userOrganizations` to detect an audit
+     * living in a different workspace of the same user and hand off to the
+     * switch-workspace path. Gating on `auditNote:read` here would 403 that
+     * deep link before the hand-off could happen.
+     */
     const permissionResult = await requirePermission({
       userId,
       request,
@@ -59,6 +69,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       isSelfServiceOrBase,
       auditId,
+    });
+
+    /**
+     * Step 2: `auditNote:read`, enforced BEFORE any note is fetched, so the
+     * notes never reach the payload of a user without the right to read them.
+     *
+     * Every role currently holds `auditNote:read`, so this is not a live
+     * exposure today — it is the same shape as the asset gap, one permission
+     * edit away from becoming one.
+     */
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
     });
 
     // Fetch audit notes
