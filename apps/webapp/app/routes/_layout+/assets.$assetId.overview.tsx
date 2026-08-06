@@ -1779,6 +1779,7 @@ export default function AssetOverview() {
               custody={asset.custody}
               assetId={asset.id}
               unitOfMeasure={asset.unitOfMeasure}
+              consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
               isSelfService={isSelfService}
               currentUserId={userId}

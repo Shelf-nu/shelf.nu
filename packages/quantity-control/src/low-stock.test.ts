@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { crossedLowStockThreshold, isLowStock } from "./low-stock.js";
+import { crossedLowStockThreshold, isLowStock } from "./low-stock";
 
 /* -------------------------------- isLowStock ------------------------------ */
 

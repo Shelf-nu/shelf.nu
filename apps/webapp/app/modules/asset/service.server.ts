@@ -25,6 +25,7 @@ import {
   Prisma,
   TagUseFor,
 } from "@prisma/client";
+import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -7724,7 +7725,7 @@ export async function checkOutQuantity({
   }
 }
 
-/** Arguments for releasing (returning) a quantity from a custodian back to the available pool. */
+/** Arguments for ending a custodian's hold on N units of a QT asset. */
 type ReleaseQuantityArgs = {
   /** The asset to release units for */
   assetId: string;
@@ -7738,10 +7739,17 @@ type ReleaseQuantityArgs = {
   organizationId: string;
   /** Optional note explaining the release */
   note?: string;
+  /**
+   * How many of the released units were used up rather than handed back.
+   * Omit to let the server derive it from the asset's `consumptionType`
+   * (consume everything for a one-way consumable, nothing for a returnable).
+   * Only a consumable accepts a non-zero value.
+   */
+  consumed?: number;
 };
 
 /**
- * Releases a quantity of units from a custodian back to the available pool.
+ * Ends a custodian's hold on N units of a QUANTITY_TRACKED asset.
  *
  * Runs inside an interactive transaction with a row-level lock to prevent
  * concurrent modifications. Validates that a custody record exists for the
@@ -7749,13 +7757,29 @@ type ReleaseQuantityArgs = {
  * the custodian currently holds.
  *
  * If releasing the full custodied amount, the Custody record is deleted.
- * Otherwise, the quantity is decremented. An immutable RETURN consumption
- * log entry is always created.
+ * Otherwise, the quantity is decremented.
+ *
+ * **What happens to the units depends on `Asset.consumptionType`, and on an
+ * optional explicit split:**
+ *
+ * - `TWO_WAY` / legacy `null` — the units return to the available pool. A
+ *   `RETURN` consumption log is written and `Asset.quantity` is untouched.
+ *   These assets reject a non-zero `consumed`.
+ * - `ONE_WAY` — the units default to consumed and are gone for good: a
+ *   `CONSUME` log is written and `Asset.quantity` decremented, matching what
+ *   booking check-in already does for a consumable. An explicit `consumed`
+ *   splits the release, so unused units can still be handed back.
+ *
+ * The default is taken here rather than in a sibling `consumeQuantity` service
+ * so it is always derived from the asset row itself: both the web and mobile
+ * release endpoints hit this one function, and neither can silently pick the
+ * wrong outcome for a consumable.
  *
  * @param args - The release details
- * @returns The updated Asset record
- * @throws {ShelfError} If no custody record exists or the release quantity
- *   exceeds the custodied amount
+ * @returns The updated Asset record plus the `consumed` / `returned` split
+ * @throws {ShelfError} If no custody record exists, the release quantity
+ *   exceeds the custodied amount, `consumed` is out of range, or a returnable
+ *   asset was asked to consume
  */
 export async function releaseQuantity({
   assetId,
@@ -7764,6 +7788,7 @@ export async function releaseQuantity({
   userId,
   organizationId,
   note,
+  consumed,
 }: ReleaseQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -7803,6 +7828,54 @@ export async function releaseQuantity({
           label,
           status: 400,
           additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /**
+       * Step 3b: Resolve how many units were used up vs. handed back.
+       *
+       * The DEFAULT comes from the LOCKED asset row — never from the caller
+       * alone — so a stale client can't return a consumable's units to the
+       * pool. `lockAssetForQuantityUpdate` does `SELECT *`, so
+       * `consumptionType` is already on hand.
+       *
+       * An explicit `consumed` lets an operator record a partial use: 40
+       * gloves come back, 10 of them actually used. Without it the only
+       * available action would destroy all 40, which is the same split
+       * booking check-in already offers for consumables. It can only ever
+       * narrow a consumable's outcome — a returnable asset rejects it below.
+       */
+      const canConsume = releaseCategory(asset.consumptionType) === "CONSUME";
+      const consumedUnits = consumed ?? (canConsume ? quantity : 0);
+      const returnedUnits = quantity - consumedUnits;
+
+      if (
+        !Number.isInteger(consumedUnits) ||
+        consumedUnits < 0 ||
+        consumedUnits > quantity
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot mark ${consumedUnits} of ${quantity} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, teamMemberId, quantity, consumed },
+        });
+      }
+
+      if (consumedUnits > 0 && !canConsume) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: {
+            assetId,
+            consumptionType: asset.consumptionType,
+          },
         });
       }
 
@@ -7885,22 +7958,119 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 7: Create an immutable audit log entry */
-      await createConsumptionLog({
-        assetId,
-        category: "RETURN",
-        quantity,
-        userId,
-        custodianId: teamMemberId,
-        note,
-        tx,
-      });
+      /**
+       * Step 6c: Consumed units did not come back — they were used up.
+       * Permanently remove exactly those from stock, mirroring the `CONSUME`
+       * branch in booking check-in. Returned units are untouched here: they
+       * are already back in the pool the moment custody dropped.
+       *
+       * No pool-drain guard is needed (unlike booking check-in, which
+       * decrements the pool WITHOUT touching custody). With
+       * `available = Asset.quantity - SUM(Custody.quantity)`, this step
+       * changes the total by `-consumedUnits` while step 6 changed custody by
+       * `-quantity`, so available moves by exactly `returnedUnits` and never
+       * goes negative: `consumedUnits <= quantity <= custody.quantity <= C <= Q`.
+       * The same cancellation holds for `bookable` and `physicalAvailable`,
+       * both of which subtract `inCustody` from `total` — which is why no
+       * reservation guard is required either.
+       *
+       * `AssetLocation` placements are deliberately NOT adjusted, matching
+       * the booking check-in CONSUME path (the booking service makes no
+       * `assetLocation` write at all). Placement is an orthogonal axis and we
+       * cannot know which location the consumed units came off.
+       *
+       * Be aware this leaves the location axis able to drift ABOVE the total:
+       * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
+       * DELETE ON "AssetLocation"` (see
+       * `20260519143054_add_asset_location_pivot`), so it does not fire on an
+       * `Asset` write and nothing aborts here — but
+       * `SUM(AssetLocation.quantity WHERE assetKitId IS NULL)` can end up
+       * exceeding `Asset.quantity`. Consume 10 of 100 placed units and the
+       * location page reads 100 while the asset reads 90; a later placement
+       * edit then trips the constraint on a write that is itself legitimate.
+       * `assertAssetQuantityNotBelowReservations` does not close this either
+       * — it queries custody / assetKit / bookingAsset / consumptionLog, not
+       * assetLocation — so the manual stock-lowering path drifts the same
+       * way. Reconciling the location axis on stock decrease is a separate
+       * piece of work across every path that lowers `Asset.quantity`.
+       */
+      if (consumedUnits > 0) {
+        const beforeQuantity = asset.quantity ?? 0;
+        await tx.asset.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+          where: { id: assetId },
+          data: { quantity: { decrement: consumedUnits } },
+        });
+
+        /**
+         * Audit the stock drop as its own event. Consuming changes TWO
+         * things — who holds the units (CUSTODY_RELEASED, below) and how
+         * many exist (this one) — and per the one-event-per-field rule each
+         * gets its own row so reports can aggregate stock movement without
+         * parsing custody meta.
+         */
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            field: "quantity",
+            fromValue: beforeQuantity,
+            toValue: beforeQuantity - consumedUnits,
+          },
+          tx
+        );
+      }
+
+      /**
+       * Step 7: Immutable audit log — one entry per non-zero leg. `CONSUME`
+       * records units that were used up (the decrement above); `RETURN`
+       * records units that went back into the available pool. Same category
+       * discriminator booking check-in uses, so consumption reporting sees
+       * every path identically.
+       *
+       * Both calls are conditional because `createConsumptionLog` rejects a
+       * non-positive quantity. A pure return therefore writes exactly the one
+       * RETURN row it always did.
+       *
+       * A split attaches the operator's note to both rows: it explains the
+       * single action the operator took, and there is no per-leg note field.
+       */
+      if (consumedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "CONSUME",
+          quantity: consumedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
+
+      if (returnedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "RETURN",
+          quantity: returnedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
 
       /**
        * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
        * it commits atomically with the custody decrement/delete. Mirrors
        * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
-       * qty-tracked releases from INDIVIDUAL-asset custody releases.
+       * qty-tracked releases from INDIVIDUAL-asset custody releases. The
+       * custodian stops holding the units either way, so this event is
+       * emitted for both outcomes; `meta.consumed` / `meta.returned` record
+       * the split.
        */
       const custodianTeamMember = await tx.teamMember.findFirst({
         // org-scoped: teamMemberId is request input, so scope the lookup to
@@ -7918,16 +8088,27 @@ export async function releaseQuantity({
           assetId,
           teamMemberId,
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: { quantity, viaQuantity: true },
+          meta: {
+            quantity,
+            viaQuantity: true,
+            consumed: consumedUnits,
+            returned: returnedUnits,
+          },
         },
         tx
       );
 
-      /** Step 9: Return the refreshed asset */
-      return tx.asset.findUniqueOrThrow({
+      /** Step 9: Return the refreshed asset plus the split that was applied */
+      const updatedAsset = await tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
       });
+
+      return {
+        asset: updatedAsset,
+        consumed: consumedUnits,
+        returned: returnedUnits,
+      };
     });
   } catch (cause) {
     if (cause instanceof ShelfError) {

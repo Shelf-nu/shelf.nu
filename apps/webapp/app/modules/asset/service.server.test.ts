@@ -965,7 +965,9 @@ describe("releaseQuantity — activity events", () => {
         assetId: "asset-1",
         teamMemberId: "tm-1",
         targetUserId: "user-42",
-        meta: { quantity: 4, viaQuantity: true },
+        // The split is recorded on the event so reports can tell a return
+        // from a consume without re-deriving it from the asset row.
+        meta: { quantity: 4, viaQuantity: true, consumed: 0, returned: 4 },
       }),
       expect.anything()
     );
@@ -1023,6 +1025,354 @@ describe("releaseQuantity — activity events", () => {
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "AVAILABLE" }),
+      })
+    );
+  });
+});
+
+/**
+ * Ending a custodian's hold means something different per `consumptionType`:
+ * a TWO_WAY asset's units go back in the pool, a ONE_WAY consumable's units
+ * are gone. Before this suite nothing on the direct-custody path exercised
+ * `consumptionType` at all, which is how the consumable case shipped writing
+ * RETURN and handing the stock back.
+ */
+describe("releaseQuantity — consumptionType disposition", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockTeamMemberFindUnique = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+  const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+
+  /** Base locked-asset row; each test sets the `consumptionType` under test. */
+  const baseLockedAsset = {
+    id: "asset-1",
+    title: "Nitrile Gloves",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 500,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    // Custodian holds 40 units; every test releases 10 of them (partial), so
+    // the status-flip branch stays out of the way of the quantity assertions.
+    mockCustodyFindFirst.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+    });
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+    // why: the `refreshExpiredAssetImages` suite earlier in this file leaves a
+    // rejection implementation on the asset write mocks that `clearAllMocks`
+    // does not undo (it only clears call history).
+    mockAssetUpdate.mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+  });
+
+  it("consumes the whole release for a ONE_WAY consumable by default", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Exactly one log, classified as consumption. Writing RETURN here is the
+    // shipped bug: consumption reporting counts the units as back on the shelf.
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        category: "CONSUME",
+        quantity: 10,
+        custodianId: "tm-1",
+      })
+    );
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1" },
+        data: { quantity: { decrement: 10 } },
+      })
+    );
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(0);
+  });
+
+  it("splits a partial consume: two logs, and only the consumed units leave stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      consumed: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // 10 gloves used up, 30 handed back in good condition. Destroying all 40
+    // is the over-correction this split exists to prevent.
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    );
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 30 })
+    );
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1" },
+        data: { quantity: { decrement: 10 } },
+      })
+    );
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(30);
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED for the consumed units only", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      consumed: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // One event per field that changed: stock dropped by the consumed
+    // amount, not by the full release.
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_QUANTITY_CHANGED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        assetId: "asset-1",
+        field: "quantity",
+        fromValue: 500,
+        toValue: 490,
+      }),
+      // Second arg is the tx client — the event must commit with the write.
+      expect.anything()
+    );
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "CUSTODY_RELEASED",
+        meta: { quantity: 40, viaQuantity: true, consumed: 10, returned: 30 },
+      }),
+      expect.anything()
+    );
+    expect(mockRecordEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("an explicit consumed of 0 on a consumable returns everything and never touches stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      consumed: 0,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    // No quantity write at all — the returnable path stays byte-identical.
+    // Match ANY `quantity` payload rather than `decrement: 0`: the service
+    // gates the whole decrement block on `consumedUnits > 0`, so asserting
+    // the zero case alone could never fail even if it wrongly decremented.
+    // (The status-flip write carries no `quantity` key, so it can't match.)
+    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+    expect(mockRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("leaves TWO_WAY behaviour untouched: RETURN log, no stock decrement", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "TWO_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    expect(mockRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("treats a legacy null consumptionType as returnable", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: null,
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("rejects consuming a returnable asset", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "TWO_WAY",
+    });
+
+    // A client must never be able to destroy stock that is meant to come back.
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(/consumable/i);
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects a consumed amount larger than the release", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 11,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("does not touch AssetLocation on consume (documented deferral, matches booking check-in)", async () => {
+    // A CONSUME lowers `Asset.quantity` and deliberately leaves placements
+    // alone, so `SUM(AssetLocation.quantity)` can end up above the total. This
+    // is pre-existing, not introduced by the consumable branch: the booking
+    // service makes no `assetLocation` write at all, and the manual
+    // stock-lowering guard (`assertAssetQuantityNotBelowReservations`) queries
+    // custody / assetKit / bookingAsset / consumptionLog, never assetLocation.
+    // Custody carries no location, so there is nothing here to identify WHICH
+    // placement the used-up units came off.
+    //
+    // This test pins the deferral rather than the desired end state: when the
+    // location axis is reconciled across every path that lowers
+    // `Asset.quantity`, this is the assertion that should fail and be rewritten.
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // The three write methods the mocked client exposes — the same set
+    // `moveAssetLocationUnits` / `placeUnplacedUnits` drive when they DO
+    // adjust placements.
+    expect(db.assetLocation.create).not.toHaveBeenCalled();
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.delete).not.toHaveBeenCalled();
+  });
+
+  it("still flips Asset.status to AVAILABLE when a consume empties the last custody row", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+    // Full release of the 40-unit row → no custody rows remain.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-1" },
+      data: { status: "AVAILABLE" },
+    });
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { quantity: { decrement: 40 } },
       })
     );
   });
