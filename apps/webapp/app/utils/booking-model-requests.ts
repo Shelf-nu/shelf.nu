@@ -45,6 +45,18 @@ export type CountableModelRequest = {
  * tab of manage-assets as an audit trail but must not appear in any
  * outstanding-work count or list.
  *
+ * Two conditions, deliberately:
+ *
+ *  - `fulfilledAt === null` is the documented completion stamp, and it is what
+ *    re-opens a request: `upsertBookingModelRequest` clears it back to null
+ *    whenever the new quantity exceeds `fulfilledQuantity`, so a fulfilled
+ *    3-unit reservation raised to 5 correctly becomes outstanding again.
+ *  - `fulfilledQuantity < quantity` guards the inverse. Nothing should reach
+ *    "every unit assigned but no stamp", but if it did, the stamp alone would
+ *    let a request with zero remaining units render a "0 units to assign" row
+ *    and inflate the model count. Requiring real remaining work makes the
+ *    predicate mean what its name says rather than trusting one column.
+ *
  * @param modelRequests - The booking's model requests. Tolerates
  *   `null`/`undefined` so callers whose include omits the relation don't need
  *   their own guard.
@@ -53,7 +65,9 @@ export type CountableModelRequest = {
 export function getOutstandingModelRequests<T extends CountableModelRequest>(
   modelRequests: T[] | null | undefined
 ): T[] {
-  return (modelRequests ?? []).filter((req) => req.fulfilledAt === null);
+  return (modelRequests ?? []).filter(
+    (req) => req.fulfilledAt === null && req.fulfilledQuantity < req.quantity
+  );
 }
 
 /**

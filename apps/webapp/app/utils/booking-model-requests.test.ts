@@ -43,6 +43,17 @@ describe("getOutstandingModelRequests", () => {
     expect(getOutstandingModelRequests(undefined)).toEqual([]);
     expect(getOutstandingModelRequests(null)).toEqual([]);
   });
+
+  it("excludes a request with no remaining units even if unstamped", () => {
+    // Shouldn't be reachable, but trusting `fulfilledAt` alone would render a
+    // "0 units to assign" row and count a model with no outstanding work.
+    expect(
+      getOutstandingModelRequests([
+        { quantity: 3, fulfilledQuantity: 3, fulfilledAt: null },
+        { quantity: 2, fulfilledQuantity: 5, fulfilledAt: null },
+      ])
+    ).toEqual([]);
+  });
 });
 
 describe("countUnassignedModelUnits", () => {

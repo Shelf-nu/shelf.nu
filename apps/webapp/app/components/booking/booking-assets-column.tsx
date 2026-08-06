@@ -203,7 +203,10 @@ export function BookingAssetsColumn() {
                 request={request}
                 bookingId={booking.id}
                 bookingStatus={booking.status}
-                canManage={!manageAssetsButtonDisabled}
+                // Same gate the asset rows use. Without `canSeeActions` a
+                // BASE/SELF_SERVICE non-custodian saw reservation actions on a
+                // DRAFT booking while every asset control was hidden.
+                canManage={canSeeActions && !manageAssetsButtonDisabled}
               />
             )}
           />
@@ -223,7 +226,14 @@ export function BookingAssetsColumn() {
               <EmptyState
                 className="py-10"
                 customContent={{
-                  title: "Start by defining a booking period",
+                  // The period prompt is only true before dates are set. Once
+                  // they are, an empty table means "no concrete assets yet",
+                  // which is now reachable on its own: a book-by-model booking
+                  // has reservations above but nothing in this table.
+                  title:
+                    booking.from && booking.to
+                      ? "No assets added yet"
+                      : "Start by defining a booking period",
                   text: "Assets added to your booking will show up here. Scan tags or search for assets to add to your booking.",
                   newButtonRoute: manageAssetsUrl,
                   newButtonContent: "Add assets",
