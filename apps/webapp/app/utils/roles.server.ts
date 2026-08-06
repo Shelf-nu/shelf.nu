@@ -46,6 +46,48 @@ export async function isAdmin(context: Record<string, any>) {
   return !!user;
 }
 
+/**
+ * The caller's effective role in one organization.
+ *
+ * A membership's `roles` is an array, but the app treats the **first** entry as
+ * authoritative everywhere a single role is needed. Exported so callers outside
+ * {@link requirePermission} (e.g. `/api/model-filters`) resolve the role the
+ * exact same way — a different rule here would make a search disagree with the
+ * loader that seeded it.
+ *
+ * @param args.userOrganizations - Memberships from `getSelectedOrganization`.
+ * @param args.organizationId - Workspace whose membership to read.
+ * @returns The effective role, defaulting to `BASE` when no membership matches.
+ */
+export function resolveEffectiveRole({
+  userOrganizations,
+  organizationId,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+}): OrganizationRoles {
+  const roles = userOrganizations.find(
+    (o) => o.organization.id === organizationId
+  )?.roles;
+
+  return roles?.[0] ?? OrganizationRoles.BASE;
+}
+
+/**
+ * Whether a role is one of the two restricted, "own records only" roles.
+ *
+ * @param role - Effective role from {@link resolveEffectiveRole}.
+ * @returns `true` for SELF_SERVICE and BASE.
+ */
+export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
+  return (
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
+  );
+}
+
 export async function requirePermission({
   userId,
   request,
@@ -91,10 +133,9 @@ export async function requirePermission({
   Sentry.setUser({ id: userId });
   Sentry.setTag("organizationId", organizationId);
 
-  const role = roles ? roles[0] : OrganizationRoles.BASE;
+  const role = resolveEffectiveRole({ userOrganizations, organizationId });
 
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  const isSelfServiceOrBase = isSelfServiceOrBaseRole(role);
 
   /**
    * This checks the organization settings permissions overrides for BASE and SELF_SERVICE roles

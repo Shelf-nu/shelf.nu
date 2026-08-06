@@ -8,29 +8,23 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: the resolver's own branching is covered by its co-located test; here
-// we only assert how THIS route propagates the resolver's discriminated
-// results into the wire payload the companion consumes.
+// we only assert how the audit-scanner route propagates the discriminated
+// results — the reason field must be additive (same status + message).
 vi.mock("~/modules/api/mobile-code-resolve.server", () => ({
   resolveMobileScannedCode: vi.fn(),
 }));
 
-// why: scan provenance writes hit the DB; the route's contract under test is
-// the error payload shape, not recording (which stays unchanged).
-vi.mock("~/modules/scan/service.server", () => ({
-  createScan: vi.fn(),
-}));
-
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
-import { createScan } from "~/modules/scan/service.server";
-import { loader } from "./qr.$qrId";
+import { loader } from "~/routes/api+/mobile+/get-scanned-item.$qrId";
 
 /**
- * Tests for GET /api/mobile/qr/:qrId error-payload propagation — the
- * structured `reason`/`qrId` discriminator must reach the wire for unclaimed
- * codes, and must be absent for plain failures (additive contract).
+ * Tests for GET /api/mobile/get-scanned-item/:qrId error-payload propagation.
+ * The audit scanner consumes this route: an unclaimed code must still be the
+ * exact same 404 + message it always was, with `reason`/`qrId` strictly
+ * additive on top.
  *
- * @see {@link file://./qr.$qrId.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
 
 /** Shape of the `data()` result the route loader returns. */
@@ -38,7 +32,9 @@ type DataResult<T> = { data: T; init: ResponseInit | null };
 
 /** Runs the loader and unwraps the data() envelope. */
 async function callLoader(qrId = "qr-1") {
-  const request = new Request(`http://localhost/api/mobile/qr/${qrId}`);
+  const request = new Request(
+    `http://localhost/api/mobile/get-scanned-item/${qrId}`
+  );
   const result = await loader({
     request,
     params: { qrId },
@@ -58,8 +54,8 @@ beforeEach(() => {
   } as any);
 });
 
-describe("GET /api/mobile/qr/:qrId error payload", () => {
-  it("propagates reason + qrId for an unclaimed code and records nothing", async () => {
+describe("GET /api/mobile/get-scanned-item/:qrId error payload", () => {
+  it("keeps the audit-scanner 404 contract for unclaimed codes, with reason additive", async () => {
     vi.mocked(resolveMobileScannedCode).mockResolvedValue({
       ok: false,
       status: 404,
@@ -70,28 +66,27 @@ describe("GET /api/mobile/qr/:qrId error payload", () => {
 
     const { body, status } = await callLoader();
 
+    // Unchanged for existing callers: same status, same message.
     expect(status).toBe(404);
-    expect(body.error).toEqual({
-      message: "This QR code is not linked to any organization",
-      reason: "unclaimed",
-      qrId: "qr-1",
-    });
-    expect(createScan).not.toHaveBeenCalled();
+    expect(body.error?.message).toBe(
+      "This QR code is not linked to any organization"
+    );
+    // Additive discriminator for reason-aware callers.
+    expect(body.error?.reason).toBe("unclaimed");
+    expect(body.error?.qrId).toBe("qr-1");
   });
 
   it("omits reason/qrId entirely for plain failures (additive contract)", async () => {
     vi.mocked(resolveMobileScannedCode).mockResolvedValue({
       ok: false,
-      status: 403,
-      message: "This QR code belongs to a different organization",
+      status: 404,
+      message: "QR code not found",
     });
 
     const { body, status } = await callLoader();
 
-    expect(status).toBe(403);
-    expect(body.error).toEqual({
-      message: "This QR code belongs to a different organization",
-    });
+    expect(status).toBe(404);
+    expect(body.error).toEqual({ message: "QR code not found" });
     expect(body.error).not.toHaveProperty("reason");
     expect(body.error).not.toHaveProperty("qrId");
   });

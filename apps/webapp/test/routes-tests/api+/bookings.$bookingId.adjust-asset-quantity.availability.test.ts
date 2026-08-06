@@ -2,13 +2,14 @@
  * Route tests for `bookings.$bookingId.adjust-asset-quantity` — the
  * per-asset "Adjust quantity" action for a QUANTITY_TRACKED booking row.
  *
- * Named `*.test.server.ts` (not `*.test.ts`): per the comment in
- * `apps/webapp/vitest.config.ts`, React Router's typegen mirrors route
- * filenames under `.react-router/types`, so a co-located `foo.test.ts`
- * would collide with a generated file of the same name and Vitest would
- * try to run it twice. `**\/*.test.*` is already excluded from the route
- * tree by `ignoredRouteFiles` in `app/routes.ts`, so this file is never
- * mistaken for a route either way.
+ * Lives in `test/routes-tests/` (never under `app/routes/`): the dev server
+ * warms every file under `app/routes/` as a CLIENT module, so a co-located
+ * route test importing a `*.server` module breaks `pnpm webapp:dev`. Enforced
+ * by the `local-rules/no-test-files-in-routes` ESLint rule.
+ *
+ * The `.availability` infix distinguishes this from
+ * `bookings.$bookingId.adjust-asset-quantity.test.ts` (the ownership/IDOR
+ * guard) — both cover the same route from different angles.
  *
  * These tests cover the #2725 fix: the guard used to compare the absolute
  * submitted quantity against an unwindowed, unclamped availability figure,
@@ -28,14 +29,14 @@
  * configured per-test with `// @ts-expect-error mocked` — the same
  * convention used there.
  *
- * @see {@link file://./bookings.$bookingId.adjust-asset-quantity.ts}
- * @see {@link file://./../../modules/asset/availability.server.ts}
- * @see {@link file://./../../modules/asset/availability.server.test.ts}
+ * @see {@link file://../../../app/routes/api+/bookings.$bookingId.adjust-asset-quantity.ts}
+ * @see {@link file://../../../app/modules/asset/availability.server.ts}
+ * @see {@link file://../../../app/modules/asset/availability.server.test.ts}
  */
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -92,14 +93,14 @@ vitest.mock("~/utils/emitter/send-notification.server", () => ({
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   computeAvailableQuantity: vitest.fn(),
 }));
-vitest.mock("~/modules/booking/service.server", () => ({
-  computeCheckedOutForAsset: vitest.fn(),
+vitest.mock("~/modules/booking/checked-out.server", () => ({
+  computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
 // why: `vitest.mock` calls above are hoisted above all imports by Vitest's
 // transform regardless of source position, so importing the module under
 // test here (after the mocks are declared) is only for readability.
-import { action } from "./bookings.$bookingId.adjust-asset-quantity";
+import { action } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 
 /* -------------------------------------------------------------------------- */
 /*                                 Fixtures                                   */
@@ -121,17 +122,25 @@ type ReservedRowFixture = {
 /**
  * Builds the `tx` mock passed into `db.$transaction`'s callback. Shaped
  * like `PrismaClientOrTx` (`~/modules/asset/availability.server`) plus
- * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock) and
- * `bookingAsset.update` (the route's own write), so the REAL
- * `assertAssetQuantityAvailable` → `getAssetAvailability` composition runs
- * unmodified against the reservation rows supplied per test.
+ * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock),
+ * `bookingAsset.findUnique` (the route's TOCTOU re-read of the booked
+ * quantity UNDER the lock) and `bookingAsset.update` (the route's own
+ * write), so the REAL `assertAssetQuantityAvailable` → `getAssetAvailability`
+ * composition runs unmodified against the reservation rows supplied per test.
+ *
+ * `currentQuantity` is the value the locked re-read observes — the directional
+ * guard measures increases against THIS, not the outside-tx snapshot. Defaults
+ * to the fixture's own quantity for the common no-race case; tests modelling a
+ * concurrent change set it to the post-race value.
  */
 function createTxMock({
   inKits = 0,
   reservedRows = [],
+  currentQuantity = 0,
 }: {
   inKits?: number;
   reservedRows?: ReservedRowFixture[];
+  currentQuantity?: number;
 } = {}) {
   return {
     $queryRaw: vitest.fn().mockResolvedValue([{ id: ASSET_ID }]),
@@ -140,6 +149,7 @@ function createTxMock({
     },
     bookingAsset: {
       findMany: vitest.fn().mockResolvedValue(reservedRows),
+      findUnique: vitest.fn().mockResolvedValue({ quantity: currentQuantity }),
       update: vitest.fn().mockResolvedValue({}),
     },
     consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
@@ -223,7 +233,10 @@ beforeEach(() => {
   // @ts-expect-error mocked
   sendNotification.mockReturnValue(undefined);
   // @ts-expect-error mocked
-  computeCheckedOutForAsset.mockResolvedValue(0);
+  computeCheckedOutBreakdownForAsset.mockResolvedValue({
+    total: 0,
+    standalone: 0,
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -245,6 +258,7 @@ describe("action (adjust-asset-quantity)", () => {
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
     const tx = createTxMock({
+      currentQuantity: 8,
       reservedRows: [
         {
           bookingId: "other-booking-1",
@@ -304,6 +318,7 @@ describe("action (adjust-asset-quantity)", () => {
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
     const tx = createTxMock({
+      currentQuantity: 2,
       reservedRows: [
         {
           bookingId: "other-booking-1",
@@ -342,7 +357,7 @@ describe("action (adjust-asset-quantity)", () => {
     // @ts-expect-error mocked
     computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
 
-    const tx = createTxMock();
+    const tx = createTxMock({ currentQuantity: 5 });
     // @ts-expect-error mocked
     db.$transaction.mockImplementation((callback: (tx: unknown) => unknown) =>
       callback(tx)
@@ -363,5 +378,55 @@ describe("action (adjust-asset-quantity)", () => {
     // increase = 5 - 5 = 0 → the directional guard's "reductions & no-ops
     // always allowed" early return; no availability read should occur.
     expect(tx.bookingAsset.findMany).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the booked quantity under the lock so a stale-high snapshot can't slip an increase past the guard (TOCTOU)", async () => {
+    // Outside-tx snapshot reports 8 units, but a concurrent request already
+    // reduced the real booked qty to 2 before this request took the lock.
+    // Submitting 6 looks like a REDUCTION against the stale 8 (6 <= 8, which
+    // the directional guard would wave through), but is actually a +4 INCREASE
+    // against the committed 2. With one other booking reserving 7 of the 10,
+    // bookable = 3, so the real increase (4) must be REJECTED. Before the
+    // re-read fix, the stale snapshot let this oversubscribe the pool.
+    const bookingAsset = buildBookingAssetFixture({ quantity: 8 });
+    // @ts-expect-error mocked
+    db.bookingAsset.findFirst.mockResolvedValue(bookingAsset);
+    // @ts-expect-error mocked
+    computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });
+
+    const tx = createTxMock({
+      currentQuantity: 2, // the FRESH value observed under the lock
+      reservedRows: [
+        {
+          bookingId: "other-booking-1",
+          quantity: 7,
+          booking: {
+            from: new Date("2026-08-01T09:00:00.000Z"),
+            to: new Date("2026-08-05T09:00:00.000Z"),
+          },
+        },
+      ],
+    });
+    // @ts-expect-error mocked
+    db.$transaction.mockImplementation((callback: (tx: unknown) => unknown) =>
+      callback(tx)
+    );
+
+    const response = await action(
+      buildActionArgs({ assetId: ASSET_ID, quantity: "6" })
+    );
+
+    // Measured against the fresh 2, the +4 increase exceeds bookable (3).
+    expect(response.data.error).not.toBeNull();
+    if (response.data.error === null) throw new Error("expected a 400 error");
+    expect(response.init?.status).toBe(400);
+    // The re-read ran, the availability guard ran (not short-circuited as a
+    // reduction against the stale 8), and the write did NOT happen.
+    expect(tx.bookingAsset.findUnique).toHaveBeenCalledWith({
+      where: { id: BOOKING_ASSET_ID },
+      select: { quantity: true },
+    });
+    expect(tx.bookingAsset.findMany).toHaveBeenCalled();
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
   });
 });

@@ -108,10 +108,13 @@ export type OrgValidationTxClient = {
     }) => Promise<{ id: string }[]>;
   };
   assetModel: {
+    // `name` is selected (not just `id`) because the guard hands the row back —
+    // see `assertAssetModelBelongsToOrg`, whose callers need the label and would
+    // otherwise repeat the same query.
     findFirst: (args: {
       where: { id: string; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string } | null>;
+      select: { id: true; name: true };
+    }) => Promise<{ id: string; name: string } | null>;
   };
 };
 
@@ -537,6 +540,9 @@ export async function assertLocationBelongsToOrg(
  * @param params.assetModelId - AssetModel ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns The org-scoped model row. `name` is selected so callers that need a
+ *   label for a note or toast (e.g. `bulkUpdateAssetModel`) do not have to issue
+ *   a second query with the same `{ id, organizationId }` predicate.
  * @throws {ShelfError} 404 if the model is missing or in another org
  */
 export async function assertAssetModelBelongsToOrg(
@@ -545,12 +551,12 @@ export async function assertAssetModelBelongsToOrg(
     organizationId,
   }: { assetModelId: AssetModel["id"]; organizationId: string },
   tx?: OrgValidationTxClient
-): Promise<void> {
+): Promise<Pick<AssetModel, "id" | "name">> {
   const client = tx ?? db;
 
   const found = await client.assetModel.findFirst({
     where: { id: assetModelId, organizationId },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
   if (!found) {
@@ -565,6 +571,8 @@ export async function assertAssetModelBelongsToOrg(
       additionalData: { organizationId, assetModelId },
     });
   }
+
+  return found;
 }
 
 /**

@@ -63,10 +63,18 @@
 
 import type { Prisma } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import {
+  checkQuantityAvailable,
+  computeAvailability,
+  overCommittedWindows as overCommittedWindowsCore,
+} from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
-import { checkoutSessionsToLogsByAsset } from "~/modules/booking/checkout-attribution";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import {
+  attributeDispositionsByBookingAsset,
+  checkoutSessionsToLogsByAsset,
+} from "~/modules/booking/checkout-attribution";
 import {
   computeAvailableQuantity,
   type AvailableQuantityClient,
@@ -112,17 +120,14 @@ export type {
  * genuine over-commitment, not merely "at capacity"). Empty when the running
  * sum never exceeds `total`.
  *
- * Runs the identical O(n log n) event-sweep as {@link peakConcurrent} — same
- * +qty-at-`from` / −qty-at-`to` events, same tie-break (releases before
- * claims at an identical timestamp, so a booking ending exactly when another
- * begins is never treated as momentarily overlapping) — but instead of
- * tracking a single peak, it walks the timeline in timestamp-grouped batches
- * (every event sharing an exact instant is folded in together before the
- * level is tested) and records the `[from, to)` span of every contiguous
- * stretch where the level exceeds `total`. Adjacent over-committed spans that
- * touch (e.g. two back-to-back bookings that individually exceed `total`)
- * naturally merge into one window, because the level never dips back to
- * `total` or below in between.
+ * The event-sweep itself is owned by `@shelf/quantity-control` — the same
+ * O(n log n) walk as {@link peakConcurrent} (same events, same
+ * releases-before-claims tie-break, same timestamp-grouped batching, same
+ * adjacent-window merging). The package's primitive additionally tags each
+ * window with the `peak` level reached inside it; this module's public
+ * contract has always been `{from, to}` only (and its callers/tests depend on
+ * exactly that shape), so the extra `peak` field is projected away here. The
+ * `from`/`to` boundaries are byte-identical to the package's.
  *
  * @param intervals - committed booking intervals (already filtered to the assets/pool in question)
  * @param total - the asset's total quantity; the threshold intervals must NOT exceed
@@ -132,46 +137,10 @@ export function overCommittedWindows(
   intervals: AvailabilityInterval[],
   total: number
 ): Array<{ from: Date; to: Date }> {
-  const events: Array<{ t: number; delta: number }> = [];
-  for (const { from, to, qty } of intervals) {
-    events.push({ t: from.getTime(), delta: qty });
-    events.push({ t: to.getTime(), delta: -qty });
-  }
-  // Same tie-break as peakConcurrent: releases (−) before claims (+) at an
-  // identical timestamp.
-  events.sort((a, b) => a.t - b.t || a.delta - b.delta);
-
-  const windows: Array<{ from: Date; to: Date }> = [];
-  let running = 0;
-  // Timestamp (ms) the current over-committed window started, or `null` when
-  // the running level is currently at-or-below `total`.
-  let overSince: number | null = null;
-
-  let i = 0;
-  while (i < events.length) {
-    const t = events[i].t;
-    // Fold in every event sharing this exact instant before testing the
-    // level — the level for "at `t` and onward until the next distinct
-    // timestamp" only makes sense once all same-instant releases/claims are
-    // applied together (matches the interval model's end-exclusive `to`).
-    while (i < events.length && events[i].t === t) {
-      running += events[i].delta;
-      i++;
-    }
-
-    if (running > total) {
-      if (overSince === null) overSince = t;
-    } else if (overSince !== null) {
-      windows.push({ from: new Date(overSince), to: new Date(t) });
-      overSince = null;
-    }
-  }
-
-  // Not defensively closed: every interval contributes a matching +qty/−qty
-  // event pair, so the running sum always returns to 0 (≤ total, since
-  // `total` is never negative) by the final event — `overSince` is always
-  // `null` again once the loop above finishes.
-  return windows;
+  return overCommittedWindowsCore(intervals, total).map(({ from, to }) => ({
+    from,
+    to,
+  }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -348,26 +317,33 @@ export async function getAssetAvailability({
   // rationale as `computeCheckedOutForAsset`'s `tx: any` parameter below.
   const client = (dbOrTx ?? db) as unknown as PrismaClientOrTx;
   try {
-    const [{ total, inCustody }, inKitsAgg, checkedOut] = await Promise.all([
-      // Pass the active client so `total`/`inCustody` read from the SAME
-      // transaction as the rest of this availability computation (matters when
-      // a write guard calls this inside a row-locked tx — see the param doc).
-      // `client` is the real db/tx behind the module's minimal `PrismaClientOrTx`
-      // structural type, so it genuinely carries the `asset`/`custody` delegates
-      // `AvailableQuantityClient` needs — same `as unknown as` bridge this
-      // module already uses for its clients (see the cast above).
-      computeAvailableQuantity(
-        assetId,
-        client as unknown as AvailableQuantityClient
-      ),
-      client.assetKit.aggregate({
-        where: { assetId, organizationId },
-        _sum: { quantity: true },
-      }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- computeCheckedOutForAsset's `tx` param is typed `any` upstream
-      computeCheckedOutForAsset(client as any, assetId, organizationId),
-    ]);
+    const [{ total, inCustody }, inKitsAgg, checkedOutBreakdown] =
+      await Promise.all([
+        // Pass the active client so `total`/`inCustody` read from the SAME
+        // transaction as the rest of this availability computation (matters when
+        // a write guard calls this inside a row-locked tx — see the param doc).
+        // `client` is the real db/tx behind the module's minimal `PrismaClientOrTx`
+        // structural type, so it genuinely carries the `asset`/`custody` delegates
+        // `AvailableQuantityClient` needs — same `as unknown as` bridge this
+        // module already uses for its clients (see the cast above).
+        computeAvailableQuantity(
+          assetId,
+          client as unknown as AvailableQuantityClient
+        ),
+        client.assetKit.aggregate({
+          where: { assetId, organizationId },
+          _sum: { quantity: true },
+        }),
+        computeCheckedOutBreakdownForAsset(client, assetId, organizationId),
+      ]);
     const inKits = inKitsAgg._sum.quantity ?? 0;
+    // #2790 ③: `physicalAvailable` must subtract only the STANDALONE
+    // checked-out units — kit-driven checkout is already covered by `inKits`,
+    // so subtracting the full checked-out here (as before) double-counts
+    // kit-driven units and can drive the headline negative. The DISPLAYED
+    // `checkedOut` field below keeps the FULL count so that number is unchanged.
+    const checkedOut = checkedOutBreakdown.total;
+    const standaloneCheckedOut = checkedOutBreakdown.standalone;
 
     /** Where clause for the standalone (non-kit-driven) reservations. */
     const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
@@ -467,11 +443,24 @@ export async function getAssetAvailability({
     // add-to-existing) stays CONSERVATIVE: subtract every active commitment,
     // including checked-out ONGOING/OVERDUE units.
     const reserved = window ? peakConcurrent(intervals) : allActiveRemaining;
-    const physicalAvailable = total - inCustody - inKits - checkedOut;
-    // Deliberately NOT `physicalAvailable - reserved` — that would subtract
-    // `checkedOut` a second time. ONGOING/OVERDUE occupancy is already fully
+    // Signed headline figures come from the pure package formula:
+    //   physicalAvailable = total − inCustody − inKits − checkedOut
+    //   bookable          = total − inCustody − inKits − reservedPeak
+    // `bookable` deliberately subtracts `reserved` (mapped to `reservedPeak`),
+    // NOT `checkedOut` a second time — ONGOING/OVERDUE occupancy is already
     // captured in `reserved`'s windowed sweep (see the module doc).
-    const bookable = total - inCustody - inKits - reserved;
+    //
+    // #2790 ③: feed the STANDALONE checked-out into `computeAvailability` so
+    // `physicalAvailable` subtracts only free-pool units off the shelf — the
+    // kit-driven ones are already subtracted via `inKits`. The full
+    // `checkedOut` is restored on the returned struct below (display value).
+    const { physicalAvailable, bookable } = computeAvailability({
+      total,
+      inCustody,
+      inKits,
+      reservedPeak: reserved,
+      checkedOut: standaloneCheckedOut,
+    });
 
     return {
       total,
@@ -541,21 +530,30 @@ export type AvailabilityBatchClient = {
    * ignores the `booking.from`/`booking.to`/`booking.status` fields it
    * doesn't need). Reusing one signature for both call sites keeps this type
    * from needing method overloads.
+   *
+   * `id`/`assetKitId` are OPTIONAL: only the checked-out pivots read selects
+   * them (it needs `id` to attribute checkout claims per slice and `assetKitId`
+   * to split standalone vs kit-driven checked-out — #2790 ③). The reserved-rows
+   * read leaves them off, so the widened type still accepts its narrower select.
    */
   bookingAsset: {
     findMany: (args: {
       where: Prisma.BookingAssetWhereInput;
       select: {
+        id?: true;
         assetId: true;
         bookingId: true;
         quantity: true;
+        assetKitId?: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
       Array<{
+        id?: string;
         assetId: string;
         bookingId: string;
         quantity: number;
+        assetKitId?: string | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -665,7 +663,7 @@ export async function getAssetAvailabilityBatch(
   const client = (dbOrTx ?? db) as unknown as AvailabilityBatchClient;
 
   try {
-    const [assetRows, custodyGroups, inKitsGroups, checkedOutByAsset] =
+    const [assetRows, custodyGroups, inKitsGroups, checkedOutBreakdownByAsset] =
       await Promise.all([
         client.asset.findMany({
           where: { id: { in: uniqueAssetIds }, organizationId },
@@ -694,7 +692,7 @@ export async function getAssetAvailabilityBatch(
           where: { assetId: { in: uniqueAssetIds }, organizationId },
           _sum: { quantity: true },
         }),
-        computeCheckedOutBatch(client, uniqueAssetIds, organizationId),
+        computeCheckedOutBreakdownBatch(client, uniqueAssetIds, organizationId),
       ]);
 
     const totalByAsset = new Map(assetRows.map((a) => [a.id, a.quantity ?? 0]));
@@ -815,7 +813,14 @@ export async function getAssetAvailabilityBatch(
       const total = totalByAsset.get(assetId) ?? 0;
       const inCustody = inCustodyByAsset.get(assetId) ?? 0;
       const inKits = inKitsByAsset.get(assetId) ?? 0;
-      const checkedOut = checkedOutByAsset.get(assetId) ?? 0;
+      const checkedOutBreakdown = checkedOutBreakdownByAsset.get(assetId) ?? {
+        total: 0,
+        standalone: 0,
+      };
+      // #2790 ③: DISPLAYED "Checked out" is the FULL count (kit + standalone);
+      // `physicalAvailable` below subtracts only the STANDALONE portion so
+      // kit-driven checked-out units aren't double-counted against `inKits`.
+      const checkedOut = checkedOutBreakdown.total;
       // RESERVED-only, so already disjoint from `checkedOut` — no netting.
       const reservedTotal = reservedTotalByAsset.get(assetId) ?? 0;
       // Windowed uses the peak-concurrency sweep; windowless stays conservative
@@ -823,10 +828,17 @@ export async function getAssetAvailabilityBatch(
       const reserved = window
         ? peakConcurrent(intervalsByAsset.get(assetId) ?? [])
         : allActiveRemainingByAsset.get(assetId) ?? 0;
-      const physicalAvailable = total - inCustody - inKits - checkedOut;
-      // Deliberately NOT `physicalAvailable - reserved` — see the singular
-      // primitive's matching comment; avoids double-subtracting `checkedOut`.
-      const bookable = total - inCustody - inKits - reserved;
+      // Same pure package formula as the singular primitive — `bookable`
+      // subtracts `reserved` (as `reservedPeak`), never `checkedOut` twice.
+      // `checkedOut` fed here is the STANDALONE portion (#2790 ③): the full
+      // count is restored on the returned struct's `checkedOut` field below.
+      const { physicalAvailable, bookable } = computeAvailability({
+        total,
+        inCustody,
+        inKits,
+        reservedPeak: reserved,
+        checkedOut: checkedOutBreakdown.standalone,
+      });
 
       result.set(assetId, {
         total,
@@ -861,12 +873,16 @@ export async function getAssetAvailabilityBatch(
   }
 }
 
+/** Per-asset checked-out breakdown: full total + the standalone-only portion. */
+type CheckedOutBreakdown = { total: number; standalone: number };
+
 /**
- * Batched `checkedOut` computation — reimplements
- * {@link computeCheckedOutForAsset}'s physically-out math for MANY assets in
- * TWO queries total, instead of calling that per-asset helper in a loop
- * (which would turn a picker with N assets into `O(2·N)` extra round-trips —
- * the exact fan-out {@link getAssetAvailabilityBatch} exists to avoid).
+ * Batched `checkedOut` breakdown — reimplements
+ * {@link computeCheckedOutBreakdownForAsset}'s physically-out math for MANY
+ * assets in TWO queries total, instead of calling that per-asset helper in a
+ * loop (which would turn a picker with N assets into `O(2·N)` extra
+ * round-trips — the exact fan-out {@link getAssetAvailabilityBatch} exists to
+ * avoid).
  *
  * // why: there IS already a batched checkout-remaining helper
  * // (`computeBookingAssetsRemainingToCheckOut` in booking/service.server.ts),
@@ -880,19 +896,28 @@ export async function getAssetAvailabilityBatch(
  * // assets are involved, at the cost of duplicating the arithmetic — the
  * // trade-off called out in Task 8 of the QT-availability plan.
  *
- * Formula per (booking, asset) pair, summed across bookings and floored at 0
- * per booking (mirrors {@link computeCheckedOutForAsset} exactly):
- *   `checkedOutOnBooking = booked − remaining`
- *   `remaining = 0` when the booking has zero {@link PartialBookingCheckout}
- *     sessions (legacy all-at-once checkout — every booked unit is
- *     physically off the shelf, the same legacy-ONGOING fallback the
- *     singular batched helper documents); otherwise
- *     `max(0, booked − Σ(session claims for this asset on this booking))`.
+ * Returns per asset BOTH figures (#2790 ③):
+ *   - `total`     — every checked-out unit (kit + standalone); the DISPLAYED
+ *                   "Checked out" number, byte-identical to the pre-split math.
+ *   - `standalone`— only units checked out via standalone
+ *                   (`assetKitId IS NULL`) slices; what `physicalAvailable`
+ *                   subtracts so kit-driven checked-out units aren't
+ *                   double-counted against `inKits`.
+ *
+ * Per (booking, asset), attribution mirrors
+ * {@link computeCheckedOutBreakdownForAsset} exactly:
+ *   - legacy all-at-once booking (zero {@link PartialBookingCheckout} sessions)
+ *     ⇒ every slice's checked-out = its full `quantity`;
+ *   - otherwise the booking's claims for the asset are attributed across its
+ *     slices via {@link attributeDispositionsByBookingAsset} (standalone-first
+ *     greedy) and each slice's checked-out = `min(slice.quantity, claimed)`.
+ * Summing the per-slice checked-out reproduces the per-booking
+ * `booked − remaining` the pre-split code computed, so `total` is unchanged.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
  * so — unlike the singular helper, which fetches `Booking.status` separately
  * to test the legacy-ONGOING fallback — every booking that shows up here
- * already satisfies that condition; the formula below never reads
+ * already satisfies that condition; the loop below never reads
  * `booking.status` (it's only selected because {@link AvailabilityBatchClient}
  * shares one `bookingAsset.findMany` select shape with the reserved-rows
  * read, which DOES need it — see that type's doc).
@@ -900,15 +925,15 @@ export async function getAssetAvailabilityBatch(
  * @param client - Batch Prisma surface (see {@link AvailabilityBatchClient}).
  * @param assetIds - Assets to compute checked-out totals for (already deduped).
  * @param organizationId - Caller's organization — scopes the active-booking lookup.
- * @returns Map keyed by every requested `assetId` → non-negative checked-out units.
+ * @returns Map keyed by every requested `assetId` → its {@link CheckedOutBreakdown}.
  */
-async function computeCheckedOutBatch(
+async function computeCheckedOutBreakdownBatch(
   client: AvailabilityBatchClient,
   assetIds: string[],
   organizationId: string
-): Promise<Map<string, number>> {
-  const checkedOutByAsset = new Map<string, number>(
-    assetIds.map((id) => [id, 0])
+): Promise<Map<string, CheckedOutBreakdown>> {
+  const breakdownByAsset = new Map<string, CheckedOutBreakdown>(
+    assetIds.map((id) => [id, { total: 0, standalone: 0 }])
   );
 
   const pivots = await client.bookingAsset.findMany({
@@ -920,32 +945,47 @@ async function computeCheckedOutBatch(
       },
     },
     select: {
+      // `id` + `assetKitId` are needed for per-slice attribution and the
+      // standalone/kit-driven split (#2790 ③) — the reserved-rows read shares
+      // this select type but leaves both off (they're optional there).
+      id: true,
       assetId: true,
       bookingId: true,
       quantity: true,
+      assetKitId: true,
       booking: { select: { from: true, to: true, status: true } },
     },
   });
 
-  if (pivots.length === 0) return checkedOutByAsset;
+  if (pivots.length === 0) return breakdownByAsset;
 
-  // Booked total per (bookingId, assetId) — an asset can have multiple
-  // standalone/kit-driven slices on one booking.
-  const bookedByBooking = new Map<string, Map<string, number>>();
+  /** slices grouped: bookingId → assetId → its slices on that booking. */
+  type Slice = { id: string; quantity: number; assetKitId: string | null };
+  const slicesByBookingByAsset = new Map<string, Map<string, Slice[]>>();
   for (const p of pivots) {
-    let forBooking = bookedByBooking.get(p.bookingId);
-    if (!forBooking) {
-      forBooking = new Map();
-      bookedByBooking.set(p.bookingId, forBooking);
+    let byAsset = slicesByBookingByAsset.get(p.bookingId);
+    if (!byAsset) {
+      byAsset = new Map();
+      slicesByBookingByAsset.set(p.bookingId, byAsset);
     }
-    forBooking.set(
-      p.assetId,
-      (forBooking.get(p.assetId) ?? 0) + (p.quantity ?? 0)
-    );
+    const slice: Slice = {
+      // `id` is always selected in production; the `??` fallback only covers
+      // untyped test mocks that omit it (single-slice fixtures — a synthesized
+      // key is unique enough there).
+      id: p.id ?? `${p.bookingId}:${p.assetId}`,
+      quantity: p.quantity ?? 0,
+      assetKitId: p.assetKitId ?? null,
+    };
+    const list = byAsset.get(p.assetId);
+    if (list) {
+      list.push(slice);
+    } else {
+      byAsset.set(p.assetId, [slice]);
+    }
   }
 
   const sessions = await client.partialBookingCheckout.findMany({
-    where: { bookingId: { in: [...bookedByBooking.keys()] } },
+    where: { bookingId: { in: [...slicesByBookingByAsset.keys()] } },
     select: {
       bookingId: true,
       assetIds: true,
@@ -964,38 +1004,44 @@ async function computeCheckedOutBatch(
     forBooking.push(s);
   }
 
-  for (const [bookingId, bookedForBooking] of bookedByBooking) {
+  for (const [bookingId, byAsset] of slicesByBookingByAsset) {
     const sessionsForBooking = sessionsByBooking.get(bookingId) ?? [];
     // A booking with zero sessions was checked out via the legacy
     // all-at-once flow (the partial flow always writes a session row) —
     // since these pivots are already scoped to ONGOING/OVERDUE, every
     // booked unit on this booking is physically off the shelf.
     const isLegacyOngoing = sessionsForBooking.length === 0;
-    const logsByAsset = checkoutSessionsToLogsByAsset(
-      sessionsForBooking,
-      (id) => bookedForBooking.has(id)
-    );
-
-    for (const [assetId, booked] of bookedForBooking) {
-      let remaining: number;
-      if (isLegacyOngoing) {
-        remaining = 0;
-      } else {
-        const claimed = (logsByAsset.get(assetId) ?? []).reduce(
-          (sum, log) => sum + log.quantity,
-          0
+    const logsByAsset = isLegacyOngoing
+      ? null
+      : checkoutSessionsToLogsByAsset(sessionsForBooking, (id) =>
+          byAsset.has(id)
         );
-        remaining = Math.max(0, booked - claimed);
+
+    for (const [assetId, slices] of byAsset) {
+      const claimedBySlice = isLegacyOngoing
+        ? null
+        : attributeDispositionsByBookingAsset({
+            bookingAssetRows: slices,
+            consumptionLogs: logsByAsset?.get(assetId) ?? [],
+          });
+
+      const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
+      for (const slice of slices) {
+        const checkedOutSlice = isLegacyOngoing
+          ? slice.quantity
+          : Math.min(slice.quantity, claimedBySlice?.get(slice.id) ?? 0);
+        acc.total += checkedOutSlice;
+        // Standalone (free-pool) iff no kit FK — `!= null` matches
+        // `attributeDispositionsByBookingAsset`'s kit-driven test.
+        if (slice.assetKitId == null) {
+          acc.standalone += checkedOutSlice;
+        }
       }
-      const checkedOutOnBooking = Math.max(0, booked - remaining);
-      checkedOutByAsset.set(
-        assetId,
-        (checkedOutByAsset.get(assetId) ?? 0) + checkedOutOnBooking
-      );
+      breakdownByAsset.set(assetId, acc);
     }
   }
 
-  return checkedOutByAsset;
+  return breakdownByAsset;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1092,13 +1138,24 @@ export async function assertAssetQuantityAvailable({
     db: tx,
   });
 
+  // The verdict (allowed vs oversubscribed) comes from the pure package guard.
   // `bookable` EXCLUDES this booking (via `excludeBookingId`), so it is the
   // ABSOLUTE maximum this booking may hold given every OTHER overlapping
   // commitment — the full requested amount competes against it, not just the
   // delta. Comparing the delta (`requested − current > bookable`) would
   // double-count this booking's own headroom and allow it to grow to
-  // `current + bookable`, oversubscribing the pool by `current` units.
-  if (requestedQuantity > bookable) {
+  // `current + bookable`, oversubscribing the pool by `current` units. The
+  // thrown message + `additionalData` stay app-side so the exact
+  // (webapp-specific) shortfall copy `buildInsufficientStockMessage` produces
+  // is preserved — the package's own message differs and is deliberately unused.
+  const verdict = checkQuantityAvailable({
+    requestedQuantity,
+    currentQuantity,
+    bookable,
+    assetTitle,
+    unitOfMeasure,
+  });
+  if (!verdict.ok) {
     throw new ShelfError({
       cause: null,
       title: "Insufficient availability",
@@ -1231,12 +1288,6 @@ export async function assertAssetQuantitiesAvailable(
   const shortfalls: AssetQuantityShortfall[] = [];
 
   for (const item of items) {
-    const current = item.currentQuantity ?? 0;
-    // A reduction (or no-op) against this row's own prior quantity can never
-    // oversubscribe the pool → always allowed, without even touching
-    // `bookable` — mirrors the singular guard's #2725 recovery rule.
-    if (item.requestedQuantity <= current) continue;
-
     // An asset id the batch read couldn't resolve (should not happen for an
     // id the caller validated itself, but this primitive makes no such
     // assumption) is treated as zero bookable — the conservative reading,
@@ -1245,10 +1296,22 @@ export async function assertAssetQuantitiesAvailable(
     const bookable = availability?.bookable ?? 0;
     const total = availability?.total ?? 0;
 
-    // `bookable` already EXCLUDES this booking (via `excludeBookingId`), so —
-    // exactly as in the singular guard — the full requested amount competes
-    // against it, not just the delta over `current`.
-    if (item.requestedQuantity > bookable) {
+    // Per-item verdict from the pure package guard, same directional rule as
+    // the singular guard: a reduction/no-op against this row's own prior
+    // quantity is always allowed (the #2725 recovery, without even touching
+    // `bookable`), and — since `bookable` already EXCLUDES this booking (via
+    // `excludeBookingId`) — an increase competes against the full pool, not
+    // just the delta over `current`. `currentQuantity` defaults to `0` inside
+    // the package guard, so a brand-new booking's item is checked absolutely.
+    // The aggregated shortfall message stays app-side (its webapp-specific
+    // multi-line copy differs from the package's), so `verdict.message` is
+    // deliberately unused — only the ok/not-ok decision is taken from it.
+    const verdict = checkQuantityAvailable({
+      requestedQuantity: item.requestedQuantity,
+      currentQuantity: item.currentQuantity,
+      bookable,
+    });
+    if (!verdict.ok) {
       shortfalls.push({
         assetId: item.assetId,
         assetTitle: item.assetTitle,

@@ -470,10 +470,49 @@ describe(createUser.name, () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
+    // @ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue(newUserMock);
     // why: the mocked $transaction just invokes the callback with the mocked db,
     // so the callback's `tx.user.create` resolves to whatever db.user.create does
     // @ts-expect-error missing vitest type
     db.$transaction.mockImplementation((callback: any) => callback(db));
+  });
+
+  it("persists detected format prefs onto the new user row", async () => {
+    // why: DetectedFormatPrefs is the exact shape each entry action passes down
+    const formatPrefs = {
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Europe/Amsterdam",
+    } as const;
+
+    await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      formatPrefs,
+    });
+
+    expect(db.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dateFormat: "DD_MM_YYYY",
+          timeFormat: "H24",
+          weekStart: "MONDAY",
+          timeZone: "Europe/Amsterdam",
+        }),
+      })
+    );
+  });
+
+  it("omits the pref columns when no formatPrefs passed (resolver backfills at read)", async () => {
+    await createUser({ email: USER_EMAIL, userId: USER_ID, username });
+
+    // @ts-expect-error missing vitest type
+    const createArg = db.user.create.mock.calls[0][0];
+    expect(createArg.data.dateFormat).toBeUndefined();
+    expect(createArg.data.timeZone).toBeUndefined();
   });
 
   it("returns the existing user when create throws a P2002 unique violation on id", async () => {

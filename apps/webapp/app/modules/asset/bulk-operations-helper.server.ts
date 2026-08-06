@@ -66,6 +66,9 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param filters - URL search params string with advanced filters
  * @param settings - Asset index settings with columns configuration
  * @param availableToBookOnly - Filter to bookable assets only (for self-service)
+ * @param timeZone - Acting user's IANA timezone; forwarded to
+ *   {@link generateWhereClause} so built-in date-column filters truncate the
+ *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
  * @returns Promise resolving to array of asset IDs matching the filters
  */
 async function getAdvancedFilteredAssetIds({
@@ -73,16 +76,21 @@ async function getAdvancedFilteredAssetIds({
   filters,
   settings,
   availableToBookOnly = false,
+  timeZone = "UTC",
 }: {
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
   availableToBookOnly?: boolean;
+  timeZone?: string;
 }): Promise<string[]> {
   try {
     const searchParams = new URLSearchParams(filters);
     const paramsValues = getParamsValues(searchParams);
     const { search } = paramsValues;
+    // "Low stock" quick filter toggle — must be forwarded here too so
+    // "select all" (ALL_SELECTED_KEY) matches the same rows the index shows.
+    const lowStockOnly = searchParams.get("lowStockOnly") === "true";
 
     const settingColumns = settings.columns as Column[];
     const parsedFilters = await parseFiltersWithHierarchy(
@@ -97,7 +105,9 @@ async function getAdvancedFilteredAssetIds({
       search,
       parsedFilters,
       undefined, // no specific assetIds filter
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone,
+      lowStockOnly
     );
 
     // Minimal query: only SELECT id, but include the same joins the main
@@ -131,6 +141,9 @@ async function getAdvancedFilteredAssetIds({
  * @param organizationId - Organization ID to scope query
  * @param currentSearchParams - URL search params string with active filters
  * @param settings - Asset index settings (determines mode and columns)
+ * @param timeZone - Acting user's IANA timezone; forwarded to the advanced
+ *   filter query so built-in date-column filters truncate the day in the
+ *   user's tz (avoids an off-by-one). Defaults to "UTC".
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -158,11 +171,13 @@ export async function resolveAssetIdsForBulkOperation({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  timeZone?: string;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -182,6 +197,7 @@ export async function resolveAssetIdsForBulkOperation({
       filters: currentSearchParams,
       settings,
       availableToBookOnly: false, // Set based on user role if needed
+      timeZone,
     });
   } else {
     // SIMPLE MODE: Use simple where clause

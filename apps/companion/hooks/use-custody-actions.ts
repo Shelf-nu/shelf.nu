@@ -27,10 +27,15 @@ interface UseCustodyActionsReturn {
    * Release `quantity` units of a QUANTITY_TRACKED asset from the custodian
    * identified by `custodianId` (team-member id). Confirmed by the sheet,
    * same as `performAssignQuantity`.
+   *
+   * `consumed` records how many of those units were used up rather than
+   * handed back. Omit it and the server derives the outcome from the asset's
+   * consumptionType.
    */
   performReleaseQuantity: (
     custodianId: string,
-    quantity: number
+    quantity: number,
+    consumed?: number
   ) => Promise<void>;
 }
 
@@ -142,7 +147,8 @@ export function useCustodyActions({
 
   const performReleaseQuantity = async (
     custodianId: string,
-    quantity: number
+    quantity: number,
+    consumed?: number
   ) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
@@ -151,7 +157,8 @@ export function useCustodyActions({
         currentOrg.id,
         asset.id,
         custodianId,
-        quantity
+        quantity,
+        { consumed }
       );
       if (err) Alert.alert("Error", err);
       else {

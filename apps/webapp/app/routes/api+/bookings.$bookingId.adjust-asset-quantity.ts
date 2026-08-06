@@ -33,6 +33,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -155,6 +156,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * can show the "from X → to Y" delta. If the quantity didn't actually
      * change we skip the note write below.
      *
+     * Seeded from the outside-tx snapshot, but overwritten inside the tx with
+     * the value re-read UNDER the lock (see below) so the note reflects the
+     * real pre-edit quantity even if a concurrent request changed it.
+     *
      * Declared outside the transaction so the activity-notes block (which
      * intentionally lives outside the tx) can reference it.
      */
@@ -186,7 +191,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * double-counted.
      */
     await db.$transaction(async (tx) => {
-      await lockAssetForQuantityUpdate(tx, assetId);
+      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+
+      /**
+       * TOCTOU guard: re-read this slice's booked quantity UNDER the asset
+       * lock. `bookingAsset.quantity` was read outside the tx (for the
+       * ownership/type/permission checks above, which don't race meaningfully),
+       * but it may be stale by now. The directional rule in
+       * `assertAssetQuantityAvailable` treats `requested <= currentQuantity` as
+       * an always-allowed reduction that SKIPS the availability check — so a
+       * stale-HIGH `currentQuantity` (a concurrent request already lowered the
+       * real booked qty) would let a genuine INCREASE masquerade as a reduction
+       * and bypass the guard, oversubscribing the pool. The asset `FOR UPDATE`
+       * lock serializes concurrent adjusts on this asset, so this re-read
+       * observes the committed value.
+       */
+      const freshBookingAsset = await tx.bookingAsset.findUnique({
+        where: { id: bookingAsset.id },
+        select: { quantity: true },
+      });
+
+      // The slice vanished between the outside-tx read and here (concurrent
+      // removal) — treat it as not-found, consistent with the check above.
+      if (!freshBookingAsset) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not found",
+          message: "This asset is not part of the booking.",
+          label: "Booking",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+
+      const currentQuantity = freshBookingAsset.quantity;
 
       await assertAssetQuantityAvailable({
         assetId,
@@ -197,13 +235,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
             : null,
         excludeBookingId: bookingId,
-        currentQuantity: bookingAsset.quantity,
+        currentQuantity,
         requestedQuantity: quantity,
         assetTitle: bookingAsset.asset.title,
         unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
       });
 
-      previousQuantity = bookingAsset.quantity;
+      // Drive the "from X → to Y" activity note off the FRESH value too, so the
+      // note reflects the real pre-edit quantity (not the stale snapshot).
+      previousQuantity = currentQuantity;
 
       await tx.bookingAsset.update({
         where: { id: bookingAsset.id },
@@ -257,7 +297,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           createSystemBookingNote({
             bookingId,
             organizationId,
-            content: `${actor} adjusted booked quantity for **${bookingAsset.asset.title}** from **${previousQuantity}** to **${quantity}**.`,
+            content: `${actor} adjusted booked quantity for **${stripMarkdocDelimiters(
+              bookingAsset.asset.title
+            )}** from **${previousQuantity}** to **${quantity}**.`,
           }),
         ]);
       } catch (noteError) {

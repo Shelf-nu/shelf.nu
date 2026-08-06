@@ -18,12 +18,14 @@ import {
   AssetStatus,
   AssetType,
   BookingStatus,
+  ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
   OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
+import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -113,6 +115,7 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
@@ -176,6 +179,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -1148,6 +1152,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   canUseBarcodes = false,
   availableToBookOnly = false,
   preParsedFilters,
+  timeZone = "UTC",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1160,6 +1165,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly?: boolean;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
+  /**
+   * IANA timezone the acting user displays dates in. Threaded into
+   * `generateWhereClause` so built-in date-column filters truncate the day in
+   * the user's tz (avoids an off-by-one for non-UTC users). Defaults to "UTC"
+   * for callers that don't resolve the acting user's prefs.
+   */
+  timeZone?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1169,6 +1181,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   const { page, perPageParam, search } = paramsValues;
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
+
+  /** "Low stock" quick filter toggle — a `lowStockOnly=true` URL param set
+   * via the assets-index UI toggle, not a `settings.columns` field. See
+   * {@link generateWhereClause}'s `lowStockOnly` param for the predicate. */
+  const lowStockOnly = searchParams.get("lowStockOnly") === "true";
 
   const settingColumns = settings?.columns as Column[];
 
@@ -1194,7 +1211,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone,
+      lowStockOnly
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -2169,10 +2188,12 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
-      // Quantity-tracked fields (type is immutable, never updated here)
-      // TODO(Phase 2): Route quantity changes through an audited adjustment
-      // path that writes to ConsumptionLog. Direct mutation here bypasses
-      // the full-attribution audit trail required by the PRD.
+      // Quantity-tracked fields (type is immutable, never updated here).
+      // The direct `quantity` write is audited below: the quantity/placement
+      // transaction writes a `ConsumptionLog` ADJUSTMENT for the stock delta
+      // and the `fieldChangeEvents` block emits `ASSET_QUANTITY_CHANGED` /
+      // `ASSET_MIN_QUANTITY_CHANGED`, so the full-attribution trail the PRD
+      // requires is preserved.
       quantity,
       minQuantity,
       consumptionType,
@@ -2523,6 +2544,14 @@ export async function updateAsset({
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
+    // Captured from the locked pre-update row so the post-update
+    // ConsumptionLog ADJUSTMENT (below) can compute the stock delta, AND so
+    // the post-transaction low-stock check can tell whether this patch LOWERED
+    // a QUANTITY_TRACKED asset's total. Hoisted out of the tx callback so both
+    // signals survive past the commit. Only populated when a quantity write is
+    // actually part of this patch.
+    let quantityBeforeUpdate: number | null = null;
+    let lockedAssetType: AssetType | null = null;
     const asset = await db.$transaction(async (tx) => {
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
@@ -2530,7 +2559,9 @@ export async function updateAsset({
       // `adjustQuantity` and the booking write guards). Also covers the CSV
       // update-existing import, which routes through `updateAsset`.
       if (quantity != null) {
-        const locked = await lockAssetForQuantityUpdate(tx, id);
+        const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        quantityBeforeUpdate = locked.quantity ?? 0;
+        lockedAssetType = locked.type;
         if (
           locked.type === AssetType.QUANTITY_TRACKED &&
           quantity < (locked.quantity ?? 0)
@@ -2556,6 +2587,32 @@ export async function updateAsset({
           organization: true,
         },
       });
+
+      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
+      // through the asset-edit form. The form has no consumption-category
+      // input, so a manual total correction is an `ADJUSTMENT` (schema
+      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
+      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
+      // IN this tx (not via `adjustQuantity`, which opens its own tx and
+      // re-locks the row we already hold). Skipped for a no-op edit
+      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
+      if (
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+      ) {
+        const delta = Math.abs(quantity - quantityBeforeUpdate);
+        if (delta > 0) {
+          await createConsumptionLog({
+            assetId: id,
+            category: ConsumptionCategory.ADJUSTMENT,
+            quantity: delta,
+            userId,
+            note: "Quantity adjusted via asset edit",
+            tx,
+          });
+        }
+      }
 
       if (shouldUpdatePlacement) {
         if (newLocationId) {
@@ -2972,6 +3029,42 @@ export async function updateAsset({
           toValue: asset.valuation ?? null,
         });
       }
+      // Quantity is stock; minQuantity is the reorder threshold. Each emits
+      // its own event so reports can aggregate them independently. The stock
+      // ConsumptionLog ADJUSTMENT is written in the tx above; minQuantity is a
+      // threshold (not stock), so it never writes a ConsumptionLog.
+      if (
+        typeof quantity !== "undefined" &&
+        (assetBeforeUpdate.quantity ?? null) !== (asset.quantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "quantity",
+          fromValue: assetBeforeUpdate.quantity ?? null,
+          toValue: asset.quantity ?? null,
+        });
+      }
+      if (
+        typeof minQuantity !== "undefined" &&
+        (assetBeforeUpdate.minQuantity ?? null) !== (asset.minQuantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: assetBeforeUpdate.minQuantity ?? null,
+          toValue: asset.minQuantity ?? null,
+        });
+      }
       if (fieldChangeEvents.length > 0) {
         await recordEvents(fieldChangeEvents);
       }
@@ -3077,6 +3170,50 @@ export async function updateAsset({
             }))
           );
         }
+      }
+    }
+
+    /**
+     * Low-stock check — on any QUANTITY change OR any MIN-QUANTITY (threshold)
+     * change to a QUANTITY_TRACKED asset.
+     * - A quantity DROP may cross INTO the low-stock band (fire the alert); a
+     *   raise (restock via the edit form / CSV update-import) may cross back OUT
+     *   (clear the `lowStockNotifiedAt` marker + send the "back in stock" notice).
+     * - A THRESHOLD change must also run — including CLEARING `minQuantity`.
+     *   Otherwise removing a threshold while an asset is low leaves the marker
+     *   set, and re-adding a threshold later would let that stale marker suppress
+     *   the next genuine alert. The notifier only performs its clear/recovery
+     *   transition when it is actually called (it clears a stale marker when the
+     *   asset has no threshold).
+     * Mirrors the adjust-quantity route (unconditional on add/subtract). Runs
+     * OUTSIDE the committed transaction (best-effort — a notification failure
+     * must never roll back a successful asset edit). The min-quantity branch
+     * relies on `asset.type` (not the hoisted `lockedAssetType`, which is only
+     * set when a quantity write took the row lock).
+     */
+    const isQuantityTrackedAsset =
+      lockedAssetType === AssetType.QUANTITY_TRACKED ||
+      asset.type === AssetType.QUANTITY_TRACKED;
+    const quantityChanged =
+      quantity != null &&
+      quantityBeforeUpdate != null &&
+      quantity !== quantityBeforeUpdate;
+    const minQuantityChanged =
+      typeof minQuantity !== "undefined" &&
+      (assetBeforeUpdate?.minQuantity ?? null) !== (asset.minQuantity ?? null);
+    if (isQuantityTrackedAsset && (quantityChanged || minQuantityChanged)) {
+      try {
+        await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
+      } catch (lowStockError) {
+        Logger.error(
+          new ShelfError({
+            cause: lowStockError,
+            message:
+              "Failed to run low-stock check after asset quantity/threshold edit",
+            label: "Assets",
+            additionalData: { assetId: id, organizationId },
+          })
+        );
       }
     }
 
@@ -4123,6 +4260,8 @@ export async function getPaginatedAndFilterableAssets({
         totalCategories,
         locations,
         totalLocations,
+        assetModels,
+        totalAssetModels,
       },
       teamMembersData,
       { assets, totalAssets },
@@ -4179,6 +4318,15 @@ export async function getPaginatedAndFilterableAssets({
       cookie,
       locations: excludeLocationQuery ? [] : locations,
       totalLocations,
+      /**
+       * `getEntitiesWithSelectedValues` already queries these on every simple
+       * mode load and the results were being dropped at the destructure above.
+       * Forwarding them costs no extra query and is what seeds the asset model
+       * picker in the bulk "Update asset model" dialog — without it the picker
+       * opens blank for every simple mode workspace.
+       */
+      assetModels,
+      totalAssetModels,
       ...teamMembersData,
     };
   } catch (cause) {
@@ -5640,12 +5788,19 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5654,6 +5809,7 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5766,6 +5922,7 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -5782,6 +5939,12 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5790,6 +5953,7 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -5930,7 +6094,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -5995,6 +6160,7 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   /**
@@ -6008,6 +6174,12 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6016,6 +6188,7 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /**
@@ -6128,14 +6301,20 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
+          // Actor name, custodian name and asset title are all user-supplied
+          // and render as literal text in this Markdoc note.
+          const actorName = stripMarkdocDelimiters(
+            `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
+          );
+          const custodianName = stripMarkdocDelimiters(
+            primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
+              : "Unknown Custodian"
+          );
           return {
-            content: `**${user.firstName?.trim()} ${
-              user.lastName
-            }** has released **${
-              primaryCustody
-                ? resolveTeamMemberName(primaryCustody.custodian)
-                : "Unknown Custodian"
-            }'s** custody over **${asset.title?.trim()}**`,
+            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
+              asset.title ?? ""
+            )}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -6189,6 +6368,7 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -6196,6 +6376,12 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6204,6 +6390,7 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     /** We have to create notes for all the assets so we have make this query */
@@ -6495,6 +6682,7 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6502,6 +6690,12 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6510,6 +6704,7 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6612,6 +6807,213 @@ export async function bulkUpdateAssetCategory({
   }
 }
 
+/** Outcome of a bulk asset model update, used to build an honest toast. */
+export type BulkUpdateAssetModelResult = {
+  /**
+   * Whether the action linked assets to a model (`true`) or removed the link
+   * (`false`). The caller must branch on this rather than on `modelName`,
+   * which is only a label and can be blank.
+   */
+  linked: boolean;
+  /**
+   * How many assets the selection resolved to. Distinguishes "your filters
+   * matched nothing" from "nothing needed changing", which read identically
+   * from `updated: 0`.
+   */
+  resolved: number;
+  /** Assets whose `assetModelId` actually changed. */
+  updated: number;
+  /** Of `updated`, how many were moved off a different model rather than grouped for the first time. */
+  moved: number;
+  /** Selected assets left untouched because models are individually-tracked only. */
+  skippedQuantityTracked: number;
+  /** Name of the target model, or `null` when the action removed the link. */
+  modelName: string | null;
+};
+
+/**
+ * Links (or unlinks) many assets to a single AssetModel in one action.
+ *
+ * This is the bulk counterpart of the Asset Model picker on the asset edit
+ * form. It exists so an existing library can be grouped into models without
+ * editing assets one at a time or round-tripping through a CSV re-import.
+ *
+ * Behaviour worth knowing before you change it:
+ * - QUANTITY_TRACKED assets are **skipped**, not rejected. An asset model
+ *   describes N distinguishable units of one template, while a qty-tracked
+ *   asset is a stock pool, so `createAsset`/`updateAsset` both refuse that
+ *   link. A mixed selection is normal in a real library, so the batch applies
+ *   to the individually-tracked assets and reports the skip. Only a selection
+ *   with nothing eligible in it is an error.
+ * - The model's `defaultCategoryId` / `defaultValuation` are **not** applied.
+ *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
+ *   retro-applying them here would silently overwrite curated data on assets
+ *   that already exist.
+ * - No activity events and no notes are written. `ActivityAction` has no
+ *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
+ *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
+ *   bulk must emit exactly what singular emits. Adding the event properly
+ *   needs an additive enum migration plus the singular call site plus the
+ *   model-delete SetNull cascade, which is its own change.
+ *
+ * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
+ * @param params.assetModelId - Target model, or `null`/`""` to remove the link
+ * @param params.currentSearchParams - Active index filters, used to resolve a
+ *   cross-page "select all" into real ids
+ * @param params.settings - Asset index settings; decides simple vs advanced
+ *   filter resolution for that select-all
+ * @returns Counts describing what actually happened, for the caller's toast
+ * @throws {ShelfError} 404 when the model is not in this organization, 400
+ *   when every selected asset is quantity-tracked
+ */
+export async function bulkUpdateAssetModel({
+  userId,
+  assetIds,
+  organizationId,
+  assetModelId,
+  currentSearchParams,
+  settings,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  assetModelId: Asset["assetModelId"];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+}): Promise<BulkUpdateAssetModelResult> {
+  try {
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
+
+    /** An empty `assetModelId` is the "remove from asset model" request. */
+    const newAssetModelId = assetModelId || null;
+    const linked = newAssetModelId !== null;
+
+    if (resolvedIds.length === 0) {
+      return {
+        linked,
+        resolved: 0,
+        updated: 0,
+        moved: 0,
+        skippedQuantityTracked: 0,
+        modelName: null,
+      };
+    }
+
+    // why: `connect`-style writes are not org-scoped by Prisma, so a crafted
+    // foreign-org model id would otherwise be written verbatim onto this
+    // org's assets. Shared guard per .claude/rules/org-scope-user-supplied-ids.
+    let modelName: string | null = null;
+    if (newAssetModelId) {
+      // The guard returns the row it already had to read, so the toast label
+      // costs no extra query.
+      const model = await assertAssetModelBelongsToOrg({
+        assetModelId: newAssetModelId,
+        organizationId,
+      });
+      modelName = model.name;
+    }
+
+    /**
+     * Before-state, org-scoped. This read is also the ownership proof for the
+     * asset ids: `resolveAssetIdsForBulkOperation` returns a caller-supplied
+     * list verbatim when it is not a select-all, so nothing upstream has
+     * checked them against this organization yet.
+     */
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: { id: { in: resolvedIds }, organizationId },
+      select: { id: true, type: true, assetModelId: true },
+    });
+
+    const individuals = assetsBeforeUpdate.filter(
+      (asset) => asset.type !== AssetType.QUANTITY_TRACKED
+    );
+    const skippedQuantityTracked =
+      assetsBeforeUpdate.length - individuals.length;
+
+    /**
+     * Only the LINK direction errors here. Removing a link from a set of
+     * quantity-tracked assets is a legitimate no-op (they can never have had a
+     * model), so failing it would teach a rule the user did not break.
+     */
+    if (linked && individuals.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not allowed",
+        message:
+          "All selected assets are quantity-tracked. Asset models can only be linked to individually tracked assets.",
+        additionalData: { organizationId, userId, assetModelId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Skip rows that already point at the target so the counts stay honest. */
+    const assetsThatChange = individuals.filter(
+      (asset) => asset.assetModelId !== newAssetModelId
+    );
+
+    /**
+     * Assets taken off another model rather than grouped for the first time.
+     * Surfaced in the toast because it is the only signal that the previous
+     * model's book-by-model availability pool just shrank.
+     */
+    const moved = newAssetModelId
+      ? assetsThatChange.filter((asset) => asset.assetModelId !== null).length
+      : 0;
+
+    if (assetsThatChange.length > 0) {
+      await db.asset.updateMany({
+        where: {
+          id: { in: assetsThatChange.map((asset) => asset.id) },
+          organizationId,
+        },
+        data: { assetModelId: newAssetModelId },
+      });
+    }
+
+    return {
+      linked,
+      /**
+       * The org-verified count, not `resolvedIds.length`. A caller-supplied id
+       * list comes back from the resolver verbatim, so counting it would report
+       * "already in this asset model" for ids that simply are not in this
+       * organization, when "matched no assets" is the truth.
+       */
+      resolved: assetsBeforeUpdate.length,
+      updated: assetsThatChange.length,
+      moved,
+      /**
+       * Only meaningful when linking. On the unlink path a quantity-tracked
+       * asset was never going to change, so reporting it as "skipped" would
+       * invent a failure.
+       */
+      skippedQuantityTracked: linked ? skippedQuantityTracked : 0,
+      modelName,
+    };
+  } catch (cause) {
+    // why: the eligibility 400 and the cross-org 404 are the two errors the
+    // user is meant to read. The generic wrapper keeps the status but replaces
+    // the message, so re-throw our own errors untouched.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the asset model.",
+      additionalData: { userId, assetIds, organizationId, assetModelId },
+      label,
+    });
+  }
+}
+
 export async function bulkAssignAssetTags({
   userId,
   assetIds,
@@ -6620,6 +7022,7 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6628,6 +7031,12 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6636,6 +7045,7 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6786,12 +7196,19 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6800,6 +7217,7 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
     });
 
     // Simple, consistent where clause
@@ -7339,7 +7757,11 @@ export async function checkOutQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7521,7 +7943,7 @@ export async function checkOutQuantity({
   }
 }
 
-/** Arguments for releasing (returning) a quantity from a custodian back to the available pool. */
+/** Arguments for ending a custodian's hold on N units of a QT asset. */
 type ReleaseQuantityArgs = {
   /** The asset to release units for */
   assetId: string;
@@ -7535,10 +7957,17 @@ type ReleaseQuantityArgs = {
   organizationId: string;
   /** Optional note explaining the release */
   note?: string;
+  /**
+   * How many of the released units were used up rather than handed back.
+   * Omit to let the server derive it from the asset's `consumptionType`
+   * (consume everything for a one-way consumable, nothing for a returnable).
+   * Only a consumable accepts a non-zero value.
+   */
+  consumed?: number;
 };
 
 /**
- * Releases a quantity of units from a custodian back to the available pool.
+ * Ends a custodian's hold on N units of a QUANTITY_TRACKED asset.
  *
  * Runs inside an interactive transaction with a row-level lock to prevent
  * concurrent modifications. Validates that a custody record exists for the
@@ -7546,13 +7975,29 @@ type ReleaseQuantityArgs = {
  * the custodian currently holds.
  *
  * If releasing the full custodied amount, the Custody record is deleted.
- * Otherwise, the quantity is decremented. An immutable RETURN consumption
- * log entry is always created.
+ * Otherwise, the quantity is decremented.
+ *
+ * **What happens to the units depends on `Asset.consumptionType`, and on an
+ * optional explicit split:**
+ *
+ * - `TWO_WAY` / legacy `null` — the units return to the available pool. A
+ *   `RETURN` consumption log is written and `Asset.quantity` is untouched.
+ *   These assets reject a non-zero `consumed`.
+ * - `ONE_WAY` — the units default to consumed and are gone for good: a
+ *   `CONSUME` log is written and `Asset.quantity` decremented, matching what
+ *   booking check-in already does for a consumable. An explicit `consumed`
+ *   splits the release, so unused units can still be handed back.
+ *
+ * The default is taken here rather than in a sibling `consumeQuantity` service
+ * so it is always derived from the asset row itself: both the web and mobile
+ * release endpoints hit this one function, and neither can silently pick the
+ * wrong outcome for a consumable.
  *
  * @param args - The release details
- * @returns The updated Asset record
- * @throws {ShelfError} If no custody record exists or the release quantity
- *   exceeds the custodied amount
+ * @returns The updated Asset record plus the `consumed` / `returned` split
+ * @throws {ShelfError} If no custody record exists, the release quantity
+ *   exceeds the custodied amount, `consumed` is out of range, or a returnable
+ *   asset was asked to consume
  */
 export async function releaseQuantity({
   assetId,
@@ -7561,6 +8006,7 @@ export async function releaseQuantity({
   userId,
   organizationId,
   note,
+  consumed,
 }: ReleaseQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -7574,7 +8020,11 @@ export async function releaseQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7596,6 +8046,54 @@ export async function releaseQuantity({
           label,
           status: 400,
           additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /**
+       * Step 3b: Resolve how many units were used up vs. handed back.
+       *
+       * The DEFAULT comes from the LOCKED asset row — never from the caller
+       * alone — so a stale client can't return a consumable's units to the
+       * pool. `lockAssetForQuantityUpdate` does `SELECT *`, so
+       * `consumptionType` is already on hand.
+       *
+       * An explicit `consumed` lets an operator record a partial use: 40
+       * gloves come back, 10 of them actually used. Without it the only
+       * available action would destroy all 40, which is the same split
+       * booking check-in already offers for consumables. It can only ever
+       * narrow a consumable's outcome — a returnable asset rejects it below.
+       */
+      const canConsume = releaseCategory(asset.consumptionType) === "CONSUME";
+      const consumedUnits = consumed ?? (canConsume ? quantity : 0);
+      const returnedUnits = quantity - consumedUnits;
+
+      if (
+        !Number.isInteger(consumedUnits) ||
+        consumedUnits < 0 ||
+        consumedUnits > quantity
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot mark ${consumedUnits} of ${quantity} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, teamMemberId, quantity, consumed },
+        });
+      }
+
+      if (consumedUnits > 0 && !canConsume) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: {
+            assetId,
+            consumptionType: asset.consumptionType,
+          },
         });
       }
 
@@ -7678,22 +8176,119 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 7: Create an immutable audit log entry */
-      await createConsumptionLog({
-        assetId,
-        category: "RETURN",
-        quantity,
-        userId,
-        custodianId: teamMemberId,
-        note,
-        tx,
-      });
+      /**
+       * Step 6c: Consumed units did not come back — they were used up.
+       * Permanently remove exactly those from stock, mirroring the `CONSUME`
+       * branch in booking check-in. Returned units are untouched here: they
+       * are already back in the pool the moment custody dropped.
+       *
+       * No pool-drain guard is needed (unlike booking check-in, which
+       * decrements the pool WITHOUT touching custody). With
+       * `available = Asset.quantity - SUM(Custody.quantity)`, this step
+       * changes the total by `-consumedUnits` while step 6 changed custody by
+       * `-quantity`, so available moves by exactly `returnedUnits` and never
+       * goes negative: `consumedUnits <= quantity <= custody.quantity <= C <= Q`.
+       * The same cancellation holds for `bookable` and `physicalAvailable`,
+       * both of which subtract `inCustody` from `total` — which is why no
+       * reservation guard is required either.
+       *
+       * `AssetLocation` placements are deliberately NOT adjusted, matching
+       * the booking check-in CONSUME path (the booking service makes no
+       * `assetLocation` write at all). Placement is an orthogonal axis and we
+       * cannot know which location the consumed units came off.
+       *
+       * Be aware this leaves the location axis able to drift ABOVE the total:
+       * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
+       * DELETE ON "AssetLocation"` (see
+       * `20260519143054_add_asset_location_pivot`), so it does not fire on an
+       * `Asset` write and nothing aborts here — but
+       * `SUM(AssetLocation.quantity WHERE assetKitId IS NULL)` can end up
+       * exceeding `Asset.quantity`. Consume 10 of 100 placed units and the
+       * location page reads 100 while the asset reads 90; a later placement
+       * edit then trips the constraint on a write that is itself legitimate.
+       * `assertAssetQuantityNotBelowReservations` does not close this either
+       * — it queries custody / assetKit / bookingAsset / consumptionLog, not
+       * assetLocation — so the manual stock-lowering path drifts the same
+       * way. Reconciling the location axis on stock decrease is a separate
+       * piece of work across every path that lowers `Asset.quantity`.
+       */
+      if (consumedUnits > 0) {
+        const beforeQuantity = asset.quantity ?? 0;
+        await tx.asset.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+          where: { id: assetId },
+          data: { quantity: { decrement: consumedUnits } },
+        });
+
+        /**
+         * Audit the stock drop as its own event. Consuming changes TWO
+         * things — who holds the units (CUSTODY_RELEASED, below) and how
+         * many exist (this one) — and per the one-event-per-field rule each
+         * gets its own row so reports can aggregate stock movement without
+         * parsing custody meta.
+         */
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            field: "quantity",
+            fromValue: beforeQuantity,
+            toValue: beforeQuantity - consumedUnits,
+          },
+          tx
+        );
+      }
+
+      /**
+       * Step 7: Immutable audit log — one entry per non-zero leg. `CONSUME`
+       * records units that were used up (the decrement above); `RETURN`
+       * records units that went back into the available pool. Same category
+       * discriminator booking check-in uses, so consumption reporting sees
+       * every path identically.
+       *
+       * Both calls are conditional because `createConsumptionLog` rejects a
+       * non-positive quantity. A pure return therefore writes exactly the one
+       * RETURN row it always did.
+       *
+       * A split attaches the operator's note to both rows: it explains the
+       * single action the operator took, and there is no per-leg note field.
+       */
+      if (consumedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "CONSUME",
+          quantity: consumedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
+
+      if (returnedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "RETURN",
+          quantity: returnedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
 
       /**
        * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
        * it commits atomically with the custody decrement/delete. Mirrors
        * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
-       * qty-tracked releases from INDIVIDUAL-asset custody releases.
+       * qty-tracked releases from INDIVIDUAL-asset custody releases. The
+       * custodian stops holding the units either way, so this event is
+       * emitted for both outcomes; `meta.consumed` / `meta.returned` record
+       * the split.
        */
       const custodianTeamMember = await tx.teamMember.findFirst({
         // org-scoped: teamMemberId is request input, so scope the lookup to
@@ -7711,16 +8306,27 @@ export async function releaseQuantity({
           assetId,
           teamMemberId,
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: { quantity, viaQuantity: true },
+          meta: {
+            quantity,
+            viaQuantity: true,
+            consumed: consumedUnits,
+            returned: returnedUnits,
+          },
         },
         tx
       );
 
-      /** Step 9: Return the refreshed asset */
-      return tx.asset.findUniqueOrThrow({
+      /** Step 9: Return the refreshed asset plus the split that was applied */
+      const updatedAsset = await tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
       });
+
+      return {
+        asset: updatedAsset,
+        consumed: consumedUnits,
+        returned: returnedUnits,
+      };
     });
   } catch (cause) {
     if (cause instanceof ShelfError) {
@@ -7825,14 +8431,19 @@ export async function moveAssetLocationUnits(
       );
 
       /** Step 2: Lock the asset row so concurrent placement edits serialize. */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
-       * Step 3: Defense-in-depth org check. The `assertAssetsBelongToOrg`
-       * above already guards request input, but `lockAssetForQuantityUpdate`
-       * does NOT scope by org — so we re-check the locked row's
-       * `organizationId` to make absolutely sure we're not mutating
-       * another tenant's data.
+       * Step 3: Defense-in-depth org check. Both `assertAssetsBelongToOrg`
+       * above AND the org-scoped `lockAssetForQuantityUpdate` (which now
+       * filters `FOR UPDATE` on `organizationId`) already guarantee the row
+       * belongs to this org — a foreign-org id would have 404'd at the lock.
+       * We keep this re-check as belt-and-braces to make absolutely sure we're
+       * not mutating another tenant's data.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -8201,7 +8812,11 @@ export async function placeUnplacedUnits(
         tx
       );
 
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({

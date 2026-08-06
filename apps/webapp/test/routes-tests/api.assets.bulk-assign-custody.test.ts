@@ -37,6 +37,19 @@ vi.mock("~/database/db.server", () => ({
   db: {},
 }));
 
+// why: the route resolves the acting user's timezone via
+// resolveUserFormatPrefsById to forward it to bulkCheckOutAssets (select-all
+// date filters truncate in the user's tz). Stub it so the route test doesn't
+// need a db.user.findFirst mock.
+vi.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vi.fn().mockResolvedValue({
+    dateFormat: "MM_DD_YYYY",
+    timeFormat: "H12",
+    weekStartsOn: 0,
+    timeZone: "UTC",
+  }),
+}));
+
 // why: testing authorization logic without executing actual permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
