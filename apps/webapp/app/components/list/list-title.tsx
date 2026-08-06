@@ -58,10 +58,27 @@ export default function ListTitle({
     modelName: { singular, plural },
   } = loaderData as unknown as IndexResponse;
 
+  /**
+   * SELECTION list. When `itemsGetter` is supplied it flattens composite rows
+   * into their selectable entities — the booking overview expands each kit row
+   * into its member assets plus the kit itself. Right for "select all", wrong
+   * for any count shown to a human.
+   */
   const items =
     typeof itemsGetter === "function"
       ? itemsGetter(loaderData)
       : loaderData.items;
+
+  /**
+   * DISPLAY count: rows actually rendered on this page.
+   *
+   * Must not come from `items` above. On the booking overview a 10-row page
+   * containing two kits (4 and 3 members) flattens to 17 selectable entities,
+   * so the header read "17 items out of 20" — a number matching neither the
+   * rows on screen nor the total. Identical to `items.length` on every list
+   * that passes no `itemsGetter`.
+   */
+  const rowCount = loaderData.items?.length ?? 0;
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
@@ -116,16 +133,16 @@ export default function ListTitle({
           </div>
         ) : (
           <div>
+            {/* Both branches pluralise on the count, not on `> 1` — an empty
+                list read "0 item". Only exactly one is singular. */}
             {perPage < totalItems ? (
               <p>
-                {items.length} {items.length > 1 ? plural : singular}{" "}
+                {rowCount} {rowCount === 1 ? singular : plural}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>
-                {/* Pluralise on the count, not on `> 1` — an empty list read
-                    "0 item". Only exactly one is singular. */}
-                {totalItems} {items.length === 1 ? singular : plural}
+                {totalItems} {rowCount === 1 ? singular : plural}
               </span>
             )}
           </div>
