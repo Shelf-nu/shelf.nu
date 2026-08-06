@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -42,6 +43,26 @@ type ListTitleProps = {
    * Optional class name for the title element
    */
   titleClassName?: string;
+
+  /**
+   * Describes the rendered rows in the surface's own words, replacing the
+   * default `"N items"`.
+   *
+   * The default noun comes from `modelName`, which is necessarily generic when
+   * a list holds more than one kind of row. The booking overview mixes assets
+   * and kits, so its header read "20 items" while the bookings index reported
+   * 25 assets for the same booking — the difference being the 7 assets folded
+   * inside 2 kit rows. Neither number was wrong; "items" just never said what
+   * it counted, leaving the reader to work it out.
+   *
+   * Called with the number of rows being described (the page's rows, or the
+   * total when the list fits on one page). Return a phrase, not a sentence —
+   * it renders inline and may be followed by "out of N".
+   *
+   * @param count - Rows being described.
+   * @returns e.g. `"18 assets and 2 kits"`.
+   */
+  countLabel?: (count: number) => ReactNode;
 };
 
 export default function ListTitle({
@@ -50,6 +71,7 @@ export default function ListTitle({
   disableSelectAllItems = false,
   itemsGetter,
   titleClassName,
+  countLabel,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -137,12 +159,16 @@ export default function ListTitle({
                 list read "0 item". Only exactly one is singular. */}
             {perPage < totalItems ? (
               <p>
-                {rowCount} {rowCount === 1 ? singular : plural}{" "}
+                {countLabel
+                  ? countLabel(rowCount)
+                  : `${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>
-                {totalItems} {rowCount === 1 ? singular : plural}
+                {countLabel
+                  ? countLabel(totalItems)
+                  : `${totalItems} ${rowCount === 1 ? singular : plural}`}
               </span>
             )}
           </div>
