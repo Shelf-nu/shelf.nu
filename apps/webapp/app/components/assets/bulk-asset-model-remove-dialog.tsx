@@ -58,7 +58,9 @@ export default function BulkAssetModelRemoveDialog() {
           <input type="hidden" name="assetModelId" value="" />
 
           {fetcherError ? (
-            <p className="mb-4 text-sm text-error-500">{fetcherError}</p>
+            <p role="alert" className="mb-4 text-sm text-error-500">
+              {fetcherError}
+            </p>
           ) : null}
 
           <div className="flex gap-3">

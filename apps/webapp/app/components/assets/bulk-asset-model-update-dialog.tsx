@@ -120,6 +120,13 @@ export default function BulkAssetModelUpdateDialog() {
           <div className="relative z-50 mb-8">
             <DynamicSelect
               disabled={disabled}
+              /**
+               * Handed to the picker rather than rendered here, so the message
+               * is announced and the trigger carries `aria-describedby` — a
+               * picker that silently refuses to submit tells a screen-reader
+               * user nothing.
+               */
+              error={zo.errors.assetModelId()?.message}
               model={{ name: "assetModel", queryKey: "name" }}
               placeholder="Select asset model"
               initialDataKey="assetModels"
@@ -145,13 +152,12 @@ export default function BulkAssetModelUpdateDialog() {
                 />
               )}
             />
-            {zo.errors.assetModelId()?.message ? (
-              <p className="text-sm text-error-500">
-                {zo.errors.assetModelId()?.message}
-              </p>
-            ) : null}
+            {/* Form-level server error, not a field error — announced, but
+                deliberately not folded into the picker's aria-describedby. */}
             {fetcherError ? (
-              <p className="text-sm text-error-500">{fetcherError}</p>
+              <p role="alert" className="text-sm text-error-500">
+                {fetcherError}
+              </p>
             ) : null}
           </div>
 

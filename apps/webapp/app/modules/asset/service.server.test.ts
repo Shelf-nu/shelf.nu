@@ -2060,7 +2060,7 @@ describe("bulkUpdateAssetModel", () => {
   });
 
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {
-    expect.assertions(4);
+    expect.assertions(5);
     //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([
       { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
@@ -2086,6 +2086,11 @@ describe("bulkUpdateAssetModel", () => {
       skippedQuantityTracked: 1,
       modelName: "Panasonic PT-VZ580",
     });
+    // The model is read ONCE. `assertAssetModelBelongsToOrg` returns the row it
+    // already had to fetch, so the toast label costs no second round trip —
+    // pinned here because re-adding a `findFirst` for the name is the easy
+    // regression.
+    expect(db.assetModel.findFirst).toHaveBeenCalledTimes(1);
     // The active filters and index mode must reach the resolver, or a
     // cross-page "select all" silently operates on the wrong set.
     expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith({

@@ -6726,16 +6726,13 @@ export async function bulkUpdateAssetModel({
     // org's assets. Shared guard per .claude/rules/org-scope-user-supplied-ids.
     let modelName: string | null = null;
     if (newAssetModelId) {
-      await assertAssetModelBelongsToOrg({
+      // The guard returns the row it already had to read, so the toast label
+      // costs no extra query.
+      const model = await assertAssetModelBelongsToOrg({
         assetModelId: newAssetModelId,
         organizationId,
       });
-
-      const model = await db.assetModel.findFirst({
-        where: { id: newAssetModelId, organizationId },
-        select: { name: true },
-      });
-      modelName = model?.name ?? null;
+      modelName = model.name;
     }
 
     /**
