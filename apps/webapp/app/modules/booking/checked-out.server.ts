@@ -12,7 +12,7 @@
  * @see {@link file://./checkout-attribution.ts} — per-slice attribution + the shared session parser.
  * @see {@link file://../asset/availability.server.ts} — the main consumer (`getAssetAvailability`).
  */
-import { BookingStatus, type Asset } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Asset } from "@prisma/client";
 
 import {
   attributeDispositionsByBookingAsset,
@@ -111,10 +111,13 @@ export async function computeCheckedOutForAsset(
  * Attribution mirrors {@link computeCheckedOutForAsset} EXACTLY so `total`
  * parity holds:
  *   - Same active-booking scope (`ONGOING`/`OVERDUE`, org-scoped).
- *   - Same legacy-ONGOING fallback: a booking with ZERO
- *     {@link PartialBookingCheckout} sessions was checked out via the legacy
- *     all-at-once flow, so every booked unit of every slice is physically off
- *     the shelf (each slice's checked-out = its full `quantity`).
+ *   - Same legacy all-at-once fallback, decided PER ASSET: the asset is live
+ *     `CHECKED_OUT` and has NO {@link PartialBookingCheckout} claims of its own
+ *     on this booking, so its zeroed counters are that flow's silence rather
+ *     than "still on the shelf" ⇒ every slice's checked-out = its full
+ *     `quantity`. Keyed on the asset rather than on the BOOKING having zero
+ *     sessions, so one later batch for a different asset can't resurrect it and
+ *     an asset added after the checkout (still AVAILABLE) is never counted.
  *   - Otherwise, each booking's checkout claims for this asset are attributed
  *     to individual slices via {@link attributeDispositionsByBookingAsset}
  *     (standalone-first greedy fill over the SAME shared positional parser
@@ -156,15 +159,30 @@ export async function computeCheckedOutBreakdownForAsset(
       quantity: true,
       assetKitId: true,
       bookingId: true,
+      // Live asset status — the per-asset half of the legacy all-at-once
+      // detection below. Joined here so it costs no extra round-trip.
+      asset: { select: { status: true } },
     },
   })) as Array<{
     id: string;
     quantity: number;
     assetKitId: string | null;
     bookingId: string;
+    asset?: { status: AssetStatus } | null;
   }>;
 
   if (slices.length === 0) return { total: 0, standalone: 0 };
+
+  /**
+   * Whether the asset itself is currently flipped off the shelf. The
+   * all-at-once checkout sets `CHECKED_OUT` on every asset it processed, so
+   * this is what distinguishes "was on the booking when it was checked out"
+   * from "added to the booking afterwards" (which `updateBookingAssets` leaves
+   * AVAILABLE on purpose). Only the former may take the legacy branch below.
+   */
+  const assetIsCheckedOut = slices.some(
+    (slice) => slice.asset?.status === AssetStatus.CHECKED_OUT
+  );
 
   // Group this asset's slices by booking — an asset can have multiple slices on
   // one booking (a standalone free-pool slice + one or more kit-driven slices),
@@ -188,8 +206,8 @@ export async function computeCheckedOutBreakdownForAsset(
   }
 
   // Fetch every checkout session for the involved bookings ONCE. Grouped by
-  // booking so the legacy-ONGOING detection (does the BOOKING have ANY
-  // sessions) matches the parent's per-booking check exactly.
+  // booking because claims are attributed per (booking, asset) — the legacy
+  // test below then asks whether THIS asset has any claims on THIS booking.
   const bookingIds = [...slicesByBooking.keys()];
   const sessions = (await tx.partialBookingCheckout.findMany({
     where: { bookingId: { in: bookingIds } },
@@ -226,24 +244,29 @@ export async function computeCheckedOutBreakdownForAsset(
 
   for (const [bookingId, bookingSlices] of slicesByBooking) {
     const bookingSessions = sessionsByBooking.get(bookingId) ?? [];
-    // Legacy all-at-once checkout: a booking with ZERO sessions (these slices
-    // are already scoped to ONGOING/OVERDUE) had every booked unit flipped off
-    // the shelf at once — mirrors the parent's legacy-ONGOING branch.
-    const isLegacyOngoing = bookingSessions.length === 0;
-
     // Claimed-per-slice map: exact for tagged logs, standalone-first greedy for
-    // untagged/legacy-attribution logs. Skipped for legacy-ONGOING bookings,
-    // where every slice is fully off the shelf regardless of session data.
-    const claimedBySlice = isLegacyOngoing
-      ? null
-      : attributeDispositionsByBookingAsset({
-          bookingAssetRows: bookingSlices,
-          consumptionLogs:
-            checkoutSessionsToLogsByAsset(
-              bookingSessions,
-              (id) => id === assetId
-            ).get(assetId) ?? [],
-        });
+    // untagged/legacy-attribution logs. Built first so the legacy test below can
+    // ask whether THIS asset has any claims at all.
+    const claimedBySlice = attributeDispositionsByBookingAsset({
+      bookingAssetRows: bookingSlices,
+      consumptionLogs:
+        checkoutSessionsToLogsByAsset(
+          bookingSessions,
+          (id) => id === assetId
+        ).get(assetId) ?? [],
+    });
+    const assetHasClaims = bookingSlices.some(
+      (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
+    );
+
+    // Legacy all-at-once checkout — mirrors the parent's per-asset branch: this
+    // asset is flagged off the shelf and has NO recorded claims on this
+    // booking, so the zeroed counters are the all-at-once flow's silence rather
+    // than "still on the shelf". Keyed on the asset, not on the booking having
+    // zero sessions, so a later batch for a DIFFERENT asset can't resurrect it,
+    // and an asset added after the checkout (still AVAILABLE) is never counted
+    // as out (GitHub #2815).
+    const isLegacyOngoing = assetIsCheckedOut && !assetHasClaims;
 
     for (const slice of bookingSlices) {
       const checkedOutSlice = isLegacyOngoing
