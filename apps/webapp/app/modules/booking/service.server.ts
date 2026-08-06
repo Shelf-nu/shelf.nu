@@ -8631,6 +8631,12 @@ export async function cancelBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while cancelling the booking, please try again.",
+      // ShelfError inherits status/shouldBeCaptured from a ShelfError cause but
+      // NOT additionalData — forward it so the handled-400 branch's { bookingId,
+      // status } debug context survives the re-wrap. See SHELF-WEBAPP-222.
+      additionalData: isLikeShelfError(cause)
+        ? cause.additionalData
+        : undefined,
     });
   }
 }

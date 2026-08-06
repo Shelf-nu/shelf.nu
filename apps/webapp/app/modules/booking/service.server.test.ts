@@ -9327,5 +9327,11 @@ describe("cancelBooking — handled validation (SHELF-WEBAPP-222)", () => {
     // from the cause, so the handled-client classification survives.
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+    // ...and additionalData is forwarded through the wrapper (not inherited by
+    // ShelfError automatically), so the debug context survives.
+    expect(err.additionalData).toMatchObject({
+      bookingId: "booking-1",
+      status: BookingStatus.COMPLETE,
+    });
   });
 });
