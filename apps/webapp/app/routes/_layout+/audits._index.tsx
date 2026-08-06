@@ -252,28 +252,19 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         {item.dueDate ? (
-          <DateS
-            date={item.dueDate}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.dueDate} includeTime />
         ) : (
           <EmptyTableValue />
         )}
       </Td>
 
       <Td>
-        <DateS
-          date={item.createdAt}
-          options={{ dateStyle: "short", timeStyle: "short" }}
-        />
+        <DateS date={item.createdAt} includeTime />
       </Td>
 
       <Td>
         {item.startedAt ? (
-          <DateS
-            date={item.startedAt}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.startedAt} includeTime />
         ) : (
           <EmptyTableValue />
         )}
@@ -281,10 +272,7 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         {item.completedAt ? (
-          <DateS
-            date={item.completedAt}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.completedAt} includeTime />
         ) : (
           <EmptyTableValue />
         )}

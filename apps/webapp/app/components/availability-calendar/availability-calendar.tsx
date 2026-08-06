@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CustomContentGenerator, EventInput } from "@fullcalendar/core";
+// Named-timezone support: FullCalendar v6 only understands "local"/"UTC"; a
+// named IANA `timeZone` (below) silently falls back to UTC — rendering non-UTC
+// users' booking bars at the wrong time in the Day/Week views — unless this
+// Luxon connector is registered in `plugins`. Same reason as routes/calendar.tsx.
+import luxonPlugin from "@fullcalendar/luxon3";
 import FullCalendar from "@fullcalendar/react";
 import type {
   ResourceInput,
@@ -13,6 +18,7 @@ import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
   getCalendarTitleAndSubtitle,
@@ -44,7 +50,13 @@ export default function AvailabilityCalendar({
     useLoaderData<AssetIndexLoaderData>();
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
-  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+  const { prefs } = useDateFormatter();
+  // Drive FullCalendar's clock (12h vs 24h) from the workspace time-format pref.
+  const hour12 = prefs.timeFormat === "H12";
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+    new Date(),
+    prefs
+  );
 
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -59,7 +71,9 @@ export default function AvailabilityCalendar({
   const updateTitle = (viewType = calendarView) => {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
+      setCalendarHeader(
+        getCalendarTitleAndSubtitle({ viewType, calendarApi, prefs })
+      );
     }
   };
 
@@ -128,18 +142,23 @@ export default function AvailabilityCalendar({
               ref={calendarRef}
               height="auto"
               timeZone={timeZone}
+              firstDay={prefs.weekStartsOn}
               nowIndicator
               slotEventOverlap
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
                 meridiem: "short",
+                hour12,
               }}
               eventMouseEnter={handleEventMouseEnter("resourceTimelineMonth")}
               eventMouseLeave={handleEventMouseLeave("resourceTimelineMonth")}
               eventClick={handleEventClick}
               resourceOrder="none"
-              plugins={[resourceTimelinePlugin]}
+              // luxonPlugin registers named-IANA-timezone resolution so
+              // `timeZone={timeZone}` above renders in the user's zone instead
+              // of falling back to UTC (see import note).
+              plugins={[resourceTimelinePlugin, luxonPlugin]}
               schedulerLicenseKey={FULL_CALENDAR_LICENSE_KEY}
               initialView={DEFAULT_CALENDAR_VIEW}
               headerToolbar={false}
@@ -183,13 +202,18 @@ export default function AvailabilityCalendar({
                 resourceTimelineWeek: {
                   slotLabelFormat: [
                     { weekday: "long", month: "short", day: "numeric" },
-                    { hour: "numeric", meridiem: "short" },
+                    { hour: "numeric", meridiem: "short", hour12 },
                   ],
                 },
                 resourceTimelineDay: {
                   slotLabelFormat: [
                     { weekday: "short", month: "short", day: "numeric" },
-                    { hour: "numeric", minute: "2-digit", meridiem: "short" },
+                    {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      meridiem: "short",
+                      hour12,
+                    },
                   ],
                 },
               }}

@@ -89,10 +89,7 @@ export default function LocationOverview() {
             Created
           </span>
           <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-            <DateS
-              date={location.createdAt}
-              options={{ dateStyle: "short", timeStyle: "short" }}
-            />
+            <DateS date={location.createdAt} includeTime />
           </div>
         </li>
         {location.address && (

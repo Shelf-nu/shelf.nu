@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useFetcher, useLoaderData } from "react-router";
+import { Form, useLoaderData } from "react-router";
 import invariant from "tiny-invariant";
 import { Button } from "~/components/shared/button";
 import {
@@ -15,7 +15,6 @@ import ProfilePicture from "~/components/user/profile-picture";
 import When from "~/components/when/when";
 import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import type { loader } from "~/routes/_layout+/_layout";
-import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import {
   SidebarMenu,
@@ -26,14 +25,15 @@ import {
 
 export default function OrganizationSelector() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
 
   const { open, openMobile, isMobile } = useSidebar();
 
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
 
-  const fetcher = useFetcher();
-  const isSwitchingOrg = isFormProcessing(fetcher.state);
+  const formRef = useRef<HTMLFormElement>(null);
+  const organizationIdRef = useRef<HTMLInputElement>(null);
 
   const currentOrganization = organizations.find(
     (org) => org.id === currentOrganizationId
@@ -43,14 +43,30 @@ export default function OrganizationSelector() {
     "Something went wrong. Current organization is not in the list of organizations."
   );
 
+  /**
+   * Switching workspace swaps the whole tenant: the app shell (sidebar nav,
+   * roles, org, subscription), every route loader, and all client-side caches
+   * and atoms. A client-side submission leaves that to router revalidation,
+   * and ancestor routes that opt out of revalidation (the app shell does, via
+   * `skipRevalidationOnClientViewChange`) can end up keeping the PREVIOUS
+   * workspace's data while the page below shows the new one — the sidebar then
+   * lists nav items for a workspace the user is no longer in.
+   *
+   * A native document submission sidesteps that entirely: the browser posts,
+   * follows the redirect, and builds a fresh document for the new workspace.
+   * Switching workspace is a deliberate, infrequent action, so a full reload is
+   * the right trade for guaranteed consistency.
+   */
   function handleSwitchOrganization(organizationId: string) {
-    const formData = new FormData();
-    formData.append("organizationId", organizationId);
+    if (!formRef.current || !organizationIdRef.current) {
+      return;
+    }
 
-    void fetcher.submit(formData, {
-      method: "POST",
-      action: CHANGE_CURRENT_ORGANIZATION_ACTION,
-    });
+    setIsSwitchingOrg(true);
+    organizationIdRef.current.value = organizationId;
+    // `HTMLFormElement.submit()` is a native navigation — React Router never
+    // sees it, which is exactly what we want here.
+    formRef.current.submit();
   }
 
   function closeDropdown() {
@@ -60,6 +76,19 @@ export default function OrganizationSelector() {
   return (
     <SidebarMenu>
       <SidebarMenuItem className={tw(openMobile && "px-2")}>
+        {/* Submitted imperatively by `handleSwitchOrganization`.
+            `reloadDocument` keeps React Router out of the submission so the
+            whole document is rebuilt for the newly selected workspace. */}
+        <Form
+          ref={formRef}
+          method="POST"
+          action={CHANGE_CURRENT_ORGANIZATION_ACTION}
+          reloadDocument
+          className="hidden"
+        >
+          <input type="hidden" name="organizationId" ref={organizationIdRef} />
+        </Form>
+
         <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton

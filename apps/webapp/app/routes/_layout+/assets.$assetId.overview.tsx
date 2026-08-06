@@ -35,6 +35,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
@@ -47,6 +48,7 @@ import {
 } from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
@@ -81,8 +83,7 @@ import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
+import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
@@ -157,6 +158,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { locale, timeZone } = getClientHint(request);
 
+    /**
+     * The caller's roles in the active org. Derived once here and reused by
+     * every server-side `hasPermission` check in this loader (scan gating
+     * below, edit gating further down) — passing `roles` explicitly avoids
+     * the validator's DB fallback lookup on each call.
+     */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
     const asset = await getAsset({
       id,
       organizationId,
@@ -167,14 +178,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan
+     * And using the ID of tha qr code, we find the latest scan.
+     *
+     * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
+     * returns null without it. The parsed scan carries the scanner's name and
+     * email, GPS coordinates and user-agent; the component renders
+     * `<ScanDetails>` behind the same check, but a client-side check only
+     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
+     * receiving all of it in the page payload.
      */
-    const lastScan = asset.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-          userId,
-        })
-      : null;
+    const lastScan = await getLastScanForViewer({
+      qrId: asset.qrCodes[0]?.id,
+      userId,
+      organizationId,
+      roles,
+    });
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -187,13 +205,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * skip the heavy categories/locations/custom-field-defs queries for
      * users who are view-only. Uses the server-side `hasPermission` because
      * the client-side `userHasPermission` validator file has the `.client.`
-     * suffix and is stripped from the SSR bundle. Passing `roles` explicitly
-     * avoids the validator's DB fallback lookup.
+     * suffix and is stripped from the SSR bundle. `roles` is derived once at
+     * the top of the loader.
      */
-    const roles = userOrganizations.find(
-      (o) => o.organization.id === organizationId
-    )?.roles;
-
     const canEditAsset = await hasPermission({
       userId,
       organizationId,
@@ -724,7 +738,6 @@ export default function AssetOverview() {
   const {
     asset,
     locale,
-    timeZone,
     qrObj,
     lastScan,
     currentOrganization,
@@ -734,6 +747,7 @@ export default function AssetOverview() {
     moveDestinations,
     unplacedQuantity,
   } = useLoaderData<typeof loader>();
+  const { prefs } = useDateFormatter();
 
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
@@ -1238,10 +1252,7 @@ export default function AssetOverview() {
                         ? String(fieldValue.raw)
                         : "";
                     const customFieldDisplayValue = hasValue
-                      ? getCustomFieldDisplayValue(fieldValue!, {
-                          locale,
-                          timeZone,
-                        })
+                      ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
                     /* Hide "Not set" rows from view-only users */
@@ -1271,6 +1282,7 @@ export default function AssetOverview() {
                                   content={
                                     customFieldDisplayValue as RenderableTreeNode
                                   }
+                                  allowExternalLinks
                                 />
                               ) : isLink(customFieldDisplayValue as string) ? (
                                 <Button
@@ -1323,10 +1335,10 @@ export default function AssetOverview() {
                               );
                             case CustomFieldType.DATE:
                               return (
-                                <Input
+                                <DateTimePicker
+                                  mode="date"
                                   label={def.name}
                                   hideLabel
-                                  type="date"
                                   name="fieldValue"
                                   defaultValue={rawValue}
                                   className="w-full"
@@ -1767,6 +1779,7 @@ export default function AssetOverview() {
               custody={asset.custody}
               assetId={asset.id}
               unitOfMeasure={asset.unitOfMeasure}
+              consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
               isSelfService={isSelfService}
               currentUserId={userId}

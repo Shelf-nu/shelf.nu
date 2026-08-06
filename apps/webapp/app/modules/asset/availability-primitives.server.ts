@@ -1,11 +1,14 @@
 /**
  * Asset Availability Primitives (dependency-free leaf)
  *
- * The pure, I/O-light core of the QT-availability domain: the interval-sweep
- * primitive ({@link peakConcurrent}), the shared active-booking filters
- * ({@link buildActiveBookingWhere} / {@link resolveIntervalTo} and their
- * status/category constants), and the stock-lowering write guard
- * ({@link assertAssetQuantityNotBelowReservations}).
+ * The Prisma-COUPLED core of the QT-availability domain that cannot live in
+ * the pure `@shelf/quantity-control` package: the shared active-booking
+ * `where`-builder ({@link buildActiveBookingWhere}) and the stock-lowering
+ * write guard ({@link assertAssetQuantityNotBelowReservations}). The pure math
+ * these rely on — the interval-sweep primitive, the OVERDUE-sentinel `to`
+ * resolver, the status/category constants, and the committed-total verdict —
+ * is now owned by `@shelf/quantity-control` and imported here (and re-exported
+ * below so every existing consumer's import path stays stable).
  *
  * ## Why this file exists — breaking an import cycle
  *
@@ -22,18 +25,27 @@
  * installed, so every check-in disposition test sees zero mock calls.
  *
  * This leaf imports NEITHER `booking/service.server` NOR `consumption-log`
- * (only `@prisma/client` enums, `~/utils/error`, and TYPE-only shapes from
- * `availability.server`, which are erased at build time), so `consumption-log`
- * can import the guard from here without forming a runtime cycle.
- * `availability.server` re-exports everything here, so every existing consumer
- * keeps importing these symbols from `~/modules/asset/availability.server`
- * unchanged.
+ * (only the dependency-free `@shelf/quantity-control` package, `@prisma/client`
+ * enums, `~/utils/error`, and TYPE-only shapes from `availability.server`,
+ * which are erased at build time), so `consumption-log` can import the guard
+ * from here without forming a runtime cycle. `availability.server` re-exports
+ * everything here, so every existing consumer keeps importing these symbols
+ * from `~/modules/asset/availability.server` unchanged.
  *
  * @see {@link file://./availability.server.ts} — the public entrypoint that re-exports these.
+ * @see {@link file://../../../../packages/quantity-control/src/availability.ts} — the pure primitives.
  */
 
 import type { Prisma } from "@prisma/client";
-import { BookingStatus, ConsumptionCategory } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
+import {
+  ACTIVE_BOOKING_STATUSES,
+  checkQuantityNotBelowCommitted,
+  peakConcurrent,
+  RESERVATION_REDUCING_CATEGORIES,
+  resolveIntervalTo,
+} from "@shelf/quantity-control";
+import type { AvailabilityInterval } from "@shelf/quantity-control";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -44,88 +56,17 @@ import type {
 
 const label: ErrorLabel = "Assets";
 
-/**
- * "No known return date" sentinel used as an OVERDUE booking's effective
- * interval `to` (see {@link resolveIntervalTo}) — JS's maximum representable
- * `Date` (`+275760-09-13`), i.e. as close to "forever" as `Date` allows. Using
- * an actual `Date` (rather than e.g. `Infinity`) keeps
- * {@link peakConcurrent}'s `.getTime()` sweep uniform across every interval.
- */
-const FAR_FUTURE_SENTINEL = new Date(8_640_000_000_000_000);
-
-/* -------------------------------------------------------------------------- */
-/*                               peakConcurrent                               */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A committed booking interval competing for an asset's pool. Exported so
- * sibling batched primitives (e.g.
- * `~/modules/booking/stock-conflicts.server`) that build their own interval
- * lists from a differently-shaped query can type them identically to what
- * {@link peakConcurrent} / {@link overCommittedWindows} expect, without
- * redeclaring the shape.
- */
-export type AvailabilityInterval = { from: Date; to: Date; qty: number };
-
-/**
- * Maximum concurrent committed quantity at any instant across `intervals`.
- *
- * Runs an O(n log n) sweep: each interval contributes a +qty event at `from`
- * and a −qty event at `to`. Ends are applied before starts at an identical
- * timestamp, so a booking that ends exactly when another begins is treated as
- * non-overlapping (end-exclusive). This is what fixes the "bb1/bb2 bug":
- * naively summing every reservation in a window double-counts bookings that
- * never actually overlap in time.
- *
- * @param intervals - committed booking intervals (already filtered to the target window)
- * @returns the peak concurrent quantity (0 for empty input)
- */
-export function peakConcurrent(intervals: AvailabilityInterval[]): number {
-  const events: Array<{ t: number; delta: number }> = [];
-  for (const { from, to, qty } of intervals) {
-    events.push({ t: from.getTime(), delta: qty });
-    events.push({ t: to.getTime(), delta: -qty });
-  }
-  // Sort by time; at equal timestamps apply releases (−) before claims (+)
-  // so a booking ending exactly when another starts never appears to overlap.
-  events.sort((a, b) => a.t - b.t || a.delta - b.delta);
-
-  let running = 0;
-  let peak = 0;
-  for (const { delta } of events) {
-    running += delta;
-    if (running > peak) peak = running;
-  }
-  return peak;
-}
-
-/**
- * Booking statuses that claim availability for a given asset. Exported so
- * sibling primitives that need to test "is this booking active" against the
- * same definition (e.g. `flagBookingStockConflicts`'s eligibility filter in
- * `~/modules/booking/stock-conflicts.server`) never drift from what actually
- * competes for the pool here.
- */
-export const ACTIVE_BOOKING_STATUSES = [
-  BookingStatus.RESERVED,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-] as const;
-
-/**
- * Disposition categories that reduce a booking's remaining reserved
- * quantity. Exported so sibling batched primitives building their own
- * logged-dispositions read (e.g.
- * `~/modules/booking/stock-conflicts.server`) filter on the identical set —
- * see {@link RESERVATION_REDUCING_CATEGORIES}'s usage below for the
- * canonical shape of that query.
- */
-export const RESERVATION_REDUCING_CATEGORIES = [
-  ConsumptionCategory.RETURN,
-  ConsumptionCategory.CONSUME,
-  ConsumptionCategory.LOSS,
-  ConsumptionCategory.DAMAGE,
-] as const;
+// The pure availability primitives now live in `@shelf/quantity-control`.
+// Re-exported here (unchanged values) so `availability.server` — and, through
+// its own re-export, every downstream consumer — keeps importing them from the
+// `~/modules/asset/...` path they always have, with no call-site churn.
+export {
+  ACTIVE_BOOKING_STATUSES,
+  peakConcurrent,
+  RESERVATION_REDUCING_CATEGORIES,
+  resolveIntervalTo,
+};
+export type { AvailabilityInterval };
 
 /**
  * Builds the shared `booking` where-filter for a reserved-rows query — used
@@ -183,40 +124,6 @@ export function buildActiveBookingWhere(
     ];
   }
   return bookingWhere;
-}
-
-/**
- * Resolves the effective `to` timestamp for a reserved row's
- * {@link AvailabilityInterval} in the peak-concurrent sweep.
- *
- * RESERVED/ONGOING bookings keep their REAL `to` (or the query window's `to`
- * when the row's own booking is unexpectedly missing dates — the same
- * conservative fallback used for `from`) — a unit is only occupied while the
- * booking is actually scheduled/active, so a booking that already ended
- * before the target window starts correctly stops competing for the pool.
- *
- * OVERDUE bookings have blown past their `to` with no logged return — there
- * is no known date they stop competing, so they get
- * {@link FAR_FUTURE_SENTINEL} instead, keeping them "occupying" every
- * current/future window until an explicit check-in changes their status.
- *
- * Exported so sibling primitives building their own interval lists from a
- * global (unwindowed) active-bookings read — e.g.
- * `flagBookingStockConflicts` in `~/modules/booking/stock-conflicts.server`
- * — resolve the OVERDUE sentinel identically instead of re-deriving it.
- *
- * @param bookingStatus - The reserving booking's status, if known.
- * @param bookingTo - The reserving booking's real `to` date, if known.
- * @param windowTo - The query window's `to` — conservative fallback only.
- * @returns The `to` timestamp to use for this row's interval.
- */
-export function resolveIntervalTo(
-  bookingStatus: BookingStatus | undefined,
-  bookingTo: Date | undefined,
-  windowTo: Date
-): Date {
-  if (bookingStatus === BookingStatus.OVERDUE) return FAR_FUTURE_SENTINEL;
-  return bookingTo ?? windowTo;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -413,7 +320,11 @@ export async function assertAssetQuantityNotBelowReservations({
 
   const committed = inCustody + inKits + peakReserved;
 
-  if (newTotal < committed) {
+  // Route only the FINAL numeric decision through the pure package verdict
+  // (`newTotal < committed` ⟺ `!verdict.ok`). The thrown `ShelfError` — its
+  // message copy and `additionalData` breakdown — stays built here so the
+  // exact user-facing string and debugging payload are preserved byte-for-byte.
+  if (!checkQuantityNotBelowCommitted({ newTotal, committed }).ok) {
     const title = assetTitle ?? "This asset";
     const unit = unitOfMeasure || "units";
     throw new ShelfError({

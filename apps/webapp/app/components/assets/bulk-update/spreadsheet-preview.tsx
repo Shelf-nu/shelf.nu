@@ -62,8 +62,23 @@ export function SpreadsheetPreview({
   return (
     <div className="mb-4">
       <p className="mb-2 text-sm font-medium text-gray-700">
-        {totalChanges} change{totalChanges !== 1 ? "s" : ""} across{" "}
-        {totalAssets} asset{totalAssets !== 1 ? "s" : ""}
+        {/* `totalChanges` counts only changes the apply layer will write.
+            Rows whose every change is warning-marked still render below (the
+            user needs to see what was flagged), so the count can legitimately
+            be 0 while rows are shown — say that plainly rather than printing
+            a contradictory "0 changes across 2 assets". */}
+        {totalChanges === 0 ? (
+          <>
+            No changes to apply — {totalAssets} asset
+            {totalAssets !== 1 ? "s" : ""} need
+            {totalAssets === 1 ? "s" : ""} fixing
+          </>
+        ) : (
+          <>
+            {totalChanges} change{totalChanges !== 1 ? "s" : ""} across{" "}
+            {totalAssets} asset{totalAssets !== 1 ? "s" : ""}
+          </>
+        )}
         {totalAssets > displayLimit && ` (showing first ${displayLimit})`}
       </p>
       <div className="max-h-[600px] overflow-auto rounded-md border">

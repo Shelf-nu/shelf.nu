@@ -698,6 +698,90 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
+describe("generateWhereClause - built-in date filter timezone", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * Built-in date columns (createdAt, updatedAt, …) are Prisma-default
+   * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+   * as a bare wall clock. To truncate to the calendar day the row DISPLAYS in
+   * for a non-UTC user, the column is converted in TWO steps —
+   * `AT TIME ZONE 'UTC'` (reinterpret the wall clock as a UTC instant) then
+   * `AT TIME ZONE ${tz}` (to the user's wall clock) — before `::date`.
+   *
+   * A single `AT TIME ZONE ${tz}` is the bug this guards: it ASSUMES the stored
+   * value is already in the user's zone, mis-shifting by the offset. Verified
+   * against Postgres: an asset at `2026-07-20 23:00Z` (shows as Jul 21 in Tokyo)
+   * truncates to Jul 20 under the single cast, Jul 21 under the double cast.
+   *
+   * The user tz is bound as a SQL parameter (`AT TIME ZONE $n`), so it surfaces
+   * in `values`; the leading `'UTC'` is a fixed literal in the SQL text.
+   */
+  it("converts UTC→user-tz (double AT TIME ZONE) before truncating to a date", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    // The two-step conversion — a single `AT TIME ZONE` would be the off-by-one
+    // bug. The literal 'UTC' lives in the SQL text; the user tz is bound.
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    expect(result.values).toContain("Asia/Tokyo");
+  });
+
+  it("defaults the built-in date filter timezone to UTC when unspecified", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    // The (defaulted) user tz is bound as a parameter.
+    expect(result.values).toContain("UTC");
+  });
+
+  /**
+   * Custom-field DATE values are stored date-only (no timezone), so their
+   * filter must NOT be wrapped in AT TIME ZONE — doing so would be a no-op at
+   * best and a cast error at worst. Regression guard for the deliberate carve-out.
+   */
+  it("does NOT apply AT TIME ZONE to a custom-field DATE filter", () => {
+    const filter = {
+      name: "cf_PurchaseDate",
+      type: "customField",
+      fieldType: "DATE",
+      operator: "is",
+      value: "2026-07-20",
+    } as Filter;
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    expect(getSqlString(result)).not.toContain("AT TIME ZONE");
+  });
+});
+
 describe("assetQueryFragment", () => {
   /**
    * Helper to extract SQL string from Prisma.Sql for testing.
@@ -1049,6 +1133,34 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
     const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
 
     expect(sql).toContain('WHERE att."A" = a.id AND t.id = ANY');
+  });
+});
+
+describe("generateWhereClause - lowStockOnly", () => {
+  const orgId = "test-org-id";
+
+  it("does NOT emit the low-stock predicate when the flag is unset", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("does NOT emit the low-stock predicate when explicitly false", () => {
+    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+    );
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("emits the low-stock predicate when the flag is set", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+    );
+    expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
+    expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
+    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
   });
 });
 

@@ -29,6 +29,7 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -476,6 +477,7 @@ export function getTeamMemberHref(member: TeamMemberSearchResult) {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
+  const { formatDate } = useDateFormatter();
   const inputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const layoutData = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
@@ -729,9 +731,7 @@ export function CommandPalette() {
                   </span>
                   <span className="truncate text-xs text-gray-500">
                     {audit.status}
-                    {audit.dueDate
-                      ? ` • Due ${new Date(audit.dueDate).toLocaleDateString()}`
-                      : ""}
+                    {audit.dueDate ? ` • Due ${formatDate(audit.dueDate)}` : ""}
                     {audit.description ? ` • ${audit.description}` : ""}
                   </span>
                 </div>
@@ -782,11 +782,9 @@ export function CommandPalette() {
                     {booking.status}
                     {booking.custodianName ? ` • ${booking.custodianName}` : ""}
                     {booking.from && booking.to
-                      ? ` • ${new Date(
-                          booking.from
-                        ).toLocaleDateString()} - ${new Date(
+                      ? ` • ${formatDate(booking.from)} - ${formatDate(
                           booking.to
-                        ).toLocaleDateString()}`
+                        )}`
                       : ""}
                   </span>
                 </div>

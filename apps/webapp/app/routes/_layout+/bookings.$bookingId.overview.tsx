@@ -86,7 +86,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  canUserRemoveBookingAssets,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -95,6 +98,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
@@ -1395,15 +1399,56 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         getBookingSettingsForOrganization(organizationId),
       ]
     );
+
+    /**
+     * A finished booking is a closed record — its contents must not change.
+     *
+     * The remove intents were gated on `booking:update` permission alone: the
+     * COMPLETE/ARCHIVED block lived only in the client dropdown, so a crafted
+     * POST could still strip items from a finished booking. Every sibling
+     * path already guards this server-side (`manage-assets`, `manage-kits`,
+     * and the mobile remove endpoint).
+     *
+     * Status only — WHO may remove is already settled upstream by the row/bulk
+     * action gating, and differs from who may add (a self-service custodian
+     * may remove from their own RESERVED booking).
+     */
+    const removeIntents = [
+      "removeAsset",
+      "removeKit",
+      "bulk-remove-asset-or-kit",
+    ];
+    if (
+      removeIntents.includes(intent) &&
+      !canUserRemoveBookingAssets(basicBookingInfo)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Removing items is not allowed for the current status of the booking.",
+        additionalData: { userId, id, intent, status: basicBookingInfo.status },
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     switch (intent) {
       case "save": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
         const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints,
+            hints: hintsWithPrefTz,
             workingHours,
             bookingSettings,
             isAdminOrOwner,
@@ -1418,13 +1463,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1457,11 +1502,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "reserve": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
 
         const parsedData = parseData(
           formData,
           BookingFormSchema({
-            hints,
+            hints: hintsWithPrefTz,
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
@@ -1479,13 +1531,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1859,13 +1911,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "extend-booking": {
         const hints = getClientHint(request);
 
-        // Debug: Check what's actually in the form data
+        // TIMEZONE FIX: parse the submitted wall-clock end date in the acting
+        // user's RESOLVED pref timezone (matches display), not the browser
+        // hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (await resolveUserFormatPrefsById(userId, hints))
+          .timeZone;
 
         const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
-            timeZone: hints.timeZone,
+            timeZone: prefTimeZone,
             bookingSettings,
             isAdminOrOwner,
           }),
@@ -1929,15 +1985,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "bulk-remove-asset-or-kit": {
-        const { assetOrKitIds } = parseData(
-          formData,
-          BulkRemoveAssetsAndKitSchema
-        );
+        const { assetOrKitIds, standaloneAssetIds: selectedStandaloneIds } =
+          parseData(formData, BulkRemoveAssetsAndKitSchema);
 
         /**
-         * From frontend, we get both assetIds and kitIds,
-         * here we are separating them and excluding assets that belong to kits
-         * */
+         * The selection arrives as one flat id list holding both assets and
+         * kits, so resolve it against each table to split it apart. Ticking a
+         * kit also injects its member rows into the selection, which is why
+         * the split alone can't tell a member apart from a directly-ticked
+         * asset — `standaloneAssetIds` carries that provenance separately.
+         */
         const assets = await db.asset.findMany({
           where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
@@ -1957,19 +2014,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           kit.assetKits.map((ak) => ak.asset.id)
         );
 
-        // Filter out assets that belong to the selected kits to avoid double-counting
-        const standaloneAssets = assets.filter(
-          (asset) => !kitAssetIds.includes(asset.id)
+        /**
+         * Assets the user ticked as their own standalone row. Intersected
+         * with the org-scoped `assets` above so a forged id in the hidden
+         * field can never reach the delete predicate.
+         *
+         * Kit membership deliberately does NOT disqualify an asset here: a
+         * qty-tracked asset can sit on the booking both standalone and via a
+         * kit, and ticking both rows must remove both. Falls back to the
+         * membership filter when the field is absent (older clients), which
+         * is the pre-existing behaviour.
+         */
+        const orgScopedAssetIds = new Set(assets.map((asset) => asset.id));
+        const standaloneAssetIds =
+          selectedStandaloneIds.length > 0
+            ? selectedStandaloneIds.filter((assetId) =>
+                orgScopedAssetIds.has(assetId)
+              )
+            : assets
+                .filter((asset) => !kitAssetIds.includes(asset.id))
+                .map((asset) => asset.id);
+
+        // Drives the removal note wording only — the ids above drive what is
+        // actually detached.
+        const standaloneAssets = assets.filter((asset) =>
+          standaloneAssetIds.includes(asset.id)
         );
 
-        // All asset IDs to be disconnected (standalone assets + kit assets)
+        // All asset IDs to be disconnected (standalone assets + kit assets).
+        // De-duped: an asset ticked standalone AND present in a ticked kit
+        // appears in both buckets, and `assetIds` drives one-note-per-asset
+        // downstream.
         const allAssetIdsToRemove = [
-          ...standaloneAssets.map((a) => a.id),
-          ...kitAssetIds,
+          ...new Set([...standaloneAssetIds, ...kitAssetIds]),
         ];
 
         const b = await removeAssets({
           booking: { id, assetIds: allAssetIdsToRemove },
+          standaloneAssetIds,
           kitIds: kits.map((k) => k.id),
           kits: kits.map((kit) => ({ id: kit.id, name: kit.name })),
           assets: standaloneAssets.map((asset) => ({
@@ -1992,9 +2074,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
+        // The selection can hold assets, kits, or both — the old hardcoded
+        // "Kit removed" toast was wrong for every selection that wasn't a
+        // lone kit, which read as "the assets weren't removed".
+        const removedCount = standaloneAssets.length + kits.length;
         sendNotification({
-          title: "Kit removed",
-          message: "Your kit has been removed from the booking",
+          title: removedCount === 1 ? "Item removed" : "Items removed",
+          message:
+            removedCount === 1
+              ? "The selected item has been removed from the booking"
+              : `${removedCount} items have been removed from the booking`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

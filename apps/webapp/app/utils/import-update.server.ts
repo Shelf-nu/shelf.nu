@@ -30,6 +30,7 @@ import {
   analyzeUpdateHeaders,
   computeAssetDiffs,
   describeBulkUpdateRowFailure,
+  isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -62,6 +63,65 @@ export { analyzeUpdateHeaders, computeAssetDiffs } from "./import-update-diff";
 export { fetchAssetsForUpdate } from "./import-update-entities.server";
 
 // ---------------------------------------------------------------------------
+// Shared User-Facing Error Copy
+// ---------------------------------------------------------------------------
+
+/**
+ * "No identifier column" error message — shared between `buildUpdatePreview`
+ * and `applyBulkUpdatesFromImport` so the two call sites of
+ * `analyzeUpdateHeaders` (preview time and apply time) never drift out of
+ * sync with each other.
+ *
+ * Previously claimed the ID column is "automatically included in all Asset
+ * Index exports" — that was false: the Import-ready export historically had
+ * no identifier column at all (now fixed separately — it always includes an
+ * `id` column), and the Standard export's "ID" column is only present when
+ * the user has it visible, or picks the "All columns" scope. Point at the
+ * export that's actually guaranteed to include one instead of asserting
+ * something untrue about "all" exports.
+ */
+const NO_IDENTIFIER_COLUMN_MESSAGE =
+  'No identifier column found. Your CSV needs an "Asset ID", "ID", or "id" ' +
+  "column so rows can be matched to existing assets. Export " +
+  '"Import-ready" from the Asset Index (either column scope) — it always ' +
+  "includes an id column, and the same file can be re-imported here to " +
+  "update those assets.";
+
+/**
+ * "Identifier found, nothing updatable" error message. Fires when every
+ * non-identifier header in the CSV is either unrecognized or a known
+ * read-only field (Status, Kit, Custody, …) — the file matches assets but
+ * carries no column this flow can write. Without this check the preview
+ * silently came back empty ("No changes detected"), which reads as "nothing
+ * changed" rather than "this is the wrong file" — see the
+ * `headerAnalysis.updatableColumns.length === 0` guard below.
+ */
+const NO_UPDATABLE_COLUMNS_MESSAGE =
+  "We matched your identifier column, but none of the other columns in " +
+  "this file can be updated here (e.g. Title, Category, Location, Tags, " +
+  "Valuation, or your custom fields). This usually means the file isn't " +
+  'shaped for updates. Export "Import-ready" from the Asset Index and ' +
+  "re-import that file to update these assets.";
+
+/**
+ * "Workspace backup export detected" error message. Fires when the header
+ * row carries raw Prisma field/relation names that only the workspace
+ * backup export (Settings → General → Export backup) emits — see
+ * `isBackupExportHeaderRow` in `./import-update-diff`. That file's
+ * `category`, `tags`, and `assetModel` cells are JSON blobs, not plain
+ * values, so letting it through would propose creating entities literally
+ * named `{}` / `[]` / a raw JSON string. Checked BEFORE the identifier
+ * check below: the backup file's `id` header now resolves as a valid
+ * identifier column (case-insensitive matching, added by this branch), so
+ * without this guard the file would sail past that check too.
+ */
+const BACKUP_EXPORT_MESSAGE =
+  "This looks like a workspace backup export. Use Export → Import-ready " +
+  "from the Asset Index instead — the backup file's category, tags, and " +
+  "asset model cells are stored as raw data and can't be matched to real " +
+  "entities here.";
+
+// ---------------------------------------------------------------------------
 // Build Full Preview
 // ---------------------------------------------------------------------------
 
@@ -73,7 +133,9 @@ export { fetchAssetsForUpdate } from "./import-update-entities.server";
  * @param csvData - Full CSV data array (first row is headers)
  * @param organizationId - Organization scope for the query
  * @returns Complete preview of all changes that would be applied
- * @throws {ShelfError} If no identifier column found or row limit exceeded
+ * @throws {ShelfError} If no identifier column is found, no column is
+ *   updatable (identifier present but nothing to write), or the row limit
+ *   is exceeded
  */
 export async function buildUpdatePreview({
   csvData,
@@ -91,6 +153,7 @@ export async function buildUpdatePreview({
       cause: null,
       message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -103,13 +166,41 @@ export async function buildUpdatePreview({
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
 
+  // Reject a workspace backup export before it can be misread as a normal
+  // update CSV — see BACKUP_EXPORT_MESSAGE. Checked before the identifier
+  // check below because the backup file's `id` header now resolves as a
+  // valid (case-insensitive) identifier column.
+  if (isBackupExportHeaderRow(headers)) {
+    throw new ShelfError({
+      cause: null,
+      message: BACKUP_EXPORT_MESSAGE,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
   // Validate: must have at least one identifier column
   if (headerAnalysis.idColumnIndex === -1) {
     throw new ShelfError({
       cause: null,
-      message:
-        "No identifier column found. Your CSV needs an Asset ID or ID column. The ID column is automatically included in all Asset Index exports.",
+      message: NO_IDENTIFIER_COLUMN_MESSAGE,
       label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  // Validate: at least one column must actually be updatable. Matching rows
+  // by identifier but writing nothing usually means the wrong file was
+  // uploaded (e.g. a report export with no Shelf-recognized field columns) —
+  // fail loudly here instead of returning a preview with an empty change set.
+  if (headerAnalysis.updatableColumns.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: NO_UPDATABLE_COLUMNS_MESSAGE,
+      label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -150,9 +241,16 @@ export async function buildUpdatePreview({
     fallbackAssets,
   });
 
-  // Compute field change stats
+  // Compute field change stats.
+  //
+  // Only changes WITHOUT a `.warning` are counted: the apply layer skips
+  // warning-marked fields (invalid number/date/enum, assetModel on a
+  // quantity-tracked row, location on a multi-placement asset), so counting
+  // them here would promise the user changes that will never be written —
+  // e.g. a zero-edit round trip of a workspace with multi-location assets
+  // rendered "Apply 2 changes to 2 assets" when the answer was zero.
   const totalFieldChanges = diffs.assetsToUpdate.reduce(
-    (sum, a) => sum + a.changes.length,
+    (sum, a) => sum + a.changes.filter((c) => !c.warning).length,
     0
   );
   // Total possible fields = rows with found assets × updatable columns
@@ -195,7 +293,9 @@ export async function buildUpdatePreview({
  * @param userId - User performing the import
  * @param request - Original HTTP request (passed through to updateAsset)
  * @returns Results summary with updated, skipped, and failed assets
- * @throws {ShelfError} If no identifier column found or row limit exceeded
+ * @throws {ShelfError} If no identifier column is found, no column is
+ *   updatable (identifier present but nothing to write), or the row limit
+ *   is exceeded
  */
 export async function applyBulkUpdatesFromImport({
   csvData,
@@ -218,6 +318,7 @@ export async function applyBulkUpdatesFromImport({
       cause: null,
       message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
       label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -229,12 +330,37 @@ export async function applyBulkUpdatesFromImport({
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
 
+  // Same "workspace backup export" guard as `buildUpdatePreview` — kept in
+  // sync here since this function re-parses the CSV independently
+  // (stateless apply). See BACKUP_EXPORT_MESSAGE.
+  if (isBackupExportHeaderRow(headers)) {
+    throw new ShelfError({
+      cause: null,
+      message: BACKUP_EXPORT_MESSAGE,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
   if (headerAnalysis.idColumnIndex === -1) {
     throw new ShelfError({
       cause: null,
-      message:
-        "No identifier column found. Your CSV needs an Asset ID or ID column.",
+      message: NO_IDENTIFIER_COLUMN_MESSAGE,
       label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  // Same "wrong file" guard as `buildUpdatePreview` — kept in sync here
+  // since this function re-parses the CSV independently (stateless apply).
+  if (headerAnalysis.updatableColumns.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: NO_UPDATABLE_COLUMNS_MESSAGE,
+      label: "Assets",
+      status: 400,
       shouldBeCaptured: false,
     });
   }
@@ -537,6 +663,7 @@ export async function applyBulkUpdatesFromImport({
 
       // Build update payload fields from non-location, non-availableToBook changes
       let title: UpdateAssetPayload["title"];
+      let description: UpdateAssetPayload["description"];
       let categoryId: UpdateAssetPayload["categoryId"];
       let tags: UpdateAssetPayload["tags"];
       let valuation: UpdateAssetPayload["valuation"];
@@ -607,6 +734,14 @@ export async function applyBulkUpdatesFromImport({
         switch (col.internalKey) {
           case "name":
             title = change.newValue;
+            break;
+
+          case "description":
+            // Plain scalar, no side-effects. Not clearable via an empty
+            // cell (see compareCoreField's "description" case) — this
+            // branch only runs for a change the diff already produced,
+            // i.e. a non-empty cell that differs from the current value.
+            description = change.newValue;
             break;
 
           case "category": {
@@ -714,6 +849,7 @@ export async function applyBulkUpdatesFromImport({
       // fields that were silently skipped like invalid numbers)
       let changesApplied = 0;
       if (title !== undefined) changesApplied++;
+      if (description !== undefined) changesApplied++;
       if (categoryId !== undefined) changesApplied++;
       if (tags !== undefined) changesApplied++;
       if (valuation !== undefined) changesApplied++;
@@ -726,6 +862,7 @@ export async function applyBulkUpdatesFromImport({
 
       const hasMainChanges =
         title !== undefined ||
+        description !== undefined ||
         categoryId !== undefined ||
         tags !== undefined ||
         valuation !== undefined ||
@@ -743,6 +880,7 @@ export async function applyBulkUpdatesFromImport({
           organizationId,
           request,
           title,
+          description,
           categoryId,
           tags,
           valuation,
