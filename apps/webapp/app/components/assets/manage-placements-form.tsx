@@ -12,7 +12,9 @@
  *  - "Add another location" button appends a row when there's room.
  *  - Live "placed / unplaced" indicator using `Asset.quantity` as the
  *    bound (mirrors the rule enforced server-side in
- *    `replaceAssetPlacements`).
+ *    `replaceAssetPlacements`). The residual is shown unclamped: when
+ *    placements exceed the total it reads "Over-placed", because that
+ *    state is reachable without the user doing anything wrong.
  *  - Hidden JSON field `placements` carries the full set on submit.
  *
  * INDIVIDUAL assets get the same UI but capped at one row by the
@@ -124,6 +126,29 @@ export function ManagePlacementsForm({
     [rows]
   );
 
+  /**
+   * Placement sum as the dialog was OPENED, captured once.
+   *
+   * When this already exceeds `totalPool`, the over-allocation is not something
+   * the user just typed — the app reached that state on its own. Consumption
+   * lowers `Asset.quantity` without touching placements, and
+   * `asset_location_sum_within_total` never fires on an `Asset` write, so the
+   * two drift apart silently and this dialog is where it first surfaces. The
+   * flag exists purely so the message explains that instead of reading as
+   * "you did something wrong".
+   *
+   * why(useState-not-derived): this is deliberately a snapshot of the opening
+   * state, not live state. Recomputing it from `rows` would flip it to false
+   * the moment the user starts fixing the numbers, which is exactly when the
+   * explanation is still needed.
+   */
+  const [openedOverPlaced] = useState(
+    () =>
+      isQty &&
+      initialPlacements.reduce((s, p) => s + p.quantity, 0) + kitDrivenSum >
+        totalPool
+  );
+
   /** Locations not yet picked, so each dropdown only offers fresh options. */
   const availableLocations = useMemo(
     () => (locationId: string) =>
@@ -146,6 +171,17 @@ export function ManagePlacementsForm({
     if (!isQty) return null;
     const projectedSum = placedSum + kitDrivenSum;
     if (projectedSum > totalPool) {
+      /**
+       * Save still has to stay disabled — `enforce_asset_location_sum_within_total`
+       * is DEFERRED and would abort the commit — but when the app opened in
+       * this state the message says what happened and what to do, rather than
+       * reporting the user's untouched numbers back at them as an error.
+       */
+      if (openedOverPlaced) {
+        return `These locations hold ${projectedSum} ${unit} between them, but the asset's total is now ${totalPool}. Stock was used up while every unit was assigned to a location, so ${
+          projectedSum - totalPool
+        } ${unit} are still recorded somewhere they no longer are. Lower the location that lost them, then save.`;
+      }
       return kitDrivenSum > 0
         ? `Your manual placements (${placedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum}, which exceeds the asset's total quantity (${totalPool}).`
         : `Sum of placements (${placedSum}) exceeds the asset's total quantity (${totalPool}).`;
@@ -159,11 +195,24 @@ export function ManagePlacementsForm({
       seen.add(r.locationId);
     }
     return null;
-  }, [isQty, placedSum, kitDrivenSum, totalPool, rows]);
+  }, [
+    isQty,
+    placedSum,
+    kitDrivenSum,
+    totalPool,
+    rows,
+    openedOverPlaced,
+    unit,
+  ]);
 
   // "Unplaced" excludes kit-driven rows from the pool the user can
   // claim with manual placements — they're already spoken for.
-  const unplaced = Math.max(0, totalPool - placedSum - kitDrivenSum);
+  //
+  // NOT clamped at zero: a negative residual is a state the app can actually
+  // reach, and rounding it up to "0 unplaced" told the user everything was
+  // accounted for at the exact moment it wasn't. It renders on its own row
+  // below.
+  const unplaced = totalPool - placedSum - kitDrivenSum;
 
   const canAddRow = isQty
     ? rows.length < locations.length && unplaced > 0
@@ -325,12 +374,21 @@ export function ManagePlacementsForm({
               </span>
             </div>
           ) : null}
-          <div className="flex justify-between text-gray-500">
-            <span>Unplaced</span>
-            <span className="tabular-nums">
-              {unplaced} {unit}
-            </span>
-          </div>
+          {unplaced < 0 ? (
+            <div className="flex justify-between text-error-700">
+              <span>Over-placed</span>
+              <span className="tabular-nums">
+                {-unplaced} {unit}
+              </span>
+            </div>
+          ) : (
+            <div className="flex justify-between text-gray-500">
+              <span>Unplaced</span>
+              <span className="tabular-nums">
+                {unplaced} {unit}
+              </span>
+            </div>
+          )}
         </div>
       ) : null}
 

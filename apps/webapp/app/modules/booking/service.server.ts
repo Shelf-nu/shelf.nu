@@ -35,6 +35,7 @@ import {
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
 } from "~/modules/asset/availability.server";
+import { reconcileManualPlacementsForStockDecrease } from "~/modules/asset/placement-reconcile.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
@@ -4473,6 +4474,38 @@ export async function checkinBooking({
               fromValue: beforeQuantity,
               toValue: beforeQuantity - poolDecrement,
             });
+
+            /**
+             * Consumed / lost / damaged units are destroyed, which lowers the
+             * total the PRD's location-axis invariant is measured against
+             * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+             * Asset.quantity`). Reconcile in the same tx, or a placement sum
+             * that was valid before check-in silently exceeds the total and
+             * blocks the next legitimate placement edit.
+             */
+            const reconcile = await reconcileManualPlacementsForStockDecrease({
+              assetId: slice.assetId,
+              newTotal: beforeQuantity - poolDecrement,
+              tx,
+            });
+
+            if (reconcile.outcome === "ambiguous") {
+              Logger.error(
+                new ShelfError({
+                  cause: null,
+                  message:
+                    "Check-in left the location axis over-allocated and the source location is ambiguous.",
+                  additionalData: {
+                    assetId: slice.assetId,
+                    bookingId: id,
+                    deficit: reconcile.deficit,
+                    locationIds: reconcile.locationIds,
+                  },
+                  label,
+                  shouldBeCaptured: false,
+                })
+              );
+            }
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -5774,6 +5807,35 @@ export async function partialCheckinBooking({
             fromValue: beforeQuantity,
             toValue: beforeQuantity - poolDecrement,
           });
+
+          /**
+           * Same reconcile as the full check-in path above: destroyed units
+           * lower the total the location-axis invariant is measured against,
+           * so bring the placement sum back inside it within this tx.
+           */
+          const reconcile = await reconcileManualPlacementsForStockDecrease({
+            assetId: disp.assetId,
+            newTotal: beforeQuantity - poolDecrement,
+            tx,
+          });
+
+          if (reconcile.outcome === "ambiguous") {
+            Logger.error(
+              new ShelfError({
+                cause: null,
+                message:
+                  "Partial check-in left the location axis over-allocated and the source location is ambiguous.",
+                additionalData: {
+                  assetId: disp.assetId,
+                  bookingId: id,
+                  deficit: reconcile.deficit,
+                  locationIds: reconcile.locationIds,
+                },
+                label,
+                shouldBeCaptured: false,
+              })
+            );
+          }
         }
 
         const pendingAfter = remaining - claimed;

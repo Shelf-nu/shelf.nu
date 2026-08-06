@@ -263,6 +263,14 @@ vitest.mock("~/database/db.server", () => ({
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    // why: a check-in that CONSUMEs/LOSEs/DAMAGEs units lowers `Asset.quantity`,
+    // so `reconcileManualPlacementsForStockDecrease` reads the manual placement
+    // rows to keep `SUM(AssetLocation.quantity) <= Asset.quantity` true. Default
+    // to no placements — tests that model placement drift override it.
+    assetLocation: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      update: vitest.fn().mockResolvedValue({}),
+    },
   },
 }));
 
@@ -7145,6 +7153,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   /** Booking id + common params reused across scenarios in this block. */
@@ -7621,6 +7635,48 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("trims the single placement when a partial CONSUME pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // Same invariant as full check-in, different code path: the partial
+    // check-in loop decrements the pool per disposition, so it drifts the
+    // location axis exactly the same way if left unreconciled.
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("writes no placement when a partial CONSUME is absorbed by the unplaced residual", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+  });
+
   it("runs the low-stock notifier for the asset whose pool a CONSUME decremented", async () => {
     expect.assertions(1);
 
@@ -7813,6 +7869,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     (db.asset.update as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({});
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   const mockBookingId = "booking-c1";
@@ -7936,6 +7998,45 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("trims the single placement when a CONSUME check-in pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // All 100 owned units sit in one location, so destroying 10 on check-in
+    // would leave SUM(AssetLocation) = 100 against Asset.quantity = 90. The
+    // location trigger never fires on an `Asset` write, so nothing else
+    // catches this — the next legitimate placement edit is what gets refused.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("leaves placements alone on a CONSUME check-in the unplaced residual absorbs", async () => {
+    expect.assertions(1);
+
+    // 40 of 100 placed, so consuming 10 shrinks the residual from 60 to 50.
+    // Nothing is asserted about the location, so nothing is written to it.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
   });
 
   it("auto-defaults to RETURN for TWO_WAY assets and leaves the pool untouched", async () => {

@@ -149,4 +149,56 @@ describe("QuantityOverviewCard", () => {
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("10")).toBeInTheDocument();
   });
+
+  it("shows the leftover stock as Unplaced when locations hold less than the total", () => {
+    render(
+      <QuantityOverviewCard
+        {...baseProps}
+        quantity={100}
+        availableQuantity={100}
+        inLocationsQuantity={60}
+      />
+    );
+
+    expect(screen.getByText("Unplaced")).toBeInTheDocument();
+    expect(screen.getByText("40")).toBeInTheDocument();
+    expect(screen.queryByText("Over-placed")).not.toBeInTheDocument();
+  });
+
+  it("reports Over-placed instead of clamping the residual to zero", () => {
+    // The production shape: 90 units placed, then 10 consumed off a total of
+    // 90 leaves the asset owning 80 while locations still claim 90. The old
+    // `Math.max(0, …)` rendered "Unplaced 0", which is a number that was
+    // never true and hid the drift from the only person who could fix it.
+    render(
+      <QuantityOverviewCard
+        {...baseProps}
+        quantity={80}
+        availableQuantity={80}
+        inLocationsQuantity={90}
+      />
+    );
+
+    expect(screen.getByText("Over-placed")).toBeInTheDocument();
+    expect(screen.getByText("10")).toBeInTheDocument();
+    expect(screen.queryByText("Unplaced")).not.toBeInTheDocument();
+  });
+
+  it("explains what to do about an over-placed asset", () => {
+    render(
+      <QuantityOverviewCard
+        {...baseProps}
+        quantity={80}
+        unitOfMeasure="pcs"
+        availableQuantity={80}
+        inLocationsQuantity={90}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        textContaining("Locations claim 10 pcs more", "Manage placements")
+      )
+    ).toBeInTheDocument();
+  });
 });

@@ -43,6 +43,10 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // the reports `*.server.test.ts` files import this module via
 // `refreshExpiredAssetImages`). See the leaf's header doc.
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertStockNotBelowManualPlacements,
+  reconcileManualPlacementsForStockDecrease,
+} from "~/modules/asset/placement-reconcile.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
@@ -2567,6 +2571,21 @@ export async function updateAsset({
           quantity < (locked.quantity ?? 0)
         ) {
           await assertAssetQuantityNotBelowReservations({
+            assetId: id,
+            organizationId,
+            tx,
+            newTotal: quantity,
+            assetTitle: locked.title,
+            unitOfMeasure: locked.unitOfMeasure,
+          });
+          /**
+           * Same lock, second axis. The reservations guard covers custody /
+           * kits / bookings; placement has its own `sum <= Asset.quantity`
+           * invariant that nothing else enforces on an `Asset` write. Refusing
+           * here (rather than trimming a location) keeps the choice of WHICH
+           * location loses units with the person who knows.
+           */
+          await assertStockNotBelowManualPlacements({
             assetId: id,
             organizationId,
             tx,
@@ -8192,25 +8211,13 @@ export async function releaseQuantity({
        * both of which subtract `inCustody` from `total` — which is why no
        * reservation guard is required either.
        *
-       * `AssetLocation` placements are deliberately NOT adjusted, matching
-       * the booking check-in CONSUME path (the booking service makes no
-       * `assetLocation` write at all). Placement is an orthogonal axis and we
-       * cannot know which location the consumed units came off.
-       *
-       * Be aware this leaves the location axis able to drift ABOVE the total:
+       * Lowering the total can push the location axis out of bounds, so the
+       * placement sum is reconciled below — nothing else catches it.
        * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
        * DELETE ON "AssetLocation"` (see
-       * `20260519143054_add_asset_location_pivot`), so it does not fire on an
-       * `Asset` write and nothing aborts here — but
-       * `SUM(AssetLocation.quantity WHERE assetKitId IS NULL)` can end up
-       * exceeding `Asset.quantity`. Consume 10 of 100 placed units and the
-       * location page reads 100 while the asset reads 90; a later placement
-       * edit then trips the constraint on a write that is itself legitimate.
-       * `assertAssetQuantityNotBelowReservations` does not close this either
-       * — it queries custody / assetKit / bookingAsset / consumptionLog, not
-       * assetLocation — so the manual stock-lowering path drifts the same
-       * way. Reconciling the location axis on stock decrease is a separate
-       * piece of work across every path that lowers `Asset.quantity`.
+       * `20260519143054_add_asset_location_pivot`), so it never fires on an
+       * `Asset` write, and `assertAssetQuantityNotBelowReservations` queries
+       * custody / assetKit / bookingAsset / consumptionLog, not assetLocation.
        */
       if (consumedUnits > 0) {
         const beforeQuantity = asset.quantity ?? 0;
@@ -8241,6 +8248,50 @@ export async function releaseQuantity({
           },
           tx
         );
+
+        /**
+         * Restore the PRD's location-axis invariant
+         * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+         * Asset.quantity`). Destroying units lowers the total every claim is
+         * measured against, so a placement sum that was valid a moment ago can
+         * now exceed it. Nothing else catches that:
+         * `asset_location_sum_within_total` only fires on an `AssetLocation`
+         * write, so an `Asset` write slips past it silently until a later,
+         * legitimate placement edit is refused.
+         *
+         * Runs inside this tx so the reconcile commits with the decrement it
+         * corrects — a half-applied pair would leave exactly the drift this is
+         * here to prevent.
+         */
+        const reconcile = await reconcileManualPlacementsForStockDecrease({
+          assetId,
+          newTotal: beforeQuantity - consumedUnits,
+          tx,
+        });
+
+        /**
+         * Surface an unresolvable case rather than fabricating provenance.
+         * With several placements and no unplaced residual left, nothing
+         * records which location the consumed units came off, so the drift
+         * persists and is reported instead of being papered over with a guess.
+         */
+        if (reconcile.outcome === "ambiguous") {
+          Logger.error(
+            new ShelfError({
+              cause: null,
+              message:
+                "Consumed stock left the location axis over-allocated and the source location is ambiguous.",
+              additionalData: {
+                assetId,
+                organizationId,
+                deficit: reconcile.deficit,
+                locationIds: reconcile.locationIds,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+        }
       }
 
       /**

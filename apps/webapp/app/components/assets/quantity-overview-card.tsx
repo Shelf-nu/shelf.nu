@@ -73,7 +73,8 @@ export interface QuantityOverviewCardProps {
   /**
    * Sum of `AssetLocation.quantity` across every location this asset is
    * placed at. Surfaced on its own "In locations" row when > 0; the
-   * remainder (`quantity − inLocationsQuantity`) is the "unplaced" pool.
+   * remainder (`quantity − inLocationsQuantity`) is the "unplaced" pool, and
+   * when that remainder goes negative it renders as "Over-placed" instead.
    * Does NOT subtract from `available` — placements are orthogonal to
    * custody / bookings, so a unit can be at Location X AND in custody
    * simultaneously without double-counting.
@@ -128,17 +129,20 @@ function formatWithUnit(value: number, unit: string | null): string {
  * @param props.label - Row label displayed on the left
  * @param props.value - Row value displayed on the right
  * @param props.warning - When true, renders the value in amber with a warning icon
+ * @param props.warningMessage - Text inside the warning tooltip; defaults to the low-stock wording
  * @param props.labelTooltip - Optional explanatory tooltip rendered next to the label (e.g. `InfoTooltip`)
  */
 function OverviewRow({
   label,
   value,
   warning,
+  warningMessage = "Low stock — the workspace owner will be notified.",
   labelTooltip,
 }: {
   label: string;
   value: React.ReactNode;
   warning?: boolean;
+  warningMessage?: string;
   labelTooltip?: React.ReactNode;
 }) {
   return (
@@ -155,9 +159,7 @@ function OverviewRow({
                 <TriangleAlertIcon className="size-4 text-amber-500" />
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p className="text-xs">
-                  Low stock — the workspace owner will be notified.
-                </p>
+                <p className="text-xs">{warningMessage}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -203,7 +205,16 @@ export function QuantityOverviewCard({
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
-  const unplaced = Math.max(0, qty - inLocations);
+  /**
+   * Derived residual, NOT clamped. A negative value means locations claim more
+   * units than the asset owns, which is a real state the app can reach: stock
+   * destroyed by a consume lowers `Asset.quantity` without touching placements
+   * once the residual is gone. Clamping it to 0 reported "everything is
+   * placed, nothing spare" — a number that was never true — and hid the drift
+   * from the only person who could correct it.
+   */
+  const unplaced = qty - inLocations;
+  const overPlacedBy = unplaced < 0 ? -unplaced : 0;
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
   const available =
@@ -271,6 +282,21 @@ export function QuantityOverviewCard({
       ) : null}
       {inLocations > 0 && unplaced > 0 ? (
         <OverviewRow label="Unplaced" value={formatWithUnit(unplaced, unit)} />
+      ) : null}
+      {/* Over-placed is the negative side of the same residual. It gets its
+          own row rather than a negative "Unplaced" because the number is not
+          spare stock — it is a placement figure that has outrun the total and
+          needs a human to say which location actually lost the units. */}
+      {overPlacedBy > 0 ? (
+        <OverviewRow
+          label="Over-placed"
+          value={formatWithUnit(overPlacedBy, unit)}
+          warning
+          warningMessage={`Locations claim ${formatWithUnit(
+            overPlacedBy,
+            unit
+          )} more than this asset's total. Open "Manage placements" and lower the location that lost them.`}
+        />
       ) : null}
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
       {reserved > 0 ? (
