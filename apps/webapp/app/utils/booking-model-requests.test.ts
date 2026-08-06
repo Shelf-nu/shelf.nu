@@ -91,4 +91,22 @@ describe("countUnassignedModelUnits", () => {
     expect(countUnassignedModelUnits([])).toBe(0);
     expect(countUnassignedModelUnits(undefined)).toBe(0);
   });
+
+  it("re-counts a reservation that was fulfilled and then re-opened", () => {
+    // `upsertBookingModelRequest` clears `fulfilledAt` back to null whenever
+    // the new quantity exceeds `fulfilledQuantity`, so raising a fully
+    // fulfilled 3-unit reservation to 5 re-opens it with 2 units outstanding.
+    // The operator must see those 2 again — a predicate that treated
+    // `fulfilledQuantity > 0` as "done" would hide them forever.
+    expect(
+      countUnassignedModelUnits([
+        { quantity: 5, fulfilledQuantity: 3, fulfilledAt: null },
+      ])
+    ).toBe(2);
+    expect(
+      getOutstandingModelRequests([
+        { quantity: 5, fulfilledQuantity: 3, fulfilledAt: null },
+      ])
+    ).toHaveLength(1);
+  });
 });
