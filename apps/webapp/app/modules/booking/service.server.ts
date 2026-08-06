@@ -8607,10 +8607,18 @@ export async function cancelBooking({
     ];
 
     if (!allowedStatusForCancel.includes(bookingFound.status)) {
+      // User-input validation, not a server fault: the Cancel action is gated in
+      // the UI, so this only fires on a genuine race (the booking's status
+      // changed elsewhere between render and submit). A 400 keeps it out of the
+      // Sentry error pipeline; the outer catch inherits status/shouldBeCaptured
+      // from this cause. See SHELF-WEBAPP-222.
       throw new ShelfError({
         cause: null,
         label,
         message: "Booking cannot be cancelled at the current state.",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { bookingId: id, status: bookingFound.status },
       });
     }
 
@@ -8736,6 +8744,12 @@ export async function cancelBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while cancelling the booking, please try again.",
+      // ShelfError inherits status/shouldBeCaptured from a ShelfError cause but
+      // NOT additionalData — forward it so the handled-400 branch's { bookingId,
+      // status } debug context survives the re-wrap. See SHELF-WEBAPP-222.
+      additionalData: isLikeShelfError(cause)
+        ? cause.additionalData
+        : undefined,
     });
   }
 }
