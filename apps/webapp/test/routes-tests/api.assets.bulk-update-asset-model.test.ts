@@ -77,6 +77,21 @@ const requirePermissionMock = vi.mocked(requirePermission);
 const bulkUpdateAssetModelMock = vi.mocked(bulkUpdateAssetModel);
 const sendNotificationMock = vi.mocked(sendNotification);
 
+/**
+ * The three fields this route actually destructures from `requirePermission`.
+ *
+ * Asserted to the real return type instead of `any`: the full result also
+ * carries `currentOrganization` / `organizations` / `userOrganizations`, which
+ * are Prisma payloads running to ~30 fields the route never reads, so building
+ * a complete literal would be noise. The assertion still fails the build if one
+ * of these three is renamed or retyped, which the `any` cast would not.
+ */
+const permissionResult = {
+  organizationId: "org-1",
+  role: OrganizationRoles.ADMIN,
+  canUseBarcodes: false,
+} as Awaited<ReturnType<typeof requirePermission>>;
+
 /** Builds the result shape the service returns, with link-success defaults. */
 function serviceResult(
   overrides: Partial<BulkUpdateAssetModelResult> = {}
@@ -144,11 +159,7 @@ function sentNotification() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
-    canUseBarcodes: false,
-  } as any);
+  requirePermissionMock.mockResolvedValue(permissionResult);
   bulkUpdateAssetModelMock.mockResolvedValue(serviceResult());
 });
 
