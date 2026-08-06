@@ -577,22 +577,27 @@ describe("single-entity guards reject foreign/missing with 400", () => {
     expect(err.title).toBe("Invalid asset model");
     expect(tx.assetModel.findFirst).toHaveBeenCalledWith({
       where: { id: "am-foreign", organizationId: ORG },
-      select: { id: true },
+      select: { id: true, name: true },
     });
   });
 
-  it("assertAssetModelBelongsToOrg resolves when the model is in the org", async () => {
+  it("assertAssetModelBelongsToOrg returns the row so callers skip a second read", async () => {
     const tx = txWith({
       assetModel: {
-        findFirst: vitest.fn().mockResolvedValue({ id: "am-1" }),
+        findFirst: vitest
+          .fn()
+          .mockResolvedValue({ id: "am-1", name: "Panasonic PT-VZ580" }),
       },
     });
+
+    // `name` is part of the contract: `bulkUpdateAssetModel` builds its toast
+    // label from this row instead of querying the model a second time.
     await expect(
       assertAssetModelBelongsToOrg(
         { assetModelId: "am-1", organizationId: ORG },
         tx
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ id: "am-1", name: "Panasonic PT-VZ580" });
   });
 });
 

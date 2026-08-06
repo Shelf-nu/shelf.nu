@@ -1,8 +1,14 @@
-import type { Prisma, Scan } from "@prisma/client";
+import type { OrganizationRoles, Prisma, Scan } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { parseScanData } from "./utils.server";
 import { createNote } from "../note/service.server";
 import { getOrganizationById } from "../organization/service.server";
 import { getQr } from "../qr/service.server";
@@ -152,6 +158,64 @@ export async function getScanByQrId({ qrId }: { qrId: string }) {
       label,
     });
   }
+}
+
+/** Arguments for resolving a viewer-scoped last scan. */
+type GetLastScanForViewerArgs = {
+  /** The asset's QR code id, or null/undefined when it has no QR yet */
+  qrId: string | null | undefined;
+  /** The user viewing the page */
+  userId: string;
+  /** The viewer's active organization */
+  organizationId: string;
+  /** The viewer's roles in that organization (skips the validator's DB lookup) */
+  roles?: OrganizationRoles[];
+};
+
+/**
+ * Resolves the parsed last scan for an asset, but ONLY for a viewer who holds
+ * `scan:read`.
+ *
+ * The parsed payload carries the scanner's display name and email address, the
+ * scan's GPS coordinates and the device user-agent. Gating that in the
+ * component is not enough: the loader would still ship it in the page payload
+ * to roles that hold `scan: []` (BASE and SELF_SERVICE), where anyone can read
+ * it out of the network response. This helper is the server-side gate, so a
+ * caller cannot fetch the scan and forget to check.
+ *
+ * Returns `null` — the same shape as "this asset has never been scanned" — for
+ * an unauthorized viewer, so callers need no special case.
+ *
+ * @param args - The QR to look up plus the viewer's identity and roles
+ * @returns The parsed scan, or `null` when the asset has no QR, has no scans,
+ *   or the viewer may not read scans
+ */
+export async function getLastScanForViewer({
+  qrId,
+  userId,
+  organizationId,
+  roles,
+}: GetLastScanForViewerArgs) {
+  if (!qrId) {
+    return null;
+  }
+
+  const canReadScan = await hasPermission({
+    userId,
+    organizationId,
+    roles,
+    entity: PermissionEntity.scan,
+    action: PermissionAction.read,
+  });
+
+  if (!canReadScan) {
+    return null;
+  }
+
+  return parseScanData({
+    scan: (await getScanByQrId({ qrId })) || null,
+    userId,
+  });
 }
 
 /**

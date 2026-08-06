@@ -18,8 +18,8 @@
  * @see {@link file://./types.ts}
  */
 
-import { computeAvailability } from "./availability.js";
-import type { AvailabilityInputs } from "./types.js";
+import { computeAvailability } from "./availability";
+import type { AvailabilityInputs } from "./types";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Verdicts                                  */
