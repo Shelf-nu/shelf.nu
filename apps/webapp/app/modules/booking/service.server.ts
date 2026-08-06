@@ -3336,8 +3336,9 @@ type CheckoutRemainingTxClient = Pick<
  *
  * Per-asset semantics are byte-for-byte identical to the singular helper:
  * `Σ(BookingAsset.quantity for the asset) − Σ(PartialBookingCheckout claims for
- * the asset)`, floored at 0 — INCLUDING the legacy-ONGOING/OVERDUE fallback
- * (booked > 0, zero sessions, booking ONGOING/OVERDUE ⇒ remaining 0). The
+ * the asset)`, floored at 0 — INCLUDING the legacy all-at-once fallback
+ * (booked > 0, no claims for the asset, live CHECKED_OUT, booking
+ * ONGOING/OVERDUE ⇒ remaining 0). The
  * shared positional parser {@link checkoutSessionsToLogsByAsset} is reused with
  * a set-membership predicate so the aligned/legacy quantity handling and the
  * `""` → greedy sentinel match every other read site.
@@ -3384,7 +3385,7 @@ export async function computeBookingAssetsRemainingToCheckOut(
       where: { bookingId },
       select: { assetIds: true, quantities: true, bookingAssetIds: true },
     }),
-    // Cheap PK read — needed only so the legacy-ONGOING fallback below can
+    // Cheap PK read — needed only so the legacy all-at-once fallback below can
     // distinguish "checked out via all-at-once (no PBC rows by design)" from
     // "RESERVED, not yet touched". Mirrors the singular helper exactly.
     tx.booking.findUnique({
@@ -3513,20 +3514,24 @@ export async function computeBookingAssetsRemainingToCheckOut(
  * keeps the read backward-compatible with the existing all-at-once and
  * pre-Wave-B partial-checkout history without a backfill.
  *
- * Legacy-ONGOING fallback (bug #96 follow-up): an ONGOING/OVERDUE booking
- * with ZERO {@link PartialBookingCheckout} rows can only exist if it was
- * checked out via the legacy all-at-once flow (the new partial flow writes
- * a session row on every batch, so an ONGOING booking born from it always
- * has ≥1 row). In that legacy state, EVERY booked unit is physically off
- * the shelf — the per-asset `AssetStatus.CHECKED_OUT` flip the all-at-once
- * path performs is the equivalent signal — so `remaining` is 0, not
- * `booked`. Without this fallback, {@link computeCheckedOutForAsset}
- * (which reads `booked − remaining` as the checked-out portion) would
- * compute `booked − booked = 0` for legacy ONGOING bookings and the asset
- * overview "checked out" tile would silently drop them. RESERVED bookings
- * never trip the fallback (no units out yet). The fetch is a single
- * indexed-PK read against `Booking.status`, idempotent and safe to call
- * from inside or outside a transaction.
+ * Legacy all-at-once fallback (bug #96 follow-up): the all-at-once checkout
+ * flips every asset it processes to `AssetStatus.CHECKED_OUT` but writes NO
+ * {@link PartialBookingCheckout} rows, so an asset that is live CHECKED_OUT
+ * with no claims of its own on an ONGOING/OVERDUE booking has every booked
+ * unit physically off the shelf — `remaining` is 0, not `booked`. Without
+ * this, {@link computeCheckedOutForAsset} (which reads `booked − remaining`
+ * as the checked-out portion) would compute `booked − booked = 0` and the
+ * asset overview "checked out" tile would silently drop them.
+ *
+ * The test is PER ASSET, deliberately not "this booking has zero sessions":
+ * one progressive batch for ONE asset would otherwise switch every other
+ * all-at-once asset back to "fully remaining" and invite a duplicate checkout
+ * of stock already in the field. An asset WITH claims needs no fallback
+ * (`booked − claimed` is exact), and an asset ADDED after the checkout is
+ * still AVAILABLE so it keeps its real remaining (GitHub #2815). RESERVED
+ * bookings never trip it (no units out yet). The status fetch is a single
+ * indexed-PK read against `Booking.status`, idempotent and safe to call from
+ * inside or outside a transaction.
  *
  * @param tx - Prisma transaction client (or default `db`)
  * @param bookingId - Booking the asset belongs to
@@ -3540,7 +3545,7 @@ export async function computeBookingAssetRemainingToCheckOut(
 ): Promise<number> {
   // Delegate to the batched core with a single-element set so this helper stays
   // byte-for-byte identical for its ~6 external callers while the attribution,
-  // legacy-ONGOING fallback, and positional-parser handling live in ONE place.
+  // legacy all-at-once fallback, and positional-parser handling live in ONE place.
   const remainingByAsset = await computeBookingAssetsRemainingToCheckOut(
     tx,
     bookingId,
@@ -3627,8 +3632,9 @@ export async function computeBookingAssetSliceRemainingToCheckOut(
  * set-membership predicate so the `""` → greedy sentinel and the aligned/legacy
  * quantity handling match every other read site.
  *
- * That parity INCLUDES the legacy-ONGOING fallback (booked > 0, zero sessions,
- * booking ONGOING/OVERDUE ⇒ remaining 0). Without it this per-slice reader
+ * That parity INCLUDES the legacy all-at-once fallback (quantity > 0, no claims
+ * for the slice, live CHECKED_OUT, booking ONGOING/OVERDUE ⇒ remaining 0).
+ * Without it this per-slice reader
  * disagreed with its asset-level sibling on exactly one booking shape — one
  * checked out all-at-once — and the disagreement was load-bearing:
  * {@link getRemainingCheckoutPayload} PROPOSES from here while

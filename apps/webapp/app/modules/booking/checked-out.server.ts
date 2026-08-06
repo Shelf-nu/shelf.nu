@@ -111,10 +111,13 @@ export async function computeCheckedOutForAsset(
  * Attribution mirrors {@link computeCheckedOutForAsset} EXACTLY so `total`
  * parity holds:
  *   - Same active-booking scope (`ONGOING`/`OVERDUE`, org-scoped).
- *   - Same legacy-ONGOING fallback: a booking with ZERO
- *     {@link PartialBookingCheckout} sessions was checked out via the legacy
- *     all-at-once flow, so every booked unit of every slice is physically off
- *     the shelf (each slice's checked-out = its full `quantity`).
+ *   - Same legacy all-at-once fallback, decided PER ASSET: the asset is live
+ *     `CHECKED_OUT` and has NO {@link PartialBookingCheckout} claims of its own
+ *     on this booking, so its zeroed counters are that flow's silence rather
+ *     than "still on the shelf" ⇒ every slice's checked-out = its full
+ *     `quantity`. Keyed on the asset rather than on the BOOKING having zero
+ *     sessions, so one later batch for a different asset can't resurrect it and
+ *     an asset added after the checkout (still AVAILABLE) is never counted.
  *   - Otherwise, each booking's checkout claims for this asset are attributed
  *     to individual slices via {@link attributeDispositionsByBookingAsset}
  *     (standalone-first greedy fill over the SAME shared positional parser
@@ -203,8 +206,8 @@ export async function computeCheckedOutBreakdownForAsset(
   }
 
   // Fetch every checkout session for the involved bookings ONCE. Grouped by
-  // booking so the legacy-ONGOING detection (does the BOOKING have ANY
-  // sessions) matches the parent's per-booking check exactly.
+  // booking because claims are attributed per (booking, asset) — the legacy
+  // test below then asks whether THIS asset has any claims on THIS booking.
   const bookingIds = [...slicesByBooking.keys()];
   const sessions = (await tx.partialBookingCheckout.findMany({
     where: { bookingId: { in: bookingIds } },

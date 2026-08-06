@@ -911,7 +911,8 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  *
  * Per (booking, asset), attribution mirrors
  * {@link computeCheckedOutBreakdownForAsset} exactly:
- *   - legacy all-at-once booking (zero {@link PartialBookingCheckout} sessions)
+ *   - legacy all-at-once asset (live `CHECKED_OUT` with no
+ *     {@link PartialBookingCheckout} claims of its own on this booking)
  *     ⇒ every slice's checked-out = its full `quantity`;
  *   - otherwise the booking's claims for the asset are attributed across its
  *     slices via {@link attributeDispositionsByBookingAsset} (standalone-first
@@ -920,9 +921,9 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  * `booked − remaining` the pre-split code computed, so `total` is unchanged.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
- * so — unlike the singular helper, which fetches `Booking.status` separately
- * to test the legacy-ONGOING fallback — every booking that shows up here
- * already satisfies that condition; the loop below never reads
+ * so — unlike the check-out-side helpers, which fetch `Booking.status`
+ * separately to bound the legacy fallback to an active booking — every booking
+ * that shows up here already satisfies that condition; the loop below never reads
  * `booking.status` (it's only selected because {@link AvailabilityBatchClient}
  * shares one `bookingAsset.findMany` select shape with the reserved-rows
  * read, which DOES need it — see that type's doc).
