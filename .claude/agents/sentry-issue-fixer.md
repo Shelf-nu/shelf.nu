@@ -1,6 +1,6 @@
 ---
 name: sentry-issue-fixer
-description: Given ONE Sentry issue short-id, investigates the root cause and either opens a DRAFT PR with a minimal, tested fix or DECLINES with a reason. Never auto-merges, never touches main, never edits auth/security/payments/migrations. Defaults to report-only (proposes, does not push). Dispatched by sentry-triage as a first-level subagent, one per issue, in an isolated worktree.
+description: Given ONE Sentry issue short-id, investigates the root cause and — in active mode — opens a DRAFT PR with a minimal, tested fix; in report-only mode (the default) it proposes the fix without pushing; or it DECLINES with a reason. Never auto-merges, never touches main, never edits auth/security/payments/migrations. Dispatched by sentry-triage as a first-level subagent, one per issue, in an isolated worktree.
 tools: Read, Grep, Glob, Bash, Edit, Write, mcp__sentry__get_sentry_resource, mcp__sentry__analyze_issue_with_seer
 model: sonnet
 ---
@@ -80,10 +80,12 @@ If the value is anything unexpected, treat it as `report`.
   conventions and the repo rules (`.claude/rules/`, `CLAUDE.md` — e.g.
   raw-SQL-respects-@map, org-scope guards, `// why:` on mocks, ShelfError
   status/`shouldBeCaptured` for user-input validation).
-- **Validate** (targeted only — do NOT run a standalone full typecheck; it is
-  heavy and the commit hook typechecks):
-  `pnpm --filter @shelf/webapp test -- --run <file>` and
-  `pnpm exec eslint <files>`.
+- **Validate** (targeted): `pnpm --filter @shelf/webapp test -- --run <file>`
+  and `pnpm exec eslint <files>`. In **active** mode the commit hook runs the
+  full typecheck, so don't run a standalone one (it's heavy). In **report** mode
+  there is no commit and thus no hook typecheck — so either run
+  `pnpm turbo typecheck`, or explicitly record in your structured result that
+  typecheck was NOT run for the proposed diff.
 - **`active` mode only:**
   - Dedup first: `gh pr list --state open --search "SHELF-WEBAPP-<ID>"` — if a
     PR already references this issue, DECLINE (`PR already open`).

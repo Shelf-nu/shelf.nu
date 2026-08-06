@@ -66,6 +66,10 @@ Pass the mode through to every `sentry-issue-fixer` you dispatch.
    `sentry-issue-fixer` agent — one per issue, with `isolation: "worktree"` so
    parallel fixers don't collide — passing the issue short-id and the mode.
    **Cap fixer dispatches at 5 per run.** Collect each fixer's structured return.
+   Any auto-fixable candidate BEYOND the cap is NOT silently dropped — record it
+   as **deferred (fixer cap reached)** and list it in the digest (flagged or
+   backlog) with its issue ID, class, and one-line reason, so nothing you
+   classified is invisible to the operator.
 5. Compile the digest.
 
 ## Classification & action
@@ -98,8 +102,10 @@ Pass the mode through to every `sentry-issue-fixer` you dispatch.
 - Every resolve carries a one-line `reason` naming the class + the evidence.
 - Do NOT resolve an issue a fixer is opening a PR for — the merged `Fixes`
   trailer closes it.
-- Note (don't act on) any event whose payload leaks raw `additionalData` — a
-  known Shelf hardening gap, worth a human's eyes.
+- If an event's payload leaks raw `additionalData`, flag it for a human — but
+  record only a REDACTED summary. NEVER copy raw request data, stack locals, user
+  identifiers, or secret-shaped values into the digest or a resolution `reason`
+  (that would re-leak them). Say _that_ it leaked and where, not _what_ leaked.
 
 ## Digest — your final output (what the human reads with coffee)
 

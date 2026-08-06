@@ -146,8 +146,13 @@ jobs:
 3. **Pin everything** — the CLI version and every action SHA — since the job
    holds `ANTHROPIC_API_KEY` / `SENTRY_MCP_TOKEN`.
 4. **Pre-grant a narrow tool allowlist** so the headless run isn't blocked on a
-   prompt. The agents need: `mcp__sentry__*`, and for the fixer `Bash(git:*)`,
-   `Bash(gh:*)`, `Bash(pnpm:*)`, `Edit`, `Write`. Nothing broader.
+   prompt. The agents need `mcp__sentry__*` and (fixer only) `Edit`, `Write`,
+   `Bash(pnpm:*)`. For git/gh, do **NOT** grant blanket `Bash(git:*)` /
+   `Bash(gh:*)` — those also permit merges, `main` pushes, issue edits, other PR
+   writes, and admin actions. Use **command-level** rules (or a reviewed wrapper)
+   limited to `git fetch`, branch/read ops, pushing the generated `fix/sentry-*`
+   branch, and `gh pr create --draft`. Verify the effective permissions before
+   enabling active mode.
 
 ### Option B — claude.ai routine (lighter, Sentry-only)
 
