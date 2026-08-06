@@ -22,6 +22,7 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -44,6 +45,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 const label = "Audit";
@@ -349,6 +351,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 export default function AuditDetailsPage() {
   const { session, isAdminOrOwner, hasScans, stats, userId } =
     useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -364,9 +367,17 @@ export default function AuditDetailsPage() {
   const hasNoAssignees = session.assignments.length === 0;
   const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
 
+  // The activity loader requires `auditNote:read` and 403s without it, so the
+  // tab follows the same gate rather than routing the user into an error.
   const items = [
     { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "activity", content: "Activity" }]
+      : []),
   ];
 
   const matches = useMatches();
