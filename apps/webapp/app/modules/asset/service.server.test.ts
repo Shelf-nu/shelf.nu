@@ -113,10 +113,13 @@ vitest.mock("~/database/db.server", () => ({
     // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
     // AssetLocation pivot for the manual placement rows. `findFirst` is
     // scoped to `assetKitId: null` (manual rows only); `aggregate` sums
-    // the unplaced pool for `placeUnplacedUnits`. Defaults are empty so
-    // tests opt in to the placement state they need.
+    // the unplaced pool for `placeUnplacedUnits`; `findMany` is how
+    // `reconcileManualPlacementsForStockDecrease` reads the manual rows it
+    // may have to trim. Defaults are empty so tests opt in to the placement
+    // state they need.
     assetLocation: {
       findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -1088,6 +1091,11 @@ describe("releaseQuantity — consumptionType disposition", () => {
     (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
       count: 1,
     });
+    // why: same reason — the placement rows a reconcile test hands back would
+    // otherwise leak into every later test in this suite.
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
   });
 
   it("consumes the whole release for a ONE_WAY consumable by default", async () => {
@@ -1325,23 +1333,18 @@ describe("releaseQuantity — consumptionType disposition", () => {
     expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
   });
 
-  it("does not touch AssetLocation on consume (documented deferral, matches booking check-in)", async () => {
-    // A CONSUME lowers `Asset.quantity` and deliberately leaves placements
-    // alone, so `SUM(AssetLocation.quantity)` can end up above the total. This
-    // is pre-existing, not introduced by the consumable branch: the booking
-    // service makes no `assetLocation` write at all, and the manual
-    // stock-lowering guard (`assertAssetQuantityNotBelowReservations`) queries
-    // custody / assetKit / bookingAsset / consumptionLog, never assetLocation.
-    // Custody carries no location, so there is nothing here to identify WHICH
-    // placement the used-up units came off.
-    //
-    // This test pins the deferral rather than the desired end state: when the
-    // location axis is reconciled across every path that lowers
-    // `Asset.quantity`, this is the assertion that should fail and be rewritten.
+  it("leaves placements alone on consume while the unplaced residual absorbs it", async () => {
+    // `baseLockedAsset` owns 500 units and only 50 are placed, so consuming 10
+    // shrinks the residual from 450 to 440. Reducing a placement here would
+    // assert "this room now holds 10 fewer", which is not something the
+    // consume established.
     mockLock.mockResolvedValue({
       ...baseLockedAsset,
       consumptionType: "ONE_WAY",
     });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ id: "al-1", locationId: "loc-1", quantity: 50 }]);
 
     await releaseQuantity({
       assetId: "asset-1",
@@ -1355,6 +1358,60 @@ describe("releaseQuantity — consumptionType disposition", () => {
     // `moveAssetLocationUnits` / `placeUnplacedUnits` drive when they DO
     // adjust placements.
     expect(db.assetLocation.create).not.toHaveBeenCalled();
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.delete).not.toHaveBeenCalled();
+  });
+
+  it("trims the single placement on consume once the residual is exhausted", async () => {
+    // The reproduced production case: every owned unit is placed, so
+    // destroying 10 of them would leave SUM(AssetLocation) above
+    // `Asset.quantity` and silently break the PRD invariant. One placement
+    // means the source is a fact, not a guess.
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ id: "al-1", locationId: "loc-1", quantity: 500 }]);
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-1" },
+      data: { quantity: 490 },
+    });
+  });
+
+  it("writes nothing when several placements make the consumed source ambiguous", async () => {
+    // All 500 placed across two rooms with no residual left. Nothing records
+    // which room the used-up units left, so any rule applied here would persist
+    // a number that was never true. The drift is reported instead.
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-1", locationId: "loc-1", quantity: 300 },
+      { id: "al-2", locationId: "loc-2", quantity: 200 },
+    ]);
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
     expect(db.assetLocation.update).not.toHaveBeenCalled();
     expect(db.assetLocation.delete).not.toHaveBeenCalled();
   });
@@ -1837,6 +1894,12 @@ describe("updateAsset stock-lowering guard", () => {
       id: "asset-1",
       quantity: 5,
     });
+    // why: a reduction also runs the placement guard, which reads the manual
+    // placement rows. `clearAllMocks` keeps implementations, so reset it here
+    // or the one test that models placements leaks into its neighbours.
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
   });
 
   it("locks the asset then calls the guard when lowering quantity on a QUANTITY_TRACKED asset", async () => {
@@ -1877,6 +1940,43 @@ describe("updateAsset stock-lowering guard", () => {
     );
     // The guard must run BEFORE the write.
     expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("refuses a reduction that would strand units already placed at locations", async () => {
+    // The reservations guard passes — custody / kits / bookings are clear —
+    // and the reduction is still wrong, because 9 units are recorded as
+    // sitting somewhere. Nothing else catches this: the location trigger
+    // never fires on an `Asset` write.
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ id: "al-1", locationId: "loc-1", quantity: 9 }]);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 5,
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("assigned to locations"),
+    });
+
+    expect(db.asset.update).not.toHaveBeenCalled();
   });
 
   it("propagates the guard's 400 and never writes when the reduction is below commitments", async () => {

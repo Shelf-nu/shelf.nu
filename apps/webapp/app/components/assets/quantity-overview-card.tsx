@@ -80,6 +80,19 @@ export interface QuantityOverviewCardProps {
    */
   inLocationsQuantity?: number;
   /**
+   * Sum of MANUAL placements only (`AssetLocation.assetKitId IS NULL`).
+   *
+   * Drives the placed / unplaced / over-placed split, because this is the
+   * sum `enforce_asset_location_sum_within_total` actually bounds: since
+   * `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger ignores
+   * kit-driven rows, which are bounded on their own axis by
+   * `enforce_asset_kit_sum_within_total`. Using {@link inLocationsQuantity}
+   * here instead would report a valid asset (80 manual + 50 kit-driven units
+   * of a 100 total) as over-allocated. Falls back to `inLocationsQuantity`
+   * when absent, which is exact for the (common) asset with no kits.
+   */
+  inLocationsManualQuantity?: number;
+  /**
    * Units committed to bookings but NOT yet physically off the shelf.
    *
    * Covers two contributors:
@@ -128,17 +141,20 @@ function formatWithUnit(value: number, unit: string | null): string {
  * @param props.label - Row label displayed on the left
  * @param props.value - Row value displayed on the right
  * @param props.warning - When true, renders the value in amber with a warning icon
+ * @param props.warningMessage - Text inside the warning tooltip; defaults to the low-stock wording
  * @param props.labelTooltip - Optional explanatory tooltip rendered next to the label (e.g. `InfoTooltip`)
  */
 function OverviewRow({
   label,
   value,
   warning,
+  warningMessage = "Low stock — the workspace owner will be notified.",
   labelTooltip,
 }: {
   label: string;
   value: React.ReactNode;
   warning?: boolean;
+  warningMessage?: string;
   labelTooltip?: React.ReactNode;
 }) {
   return (
@@ -155,9 +171,7 @@ function OverviewRow({
                 <TriangleAlertIcon className="size-4 text-amber-500" />
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p className="text-xs">
-                  Low stock — the workspace owner will be notified.
-                </p>
+                <p className="text-xs">{warningMessage}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -190,6 +204,7 @@ export function QuantityOverviewCard({
   inCustodyQuantity,
   inKitsQuantity,
   inLocationsQuantity,
+  inLocationsManualQuantity,
   reservedQuantity,
   reservingBookingCount,
   checkedOutQuantity,
@@ -203,7 +218,21 @@ export function QuantityOverviewCard({
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
+  const inLocationsManual = inLocationsManualQuantity ?? inLocations;
   const unplaced = Math.max(0, qty - inLocations);
+  /**
+   * The honest negative side of the residual, computed on the MANUAL axis
+   * because that is the one `enforce_asset_location_sum_within_total` bounds
+   * (kit-driven rows live on their own axis, so 80 manual + 50 kit-driven of
+   * 100 is valid and must not read as over-placed).
+   *
+   * A positive value means manual placements claim more units than the asset
+   * owns, which is a state the app can reach on its own: a consume lowers
+   * `Asset.quantity` without touching placements once the unplaced residual
+   * is gone. It used to surface as a clamped "Unplaced 0" — a number that was
+   * never true, hiding the drift from the only person who could correct it.
+   */
+  const overPlacedBy = Math.max(0, inLocationsManual - qty);
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
   const available =
@@ -271,6 +300,21 @@ export function QuantityOverviewCard({
       ) : null}
       {inLocations > 0 && unplaced > 0 ? (
         <OverviewRow label="Unplaced" value={formatWithUnit(unplaced, unit)} />
+      ) : null}
+      {/* Over-placed is the negative side of the same residual. It gets its
+          own row rather than a negative "Unplaced" because the number is not
+          spare stock — it is a placement figure that has outrun the total and
+          needs a human to say which location actually lost the units. */}
+      {overPlacedBy > 0 ? (
+        <OverviewRow
+          label="Over-placed"
+          value={formatWithUnit(overPlacedBy, unit)}
+          warning
+          warningMessage={`Locations claim ${formatWithUnit(
+            overPlacedBy,
+            unit
+          )} more than this asset's total. Open "Manage placements" and lower the location that lost them.`}
+        />
       ) : null}
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
       {reserved > 0 ? (

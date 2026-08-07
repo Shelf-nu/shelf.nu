@@ -12,7 +12,9 @@
  *  - "Add another location" button appends a row when there's room.
  *  - Live "placed / unplaced" indicator using `Asset.quantity` as the
  *    bound (mirrors the rule enforced server-side in
- *    `replaceAssetPlacements`).
+ *    `replaceAssetPlacements`). The residual is shown unclamped: when
+ *    placements exceed the total it reads "Over-placed", because that
+ *    state is reachable without the user doing anything wrong.
  *  - Hidden JSON field `placements` carries the full set on submit.
  *
  * INDIVIDUAL assets get the same UI but capped at one row by the
@@ -124,6 +126,27 @@ export function ManagePlacementsForm({
     [rows]
   );
 
+  /**
+   * Placement sum as the dialog was OPENED, captured once.
+   *
+   * When this already exceeds `totalPool`, the over-allocation is not something
+   * the user just typed — the app reached that state on its own. Consumption
+   * lowers `Asset.quantity` without touching placements, and
+   * `asset_location_sum_within_total` never fires on an `Asset` write, so the
+   * two drift apart silently and this dialog is where it first surfaces. The
+   * flag exists purely so the message explains that instead of reading as
+   * "you did something wrong".
+   *
+   * why(useState-not-derived): this is deliberately a snapshot of the opening
+   * state, not live state. Recomputing it from `rows` would flip it to false
+   * the moment the user starts fixing the numbers, which is exactly when the
+   * explanation is still needed.
+   */
+  const [openedOverPlaced] = useState(
+    () =>
+      isQty && initialPlacements.reduce((s, p) => s + p.quantity, 0) > totalPool
+  );
+
   /** Locations not yet picked, so each dropdown only offers fresh options. */
   const availableLocations = useMemo(
     () => (locationId: string) =>
@@ -146,6 +169,20 @@ export function ManagePlacementsForm({
     if (!isQty) return null;
     const projectedSum = placedSum + kitDrivenSum;
     if (projectedSum > totalPool) {
+      /**
+       * Save still has to stay disabled — `enforce_asset_location_sum_within_total`
+       * is DEFERRED and would abort the commit — but when the app opened in
+       * this state the message says what happened and what to do, rather than
+       * reporting the user's untouched numbers back at them as an error.
+       */
+      if (openedOverPlaced) {
+        // Manual sum only: kit-driven rows sit on their own axis and never
+        // contribute to this over-allocation, so quoting the combined figure
+        // would misstate how far out the numbers actually are.
+        return `These locations hold ${placedSum} ${unit} between them, but the asset's total is now ${totalPool}. Stock was used up while every unit was assigned to a location, so ${
+          placedSum - totalPool
+        } ${unit} are still recorded somewhere they no longer are. Lower the location that lost them, then save.`;
+      }
       return kitDrivenSum > 0
         ? `Your manual placements (${placedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum}, which exceeds the asset's total quantity (${totalPool}).`
         : `Sum of placements (${placedSum}) exceeds the asset's total quantity (${totalPool}).`;
@@ -159,11 +196,33 @@ export function ManagePlacementsForm({
       seen.add(r.locationId);
     }
     return null;
-  }, [isQty, placedSum, kitDrivenSum, totalPool, rows]);
+  }, [
+    isQty,
+    placedSum,
+    kitDrivenSum,
+    totalPool,
+    rows,
+    openedOverPlaced,
+    unit,
+  ]);
 
   // "Unplaced" excludes kit-driven rows from the pool the user can
   // claim with manual placements — they're already spoken for.
   const unplaced = Math.max(0, totalPool - placedSum - kitDrivenSum);
+
+  /**
+   * How far MANUAL placements exceed the asset total — the only axis
+   * `enforce_asset_location_sum_within_total` bounds (kit-driven rows were
+   * excluded from it by `20260602100000_assetlocation_sum_exclude_kit_driven`
+   * and are capped separately by `enforce_asset_kit_sum_within_total`).
+   *
+   * Computing it from `unplaced` instead would flag a perfectly valid asset:
+   * 80 manual + 50 kit-driven units of a 100 total leaves no free pool, but
+   * breaches nothing. This is a state the app reaches on its own when a
+   * consume lowers `Asset.quantity` with no unplaced residual left to absorb
+   * it, so it gets its own row rather than being clamped out of sight.
+   */
+  const overPlacedBy = Math.max(0, placedSum - totalPool);
 
   const canAddRow = isQty
     ? rows.length < locations.length && unplaced > 0
@@ -325,12 +384,21 @@ export function ManagePlacementsForm({
               </span>
             </div>
           ) : null}
-          <div className="flex justify-between text-gray-500">
-            <span>Unplaced</span>
-            <span className="tabular-nums">
-              {unplaced} {unit}
-            </span>
-          </div>
+          {overPlacedBy > 0 ? (
+            <div className="flex justify-between text-error-700">
+              <span>Over-placed</span>
+              <span className="tabular-nums">
+                {overPlacedBy} {unit}
+              </span>
+            </div>
+          ) : (
+            <div className="flex justify-between text-gray-500">
+              <span>Unplaced</span>
+              <span className="tabular-nums">
+                {unplaced} {unit}
+              </span>
+            </div>
+          )}
         </div>
       ) : null}
 
