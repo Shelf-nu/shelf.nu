@@ -62,12 +62,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, role, canSeeAllBookings } = await requirePermission(
+      {
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }
+    );
 
     // loadBookingsData + the asset lookup are independent (both only
     // need organizationId from requirePermission above), so parallelise
@@ -77,7 +79,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         userId: authSession?.userId,
-        isSelfServiceOrBase,
+        role,
+        canSeeAllBookings,
         ids: assetId ? [assetId] : undefined,
       }),
       db.asset.findFirst({
@@ -286,10 +289,6 @@ export default function ExistingBooking() {
               // `loadBookingsData` seeds the list with — otherwise searching
               // returns bookings this dialog then refuses to render.
               status: ADDABLE_BOOKING_STATUSES.join(","),
-              // Keep the typed list inside the same custodian scope
-              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
-              // are not offered bookings that submit would then reject.
-              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"
