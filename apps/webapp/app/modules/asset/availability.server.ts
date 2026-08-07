@@ -62,7 +62,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import {
   checkQuantityAvailable,
   computeAvailability,
@@ -546,6 +546,10 @@ export type AvailabilityBatchClient = {
         quantity: true;
         assetKitId?: true;
         booking: { select: { from: true; to: true; status: true } };
+        // Optional like `id`/`assetKitId`: only the checked-out read needs the
+        // live asset status (to gate the legacy all-at-once branch per asset);
+        // the reserved-rows read leaves it off.
+        asset?: { select: { status: true } };
       };
     }) => Promise<
       Array<{
@@ -555,6 +559,7 @@ export type AvailabilityBatchClient = {
         quantity: number;
         assetKitId?: string | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
+        asset?: { status: AssetStatus } | null;
       }>
     >;
   };
@@ -906,7 +911,8 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  *
  * Per (booking, asset), attribution mirrors
  * {@link computeCheckedOutBreakdownForAsset} exactly:
- *   - legacy all-at-once booking (zero {@link PartialBookingCheckout} sessions)
+ *   - legacy all-at-once asset (live `CHECKED_OUT` with no
+ *     {@link PartialBookingCheckout} claims of its own on this booking)
  *     ⇒ every slice's checked-out = its full `quantity`;
  *   - otherwise the booking's claims for the asset are attributed across its
  *     slices via {@link attributeDispositionsByBookingAsset} (standalone-first
@@ -915,9 +921,9 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  * `booked − remaining` the pre-split code computed, so `total` is unchanged.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
- * so — unlike the singular helper, which fetches `Booking.status` separately
- * to test the legacy-ONGOING fallback — every booking that shows up here
- * already satisfies that condition; the loop below never reads
+ * so — unlike the check-out-side helpers, which fetch `Booking.status`
+ * separately to bound the legacy fallback to an active booking — every booking
+ * that shows up here already satisfies that condition; the loop below never reads
  * `booking.status` (it's only selected because {@link AvailabilityBatchClient}
  * shares one `bookingAsset.findMany` select shape with the reserved-rows
  * read, which DOES need it — see that type's doc).
@@ -954,10 +960,28 @@ async function computeCheckedOutBreakdownBatch(
       quantity: true,
       assetKitId: true,
       booking: { select: { from: true, to: true, status: true } },
+      // Live asset status — the per-asset half of the legacy all-at-once
+      // detection below. Must stay in step with the singular
+      // `computeCheckedOutBreakdownForAsset`, which the parity test pins.
+      asset: { select: { status: true } },
     },
   });
 
   if (pivots.length === 0) return breakdownByAsset;
+
+  /**
+   * Assets currently flagged off the shelf. The all-at-once checkout sets
+   * CHECKED_OUT on every asset it processed, so this separates "was on the
+   * booking when it was checked out" from "added afterwards" (which
+   * `updateBookingAssets` leaves AVAILABLE on purpose). Only the former may
+   * take the legacy branch below — see GitHub #2815.
+   */
+  const checkedOutAssetIds = new Set<string>();
+  for (const p of pivots) {
+    if (p.asset?.status === AssetStatus.CHECKED_OUT) {
+      checkedOutAssetIds.add(p.assetId);
+    }
+  }
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = { id: string; quantity: number; assetKitId: string | null };
@@ -1006,30 +1030,36 @@ async function computeCheckedOutBreakdownBatch(
 
   for (const [bookingId, byAsset] of slicesByBookingByAsset) {
     const sessionsForBooking = sessionsByBooking.get(bookingId) ?? [];
-    // A booking with zero sessions was checked out via the legacy
-    // all-at-once flow (the partial flow always writes a session row) —
-    // since these pivots are already scoped to ONGOING/OVERDUE, every
-    // booked unit on this booking is physically off the shelf.
-    const isLegacyOngoing = sessionsForBooking.length === 0;
-    const logsByAsset = isLegacyOngoing
-      ? null
-      : checkoutSessionsToLogsByAsset(sessionsForBooking, (id) =>
-          byAsset.has(id)
-        );
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      sessionsForBooking,
+      (id) => byAsset.has(id)
+    );
 
     for (const [assetId, slices] of byAsset) {
-      const claimedBySlice = isLegacyOngoing
-        ? null
-        : attributeDispositionsByBookingAsset({
-            bookingAssetRows: slices,
-            consumptionLogs: logsByAsset?.get(assetId) ?? [],
-          });
+      const claimedBySlice = attributeDispositionsByBookingAsset({
+        bookingAssetRows: slices,
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+
+      // Legacy all-at-once checkout, decided PER ASSET — mirror of
+      // `computeCheckedOutBreakdownForAsset`. This asset is flagged off the
+      // shelf and has NO recorded claims on this booking, so its zeroed
+      // counters are the all-at-once flow's silence rather than "still on the
+      // shelf". Keying on the asset (not on the booking having zero sessions)
+      // keeps it correct once a later batch records a session for a DIFFERENT
+      // asset, and leaves an asset added after the checkout — still AVAILABLE —
+      // holding no units (GitHub #2815).
+      const assetHasClaims = slices.some(
+        (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
+      );
+      const assetIsLegacyAllAtOnce =
+        checkedOutAssetIds.has(assetId) && !assetHasClaims;
 
       const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
       for (const slice of slices) {
-        const checkedOutSlice = isLegacyOngoing
+        const checkedOutSlice = assetIsLegacyAllAtOnce
           ? slice.quantity
-          : Math.min(slice.quantity, claimedBySlice?.get(slice.id) ?? 0);
+          : Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0);
         acc.total += checkedOutSlice;
         // Standalone (free-pool) iff no kit FK — `!= null` matches
         // `attributeDispositionsByBookingAsset`'s kit-driven test.
