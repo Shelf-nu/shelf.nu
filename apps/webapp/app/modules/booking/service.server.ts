@@ -42,7 +42,10 @@ import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.serv
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  bookingWriteScopeClause,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -9257,6 +9260,37 @@ export async function getBookingsFilterData({
 }
 
 /**
+ * Turns a {@link resolveCustodianScope} result into the single AND-able clause
+ * that expresses "these bookings are that person's" — custody on their user
+ * link OR on any of their team-member links.
+ *
+ * Extracted so {@link getBookings} and `/api/model-filters` cannot disagree on
+ * the shape. They previously did: the endpoint matched the user link alone, so
+ * a booking custodied through a legacy team-member row showed in the list a
+ * picker was seeded with and then vanished the moment the user typed.
+ *
+ * @param scope - Resolved custodian scope for ONE person.
+ * @returns A `Prisma.BookingWhereInput` to push into `where.AND` — never into a
+ *   top-level `OR`, where a user-supplied filter could widen it away.
+ */
+export function custodianScopeClause(scope: {
+  userId: string;
+  teamMemberIds?: string[];
+}): Prisma.BookingWhereInput {
+  const selfBranches: Prisma.BookingWhereInput[] = [
+    { custodianUserId: scope.userId },
+  ];
+
+  if (scope.teamMemberIds?.length) {
+    selfBranches.push({
+      custodianTeamMemberId: { in: scope.teamMemberIds },
+    });
+  }
+
+  return selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches };
+}
+
+/**
  * DRAFT-visibility rule shared by every booking-list query: bookings that are
  * not DRAFT are visible to everyone in the org, while DRAFT bookings are only
  * visible to their creator. Extracted so heavy ({@link getBookings}) and slim
@@ -9404,6 +9438,16 @@ export async function getBookings(params: {
    * Accepts an array so the bookings index can filter by several team members.
    */
   custodianTeamMemberIds?: string[] | null;
+  /**
+   * RESTRICTION scoping results to bookings this person may MUTATE — see
+   * {@link bookingWriteScopeClause}. Set only by pickers whose selection feeds
+   * an action gated by `validateBookingOwnership`; omit for read-only lists.
+   *
+   * ONE object rather than two sibling params on purpose: a half-set pair
+   * (id without role, or role without id) would silently skip the restriction
+   * entirely. Both halves are required together or not at all.
+   */
+  writableBy?: { userId: string; role: OrganizationRoles } | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
@@ -9431,6 +9475,7 @@ export async function getBookings(params: {
     statuses,
     custodianScope,
     custodianTeamMemberIds,
+    writableBy,
     assetIds,
     bookingTo,
     excludeBookingIds,
@@ -9529,19 +9574,25 @@ export async function getBookings(params: {
      * block also writes, so whichever ran last silently dropped the other.
      */
     if (custodianScope) {
-      const selfBranches: Prisma.BookingWhereInput[] = [
-        { custodianUserId: custodianScope.userId },
-      ];
+      andClauses.push(custodianScopeClause(custodianScope));
+    }
 
-      if (custodianScope.teamMemberIds?.length) {
-        selfBranches.push({
-          custodianTeamMemberId: { in: custodianScope.teamMemberIds },
-        });
+    /**
+     * A SECOND, independent restriction: the caller may only be offered
+     * bookings they are allowed to WRITE to. Set by mutation-target pickers
+     * (the "Add to existing booking" dialogs), never by read-only lists.
+     *
+     * Scalars rather than a where-input, so a call site cannot hand this a
+     * request-controlled predicate — the clause itself is fixed by
+     * {@link bookingWriteScopeClause}. AND-ed alongside `custodianScope`, so
+     * the two intersect and neither can widen the other.
+     */
+    if (writableBy) {
+      const writeScope = bookingWriteScopeClause(writableBy);
+
+      if (writeScope) {
+        andClauses.push(writeScope);
       }
-
-      andClauses.push(
-        selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches }
-      );
     }
 
     /** The filter: independent, always AND-ed, never a restriction. */
@@ -12701,13 +12752,26 @@ export async function loadBookingsData({
   request,
   organizationId,
   userId,
-  isSelfServiceOrBase,
+  role,
+  canSeeAllBookings,
   ids,
 }: {
   request: Request;
   organizationId: string;
   userId: string;
-  isSelfServiceOrBase: boolean;
+  /**
+   * Effective role, from `requirePermission`. Drives the WRITE restriction —
+   * these pickers choose a mutation target, so they may only offer bookings
+   * the submitting action will accept.
+   */
+  role: OrganizationRoles;
+  /**
+   * Standard booking READ visibility, from `requirePermission`. Gating on the
+   * role alone ignored the workspace's `selfServiceCanSeeBookings` /
+   * `baseUserCanSeeBookings` overrides, so these pickers stayed restricted even
+   * when the workspace had switched the setting on.
+   */
+  canSeeAllBookings: boolean;
   ids?: string[];
 }): Promise<BookingLoaderResponse> {
   // Get search parameters and pagination settings
@@ -12718,10 +12782,15 @@ export async function loadBookingsData({
   // Fetch bookings with filters. Includes ONGOING/OVERDUE so assets/kits can be
   // added to active bookings (they stay AVAILABLE — progressive checkout), not
   // just to not-yet-started DRAFT/RESERVED ones.
-  // Self-service / base users may only work with their own bookings — resolve
-  // the full scope (user link + every team-member link) so legacy rows aren't
-  // hidden here while showing on the index.
-  const custodianScope = isSelfServiceOrBase
+  // TWO independent restrictions, both server-derived, both AND-ed. They must
+  // be computed identically here and in `/api/model-filters`, which takes over
+  // the moment the user types into the picker — a rule applied on only one of
+  // the two makes the list change mid-search.
+  //
+  // 1. READ — the standard booking-visibility rule. Resolve the FULL custodian
+  //    scope (user link + every team-member link) so legacy rows aren't hidden
+  //    here while showing on the index.
+  const custodianScope = !canSeeAllBookings
     ? await resolveCustodianScope({ userId, organizationId })
     : undefined;
 
@@ -12733,6 +12802,11 @@ export async function loadBookingsData({
     userId,
     statuses: ADDABLE_BOOKING_STATUSES,
     ...(custodianScope && { custodianScope }),
+    // 2. WRITE — what `validateBookingOwnership` will accept on submit. Kept
+    //    separate from the read rule because the workspace visibility toggle
+    //    does NOT grant write: without this, enabling it offers a restricted
+    //    user bookings the action then rejects with a 403.
+    writableBy: { userId, role },
   });
 
   // Set up header and model name

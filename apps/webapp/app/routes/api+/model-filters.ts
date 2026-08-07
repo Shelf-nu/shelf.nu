@@ -1,17 +1,18 @@
-import type { Prisma } from "@prisma/client";
 import { BookingStatus, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   bookingDraftVisibilityClause,
+  custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
-  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
 
@@ -89,25 +90,6 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
             ),
         { message: "Invalid booking status" }
       ),
-
-    /**
-     * Opt in to the same custodian restriction the seeding loader applies.
-     *
-     * Set by the "Add to existing booking" dialogs, whose loader runs
-     * `loadBookingsData` → `getBookings({ custodianScope })` for SELF_SERVICE /
-     * BASE callers. Without it, typing replaces their custodian-scoped list with
-     * bookings they do not own, which `validateBookingOwnership` then rejects on
-     * submit — a dead end.
-     *
-     * The asset-index advanced filter does NOT set it, so that surface keeps
-     * seeing the same rows before and after typing.
-     *
-     * This is a request-controlled *toggle*, never a request-controlled *value*:
-     * the ids it restricts to are resolved server-side from the session user, so
-     * it cannot be used to widen or retarget the scope (the hazard documented on
-     * `getMinimalBookings`). It is also a no-op for ADMIN / OWNER.
-     */
-    scopeToCustodian: z.coerce.boolean().optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
@@ -123,9 +105,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, userOrganizations } = await getSelectedOrganization(
-      { userId, request }
-    );
+    const { organizationId, userOrganizations, currentOrganization } =
+      await getSelectedOrganization({ userId, request });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -208,34 +189,50 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        */
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
 
+      const role = resolveEffectiveRole({ userOrganizations, organizationId });
+
       /**
-       * Callers that opted in get the seeding loader's custodian restriction,
-       * resolved here from the session — see the `scopeToCustodian` docs above.
+       * Standard booking READ visibility: SELF_SERVICE / BASE users only see
+       * bookings they are custodian of, unless the workspace has switched the
+       * setting on.
+       *
+       * Resolved from the session role plus the organization's settings, never
+       * from a request param, and AND-ed so the search `OR` cannot widen it.
+       * The restriction used to be opt-in via a `scopeToCustodian` query param,
+       * which a caller could simply omit — every booking row in the workspace
+       * came back to a restricted user with the setting off.
+       *
+       * Shares `custodianScopeClause` with `getBookings` so the shape matches
+       * the loader that seeded the picker; matching only `custodianUserId` here
+       * dropped bookings custodied through a legacy team-member row as soon as
+       * the user typed.
        */
-      if (
-        modelFilters.scopeToCustodian &&
-        isSelfServiceOrBaseRole(
-          resolveEffectiveRole({ userOrganizations, organizationId })
-        )
-      ) {
-        const custodianScope = await resolveCustodianScope({
-          userId,
-          organizationId,
-        });
-
-        const selfBranches: Prisma.BookingWhereInput[] = [
-          { custodianUserId: custodianScope.userId },
-        ];
-
-        if (custodianScope.teamMemberIds.length) {
-          selfBranches.push({
-            custodianTeamMemberId: { in: custodianScope.teamMemberIds },
-          });
-        }
-
+      if (!resolveCanSeeAllBookings({ role, currentOrganization })) {
         where.AND.push(
-          selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches }
+          custodianScopeClause(
+            await resolveCustodianScope({ userId, organizationId })
+          )
         );
+      }
+
+      /**
+       * Standard booking WRITE authorization, AND-ed on top.
+       *
+       * Every reachable consumer of a booking search for a restricted role is a
+       * mutation-target picker — the two "Add to existing booking" dialogs. The
+       * asset-index advanced filter is the only read-only consumer, and
+       * `assets._index.tsx` refuses ADVANCED mode to SELF_SERVICE / BASE
+       * outright, so this never narrows a list they can otherwise reach.
+       *
+       * Independent of the visibility toggle on purpose: it mirrors
+       * `validateBookingOwnership`, which ignores that toggle. Offering rows the
+       * action rejects turns the picker into a 403 dead end. A future read-only
+       * booking search for these roles needs a purpose distinction here.
+       */
+      const writeScope = bookingWriteScopeClause({ userId, role });
+
+      if (writeScope) {
+        where.AND.push(writeScope);
       }
     }
 
