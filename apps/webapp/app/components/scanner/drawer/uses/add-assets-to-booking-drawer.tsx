@@ -42,14 +42,15 @@ export const addScannedAssetsToBookingSchema = z
      */
     quantities: z.string().optional().default("{}"),
     /**
-     * JSON-encoded `Array<{ assetId, assetKitId }>` — one element per
+     * JSON-encoded `Array<{ assetId, assetKitId, kitId }>` — one element per
      * `AssetKit` membership scanned (i.e. per asset, per kit it belongs
      * to). The action passes this through to `addScannedAssetsToBooking`
      * as `kitSlices` so each gets its own kit-driven `BookingAsset` row
-     * with `assetKitId` set. Carrying a list (not a 1:1 map) is what
-     * lets a single asset belonging to MULTIPLE scanned kits produce
-     * MULTIPLE kit-driven rows. Directly-scanned assets stay out of this
-     * list (standalone, `assetKitId = null`).
+     * with `assetKitId` set (and `sourceKitId` for durable provenance).
+     * Carrying a list (not a 1:1 map) is what lets a single asset belonging
+     * to MULTIPLE scanned kits produce MULTIPLE kit-driven rows.
+     * Directly-scanned assets stay out of this list (standalone,
+     * `assetKitId = null`).
      */
     kitSlices: z.string().optional().default("[]"),
   })
@@ -117,11 +118,23 @@ export default function AddAssetsToBookingDrawer({
   // (distinct `assetKitId` each) — each is a legal row under the
   // `(bookingId, assetKitId)` partial unique, so all are created.
   const directlyScannedAssetIds = new Set(assetIds);
-  const kitSlices: Array<{ assetId: string; assetKitId: string }> = [];
+  const kitSlices: Array<{
+    assetId: string;
+    assetKitId: string;
+    kitId: string;
+  }> = [];
   for (const kit of kits) {
     for (const ak of kit.assetKits) {
       if (directlyScannedAssetIds.has(ak.asset.id)) continue;
-      kitSlices.push({ assetId: ak.asset.id, assetKitId: ak.id });
+      // `kitId` rides along as durable provenance for
+      // `BookingAsset.sourceKitId`. The server re-resolves it from the
+      // (org-validated) `AssetKit` row and only falls back to this value, so
+      // it is a hint, never a trusted input.
+      kitSlices.push({
+        assetId: ak.asset.id,
+        assetKitId: ak.id,
+        kitId: kit.id,
+      });
     }
   }
   const kitSlicesJson = JSON.stringify(kitSlices);

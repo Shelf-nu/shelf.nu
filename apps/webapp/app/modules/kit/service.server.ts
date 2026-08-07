@@ -5099,6 +5099,11 @@ export async function updateKitAssets({
                     assetId: a.id,
                     quantity: ak?.quantity ?? 1,
                     assetKitId: ak?.id ?? null,
+                    // Mirror the assetKitId branch exactly: a row that falls
+                    // back to standalone has no kit provenance either. Writing
+                    // one without the other breaks the
+                    // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
+                    sourceKitId: ak ? kit.id : null,
                   };
                 }),
                 skipDuplicates: true,

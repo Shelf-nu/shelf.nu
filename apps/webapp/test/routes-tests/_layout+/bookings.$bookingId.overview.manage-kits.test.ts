@@ -353,11 +353,13 @@ describe("manage-kits route validation", () => {
             {
               assetId: "asset-shared",
               assetKitId: "ak-kit1-shared",
+              kitId: "kit1",
               quantity: 10,
             },
             {
               assetId: "asset-shared",
               assetKitId: "ak-kit2-shared",
+              kitId: "kit2",
               quantity: 5,
             },
           ],
@@ -765,6 +767,7 @@ describe("manage-kits route validation", () => {
             {
               assetId: "asset3",
               assetKitId: "ak-kit1-asset3",
+              kitId: "kit1",
               quantity: 1,
             },
           ],

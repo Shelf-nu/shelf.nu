@@ -731,7 +731,7 @@ export async function createBooking({
    * distinct kit-driven rows (the kit partial unique is on
    * `(bookingId, assetKitId)`).
    */
-  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
+  kitSlices?: KitSliceSpec[];
 
   /**
    * Hints are used for setting the timezone of the booking
@@ -805,31 +805,17 @@ export async function createBooking({
     );
 
     /**
-     * Build the `BookingAsset` rows to create:
-     * - Standalone rows (`{ assetId }`) keep the historical shape exactly —
-     *   `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
-     *   default, so the no-kit path is unchanged byte-for-byte.
-     * - Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
-     *   settable directly in a nested create — mirrors `duplicateBooking`). A
-     *   QUANTITY_TRACKED asset may be both standalone AND a kit member (two
-     *   distinct rows under the two partial uniques); INDIVIDUAL overlaps were
-     *   already removed from the standalone bucket above.
+     * Standalone rows (`{ assetId }`) keep the historical shape exactly —
+     * `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
+     * default, so the no-kit path is unchanged byte-for-byte.
+     *
+     * Kit-driven rows are assembled INSIDE the transaction below, because
+     * their `sourceKitId` has to come from the org-scoped guard's lookup
+     * rather than from the request payload — see the comment there.
      */
-    const bookingAssetRows = [
-      ...standaloneCreateAssetIds.map((id) => ({ assetId: id })),
-      ...slices.map((s) => ({
-        assetId: s.assetId,
-        quantity: s.quantity,
-        assetKitId: s.assetKitId,
-      })),
-    ];
-
-    // Only set the nested create when there's at least one row — this covers
-    // standalone-only, kit-only, and mixed inputs (and avoids an empty
-    // `create: []` when neither is supplied).
-    if (bookingAssetRows.length > 0) {
-      dataToCreate.bookingAssets = { create: bookingAssetRows };
-    }
+    const standaloneCreateRows = standaloneCreateAssetIds.map((id) => ({
+      assetId: id,
+    }));
 
     if (booking.custodianUserId) {
       dataToCreate.custodianUser = {
@@ -864,6 +850,7 @@ export async function createBooking({
       // org before the create — otherwise an attacker could attach Org B's
       // assets/kit memberships to their own booking. Runs with the active `tx`
       // so it commits atomically with the create.
+      let kitIdByAssetKitId = new Map<string, string>();
       if (slices.length > 0) {
         await assertAssetsBelongToOrg(
           {
@@ -872,13 +859,48 @@ export async function createBooking({
           },
           tx
         );
-        await assertAssetKitsBelongToOrg(
+        kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
           {
             assetKitIds: slices.map((s) => s.assetKitId),
             organizationId: booking.organizationId,
           },
           tx
         );
+      }
+
+      /**
+       * Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
+       * settable directly in a nested create) plus `sourceKitId`, the durable
+       * copy of the owning kit that outlives the `AssetKit` row.
+       *
+       * `sourceKitId` is taken from the guard's org-proven map, NEVER from
+       * `slice.kitId`: that value is request input and the column's FK accepts
+       * any `Kit` row in any organization, so trusting it would let a caller in
+       * Org A stamp Org B's kit onto its own booking. Deriving it from the same
+       * lookup that validated `assetKitId` also enforces the schema invariant
+       * that the two AGREE. The map is total over the validated ids (the guard
+       * throws otherwise), so `?? null` is unreachable — it only satisfies the
+       * type.
+       *
+       * A QUANTITY_TRACKED asset may be both standalone AND a kit member (two
+       * distinct rows under the two partial uniques); INDIVIDUAL overlaps were
+       * already removed from the standalone bucket above.
+       */
+      const bookingAssetRows = [
+        ...standaloneCreateRows,
+        ...slices.map((s) => ({
+          assetId: s.assetId,
+          quantity: s.quantity,
+          assetKitId: s.assetKitId,
+          sourceKitId: kitIdByAssetKitId.get(s.assetKitId) ?? null,
+        })),
+      ];
+
+      // Only set the nested create when there's at least one row — this covers
+      // standalone-only, kit-only, and mixed inputs (and avoids an empty
+      // `create: []` when neither is supplied).
+      if (bookingAssetRows.length > 0) {
+        dataToCreate.bookingAssets = { create: bookingAssetRows };
       }
 
       if (booking.tags.length > 0) {
@@ -7872,12 +7894,49 @@ export async function partialCheckoutBooking({
 }
 
 /**
+ * One kit-driven booking slice to insert.
+ *
+ * Carries BOTH kit pointers because they answer different questions and have
+ * different lifetimes:
+ * - `assetKitId` is the live `AssetKit` membership row. The DB `SET NULL`s it
+ *   when the asset leaves the kit, which is what makes it useless as history.
+ * - `kitId` is the owning `Kit`, persisted to `BookingAsset.sourceKitId`, and
+ *   survives that deletion.
+ *
+ * `kitId` is required so the compiler flags any producer that forgets it —
+ * a missing value is unrecoverable once the membership row is gone.
+ */
+export type KitSliceSpec = {
+  assetId: string;
+  assetKitId: string;
+  kitId: string;
+  quantity: number;
+};
+
+/**
+ * Scanner-path variant of {@link KitSliceSpec} where `quantity` may be omitted.
+ *
+ * The scan drawer only knows which `AssetKit` memberships were scanned, not
+ * their slice quantities — `addScannedAssetsToBookingWithinTx` resolves the
+ * fallback from `AssetKit.quantity` server-side.
+ *
+ * `kitId` stays REQUIRED at the type level so the compiler keeps flagging
+ * producers that forget it, but it is NOT a trusted input: the write site
+ * re-resolves it from the org-proven `AssetKit` row and that value wins. The
+ * scan route's runtime validator therefore tolerates a stale client omitting
+ * it (passing `""`) rather than rejecting the request.
+ */
+export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
+  quantity?: number;
+};
+
+/**
  * Resolves a set of kits into the kit-driven `BookingAsset` slice specs needed
  * to add those kits to a booking.
  *
  * Each `AssetKit` membership row becomes one slice in the shape the booking
- * write paths expect (`{ assetId, assetKitId, quantity }`). A kit with N member
- * assets yields N slices; the SAME asset belonging to MULTIPLE kits yields
+ * write paths expect ({@link KitSliceSpec}). A kit with N member assets yields
+ * N slices; the SAME asset belonging to MULTIPLE kits yields
  * MULTIPLE slices (one per `AssetKit.id`). That one-slice-per-membership shape
  * is exactly what lets a single quantity-tracked asset produce multiple
  * distinct kit-driven rows — the kit partial unique is on
@@ -7910,14 +7969,15 @@ export async function buildKitSlicesForBooking({
   kitIds: string[];
   organizationId: string;
   existingAssetKitIds?: Set<string>;
-}): Promise<Array<{ assetId: string; assetKitId: string; quantity: number }>> {
+}): Promise<KitSliceSpec[]> {
   // Nothing to resolve — short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
 
   try {
     const assetKits = await db.assetKit.findMany({
       where: { kitId: { in: kitIds }, organizationId },
-      select: { id: true, assetId: true, quantity: true },
+      // `kitId` is already the filter column, so selecting it costs nothing.
+      select: { id: true, assetId: true, quantity: true, kitId: true },
     });
 
     // One slice per AssetKit membership, skipping memberships already on the
@@ -7927,6 +7987,8 @@ export async function buildKitSlicesForBooking({
       .map((ak) => ({
         assetId: ak.assetId,
         assetKitId: ak.id,
+        // Durable provenance — see `BookingAsset.sourceKitId`.
+        kitId: ak.kitId,
         quantity: ak.quantity,
       }));
   } catch (cause) {
@@ -7971,7 +8033,7 @@ export async function updateBookingAssets({
    * slice is a distinct, legal row. Non-kit callers (manage-assets
    * picker, asset bulk actions) omit this and only add standalone rows.
    */
-  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
+  kitSlices?: KitSliceSpec[];
 }) {
   try {
     const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
@@ -8041,7 +8103,11 @@ export async function updateBookingAssets({
       // must prove each AssetKit belongs to the caller's org (the asset
       // ids were already validated above; this closes the cross-org gap
       // for the kit ids).
-      await assertAssetKitsBelongToOrg(
+      //
+      // The guard hands back the org-proven `assetKitId -> kitId` map, which
+      // is the ONLY source we accept for `sourceKitId` below — `slice.kitId`
+      // is request input and that column's FK accepts any org's kit.
+      const kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
         { assetKitIds: slices.map((s) => s.assetKitId), organizationId },
         tx
       );
@@ -8118,6 +8184,15 @@ export async function updateBookingAssets({
       const kitAssetIds = effectiveSlices.map((s) => s.assetId);
       const kitQuantities = effectiveSlices.map((s) => s.quantity);
       const kitAssetKitIds = effectiveSlices.map((s) => s.assetKitId);
+      // Index-aligned with the three arrays above. Persisted to
+      // `BookingAsset.sourceKitId` so the row still names its kit after the
+      // `AssetKit` membership (and therefore `assetKitId`) is gone. Sourced
+      // from the org-scoped guard's map, never from `s.kitId` — see the
+      // comment on `kitIdByAssetKitId`. The map is total over the validated
+      // ids (the guard throws otherwise), so the `?? null` is unreachable.
+      const kitSourceKitIds = effectiveSlices.map(
+        (s) => kitIdByAssetKitId.get(s.assetKitId) ?? null
+      );
 
       // The complete set of assets touched by this call — standalone +
       // kit-driven, deduped. Everything after the insert (status flip,
@@ -8243,8 +8318,8 @@ export async function updateBookingAssets({
         // (kit qty edits cascade from `updateKitAssets`, not from here).
         kitAssetIds.length > 0
           ? tx.$executeRaw`
-              INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity", "assetKitId")
-              SELECT gen_random_uuid()::text, unnest(${kitAssetIds}::text[]), ${id}, unnest(${kitQuantities}::int[]), unnest(${kitAssetKitIds}::text[])
+              INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity", "assetKitId", "sourceKitId")
+              SELECT gen_random_uuid()::text, unnest(${kitAssetIds}::text[]), ${id}, unnest(${kitQuantities}::int[]), unnest(${kitAssetKitIds}::text[]), unnest(${kitSourceKitIds}::text[])
               ON CONFLICT ("bookingId", "assetKitId") WHERE "assetKitId" IS NOT NULL DO NOTHING
             `
           : Promise.resolve(),
@@ -12014,11 +12089,7 @@ async function addScannedAssetsToBookingWithinTx(
      * partial unique. The slice's quantity defaults to the kit's
      * `AssetKit.quantity` when omitted.
      */
-    kitSlices?: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity?: number;
-    }>;
+    kitSlices?: ScannedKitSliceSpec[];
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -12186,19 +12257,29 @@ async function addScannedAssetsToBookingWithinTx(
    * the AssetKit rows for the referenced ids and use their quantity as
    * the fallback. An explicit `slice.quantity` (when the caller already
    * resolved it) still wins.
+   *
+   * The same rows also give us the authoritative owning `kitId` for
+   * `BookingAsset.sourceKitId` at no extra round-trip. We prefer it over the
+   * client-supplied `slice.kitId` on purpose: `assetKitId` has already been
+   * proven in-org by `assertAssetKitsBelongToOrg` above, whereas `kitId`
+   * arrives straight from the scan drawer's JSON payload and is written to a
+   * column whose FK accepts ANY kit — including another org's.
    */
   const referencedAssetKitIds = Array.from(
     new Set(kitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
-  const assetKitQtyById = new Map<string, number>(
+  const assetKitById = new Map<string, { quantity: number; kitId: string }>(
     referencedAssetKitIds.length > 0
       ? (
           await tx.assetKit.findMany({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `referencedAssetKitIds` come from the org-scoped booking assets loaded earlier in this flow
             where: { id: { in: referencedAssetKitIds } },
-            select: { id: true, quantity: true },
+            select: { id: true, quantity: true, kitId: true },
           })
-        ).map((ak: { id: string; quantity: number }) => [ak.id, ak.quantity])
+        ).map((ak: { id: string; quantity: number; kitId: string }) => [
+          ak.id,
+          { quantity: ak.quantity, kitId: ak.kitId },
+        ])
       : []
   );
 
@@ -12217,14 +12298,30 @@ async function addScannedAssetsToBookingWithinTx(
             assetId: id,
             quantity: quantities[id] ?? 1,
             assetKitId: null,
+            // No kit provenance for a standalone scan — kept explicit so the
+            // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
+            sourceKitId: null,
           })),
-          // Kit-driven slices: `assetKitId` set. Quantity precedence:
-          // explicit slice qty → kit's `AssetKit.quantity` → 1.
+          // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
+          // durable owning-kit pointer that survives the membership row's
+          // deletion. Quantity precedence: explicit slice qty → kit's
+          // `AssetKit.quantity` → 1.
+          //
+          // Kit precedence: the org-validated `AssetKit.kitId` ALWAYS wins;
+          // `slice.kitId` is only a fallback. `||` (not `??`) because a
+          // pre-deploy client that never learned to send `kitId` arrives as
+          // the empty string — writing that would violate the FK, so it
+          // normalizes to NULL. Both falling through is unreachable: a missing
+          // `AssetKit` row means `assetKitId` below fails the FK first.
           ...kitSlices.map((slice) => ({
             assetId: slice.assetId,
             quantity:
-              slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1,
+              slice.quantity ??
+              assetKitById.get(slice.assetKitId)?.quantity ??
+              1,
             assetKitId: slice.assetKitId,
+            sourceKitId:
+              assetKitById.get(slice.assetKitId)?.kitId || slice.kitId || null,
           })),
         ],
       },
@@ -12256,7 +12353,7 @@ async function addScannedAssetsToBookingWithinTx(
     }
     for (const slice of kitSlices) {
       const sliceQty =
-        slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1;
+        slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1;
       addedQtyByAssetId.set(
         slice.assetId,
         (addedQtyByAssetId.get(slice.assetId) ?? 0) + sliceQty
@@ -12327,11 +12424,7 @@ export async function addScannedAssetsToBooking({
    * Kit-driven slice specs — one per `AssetKit` membership scanned.
    * See the within-tx helper for full semantics.
    */
-  kitSlices?: Array<{
-    assetId: string;
-    assetKitId: string;
-    quantity?: number;
-  }>;
+  kitSlices?: ScannedKitSliceSpec[];
 }) {
   try {
     /**
@@ -12869,7 +12962,7 @@ export type BookingKitDrift = {
 
 /**
  * Compute per-kit membership drift for a booking, comparing the booking's
- * kit-driven `BookingAsset` snapshot against each kit's CURRENT `AssetKit`
+ * kit-sourced `BookingAsset` snapshot against each kit's CURRENT `AssetKit`
  * rows.
  *
  * **Why this exists.** `BookingAsset` rows are a snapshot taken at the moment
@@ -12879,19 +12972,28 @@ export type BookingKitDrift = {
  * tells the duplicate-confirmation modal exactly what will differ so the user
  * acknowledges the change explicitly before confirming.
  *
+ * **The snapshot is keyed on PROVENANCE, not live membership.** Removing an
+ * asset from a kit `SET NULL`s the booking slice's `assetKitId`, so a snapshot
+ * built from `assetKitId IS NOT NULL` structurally could not contain a removed
+ * asset — `removed` was unreachable and the modal's "Removed since the
+ * original" section never rendered. `sourceKitId` survives the detach, so
+ * selecting on it is what makes that half of the comparison work.
+ *
  * Returns one entry per kit that actually drifted (added or removed non-empty);
  * kits with no drift are omitted. Returns `[]` when the booking has no
- * kit-driven slices at all.
+ * kit-sourced slices at all.
  *
  * Org-scope: validates that every kit referenced by the booking belongs to
  * `organizationId` before issuing the AssetKit lookup. This is defence-in-
- * depth — `getBooking` already org-scopes the source booking — but follows
- * the project rule that any ID derived from request input is org-checked
- * before being read.
+ * depth — the caller's `requirePermission` already scopes the request — but
+ * follows the project rule that any ID derived from request input is
+ * org-checked before being read. It is load-bearing here rather than merely
+ * belt-and-braces: `sourceKitId`'s FK accepts a `Kit` in ANY org.
  *
- * **Caller:** `duplicateBooking` (to emit per-kit drift in
- * `BOOKING_CREATED.meta`, future-extension), and the duplicate route loader
- * (`bookings.$bookingId.overview.duplicate.tsx`) to render the modal.
+ * **Caller:** the duplicate route loader
+ * (`bookings.$bookingId.overview.duplicate.tsx`) to render the modal. This is
+ * a read-only, display-side helper — `duplicateBooking` does NOT call it and
+ * re-resolves kit membership independently.
  *
  * @param args.bookingId - The source booking to inspect
  * @param args.organizationId - The caller's organization id (for org-scope)
@@ -12906,12 +13008,8 @@ export async function computeBookingKitDrift({
   organizationId: Organization["id"];
 }): Promise<BookingKitDrift[]> {
   try {
-    // Fetch only what we need: kit-driven slices for the booking. The
-    // `AssetKit` link is resolved via a second query below — Prisma's
-    // `BookingAsset` model deliberately omits the `assetKit` relation
-    // accessor at the schema level (TS recursion limit, see schema
-    // comment on `BookingAsset.assetKitId`), so we can't `include` it.
-    const kitDrivenSlices = await db.bookingAsset.findMany({
+    // Fetch only what we need: every slice this booking took from a kit.
+    const kitSourcedSlices = await db.bookingAsset.findMany({
       // Org-scope at the source: a foreign-org `bookingId` will not match
       // any rows, so no slice data (incl. asset titles) is loaded into
       // memory before the downstream `assertKitsBelongToOrg` check fires.
@@ -12919,12 +13017,32 @@ export async function computeBookingKitDrift({
       where: {
         bookingId,
         booking: { organizationId },
-        assetKitId: { not: null },
+        /**
+         * Provenance, not live membership.
+         *
+         * `sourceKitId` is the durable pointer and matches BOTH live
+         * kit-driven slices and detached residue (`assetKitId` `SET NULL`'d
+         * when the asset left the kit) — the residue is exactly the "removed"
+         * case this function exists to report, so filtering on `assetKitId`
+         * alone made `removed` unreachable.
+         *
+         * The `assetKitId` leg is the LEGACY fallback, and it is NOT
+         * redundant: "assetKitId non-null ⇒ sourceKitId non-null" is enforced
+         * by code alone (no CHECK constraint), and the migration necessarily
+         * lands before the new code, so during a rolling deploy an older
+         * instance can still write a kit-driven row with a NULL
+         * `sourceKitId`. Dropping such a row here would hide its whole kit
+         * from the drift result while `duplicateBooking` — which keeps the
+         * same fallback — still re-resolves that kit, silently changing the
+         * duplicate's contents with NO warning in the modal.
+         */
+        OR: [{ sourceKitId: { not: null } }, { assetKitId: { not: null } }],
       },
       select: {
         assetId: true,
         quantity: true,
         assetKitId: true,
+        sourceKitId: true,
         asset: {
           select: {
             id: true,
@@ -12935,47 +13053,76 @@ export async function computeBookingKitDrift({
       },
     });
 
-    if (kitDrivenSlices.length === 0) return [];
+    if (kitSourcedSlices.length === 0) return [];
 
-    // Resolve `assetKitId -> kitId` via a separate AssetKit lookup.
-    const assetKitIds = kitDrivenSlices
+    /**
+     * Legacy fallback ONLY: resolve `assetKitId -> kitId` for rows written
+     * before `sourceKitId` existed. Rows written by current code carry their
+     * own provenance, so this query is skipped entirely once the deploy window
+     * closes. Prisma's `BookingAsset` model deliberately omits the `assetKit`
+     * relation accessor at the schema level (TS recursion limit, see the schema
+     * comment on `BookingAsset.assetKitId`), so this cannot be an `include`.
+     */
+    const legacyAssetKitIds = kitSourcedSlices
+      .filter((s) => s.sourceKitId === null)
       .map((s) => s.assetKitId)
       .filter((id): id is string => id !== null);
-    const assetKitRows = await db.assetKit.findMany({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetKitIds were fetched above from BookingAsset rows scoped to bookingId; the booking itself is org-validated by the caller (computeBookingKitDrift is called from the duplicate route loader after requirePermission, and from duplicateBooking after getBooking). Pure read.
-      where: { id: { in: assetKitIds } },
-      select: { id: true, kitId: true },
-    });
-    const kitIdByAssetKitId = new Map(
-      assetKitRows.map((ak) => [ak.id, ak.kitId])
-    );
 
-    // Group source slices by the kit they came from (resolved via AssetKit.kitId).
-    // A kit-driven slice with no matching AssetKit row (e.g. the AssetKit was
-    // deleted) is excluded from the drift snapshot — there's nothing meaningful
-    // to compare against, and the duplicate's kit-driven copy will also skip it
-    // (see `duplicateBooking`).
-    const sliceByKitId = new Map<
-      string,
-      Array<{
-        assetId: string;
-        quantity: number;
-        title: string;
-        type: AssetType;
-      }>
-    >();
-    for (const slice of kitDrivenSlices) {
-      const kitId = slice.assetKitId
-        ? kitIdByAssetKitId.get(slice.assetKitId)
-        : undefined;
-      if (!kitId) continue; // AssetKit row gone — handled in duplicate path.
-      const bucket = sliceByKitId.get(kitId) ?? [];
-      bucket.push({
-        assetId: slice.assetId,
-        quantity: slice.quantity,
-        title: slice.asset.title,
-        type: slice.asset.type,
+    let kitIdByAssetKitId = new Map<string, string>();
+    if (legacyAssetKitIds.length > 0) {
+      const assetKitRows = await db.assetKit.findMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: legacyAssetKitIds were fetched above from BookingAsset rows scoped to bookingId; the booking itself is org-validated by the caller (the duplicate route loader runs this after requirePermission). Pure read of an id->id map, and every kitId it resolves still passes assertKitsBelongToOrg below before any kit data is read.
+        where: { id: { in: legacyAssetKitIds } },
+        select: { id: true, kitId: true },
       });
+      kitIdByAssetKitId = new Map(assetKitRows.map((ak) => [ak.id, ak.kitId]));
+    }
+
+    /**
+     * Group the source slices by the kit they came from, deduping by asset id
+     * within each kit.
+     *
+     * A booking can hold two slices for the same (kit, asset) pair: detached
+     * residue from an earlier membership (`assetKitId` NULL) plus a live slice
+     * from a later re-add (`assetKitId` set). Normally that pair is harmless
+     * here — the live `AssetKit` puts the asset in `currentAssetIds`, so it is
+     * reported zero times under "removed". The dedupe covers the race where
+     * that `AssetKit` is deleted BETWEEN the `bookingAsset` read above and the
+     * `kit.findMany` read below: both rows are then absent from
+     * `currentAssetIds` and would be emitted as two "removed" entries for one
+     * asset, which the modal renders with duplicate React keys.
+     *
+     * Two residue rows for the same pair cannot occur — the
+     * `BookingAsset_manual_unique (bookingId, assetId) WHERE assetKitId IS
+     * NULL` partial unique permits only one.
+     *
+     * Which row survives is DB order, so the surviving `quantity` is
+     * arbitrary. That is acceptable: `BookingKitDriftAsset.quantity` already
+     * documents "removed" quantities as indicative only.
+     */
+    const sliceByKitId = new Map<string, Map<string, BookingKitDriftAsset>>();
+    for (const slice of kitSourcedSlices) {
+      // Prefer the durable provenance; fall back to the legacy AssetKit hop.
+      const kitId =
+        slice.sourceKitId ??
+        (slice.assetKitId
+          ? kitIdByAssetKitId.get(slice.assetKitId)
+          : undefined);
+      // Reachable for a legacy row whose `AssetKit` was deleted between the two
+      // reads above (the FK `SET NULL` had not landed when we read the slice).
+      // Nothing meaningful to compare against, and `duplicateBooking` drops it
+      // for the same reason.
+      if (!kitId) continue;
+      const bucket =
+        sliceByKitId.get(kitId) ?? new Map<string, BookingKitDriftAsset>();
+      if (!bucket.has(slice.assetId)) {
+        bucket.set(slice.assetId, {
+          assetId: slice.assetId,
+          title: slice.asset.title,
+          type: slice.asset.type,
+          quantity: slice.quantity,
+        });
+      }
       sliceByKitId.set(kitId, bucket);
     }
 
@@ -13010,26 +13157,21 @@ export async function computeBookingKitDrift({
     const drifts: BookingKitDrift[] = [];
 
     for (const kitId of kitIds) {
+      /**
+       * A kit deleted since the booking was created cannot reach this loop:
+       * `sourceKitId` is `ON DELETE SET NULL` to `Kit`, and deleting a kit
+       * cascade-deletes its `AssetKit` rows which in turn `SET NULL`s
+       * `assetKitId` — so both legs of the snapshot predicate go NULL and the
+       * slices degrade to loose assets, matching pre-provenance behaviour.
+       * `assertKitsBelongToOrg` above has also already proven every id here
+       * exists in this org, so the guard only covers a delete racing between
+       * the two reads.
+       */
       const kit = kitsById.get(kitId);
-      const snapshotForKit = sliceByKitId.get(kitId) ?? [];
-      const snapshotAssetIds = new Set(snapshotForKit.map((s) => s.assetId));
+      if (!kit) continue;
 
-      // Kit was deleted entirely since source was created. Treat its entire
-      // snapshot as "removed" so the modal still surfaces the change.
-      if (!kit) {
-        drifts.push({
-          kitId,
-          kitName: "Deleted kit",
-          added: [],
-          removed: snapshotForKit.map((s) => ({
-            assetId: s.assetId,
-            title: s.title,
-            type: s.type,
-            quantity: s.quantity,
-          })),
-        });
-        continue;
-      }
+      const snapshotForKit = [...(sliceByKitId.get(kitId)?.values() ?? [])];
+      const snapshotAssetIds = new Set(snapshotForKit.map((s) => s.assetId));
 
       const currentAssetIds = new Set(kit.assetKits.map((ak) => ak.assetId));
 
@@ -13042,14 +13184,11 @@ export async function computeBookingKitDrift({
           quantity: ak.quantity,
         }));
 
-      const removed: BookingKitDriftAsset[] = snapshotForKit
-        .filter((s) => !currentAssetIds.has(s.assetId))
-        .map((s) => ({
-          assetId: s.assetId,
-          title: s.title,
-          type: s.type,
-          quantity: s.quantity,
-        }));
+      // Already `BookingKitDriftAsset`-shaped — the bucket stores the drift
+      // entry directly, so no re-mapping is needed here.
+      const removed: BookingKitDriftAsset[] = snapshotForKit.filter(
+        (s) => !currentAssetIds.has(s.assetId)
+      );
 
       if (added.length === 0 && removed.length === 0) continue;
 
@@ -13082,10 +13221,14 @@ export async function computeBookingKitDrift({
  * verbatim from the source. Instead, the duplicate's kit-driven slices are
  * rebuilt from each referenced kit's CURRENT `AssetKit` rows so the
  * duplicate reflects the kit's current contents (not a stale snapshot).
- * Standalone slices (`assetKitId IS NULL`) ARE copied verbatim, including
- * per-row `quantity`. The duplicate-confirmation modal surfaces the
- * resulting drift via {@link computeBookingKitDrift} so the user
- * acknowledges the change before confirming.
+ * Only GENUINE standalone slices (`assetKitId` AND `sourceKitId` both NULL)
+ * are copied verbatim, including per-row `quantity`. A slice whose
+ * `assetKitId` was `SET NULL` by a kit removal but which still carries
+ * `sourceKitId` is detached kit residue and is DROPPED — the kit it came
+ * from is re-resolved to its current membership instead. The
+ * duplicate-confirmation modal surfaces the resulting drift via
+ * {@link computeBookingKitDrift} so the user acknowledges the change before
+ * confirming.
  *
  * **Booking window.** The new booking's `from`/`to` are taken from the
  * caller-provided dates rather than being derived here, so the duplicate
@@ -13126,27 +13269,45 @@ export async function duplicateBooking({
       },
     });
 
-    // Split the source's snapshot into standalone and kit-driven buckets.
-    // Standalone slices are copied verbatim. Kit-driven slices are
-    // re-resolved against the kit's CURRENT AssetKit rows below so the
-    // duplicate reflects the kit's current contents.
+    // Three-way split of the source's snapshot:
+    //  - genuine standalone (BOTH pointers null) -> copied verbatim. A user
+    //    deliberately added these by hand; dropping them loses real intent.
+    //  - detached kit residue (`sourceKitId` set, `assetKitId` null) -> DROPPED.
+    //    `assetKitId` is `ON DELETE SET NULL`, so removing an asset from a kit
+    //    silently demotes the booking's kit-driven slice to a standalone one.
+    //    Copying it would re-add a swapped-out asset to the duplicate as a
+    //    loose asset (the reported customer bug); the kit's CURRENT contents
+    //    are re-resolved below instead.
+    //  - kit-driven (`assetKitId` non-null) -> not copied; rebuilt from the
+    //    kit's CURRENT `AssetKit` rows.
     const standaloneSourceSlices = bookingToDuplicate.bookingAssets.filter(
-      (ba) => ba.assetKitId == null
-    );
-    const kitSourceSlices = bookingToDuplicate.bookingAssets.filter(
-      (ba) => ba.assetKitId != null
+      (ba) => ba.assetKitId == null && ba.sourceKitId == null
     );
 
-    // Distinct kit ids referenced by the source. Resolved from
-    // `asset.assetKits.find(ak => ak.id === ba.assetKitId)?.kitId` because
-    // `ba.assetKitId` is an `AssetKit` row id, not the kit id itself. A slice
-    // whose AssetKit row has been deleted since (no matching entry) is
-    // dropped from the duplicate — same shape as `computeBookingKitDrift`.
+    // Every kit the source booking referenced, whether or not its slices are
+    // still kit-driven. Iterating ALL slices (not just kit-driven ones) is what
+    // keeps a kit whose members were ALL removed since in the duplicate — it
+    // gets re-resolved to its current contents instead of vanishing.
     const distinctKitIds = new Set<string>();
-    for (const slice of kitSourceSlices) {
-      const kitId = slice.asset.assetKits.find(
-        (ak) => ak.id === slice.assetKitId
-      )?.kitId;
+    for (const slice of bookingToDuplicate.bookingAssets) {
+      /**
+       * `sourceKitId` is the durable provenance and is preferred. The legacy
+       * `assetKitId -> AssetKit -> kitId` hop is the FALLBACK, kept because the
+       * "assetKitId non-null ⇒ sourceKitId non-null" invariant is enforced by
+       * code alone (no CHECK constraint): the migration necessarily lands
+       * before the new code, so during a rolling deploy an older instance can
+       * still write a kit-driven row with a NULL `sourceKitId`. Without the
+       * fallback such a row is in neither bucket and its whole kit silently
+       * vanishes from the duplicate (a kit-only booking would copy to an EMPTY
+       * one). Costs no extra query — `asset.assetKits` is already selected by
+       * `BOOKING_WITH_ASSETS_INCLUDE`.
+       *
+       * This cannot resurrect detached residue: residue rows have
+       * `assetKitId === null`, so the `find` never matches for them.
+       */
+      const kitId =
+        slice.sourceKitId ??
+        slice.asset.assetKits.find((ak) => ak.id === slice.assetKitId)?.kitId;
       if (kitId) distinctKitIds.add(kitId);
     }
 
@@ -13158,6 +13319,8 @@ export async function duplicateBooking({
       assetId: string;
       quantity: number;
       assetKitId: string;
+      /** Owning kit, persisted to `BookingAsset.sourceKitId`. */
+      kitId: string;
       asset: { type: AssetType; unitOfMeasure: string | null };
     }> = [];
 
@@ -13167,12 +13330,19 @@ export async function duplicateBooking({
         organizationId,
       });
 
+      // `kitId` costs nothing extra here — the query is already filtered by
+      // `kitId IN (...)`, so selecting it just carries the org-proven owning
+      // kit through to `sourceKitId` (same pattern as
+      // `buildKitSlicesForBooking`). It is read off the `AssetKit` row rather
+      // than taken from any caller input: every id in `kitIdsList` came from
+      // the org-scoped source booking and passed `assertKitsBelongToOrg` above.
       const currentKitAssets = await db.assetKit.findMany({
         where: { kitId: { in: kitIdsList } },
         select: {
           id: true,
           assetId: true,
           quantity: true,
+          kitId: true,
           asset: {
             select: { type: true, unitOfMeasure: true },
           },
@@ -13183,6 +13353,7 @@ export async function duplicateBooking({
         assetId: ak.assetId,
         quantity: ak.quantity,
         assetKitId: ak.id,
+        kitId: ak.kitId,
         asset: ak.asset,
       }));
     }
@@ -13196,12 +13367,19 @@ export async function duplicateBooking({
       ...standaloneSourceSlices.map((ba) => ({
         assetId: ba.assetId,
         quantity: ba.quantity,
-        assetKitId: ba.assetKitId,
+        // Explicit nulls rather than `ba.assetKitId` / `ba.sourceKitId`: this
+        // bucket is genuine standalone by construction (both pointers null),
+        // so the "assetKitId null ⇔ sourceKitId null" invariant reads locally.
+        assetKitId: null,
+        sourceKitId: null,
       })),
       ...kitDrivenCreateRows.map((row) => ({
         assetId: row.assetId,
         quantity: row.quantity,
         assetKitId: row.assetKitId,
+        // Durable provenance — survives the AssetKit row being deleted, which
+        // is what stops a future detach from turning this into loose residue.
+        sourceKitId: row.kitId,
       })),
     ];
 
@@ -13226,11 +13404,13 @@ export async function duplicateBooking({
           custodianUserId: bookingToDuplicate.custodianUserId,
           bookingAssets: {
             /**
-             * Standalone slices (`assetKitId IS NULL`) are copied verbatim
-             * so per-row `quantity` is preserved for QUANTITY_TRACKED
-             * assets. Kit-driven slices are rebuilt from each referenced
-             * kit's CURRENT `AssetKit` rows so the duplicate reflects the
-             * kit's current contents, not the snapshot the source carried.
+             * Genuine standalone slices (`assetKitId` and `sourceKitId` both
+             * NULL) are copied verbatim so per-row `quantity` is preserved
+             * for QUANTITY_TRACKED assets. Kit-driven slices are rebuilt from
+             * each referenced kit's CURRENT `AssetKit` rows so the duplicate
+             * reflects the kit's current contents, not the snapshot the
+             * source carried — and detached kit residue is dropped rather
+             * than copied in as a loose asset.
              *
              * Polish-6 allows multiple BookingAsset rows per asset (one
              * standalone + N kit-driven). Each kit-driven row carries a
