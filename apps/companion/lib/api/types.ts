@@ -368,6 +368,11 @@ export type KitDetailAsset = {
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
+  // QT-aware fields (additive; absent on older servers). `kitQuantity` is the
+  // units of this asset held by the kit (AssetKit.quantity).
+  type?: AssetType;
+  kitQuantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 export type KitDetail = {
