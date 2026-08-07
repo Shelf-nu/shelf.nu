@@ -199,6 +199,27 @@ export function BookingAssetsColumn() {
           <BookingModelReservationsSection
             modelRequests={booking.modelRequests}
             className="-mx-4 mb-2 md:mx-0"
+            /* Gives the outstanding work the same weight as "Scan to add" on
+               the assets list below. Without it, assigning units meant either
+               a per-row kebab or starting a check-out, so the section stated a
+               problem and offered no visible way to act on it. Points at the
+               plain scanner rather than fulfil-and-checkout: an operator
+               prepping days ahead wants to assign units without beginning a
+               check-out they can't finish. */
+            headerAction={
+              canSeeActions ? (
+                <Button
+                  icon="scan"
+                  variant="secondary"
+                  size="sm"
+                  to="scan-assets"
+                  disabled={manageAssetsButtonDisabled}
+                  className="whitespace-nowrap"
+                >
+                  Scan to assign
+                </Button>
+              ) : null
+            }
             renderAction={(request) => (
               <ModelRequestRowActionsDropdown
                 request={request}

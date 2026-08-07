@@ -66,6 +66,16 @@ type BookingModelReservationsSectionProps = {
    * affordance differs, matching what each surface can actually do.
    */
   renderAction?: (request: SectionModelRequest) => ReactNode;
+  /**
+   * Primary action for the section as a whole, rendered beside the heading.
+   *
+   * Without it the only way to act on outstanding work was a per-row kebab,
+   * while the Assets & Kits list directly below carried two full-size buttons.
+   * The section describing what the booking still OWES had the weakest
+   * affordance on the page, so "what do I do about this" had no visible answer
+   * short of starting a check-out.
+   */
+  headerAction?: ReactNode;
   /** Extra classes for the outer wrapper (surface-specific spacing). */
   className?: string;
 };
@@ -108,6 +118,7 @@ function describeOutstanding(request: SectionModelRequest): string {
 export function BookingModelReservationsSection({
   modelRequests,
   renderAction,
+  headerAction,
   className,
 }: BookingModelReservationsSectionProps) {
   const outstanding = getOutstandingModelRequests(modelRequests);
@@ -121,19 +132,22 @@ export function BookingModelReservationsSection({
 
   return (
     <div className={tw("overflow-hidden rounded border bg-white", className)}>
-      <div className="border-b border-gray-200 p-4 md:px-6">
-        <h5 className="text-left text-text-sm font-semibold text-gray-900">
-          Unassigned model reservations
-        </h5>
-        {/* Same `"X of Y units"` shape the rows use, so the header is checkable
+      <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 md:px-6">
+        <div>
+          <h5 className="text-left text-text-sm font-semibold text-gray-900">
+            Unassigned model reservations
+          </h5>
+          {/* Same `"X of Y units"` shape the rows use, so the header is checkable
             against them by eye: the rows' first numbers sum to X and their
             second numbers sum to Y. Stating both stops a reader having to
             guess whether a lone number means promised or remaining. */}
-        <p className="text-sm text-gray-600">
-          {units} of {reserved} {reserved === 1 ? "unit" : "units"} still to
-          assign, across {outstanding.length}{" "}
-          {outstanding.length === 1 ? "model" : "models"}
-        </p>
+          <p className="text-sm text-gray-600">
+            {units} of {reserved} {reserved === 1 ? "unit" : "units"} still to
+            assign, across {outstanding.length}{" "}
+            {outstanding.length === 1 ? "model" : "models"}
+          </p>
+        </div>
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
 
       <table className="w-full border-collapse">
