@@ -18,6 +18,7 @@ import {
   createBarcodeAddonTrialSubscription,
   getBarcodeAddonPrices,
 } from "~/modules/barcode/addon.server";
+import { signalsTeamIntent } from "~/modules/onboarding/constants";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -62,12 +63,25 @@ export async function loader({ context }: LoaderFunctionArgs) {
       // Personal org not found yet - that's ok during onboarding
     }
 
+    // Read the onboarding "how many people" answer so we can steer the plan
+    // choice. Only the known multi-person options count: the field is
+    // free-text capable, so answers like "1" must not imply a team.
+    const userWithIntel = await getUserByID(userId, {
+      select: {
+        businessIntel: { select: { teamSize: true } },
+      } satisfies Prisma.UserSelect,
+    });
+    const teamSize = userWithIntel.businessIntel?.teamSize ?? null;
+    const teamIntent =
+      teamSize && signalsTeamIntent(teamSize) ? { teamSize } : null;
+
     return data(
       payload({
         auditPrices,
         barcodePrices,
         usedAuditTrial,
         usedBarcodeTrial,
+        teamIntent,
       })
     );
   } catch (cause) {
@@ -187,6 +201,8 @@ export default function Welcome() {
         barcodePrices={loaderData?.barcodePrices ?? { month: null, year: null }}
         usedAuditTrial={loaderData?.usedAuditTrial ?? false}
         usedBarcodeTrial={loaderData?.usedBarcodeTrial ?? false}
+        teamIntent={loaderData?.teamIntent ?? null}
+        defaultSelectedPlan={loaderData?.teamIntent ? "team" : null}
       />
     </div>
   );
