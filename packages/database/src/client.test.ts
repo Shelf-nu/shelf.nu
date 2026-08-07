@@ -114,16 +114,43 @@ test("getRetryableErrorCode", async (t) => {
 });
 
 test("isLockTableExhaustionError", async (t) => {
-  await t.test("detects the SQLSTATE 53200 on `meta.code`", () => {
-    assert.equal(isLockTableExhaustionError(lockExhaustionError()), true);
-  });
+  await t.test(
+    "detects lock-table exhaustion via the max_locks_per_transaction hint",
+    () => {
+      assert.equal(isLockTableExhaustionError(lockExhaustionError()), true);
+    }
+  );
 
-  await t.test("detects the hint text in the message as a fallback", () => {
-    const error = new Error(
-      "Raw query failed: ERROR: out of shared memory HINT: increase max_locks_per_transaction."
-    );
+  await t.test("detects the hint when it rides only on `meta.message`", () => {
+    const error = Object.assign(new Error("Raw query failed. Code: `53200`."), {
+      code: "P2010",
+      meta: {
+        code: "53200",
+        message:
+          "ERROR: out of shared memory\nHINT: You might need to increase max_locks_per_transaction.",
+      },
+    });
     assert.equal(isLockTableExhaustionError(error), true);
   });
+
+  await t.test(
+    "does NOT match a generic 53200 out_of_memory WITHOUT the lock hint",
+    () => {
+      // 53200 is Postgres out_of_memory generally — backend OOM raises it too.
+      // Retrying a real memory-exhaustion read would deepen the incident, so a
+      // 53200 without the max_locks_per_transaction hint must not match.
+      const error = Object.assign(
+        new Error(
+          "Raw query failed. Code: `53200`. Message: `ERROR: out of memory`"
+        ),
+        {
+          code: "P2010",
+          meta: { code: "53200", message: "ERROR: out of memory" },
+        }
+      );
+      assert.equal(isLockTableExhaustionError(error), false);
+    }
+  );
 
   await t.test(
     "does NOT match a generic P2010 raw-query failure (different SQLSTATE)",
@@ -210,6 +237,27 @@ test("isRetryablePrismaError", async (t) => {
         isRetryablePrismaError(lockExhaustionError(), {
           operationIsRead: false,
         }),
+        false
+      );
+    }
+  );
+
+  await t.test(
+    "does NOT retry a generic 53200 out_of_memory (no lock hint) on a read",
+    () => {
+      // Guards the narrowing: a real backend OOM (53200 without the hint) must
+      // fail fast, not get retried into a deeper memory incident.
+      const oom = Object.assign(
+        new Error(
+          "Raw query failed. Code: `53200`. Message: `ERROR: out of memory`"
+        ),
+        {
+          code: "P2010",
+          meta: { code: "53200", message: "ERROR: out of memory" },
+        }
+      );
+      assert.equal(
+        isRetryablePrismaError(oom, { operationIsRead: true }),
         false
       );
     }

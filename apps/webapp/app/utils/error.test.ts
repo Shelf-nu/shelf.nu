@@ -64,6 +64,7 @@ describe(makeShelfError.name, () => {
 
       expect(error.status).toEqual(503);
       expect(error.label).toEqual("DB");
+      expect(error.shouldBeCaptured).toBe(true);
       expect(error.message).toContain("temporary database connectivity");
     });
 
@@ -127,6 +128,26 @@ describe(makeShelfError.name, () => {
       expect(error.label).toEqual("User");
       expect(error.message).toContain("does not exist");
     });
+
+    it("preserves the wrapper's additionalData when P2024 is wrapped", () => {
+      const prismaError = Object.assign(new Error("Connection pool timeout"), {
+        code: "P2024",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+        additionalData: { organizationId: "org-1" },
+      });
+
+      const error = makeShelfError(wrappedCause, { userId: "user-1" });
+
+      expect(error.status).toEqual(503);
+      expect(error.additionalData).toMatchObject({
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+    });
   });
 
   describe("cause is a DB resource-exhaustion (lock table) error", () => {
@@ -139,6 +160,9 @@ describe(makeShelfError.name, () => {
 
       expect(error.status).toEqual(503);
       expect(error.label).toEqual("DB");
+      // Kept captured on purpose (503 >= 500) so the class stays in Sentry;
+      // pin it so a regression that silences capture fails the suite.
+      expect(error.shouldBeCaptured).toBe(true);
       expect(error.message.toLowerCase()).toContain("temporarily overloaded");
     });
 
@@ -159,8 +183,33 @@ describe(makeShelfError.name, () => {
 
       expect(error.status).toEqual(503);
       expect(error.label).toEqual("DB");
+      expect(error.shouldBeCaptured).toBe(true);
       expect(error.message).not.toContain("Failed to fetch");
       expect(error.cause).toBe(wrappedCause);
+    });
+
+    it("preserves the wrapper's additionalData (org + filters) and layers route-level data", () => {
+      // The assets query wraps the raw error with { organizationId, paramsValues }
+      // — the load-dependent context needed to watch the lock exhaustion recede.
+      // The 503 mapping must not drop it.
+      const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+        additionalData: { organizationId: "org-1", paramsValues: { page: 1 } },
+      });
+
+      const error = makeShelfError(wrappedCause, { userId: "user-1" });
+
+      expect(error.status).toEqual(503);
+      expect(error.additionalData).toMatchObject({
+        organizationId: "org-1",
+        paramsValues: { page: 1 },
+        userId: "user-1",
+      });
     });
   });
 

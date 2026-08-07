@@ -615,12 +615,19 @@ export function makeShelfError(
   // This prevents misleading messages like "User not found" when the
   // real issue is a connection pool timeout (P2024).
   if (hasTransientCause(cause)) {
+    // Merge the wrapper's additionalData (a service catch may have attached
+    // context like organizationId before re-throwing) so it survives into the
+    // logged/Sentry payload, mirroring the not-found + generic branches below.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
     return new ShelfError({
       cause,
       message:
         "We're experiencing temporary database connectivity issues. Please try again in a moment.",
       label: "DB",
-      additionalData,
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
       shouldBeCaptured: true,
       status: 503,
     });
@@ -635,12 +642,20 @@ export function makeShelfError(
   // stays in the Sentry error pipeline) so we can watch it recede as the
   // durable per-request fan-out fix lands. See SHELF-WEBAPP-227.
   if (isDbResourceExhaustionError(cause)) {
+    // Merge the wrapper's additionalData: on the assets path the cause is the
+    // "Failed to fetch…" ShelfError carrying { organizationId, paramsValues },
+    // which is exactly the load-dependent context (which workspace / which
+    // filters) needed to watch this recede. Mirrors the not-found branch.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
     return new ShelfError({
       cause,
       message:
         "The server is temporarily overloaded and couldn't load this. Please try again in a moment.",
       label: "DB",
-      additionalData,
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
       shouldBeCaptured: true,
       status: 503,
     });
