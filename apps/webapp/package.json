@@ -29,7 +29,9 @@
     "seed:reporting-demo": "dotenv -e ../../.env -- tsx scripts/seed-reporting-demo.ts",
     "seed:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/seed-reporting-demo.ts",
     "clean:reporting-demo": "dotenv -e ../../.env -- tsx scripts/clean-reporting-demo.ts",
-    "clean:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/clean-reporting-demo.ts"
+    "clean:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/clean-reporting-demo.ts",
+    "report:state-of-em-2026": "dotenv -e ../../.env -- tsx scripts/state-of-em-2026.ts",
+    "report:state-of-em-2026:staging": "dotenv -e ../../.env.staging -- tsx scripts/state-of-em-2026.ts"
   },
   "dependencies": {
     "@bwip-js/browser": "^4.9.0",
