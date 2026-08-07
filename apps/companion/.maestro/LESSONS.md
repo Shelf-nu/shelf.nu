@@ -187,3 +187,22 @@ Fill in `env/test.env` with real IDs from your test organization. The IDs must r
 **Opportunities:**
 
 - <!-- Add improvement ideas here -->
+
+## Driving book-by-model / fulfil, and today's self-inflicted slowdowns (2026-07-23)
+
+- **Use THIS harness, not ad-hoc panel taps.** The fastest way to lose an hour
+  is to drive the app with blind screen-coordinate taps (the live simulator
+  panel). Coordinates drift the moment a list scrolls or the keyboard opens, so
+  you keep opening the wrong card. Every flow here uses `runFlow` + label/`id`
+  selectors for a reason — reach for a new `.maestro` flow first.
+- **Manual code entry: tap `id: dev-scan-input`, then `inputText` + `pressKey:
+Enter`.** That id is stable; the visible input position is not (the drawer
+  shifts it after the first scan). Do NOT re-tap the field by coordinate.
+- **Fulfil needs a fixture, not hand-psql.** Reserve-a-model can be built via
+  the picker (flow 13), but fulfil-scanning needs a model whose unit QR ids you
+  KNOW. `scripts/seed-e2e.sh up` creates a RESERVED "E2E Fulfil Booking" with
+  two known-QR units and writes `env/e2e.env`; `down` removes it. Never
+  hand-write psql for this again.
+- **Assert on the accessibility label for list state.** The booking card's
+  a11y label carries the full state, e.g. `Booking: …, Reserved, 0 assets, 2
+reserved` — a deterministic anchor even when the visible text truncates.
