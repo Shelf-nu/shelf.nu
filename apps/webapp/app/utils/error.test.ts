@@ -1,6 +1,7 @@
 import {
   ShelfError,
   isAssetQuantityOverAllocationError,
+  isDbResourceExhaustionError,
   isHandledClientError,
   isIndividualAssetAlreadyPlacedError,
   isLikeShelfError,
@@ -10,6 +11,15 @@ import {
   throwIfAssetQuantityOverAllocation,
   throwIfIndividualAssetAlreadyPlaced,
 } from "./error";
+
+/**
+ * Realistic Prisma message for a Postgres shared-lock-table exhaustion
+ * (SQLSTATE 53200). Prisma surfaces this as a P2010 (raw query failed) whose
+ * `.message` embeds the Postgres error + hint verbatim. Mirrors the payload
+ * captured in SHELF-WEBAPP-227.
+ */
+const LOCK_EXHAUSTION_MESSAGE =
+  "\nInvalid `prisma.$queryRaw()` invocation:\n\n\nRaw query failed. Code: `53200`. Message: `ERROR: out of shared memory\nHINT: You might need to increase max_locks_per_transaction.`";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -116,6 +126,41 @@ describe(makeShelfError.name, () => {
       expect(error.status).toEqual(404);
       expect(error.label).toEqual("User");
       expect(error.message).toContain("does not exist");
+    });
+  });
+
+  describe("cause is a DB resource-exhaustion (lock table) error", () => {
+    it("maps a direct 53200 lock-exhaustion error to a friendly retryable 503", () => {
+      const cause = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+
+      const error = makeShelfError(cause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.message.toLowerCase()).toContain("temporarily overloaded");
+    });
+
+    it("maps 53200 to 503 even when wrapped in a generic 500 ShelfError", () => {
+      // Mirrors the real path: the assets query catch re-wraps the raw Prisma
+      // error into a generic "Failed to fetch…" 500 before it reaches the
+      // route boundary where makeShelfError runs.
+      const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+      });
+
+      const error = makeShelfError(wrappedCause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.message).not.toContain("Failed to fetch");
+      expect(error.cause).toBe(wrappedCause);
     });
   });
 
@@ -444,6 +489,45 @@ describe(isPrismaTransientError.name, () => {
     error.message = undefined;
     expect(() => isPrismaTransientError(error)).not.toThrow();
     expect(isPrismaTransientError(error)).toBe(false);
+  });
+});
+
+describe(isDbResourceExhaustionError.name, () => {
+  it("detects a direct Postgres 53200 lock-table-exhaustion error", () => {
+    const error = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+      code: "P2010",
+    });
+    expect(isDbResourceExhaustionError(error)).toBe(true);
+  });
+
+  it("detects it when wrapped inside a ShelfError cause chain", () => {
+    const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+      code: "P2010",
+    });
+    const wrapped = new ShelfError({
+      cause: prismaError,
+      label: "Assets",
+      message: "Failed to fetch paginated and filterable assets",
+    });
+    expect(isDbResourceExhaustionError(wrapped)).toBe(true);
+  });
+
+  it("does NOT match a generic P2010 raw-query failure (e.g. a bad column)", () => {
+    // A genuinely broken raw query is also a P2010 — matching on the bare
+    // P2010 code would swallow real bugs. We match only the 53200 signature.
+    const error = Object.assign(
+      new Error(
+        '\nInvalid `prisma.$queryRaw()` invocation:\n\nRaw query failed. Code: `42703`. Message: `column "foo" does not exist`'
+      ),
+      { code: "P2010" }
+    );
+    expect(isDbResourceExhaustionError(error)).toBe(false);
+  });
+
+  it("returns false for unrelated errors and non-objects", () => {
+    expect(isDbResourceExhaustionError(new Error("boom"))).toBe(false);
+    expect(isDbResourceExhaustionError(null)).toBe(false);
+    expect(isDbResourceExhaustionError(undefined)).toBe(false);
   });
 });
 

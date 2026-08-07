@@ -92,6 +92,56 @@ const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 500;
 
 /**
+ * Postgres SQLSTATE `53200` (`out_of_memory`), raised when the cluster-wide
+ * **shared lock table is full** — the "increase max_locks_per_transaction"
+ * hint. Prisma surfaces it as a `P2010` (raw query failed), a code far too
+ * broad to retry wholesale (a genuinely broken raw query is *also* `P2010`), so
+ * we match NARROWLY: the SQLSTATE lands on the error's `meta.code`, and the
+ * hint text is embedded verbatim in the message as a fallback.
+ */
+const LOCK_EXHAUSTION_SQLSTATE = "53200";
+const LOCK_EXHAUSTION_MESSAGE_MARKER = "max_locks_per_transaction";
+
+/**
+ * Reports whether an error is Postgres shared-lock-table exhaustion
+ * (SQLSTATE `53200`). Unlike the connection/in-flight codes this is a
+ * RESOURCE-exhaustion under load, not a connectivity failure: the statement
+ * failed while ACQUIRING its locks, before touching any row, so it is transient
+ * and idempotent to re-run. {@link isRetryablePrismaError} gates it to READS.
+ *
+ * Duck-typed (reads `meta.code` / `message`) so plain mocked errors are
+ * recognized the same way the rest of this module treats them.
+ *
+ * @see apps/webapp/app/utils/error.ts `isDbResourceExhaustionError` — the app
+ * layer's cause-chain-walking counterpart that maps this class to a 503.
+ * @see SHELF-WEBAPP-227
+ *
+ * @param error - The unknown value thrown by a Prisma operation.
+ * @returns `true` when `error` is the 53200 lock-exhaustion condition.
+ */
+export function isLockTableExhaustionError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  // Prisma carries the Postgres SQLSTATE on `meta.code` for raw-query failures.
+  const meta = (error as { meta?: unknown }).meta;
+  if (
+    typeof meta === "object" &&
+    meta !== null &&
+    "code" in meta &&
+    (meta as { code?: unknown }).code === LOCK_EXHAUSTION_SQLSTATE
+  ) {
+    return true;
+  }
+  // Fallback: the hint text is embedded verbatim in the Prisma error message.
+  const message = (error as { message?: unknown }).message;
+  return (
+    typeof message === "string" &&
+    message.includes(LOCK_EXHAUSTION_MESSAGE_MARKER)
+  );
+}
+
+/**
  * Extracts a transient Prisma error code from an unknown thrown value, reading
  * BOTH shapes Prisma uses to report one:
  *
@@ -147,6 +197,15 @@ export function isRetryablePrismaError(
   error: unknown,
   { operationIsRead }: { operationIsRead: boolean }
 ): boolean {
+  // Postgres shared-lock-table exhaustion (SQLSTATE 53200) is a transient
+  // resource overload, not one of the transient CODES above (it rides on a
+  // P2010). The statement failed acquiring its locks before mutating anything,
+  // so it's safe to re-run — but gated to reads for the same conservatism as
+  // the in-flight codes (a write path that trips it fails fast). See
+  // SHELF-WEBAPP-227.
+  if (isLockTableExhaustionError(error)) {
+    return operationIsRead;
+  }
   const code = getRetryableErrorCode(error);
   if (code === null) {
     return false;
@@ -206,8 +265,10 @@ export async function withPrismaRetry<T>(
         isRetryablePrismaError(error, { operationIsRead }) &&
         attempt <= MAX_RETRIES
       ) {
-        // Non-null: isRetryablePrismaError only returns true for a known code.
-        const code = getRetryableErrorCode(error);
+        // Retryable path only: the code is a known transient code, or (when
+        // getRetryableErrorCode returns null) the 53200 lock-exhaustion class,
+        // which rides on a P2010 rather than a retryable code.
+        const code = getRetryableErrorCode(error) ?? LOCK_EXHAUSTION_SQLSTATE;
         const delayMs = BASE_DELAY_MS * attempt;
         log(
           `[db] transient Prisma error [${code}], retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms`
