@@ -17,6 +17,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
+import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -117,12 +118,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * - Throwing an error if the user is already connected to an email account
          * - Linking the user to the correct org if SCIM is configured
          */
+        // Detect the caller's date/time/week/timezone prefs from browser hints;
+        // only the new-user branch of the resolver consumes them. timeZone is
+        // null when the CH-time-zone cookie is absent — common on SSO/OAuth
+        // callbacks, which don't render ClientHintCheck first — so the "UTC"
+        // fallback is never stamped permanently (the lazy backfill fills it).
+        const formatPrefs = detectFormatPrefsForPersistence(request);
         const { org } = await resolveUserAndOrgForSsoCallback({
           authSession,
           firstName,
           lastName,
           groups,
           contactInfo,
+          formatPrefs,
         });
 
         // Set the auth session and redirect to the assets page

@@ -16,6 +16,7 @@ import {
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
 import type { ClientHint } from "~/utils/client-hints";
+import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -1781,6 +1782,12 @@ export async function completeAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the completion email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         assignments: {
@@ -1791,6 +1798,11 @@ export async function completeAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -1827,6 +1839,12 @@ export async function completeAuditSession({
             firstName: completedAudit.createdBy.firstName,
             lastName: completedAudit.createdBy.lastName,
             displayName: completedAudit.createdBy.displayName,
+            // Carry the creator's format prefs so their notify row resolves the
+            // same way an assignee row does (from the loaded row, no N+1).
+            dateFormat: completedAudit.createdBy.dateFormat,
+            timeFormat: completedAudit.createdBy.timeFormat,
+            weekStart: completedAudit.createdBy.weekStart,
+            timeZone: completedAudit.createdBy.timeZone,
           },
         });
       }
@@ -2127,6 +2145,12 @@ export async function cancelAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the cancellation email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         organization: {
@@ -2144,6 +2168,11 @@ export async function cancelAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -2279,12 +2308,14 @@ export async function cancelAuditSession({
     //    the creator that their audit was killed.
     const assigneesToNotify: Array<{
       userId: string;
+      // Raw format-preference columns travel on each recipient row so the email
+      // helper resolves prefs from the loaded row (no per-recipient DB fetch).
       user: {
         email: string;
         firstName: string | null;
         lastName: string | null;
         displayName?: string | null;
-      };
+      } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -2309,6 +2340,12 @@ export async function cancelAuditSession({
           firstName: auditSession.createdBy.firstName,
           lastName: auditSession.createdBy.lastName,
           displayName: auditSession.createdBy.displayName,
+          // Carry the creator's format prefs so their notify row resolves the
+          // same way an assignee row does (from the loaded row, no N+1).
+          dateFormat: auditSession.createdBy.dateFormat,
+          timeFormat: auditSession.createdBy.timeFormat,
+          weekStart: auditSession.createdBy.weekStart,
+          timeZone: auditSession.createdBy.timeZone,
         },
       });
     }

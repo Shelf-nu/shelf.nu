@@ -38,6 +38,18 @@ type Props = {
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
+  /**
+   * Optional second numeric field rendered under the primary one. The ONE_WAY
+   * custody release uses it to ask how many of the released units were used
+   * up. Its value is clamped to the primary quantity, so it can never
+   * over-claim.
+   */
+  secondary?: {
+    /** Field label, e.g. "Of those, how many were used up?". */
+    label: string;
+    /** Initial value when the sheet opens (clamped to [0, primary]). */
+    defaultValue?: number;
+  };
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -46,8 +58,11 @@ type Props = {
    * quick-actions.tsx `primaryActionGreen`). Default is the primary black.
    */
   destructive?: boolean;
-  /** Called with the validated quantity when the user confirms. */
-  onSubmit: (quantity: number) => void;
+  /**
+   * Called with the validated quantity when the user confirms, plus the
+   * secondary value when a `secondary` field is configured.
+   */
+  onSubmit: (quantity: number, secondaryValue?: number) => void;
   /** Called when the user dismisses the sheet without confirming. */
   onClose: () => void;
 };
@@ -69,6 +84,7 @@ export function QuantityInputSheet({
   max,
   defaultValue,
   unitOfMeasure,
+  secondary,
   confirmLabel,
   destructive,
   onSubmit,
@@ -78,27 +94,76 @@ export function QuantityInputSheet({
   const styles = useStyles();
 
   const [value, setValue] = useState("1");
+  const [secondaryValue, setSecondaryValue] = useState("0");
   const inputRef = useRef<TextInput>(null);
 
-  // Re-seed the input every time the sheet opens: each open targets a fresh
+  // The secondary field's presence and seed are read out as primitives so the
+  // re-seed effect below can depend on THEM rather than on the `secondary`
+  // object. Callers build that object inline, giving it a fresh identity on
+  // every parent render — as a dependency it would turn "re-seed on open" into
+  // "re-seed on every parent render", silently discarding a split the operator
+  // had already typed.
+  const hasSecondaryField = secondary != null;
+  const secondaryDefaultValue = secondary?.defaultValue;
+
+  // Re-seed the inputs every time the sheet opens: each open targets a fresh
   // action (different member/holder), so stale values must not leak across.
   useEffect(() => {
     if (visible) {
       const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
       setValue(String(seed));
+      if (hasSecondaryField) {
+        // Clamp the secondary seed to the primary seed — the two fields move
+        // together and the secondary can never exceed the units being released.
+        setSecondaryValue(
+          String(Math.min(Math.max(secondaryDefaultValue ?? 0, 0), seed))
+        );
+      }
     }
-  }, [visible, defaultValue, max]);
+  }, [visible, defaultValue, max, hasSecondaryField, secondaryDefaultValue]);
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const overMax = hasValue && parsed > max;
   const isValid = hasValue && parsed >= 1 && parsed <= max;
 
+  const parsedSecondary = secondaryValue ? parseInt(secondaryValue, 10) : NaN;
+  const hasSecondary = Number.isFinite(parsedSecondary);
+  // With no secondary field the sheet behaves exactly as it always has.
+  const isSecondaryValid =
+    !secondary ||
+    (hasSecondary &&
+      parsedSecondary >= 0 &&
+      hasValue &&
+      parsedSecondary <= parsed);
+  const canConfirm = isValid && isSecondaryValid;
+
+  /**
+   * Pull the secondary value down when the primary quantity drops below it.
+   *
+   * Both fields seed to the same number for a consumable release, so without
+   * this a single tap of the minus button leaves the secondary above the
+   * primary and disables Confirm until the operator edits the second field by
+   * hand. Clamps DOWNWARD only, so someone who deliberately typed a smaller
+   * used-up count keeps it when they raise the primary again. The webapp's
+   * counterpart already does this in its reducer.
+   */
+  const clampSecondaryTo = (nextPrimary: number) => {
+    if (!hasSecondaryField) return;
+    setSecondaryValue((prev) => {
+      const prevParsed = prev ? parseInt(prev, 10) : NaN;
+      if (!Number.isFinite(prevParsed) || prevParsed <= nextPrimary)
+        return prev;
+      return String(nextPrimary);
+    });
+  };
+
   /** Step the current value by `delta`, clamped to [1, max]. */
   const step = (delta: number) => {
     const current = hasValue ? parsed : 0;
     const next = Math.min(Math.max(current + delta, 1), Math.max(max, 1));
     setValue(String(next));
+    clampSecondaryTo(next);
   };
 
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
@@ -155,7 +220,13 @@ export function QuantityInputSheet({
               onChangeText={(text) => {
                 // Digits only — quantities are positive integers
                 // (valuation-field.tsx pattern, minus the decimal point).
-                setValue(text.replace(/[^0-9]/g, ""));
+                const cleaned = text.replace(/[^0-9]/g, "");
+                setValue(cleaned);
+                // Guard on finite: clearing the field must not write "NaN"
+                // into the secondary input. An empty primary already blocks
+                // Confirm via `isValid`.
+                const next = cleaned ? parseInt(cleaned, 10) : NaN;
+                if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
               placeholder={`Max: ${max}`}
               placeholderTextColor={colors.placeholderText}
@@ -188,20 +259,46 @@ export function QuantityInputSheet({
             </Text>
           )}
 
+          {/* Optional second field, e.g. how many released units were used up */}
+          {secondary ? (
+            <View style={styles.secondaryBlock}>
+              <Text style={styles.secondaryLabel}>{secondary.label}</Text>
+              <TextInput
+                style={styles.input}
+                value={secondaryValue}
+                onChangeText={(text) => {
+                  setSecondaryValue(text.replace(/[^0-9]/g, ""));
+                }}
+                placeholder="0"
+                placeholderTextColor={colors.placeholderText}
+                keyboardType="number-pad"
+                returnKeyType="done"
+                accessibilityLabel={secondary.label}
+              />
+              {!isSecondaryValid ? (
+                <Text style={styles.errorHint}>
+                  Cannot exceed the {hasValue ? parsed : 0} being released.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {/* Confirm */}
           <TouchableOpacity
             style={[
               destructive ? styles.confirmRelease : styles.confirmPrimary,
-              !isValid && styles.confirmDisabled,
+              !canConfirm && styles.confirmDisabled,
             ]}
             onPress={() => {
-              if (isValid) onSubmit(parsed);
+              if (canConfirm) {
+                onSubmit(parsed, secondary ? parsedSecondary : undefined);
+              }
             }}
-            disabled={!isValid}
+            disabled={!canConfirm}
             activeOpacity={0.7}
             accessibilityLabel={`${confirmLabel} ${echo ?? "quantity"}`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !isValid }}
+            accessibilityState={{ disabled: !canConfirm }}
           >
             <Text style={styles.confirmText}>{confirmLabel}</Text>
           </TouchableOpacity>
@@ -279,6 +376,14 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.muted,
     textAlign: "center",
+  },
+  secondaryBlock: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  secondaryLabel: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
   },
   errorHint: {
     fontSize: fontSize.sm,

@@ -19,17 +19,25 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Reverse mapping: exported CSV header label → internal field name.
+ * Reverse mapping: exported CSV header text → internal field name.
  *
- * Built from `columnsLabelsMap`. E.g. `"Name" → "name"`,
- * `"Category" → "category"`.
+ * Shelf has TWO independent CSV header vocabularies that were never
+ * joined:
+ *   - The asset-index export (`csv.server.ts`) uses display labels from
+ *     `columnsLabelsMap` — `"Name"`, `"Category"`, `"Available to book"`.
+ *   - The content importer / import-ready export (`ASSET_CSV_HEADERS`,
+ *     `import-ready-export.server.ts`) uses machine keys — `"title"`,
+ *     `"category"`, `"bookable"`.
+ * A customer who fed an import-ready export into the update importer had
+ * every column rejected: only `ID` matched, by coincidence. Both
+ * vocabularies are mapped here to the SAME internal field name so a file
+ * from either export round-trips through the update importer.
  *
- * Some import-only columns (the qty-tracked + consumption fields) are
- * NOT part of the asset-index export column system (`columnsLabelsMap`
- * is keyed by `ColumnLabelKey`, which only enumerates the index's
- * fixed fields). We add explicit human-readable aliases below so users
- * can include those columns in update CSVs even though the export
- * doesn't emit them as separate columns.
+ * Built from `columnsLabelsMap` (display labels) plus explicit aliases
+ * below (machine keys, and qty-tracked/consumption columns that aren't
+ * part of the asset-index export column system at all). Matching against
+ * this map is done case-insensitively by `analyzeUpdateHeaders`, so
+ * `"Asset Model"`, `"asset model"`, and `"assetModel"` all resolve here.
  */
 export const EXPORT_HEADER_TO_FIELD_MAP: Record<string, string> = {
   ...(Object.fromEntries(
@@ -42,6 +50,38 @@ export const EXPORT_HEADER_TO_FIELD_MAP: Record<string, string> = {
   "Min quantity": "minQuantity",
   "Unit of measure": "unitOfMeasure",
   "Consumption type": "consumptionType",
+
+  // ---------------------------------------------------------------------
+  // Content-importer vocabulary (ASSET_CSV_HEADERS / import-ready export).
+  // Machine keys, mapped to the SAME internal field the display-label
+  // entries above resolve to. Keys that aren't in `UPDATABLE_FIELDS`
+  // (`kit`, `custody`, `type`, `imageUrl`, `qrId`, `barcode_*`) correctly
+  // fall through to `ignoredColumns` in `analyzeUpdateHeaders` — that is
+  // desired: those columns carry side-effects (custody/booking) or aren't
+  // safely round-trippable yet, not a classification gap.
+  // ---------------------------------------------------------------------
+  title: "name",
+  description: "description",
+  category: "category",
+  kit: "kit",
+  tags: "tags",
+  location: "location",
+  custodian: "custody",
+  bookable: "availableToBook",
+  valuation: "valuation",
+  assetModel: "assetModel",
+  type: "type",
+  quantity: "quantity",
+  minQuantity: "minQuantity",
+  unitOfMeasure: "unitOfMeasure",
+  consumptionType: "consumptionType",
+  imageUrl: "imageUrl",
+  qrId: "qrId",
+  barcode_Code128: "barcode_Code128",
+  barcode_Code39: "barcode_Code39",
+  barcode_DataMatrix: "barcode_DataMatrix",
+  barcode_ExternalQR: "barcode_ExternalQR",
+  barcode_EAN13: "barcode_EAN13",
 };
 
 /**
@@ -53,12 +93,22 @@ export const EXPORT_HEADER_TO_FIELD_MAP: Record<string, string> = {
  * `export → tweak → re-import` round-trip preserves those values
  * instead of silently dropping them.
  *
+ * `description` is added here (header classification only) because it's
+ * a plain scalar with no side-effects and its absence looked like an
+ * oversight — it is in `ASSET_CSV_HEADERS` alongside every other
+ * round-trippable field.
+ *
+ * `kit` and `custodian` are deliberately NOT included — both carry
+ * custody/booking side-effects and need their own events and org-scope
+ * guards, unlike a plain field assignment.
+ *
  * `type` is intentionally NOT included — asset type is immutable once
  * an asset is created. The `type` cell on update rows is silently
  * ignored regardless of what it contains.
  */
 export const UPDATABLE_FIELDS = new Set<string>([
   "name",
+  "description",
   "category",
   "location",
   "tags",
@@ -87,18 +137,26 @@ export const UPDATABLE_CF_TYPES = new Set<string>([
  * Priority order: Asset ID (most user-friendly) > ID (UUID).
  * QR ID is not usable because it's a relation field (Qr model), not a
  * direct field on Asset.
+ *
+ * Each slot lists every accepted CSV header text across BOTH
+ * vocabularies — e.g. the asset-index export's display label
+ * `"Asset ID"` and the content-importer's machine key `"sequentialId"`
+ * both identify the same underlying field. `analyzeUpdateHeaders`
+ * matches these case-insensitively and tries the aliases in order,
+ * so the FIRST one present in the CSV wins for that slot — priority
+ * between slots (Asset ID before ID) is unaffected.
  */
 export const IDENTIFIER_COLUMNS: {
-  header: string;
+  headers: string[];
   internalField: ColumnLabelKey;
   dbField: "sequentialId" | "id";
 }[] = [
   {
-    header: "Asset ID",
+    headers: ["Asset ID", "sequentialId"],
     internalField: "sequentialId",
     dbField: "sequentialId",
   },
-  { header: "ID", internalField: "id", dbField: "id" },
+  { headers: ["ID"], internalField: "id", dbField: "id" },
 ];
 
 /**
@@ -232,6 +290,13 @@ export interface HeaderAnalysis {
 export type AssetForUpdate = {
   id: string;
   title: string;
+  /**
+   * Plain scalar, no side-effects — round-trippable like `title`/`valuation`.
+   * `fetchAssetsForUpdate` already pulls this via Prisma's `include` (which
+   * selects all scalar columns), so no query change was needed to add it
+   * here — only the TS type was missing it.
+   */
+  description: string | null;
   sequentialId: string | null;
   valuation: number | null;
   availableToBook: boolean;
@@ -258,8 +323,42 @@ export type AssetForUpdate = {
   consumptionType?: ConsumptionType | null;
   /** Current AssetModel link; INDIVIDUAL only. */
   assetModelId?: string | null;
+  /**
+   * Full AssetModel relation (id + name), when linked. The update-preview
+   * diff needs the NAME (not just the id) because the export writes the
+   * model's name to the CSV cell — comparing that cell against
+   * `assetModelId` (a cuid) can never match, which was the Bug 1 root
+   * cause (every row with a model reported a phantom change). See
+   * `compareCoreField` case "assetModel" in `import-update-diff.ts`.
+   * Optional so pre-existing test fixtures that only set `assetModelId`
+   * still compile.
+   */
+  assetModel?: { id: string; name: string } | null;
   category: { name: string } | null;
   location: { id: string; name: string } | null;
+  /**
+   * Count of `AssetLocation` placement rows for this asset. A
+   * QUANTITY_TRACKED asset can have units split across multiple
+   * locations (see .claude/rules/quantity-semantics-per-surface.md) — a
+   * CSV `location` cell can only ever carry ONE value, so there's no way
+   * to safely represent (or collapse) a multi-placement asset through
+   * this flow. `compareCoreField` / `detectClearing` use this to
+   * warn-and-skip a `location` cell instead of silently proposing (and
+   * potentially applying) a destructive single-location collapse.
+   * `undefined` or `<= 1` means "single placement or unknown" — the
+   * normal update path is unaffected.
+   */
+  locationPlacementCount?: number;
+  /**
+   * Names of every `AssetLocation` placement, in the same deterministic
+   * order the export resolves its own "primary" with. The multi-placement
+   * guard matches the CSV cell against ALL of these rather than just
+   * `location.name`: the export flattens N placements into one cell and may
+   * pick a different row than this query does, so an untouched round trip
+   * must be recognised as a no-op whichever one it wrote. A cell naming a
+   * location the asset is NOT at — and an empty cell — still warn.
+   */
+  locationPlacementNames?: string[];
   tags: { id: string; name: string }[];
   customFields: {
     id: string;

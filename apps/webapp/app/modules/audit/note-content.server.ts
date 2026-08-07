@@ -26,17 +26,17 @@
  * @see {@link file://./../../routes/api+/mobile+/audits.image.ts}
  */
 
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+
 /**
- * Removes Markdoc tag delimiters (`{%` and `%}`) from user-supplied text
- * and trims it, so the text cannot open or close a Markdoc tag when it is
- * concatenated before a trusted `{% audit_images %}` tag.
+ * Re-exported from the canonical implementation so this module's existing
+ * importers keep working. New callers — including non-audit ones — should
+ * import from `~/utils/markdoc-sanitize` directly; the concern is repo-wide,
+ * not audit-specific.
  *
- * @param raw - Untrusted user content
- * @returns The content with all `{%` / `%}` sequences removed, trimmed
+ * @see {@link file://./../../utils/markdoc-sanitize.ts}
  */
-export function stripMarkdocDelimiters(raw: string): string {
-  return raw.replace(/\{%|%\}/g, "").trim();
-}
+export { stripMarkdocDelimiters };
 
 /**
  * Builds the body of an image-evidence note: the sanitized user content

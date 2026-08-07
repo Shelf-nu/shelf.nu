@@ -82,6 +82,13 @@ export interface UpdateAssetPayload {
 export interface CreateAssetFromContentImportPayload
   extends Record<string, any> {
   key: string; // Unique identifier for the asset in the import (this is generated while parsing the csv file)
+  /**
+   * A row may carry an `id` cell (the import-ready export's row matcher for
+   * the UPDATE importer). Deliberately not declared as a typed field here:
+   * createAssetsFromContentImport must never read it — it always mints a
+   * fresh cuid via `id(LEGACY_CUID_LENGTH)`, so a caller-supplied id can
+   * never be used to set/connect/upsert onto another workspace's asset.
+   */
   title: string;
   description?: string;
   category?: string;

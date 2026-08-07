@@ -2,8 +2,14 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
-import { parseISO } from "date-fns";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
+import {
+  detectFormatPrefsFromHints,
+  formatDate,
+  isValidTimeZone,
+  type DetectedFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
 import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
 
@@ -80,6 +86,59 @@ export const getClientHint = (request: Request): ClientHint => ({
   locale: getLocale(request),
   timeZone: getHints(request).timeZone,
 });
+
+/**
+ * The raw `CH-time-zone` cookie value the request carries, or null when absent.
+ * Decoded but NOT validated — callers decide what counts as a usable value.
+ */
+function getTimeZoneCookieValue(request: Request): string | null {
+  const cookieString =
+    typeof document !== "undefined"
+      ? document.cookie
+      : request.headers.get("Cookie") ?? "";
+  return getCookieValue(cookieString, "timeZone");
+}
+
+/**
+ * Whether the request actually carries the `CH-time-zone` cookie. Distinguishes
+ * a genuine UTC user (cookie present, value "UTC") from the "UTC" FALLBACK that
+ * {@link getHints} returns when the cookie is absent — e.g. the first
+ * authenticated request before {@link ClientHintCheck} sets the cookie + reloads,
+ * and server-established sessions (SSO / OAuth callbacks) that never render
+ * ClientHintCheck first.
+ *
+ * @param request - the incoming request
+ * @returns true when the timezone cookie is present (regardless of validity)
+ */
+export function hasTimeZoneHint(request: Request): boolean {
+  return getTimeZoneCookieValue(request) !== null;
+}
+
+/**
+ * Detected prefs for PERSISTENCE (new-user stamping + lazy backfill). Same as
+ * {@link detectFormatPrefsFromHints}, EXCEPT `timeZone` is null unless the request
+ * carries a VALID IANA zone in the CH-time-zone cookie. Both an absent cookie AND
+ * a present-but-MALFORMED one are treated as unknown: `detectFormatPrefsFromHints`
+ * maps a bad cookie to the "UTC" fallback, and persisting that UTC is
+ * indistinguishable from a real UTC — once stored it permanently blocks the lazy
+ * backfill from writing the user's true zone (the fast-path sees a non-null column
+ * and returns). Leaving the column null lets the read path resolve from live hints
+ * until a valid zone arrives, at which point the backfill fills it. The other three
+ * fields derive from the always-present accept-language header, so they are always
+ * safe to persist.
+ *
+ * @param request - the incoming request
+ * @returns detected prefs to store; `timeZone` null when the cookie is absent or invalid
+ */
+export function detectFormatPrefsForPersistence(
+  request: Request
+): DetectedFormatPrefs {
+  const detected = detectFormatPrefsFromHints(getClientHint(request));
+  const rawTimeZone = getTimeZoneCookieValue(request);
+  const timeZoneIsAuthoritative =
+    rawTimeZone !== null && isValidTimeZone(rawTimeZone);
+  return timeZoneIsAuthoritative ? detected : { ...detected, timeZone: null };
+}
 
 /**
  * @returns an object with the client hints and their values
@@ -189,8 +248,20 @@ export function getLocale(request: Request) {
   return locales[0] ?? "en-US";
 }
 
-export function formatDateBasedOnLocaleOnly(value: string, locale: string) {
-  return parseISO(value).toLocaleDateString(locale);
+/**
+ * Render a date-only string as an absolute (working-hours) date using the
+ * caller's resolved format prefs — no timezone conversion. This is the spine
+ * behind custom-field DATE display and calendar labels.
+ *
+ * @param value - ISO date-only or date-time string
+ * @param prefs - Fully-resolved user format prefs
+ * @returns Numeric date string in the user's configured order
+ */
+export function formatDateBasedOnLocaleOnly(
+  value: string,
+  prefs: ResolvedFormatPrefs
+) {
+  return formatDate(value, prefs, { localeOnly: true });
 }
 
 /**

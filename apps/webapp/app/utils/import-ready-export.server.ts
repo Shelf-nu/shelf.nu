@@ -33,6 +33,7 @@ export type ColumnScope = "visible" | "all";
 
 /** Core (non-custom-field, non-barcode) importer fields. */
 export type CoreImportField =
+  | "id"
   | "title"
   | "description"
   | "category"
@@ -62,6 +63,12 @@ export type ImportColumn =
  * rows, which need `type`/`quantity`/`consumptionType`).
  *
  * `qrId` (org-scoped) and `imageUrl` (v1: skipped) are deliberately absent.
+ *
+ * `id` is first and `alwaysInclude` in both scopes: it has no `columnName`
+ * (never gated on column-visibility settings) because it is the row matcher
+ * the update importer (`/assets/import-update`) needs to find the asset to
+ * update. The create importer ignores this column entirely — see
+ * `createAssetsFromContentImport` in `~/modules/asset/service.server.ts`.
  */
 const CORE_IMPORT_FIELDS: Array<{
   header: string;
@@ -69,6 +76,7 @@ const CORE_IMPORT_FIELDS: Array<{
   columnName?: Column["name"];
   alwaysInclude?: boolean;
 }> = [
+  { header: "id", field: "id", alwaysInclude: true },
   { header: "title", field: "title", columnName: "name", alwaysInclude: true },
   { header: "description", field: "description", columnName: "description" },
   { header: "category", field: "category", columnName: "category" },
@@ -246,6 +254,10 @@ function resolveCoreField(
   asset: AdvancedIndexAsset
 ): string {
   switch (field) {
+    case "id":
+      // The cuid (asset.id), NOT sequentialId — this is the update importer's
+      // row matcher, and the update flow resolves rows by primary key.
+      return asset.id;
     case "title":
       return asset.title ?? "";
     case "description":

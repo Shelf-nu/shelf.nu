@@ -21,12 +21,15 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
@@ -1041,7 +1044,11 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  const escape = (v: string) => `**${v.replace(/([*_`~])/g, "\\$1")}**`;
+  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
+  // and address are free-form user input rendered through Markdoc, so escaping
+  // `*_~` alone still lets `{% … %}` through as a live tag.
+  const escape = (v: string) =>
+    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
   const changes: string[] = [];
 
   // Name change
@@ -2379,6 +2386,21 @@ export async function updateLocationAssets({
       assetQuantities,
     });
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400 (user tried to place more units across
+    // locations than the asset has). No-ops for every other error. See
+    // SHELF-WEBAPP-21N.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+    // Likewise translate the single-location trigger: an INDIVIDUAL asset added
+    // here while it's still placed at another location. See SHELF-WEBAPP-1P4.
+    throwIfIndividualAssetAlreadyPlaced(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }
@@ -2588,12 +2610,26 @@ export async function updateLocationKits({
           }
         })
         .catch((cause) => {
+          // Adding kit-driven `AssetLocation` rows can trip two DB triggers.
+          // Translate both into friendly 400s (no-op for any other error):
+          // - a QUANTITY_TRACKED member exceeding Asset.quantity across
+          //   locations, and
+          // - an INDIVIDUAL member still placed at another location.
+          // See SHELF-WEBAPP-1P4.
+          throwIfAssetQuantityOverAllocation(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
+          throwIfIndividualAssetAlreadyPlaced(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
           throw new ShelfError({
             cause,
             message:
               "Something went wrong while adding the kits to the location. Please try again or contact support.",
             additionalData: { kitIds, userId, locationId },
-            label: "Location",
+            label,
           });
         });
 

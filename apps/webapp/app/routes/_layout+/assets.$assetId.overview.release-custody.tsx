@@ -18,6 +18,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
@@ -219,7 +220,8 @@ export const action = async ({
                 : null,
             },
           })
-        : `**${custodianDisplayName}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianDisplayName)}**`;
       const actor = wrapUserLinkForNote({
         id: user.id,
         firstName: user.firstName,

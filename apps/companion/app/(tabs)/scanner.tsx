@@ -24,7 +24,11 @@ import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
-import type { BookingAsset, ScannedKit } from "@/lib/api/types";
+import type {
+  BookingAsset,
+  QrResolveFailureReason,
+  ScannedKit,
+} from "@/lib/api/types";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -48,6 +52,7 @@ import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
 import { ScanFrame } from "@/components/scanner/scan-frame";
 import { ScanResultCard } from "@/components/scanner/scan-result-card";
+import type { IoniconName } from "@/components/scanner/scan-result-card";
 import { ActionPills, ModeDots } from "@/components/scanner/action-pills";
 import { ActionPillsCoachmark } from "@/components/scanner/action-pills-coachmark";
 import { BatchDrawer } from "@/components/scanner/batch-drawer";
@@ -216,6 +221,15 @@ function ScannerContent() {
   // Self-service users may only assign custody to themselves (mirrors the
   // web scanner, which pre-selects self and disables the custodian picker).
   const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+
+  // Native claim / link-existing is gated on qr:update — effectively
+  // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
+  // BASE/SELF_SERVICE only hold qr:read). Non-admins keep the web bridge.
+  const canManageQrCodes = userHasPermission({
+    roles: currentOrg?.roles,
+    entity: "qr",
+    action: "update",
+  });
 
   // Action state
   const [action, setAction] = useState<ScannerAction>("view");
@@ -389,6 +403,12 @@ function ScannerContent() {
   // Scan processing state (extracted hook) -- created first so
   // its setIsPaused can be referenced by the inactivity callback.
   const setIsPausedRef = useRef<(v: boolean) => void>(() => {});
+  /**
+   * Live mirror of the active org id, written by the org-change effect.
+   * Async continuations (claim → navigate) compare their originating org
+   * against this to detect a mid-flight workspace switch.
+   */
+  const activeOrgIdRef = useRef<string | undefined>(undefined);
   const onInactivityTimeout = useCallback(
     () => setIsPausedRef.current(true),
     []
@@ -434,9 +454,37 @@ function ScannerContent() {
   }, [dismissResultBase, lastScanRef]);
 
   // The scan list and booking context are reset by remounting the whole
-  // ScannerContent on any scan-context change — the default export keys it on
-  // `bookingId` + `bookingAction`. No reset-in-effect is needed here (and
-  // react-doctor forbids that pattern anyway).
+  // ScannerContent on any SCAN-CONTEXT change — the default export keys the
+  // error boundary on `bookingId` + `bookingAction`. No reset-in-effect is
+  // needed for that axis (and react-doctor forbids that pattern anyway).
+  //
+  // A workspace switch is a separate axis: the org is deliberately NOT part of
+  // that key (it would remount mid-flow on every org change), so the component
+  // stays mounted across one and the effect below still has to invalidate what
+  // the switch makes stale.
+
+  /**
+   * A workspace switch invalidates any on-screen result card: the scanner tab
+   * keeps its state while unfocused, and the card's action closures captured
+   * the org active at SCAN time — most dangerously the Unclaimed Code card,
+   * whose claim would land in the PREVIOUS workspace (permanently, there is
+   * no unclaim) while the card copy promises "this workspace". Clearing the
+   * card and the scan-dedup memory on org change means every action the user
+   * can see always targets the workspace they see.
+   */
+  useEffect(() => {
+    setScanResult(null);
+    lastScanRef.current = "";
+    // Also invalidates any in-flight claim continuation: claimQrAndProceed
+    // compares its originating org against this ref after its awaits and
+    // drops the follow-up navigation when they differ (the claim itself may
+    // have landed in the old org — irreversible — but we must not open the
+    // create/link flow under the newly active workspace).
+    activeOrgIdRef.current = currentOrg?.id;
+    // setScanResult / lastScanRef are stable identities (setState / ref), so
+    // this effectively runs only when the active org changes (the mount run
+    // is a no-op — the card starts null and the dedup memory empty).
+  }, [currentOrg?.id, setScanResult, lastScanRef]);
 
   // Animation for scan line (shared hook)
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
@@ -489,6 +537,104 @@ function ScannerContent() {
     setIsProcessing(false);
     startCooldown();
   };
+
+  /**
+   * Claim an unclaimed QR into the current workspace, then continue into the
+   * chosen follow-up: create a new asset (the create form links the QR on
+   * submit) or pick an existing asset to link. Mirrors the web
+   * claim → new / claim → link flow; mobile always claims into the ACTIVE
+   * workspace — the server refuses any body-supplied org.
+   *
+   * A failed claim re-resolves the code once before erroring: a
+   * timed-out-but-landed claim (the request isn't retried — see
+   * `api.claimQr`) or a teammate claiming the same label seconds earlier both
+   * leave the code claimed by this org and unlinked, in which case the flow
+   * proceeds as if our claim had succeeded. Any other failure (someone else's
+   * org won the race, permission revoked) surfaces as an error card.
+   *
+   * @param claimQrId - The unclaimed QR id (from the resolve error payload).
+   * @param next - Which follow-up to open once the code is claimed.
+   */
+  const claimQrAndProceed = useCallback(
+    async (claimQrId: string, next: "create" | "link") => {
+      // Same lock discipline as handleBarCodeScanned: the result card's two
+      // buttons are plain touchables, so a rapid double-tap (or one tap on
+      // each) would otherwise start two concurrent claim flows and stack two
+      // navigations — the second claim 403s, its recovery re-resolve
+      // "succeeds", and both invocations navigate.
+      if (!currentOrg || isProcessingRef.current) return;
+
+      // Take the processing lock so further camera scans are ignored and the
+      // spinner shows while the claim is in flight.
+      isProcessingRef.current = true;
+      setIsProcessing(true);
+      setScanResult(null);
+
+      // Pin the originating org: if the user switches workspaces while the
+      // claim is in flight, the continuation below must not run (the claim
+      // may have landed in this org, but navigating would open the
+      // create/link flow under the NEW org, where createAsset silently mints
+      // a different QR and strands the scanned label unlinked).
+      const originOrgId = currentOrg.id;
+
+      const { error: claimError } = await api.claimQr(currentOrg.id, claimQrId);
+
+      let claimed = !claimError;
+      if (claimError) {
+        // Recovery resolve — the server's claim 403 is deliberately generic
+        // ("already claimed or not allowed"), so the fresh resolve is the
+        // source of truth for whether the code ended up ours and unlinked.
+        // Non-recording resolve: this is an internal identify step, not a
+        // real field scan, so it must not write scan provenance (the normal
+        // claim-success path records nothing either).
+        const { data: recheck } = await api.getScannedItem(
+          claimQrId,
+          currentOrg.id
+        );
+        claimed = Boolean(
+          recheck?.qr &&
+            recheck.qr.organizationId === currentOrg.id &&
+            !recheck.qr.assetId &&
+            !recheck.qr.kitId
+        );
+      }
+
+      finalizeScan();
+
+      // Workspace switched while the claim was in flight — drop the
+      // continuation. The org-change effect has already cleared the card;
+      // showing a stale success/error for the previous workspace (or worse,
+      // navigating) would act on a workspace the user no longer sees.
+      if (activeOrgIdRef.current !== originOrgId) return;
+
+      if (!claimed) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setScanResult({
+          type: "error",
+          title: "Couldn't Claim Code",
+          message:
+            claimError ||
+            "This QR code could not be claimed into your workspace.",
+        });
+        return;
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Clear the result card + dedup memory so returning to the scanner is
+      // a clean slate (and re-scanning the same label resolves fresh).
+      dismissResult();
+      pushIntoTab("/(tabs)/assets", {
+        pathname:
+          next === "create" ? "/(tabs)/assets/new" : "/(tabs)/assets/link-qr",
+        params: { qrId: claimQrId },
+      });
+    },
+    // why: finalizeScan, isProcessingRef, setIsProcessing, and setScanResult
+    // are stable across renders (refs / setState identities) or plain
+    // functions over refs; intentionally excluded to match the scan handler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentOrg, dismissResult]
+  );
 
   // ── Scan Handler ────────────────────────────────────
 
@@ -564,20 +710,57 @@ function ScannerContent() {
 
           // orgId is only consumed by the server's SAM branch; on the QR path
           // the org is derived from the QR record and this is ignored.
-          const { data: qrData, error } = await api.qr(
-            qrLookupId,
-            currentOrg?.id
-          );
+          const {
+            data: qrData,
+            error,
+            errorDetails,
+          } = await api.qr(qrLookupId, currentOrg?.id);
 
           if (error || !qrData) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
-            // Detect unclaimed QR codes — offer browser link instead of generic error
-            const isUnclaimed =
-              error === "This QR code is not linked to any organization";
+            // Unclaimed QR codes carry the structured `reason` discriminator
+            // (never branch on the message text — it is not the contract).
+            // Plain not-found / wrong-org failures carry no reason and MUST
+            // keep the generic error below: claiming is not an option there.
+            // `satisfies` ties the literal to the wire contract type, so a
+            // typo (or a server-side rename) fails to compile.
+            const unclaimedQrId =
+              errorDetails?.reason ===
+              ("unclaimed" satisfies QrResolveFailureReason)
+                ? errorDetails.qrId ?? qrId
+                : null;
 
-            if (isUnclaimed) {
+            if (unclaimedQrId && canManageQrCodes) {
+              // Admin/owner: native takeover of the web claim flow. Both
+              // actions claim the code into the CURRENT workspace first,
+              // then continue in-app (create form links on submit; the
+              // picker links an existing asset).
+              setScanResult({
+                type: "not_found",
+                title: "Unclaimed Code",
+                message:
+                  "This QR code isn't claimed yet. Claim it into this workspace by creating a new asset or linking an existing one.",
+                action: {
+                  label: "Create New Asset",
+                  icon: "add-circle-outline",
+                  onPress: () => {
+                    void claimQrAndProceed(unclaimedQrId, "create");
+                  },
+                },
+                secondaryAction: {
+                  label: "Link Existing Asset",
+                  icon: "link-outline",
+                  onPress: () => {
+                    void claimQrAndProceed(unclaimedQrId, "link");
+                  },
+                },
+              });
+            } else if (unclaimedQrId) {
+              // Non-admin/owner: claiming is not allowed for their role —
+              // keep the web bridge. Loop-safe in-app browser via
+              // openShelfWebUrl, never Linking.openURL (claimed App Link).
               setScanResult({
                 type: "not_found",
                 title: "No Asset Linked",
@@ -587,7 +770,9 @@ function ScannerContent() {
                   label: "Link in Browser",
                   icon: "open-outline",
                   onPress: () => {
-                    void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                    void openShelfWebUrl(
+                      `https://app.shelf.nu/qr/${unclaimedQrId}`
+                    );
                     dismissResult();
                   },
                 },
@@ -914,17 +1099,18 @@ function ScannerContent() {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
-          // For Shelf QR codes, offer a path to link the QR to a new asset:
-          // - If claimed to current org → navigate to in-app asset creation
-          // - If unclaimed → bridge to web for the claim+link flow
+          // For Shelf QR codes, offer a path forward for the unlinked code:
+          // - If claimed to current org → in-app asset creation and/or
+          //   linking an existing asset (admins) — no claim step needed
+          // - Otherwise → bridge to web
           // Barcodes don't have an external link flow, so no action for those
-          let unlinkedQrAction:
-            | {
-                label: string;
-                icon: string;
-                onPress: () => void;
-              }
-            | undefined;
+          type UnlinkedQrAction = {
+            label: string;
+            icon: IoniconName;
+            onPress: () => void;
+          };
+          let unlinkedQrAction: UnlinkedQrAction | undefined;
+          let unlinkedQrSecondaryAction: UnlinkedQrAction | undefined;
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
@@ -939,6 +1125,13 @@ function ScannerContent() {
           // "this QR will be linked" promise. Bridge those to the web kit view.
           const isKitLinked = Boolean(kitId);
 
+          // Claimed to the current org, truly unlinked, and the caller can
+          // act on it in-app (create is admin/owner + qr:update is too, but
+          // gate each action on its own permission for correctness).
+          const canActOnUnlinked =
+            codeOrgId === currentOrg?.id &&
+            (canCreateAsset || canManageQrCodes);
+
           if (qrId && isKitLinked) {
             // QR belongs to a kit — open the web app to view the kit
             unlinkedQrAction = {
@@ -949,21 +1142,40 @@ function ScannerContent() {
                 dismissResult();
               },
             };
-          } else if (qrId && codeOrgId === currentOrg?.id && canCreateAsset) {
-            // QR is claimed to current org, truly unlinked, and user can create — create in-app
-            unlinkedQrAction = {
-              label: "Create Asset",
-              icon: "add-circle-outline",
-              onPress: () => {
-                pushIntoTab("/(tabs)/assets", {
-                  pathname: "/(tabs)/assets/new",
-                  params: { qrId },
-                });
-                dismissResult();
-              },
-            };
+          } else if (qrId && canActOnUnlinked) {
+            // Already claimed by this org — the claim step is skipped; the
+            // create form / link picker attach this exact QR directly.
+            const createAction: UnlinkedQrAction | undefined = canCreateAsset
+              ? {
+                  label: "Create Asset",
+                  icon: "add-circle-outline",
+                  onPress: () => {
+                    pushIntoTab("/(tabs)/assets", {
+                      pathname: "/(tabs)/assets/new",
+                      params: { qrId },
+                    });
+                    dismissResult();
+                  },
+                }
+              : undefined;
+            const linkAction: UnlinkedQrAction | undefined = canManageQrCodes
+              ? {
+                  label: "Link Existing Asset",
+                  icon: "link-outline",
+                  onPress: () => {
+                    pushIntoTab("/(tabs)/assets", {
+                      pathname: "/(tabs)/assets/link-qr",
+                      params: { qrId },
+                    });
+                    dismissResult();
+                  },
+                }
+              : undefined;
+            unlinkedQrAction = createAction ?? linkAction;
+            unlinkedQrSecondaryAction = createAction ? linkAction : undefined;
           } else if (qrId) {
-            // QR is unclaimed — bridge to web for claim flow
+            // Unclaimed (for roles without the native claim flow) or claimed
+            // by this org while the caller can't act — bridge to web
             unlinkedQrAction = {
               label: "Link in Browser",
               icon: "open-outline",
@@ -980,11 +1192,12 @@ function ScannerContent() {
             message: qrId
               ? isKitLinked
                 ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
-                : codeOrgId === currentOrg?.id && canCreateAsset
-                ? "This QR code is not linked to any asset. Create one now."
+                : canActOnUnlinked
+                ? "This QR code is not linked to any asset. Create a new asset or link an existing one."
                 : "This QR code is not linked to any asset. Open the web app to link it."
               : "This code exists but is not linked to any asset.",
             action: unlinkedQrAction,
+            secondaryAction: unlinkedQrSecondaryAction,
           });
           finalizeScan();
           return;
@@ -1207,6 +1420,8 @@ function ScannerContent() {
       router,
       action,
       currentOrg,
+      canManageQrCodes,
+      claimQrAndProceed,
       scannedItems,
       isBookingMode,
       bookingCheckinItems,
@@ -2093,7 +2308,9 @@ function ScannerContent() {
             (apps/webapp/app/components/scanner/code-scanner.tsx).
             NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
             control's origin so the existing e2e flows stay stable. */}
-        {manualEntryBottom !== null && (
+        {/* Hidden while a result card is shown — the card's actions must never
+            be occluded (the unclaimed card is tall enough to reach this pill). */}
+        {manualEntryBottom !== null && !scanResult && (
           <View
             style={[
               styles.devScanContainer,

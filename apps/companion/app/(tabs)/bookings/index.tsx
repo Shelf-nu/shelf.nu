@@ -24,10 +24,10 @@ import {
   spacing,
   borderRadius,
   formatStatus,
-  formatDateTime,
   bookingCountdown,
   hitSlop,
 } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -98,6 +98,7 @@ function BookingsListContent() {
   } = useOrg();
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -416,7 +417,7 @@ function BookingsListContent() {
         </TouchableOpacity>
       );
     },
-    [router, colors, bookingStatusBadge, styles]
+    [router, colors, bookingStatusBadge, styles, formatDateTime]
   );
 
   if (orgLoading) {

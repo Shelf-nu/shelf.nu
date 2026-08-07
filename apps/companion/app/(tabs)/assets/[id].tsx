@@ -15,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { releaseCategory } from "@shelf/quantity-control";
 import {
   api,
   type AssetCustodyListEntry,
@@ -30,11 +31,11 @@ import {
   borderRadius,
   formatStatus,
   getQuantityStatusLabel,
-  formatDate,
   formatCurrency,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -94,6 +95,8 @@ export default function AssetDetailScreen() {
   const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  // Render dates in the acting user's format preferences + timezone.
+  const { formatDate } = useDateFormatter();
 
   // Asset data
   const {
@@ -312,6 +315,10 @@ export default function AssetDetailScreen() {
   const releaseMax = releaseQtyEntry
     ? releaseQtyEntry.releasableQuantity ?? releaseQtyEntry.quantity
     : 0;
+  // The shared predicate decides this, so the wording can never disagree with
+  // what the server does. Servers predating the field send no consumptionType,
+  // which falls through to the returnable copy — the server's own default.
+  const isConsumable = releaseCategory(asset.consumptionType) === "CONSUME";
   // Custody holders the server hid from this caller (privacy filtering for
   // roles without view-all-custody). Shown as a muted "+N others" row.
   const custodyOthersCount = isQtyTracked
@@ -496,9 +503,13 @@ export default function AssetDetailScreen() {
                     }
                     accessibilityLabel={
                       canReleaseRow
-                        ? `Release custody from ${
-                            entry.custodian.name
-                          }, holds ${qtyLabel ?? entry.quantity}`
+                        ? isConsumable
+                          ? `End hold on units held by ${
+                              entry.custodian.name
+                            }, holds ${qtyLabel ?? entry.quantity}`
+                          : `Release custody from ${
+                              entry.custodian.name
+                            }, holds ${qtyLabel ?? entry.quantity}`
                         : undefined
                     }
                   />
@@ -751,28 +762,49 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={releaseQtyEntry != null}
-                title="Release Quantity"
+                title={isConsumable ? "End hold" : "Release Quantity"}
                 subtitle={
                   releaseQtyEntry
-                    ? `Release how many of ${
-                        releaseQtyEntry.custodian.name
-                      }'s ${
-                        formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                        String(releaseMax)
-                      }?`
+                    ? isConsumable
+                      ? `End the hold on how many of ${
+                          releaseQtyEntry.custodian.name
+                        }'s ${
+                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
+                          String(releaseMax)
+                        }, and how many were used up? Used-up units permanently reduce total stock.`
+                      : `Release how many of ${
+                          releaseQtyEntry.custodian.name
+                        }'s ${
+                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
+                          String(releaseMax)
+                        }?`
                     : undefined
                 }
                 max={releaseMax}
                 // Web parity: the release dialog pre-fills a full release.
                 defaultValue={releaseMax}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel="Release"
+                secondary={
+                  isConsumable
+                    ? {
+                        label: "Of those, how many were used up?",
+                        // Pre-fill a full consume — the common case, and what
+                        // the server defaults to when no split is sent.
+                        defaultValue: releaseMax,
+                      }
+                    : undefined
+                }
+                confirmLabel={isConsumable ? "Confirm" : "Release"}
                 destructive
-                onSubmit={(quantity) => {
+                onSubmit={(quantity, consumed) => {
                   const entry = releaseQtyEntry;
                   setReleaseQtyEntry(null);
                   if (entry) {
-                    void performReleaseQuantity(entry.custodian.id, quantity);
+                    void performReleaseQuantity(
+                      entry.custodian.id,
+                      quantity,
+                      consumed
+                    );
                   }
                 }}
                 onClose={() => setReleaseQtyEntry(null)}
