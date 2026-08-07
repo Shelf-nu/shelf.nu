@@ -9,8 +9,12 @@ import {
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import {
+  getModelFilterConfig,
+  isSearchableKey,
+} from "~/utils/model-filters-registry.server";
 import {
   resolveCanSeeAllBookings,
   resolveEffectiveRole,
@@ -22,6 +26,16 @@ import {
  * bookings only, which is what the asset-index advanced filter means by
  * "Has upcoming bookings".
  */
+/**
+ * Ceiling on rows one picker search returns. Without it a single request pulls
+ * every row of a model for the whole workspace.
+ *
+ * The cap is offset by the number of already-selected ids because those ride
+ * in the same top-level `OR` — a flat limit could evict the very rows the
+ * picker needs in order to render its current selection.
+ */
+const SEARCH_TAKE_LIMIT = 100;
+
 const DEFAULT_BOOKING_SEARCH_STATUSES: BookingStatus[] = [
   BookingStatus.RESERVED,
   BookingStatus.ONGOING,
@@ -44,9 +58,6 @@ const BasicModelFilters = z.object({
  * To allow filtersing and searching on different models update the schema for the relevant model
  */
 export const ModelFiltersSchema = z.discriminatedUnion("name", [
-  BasicModelFilters.extend({
-    name: z.literal("asset"),
-  }),
   BasicModelFilters.extend({
     name: z.literal("tag"),
     useFor: z.nativeEnum(TagUseFor).optional(),
@@ -94,6 +105,9 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
   }),
+  // No `asset` member: `Asset` has no `name` column (it has `title`), no call
+  // site ever passed `name: "asset"`, and any such call would have thrown at
+  // the `where`. Registering it would only widen the surface.
 ]);
 
 export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["name"];
@@ -123,9 +137,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const modelFilters = parseData(searchParams, ModelFiltersSchema);
     const { name, queryKey, queryValue, selectedValues } = modelFilters;
 
+    /**
+     * `queryKey` is interpolated straight into the Prisma `where`, so an
+     * unvalidated value is a blind-search oracle over columns no picker ever
+     * displays. Every call site passes `name`; anything else is rejected.
+     */
+    if (!isSearchableKey(name, queryKey)) {
+      throw new ShelfError({
+        cause: null,
+        message: `Cannot search "${name}" by "${queryKey}".`,
+        label: "Request validation",
+        status: 400,
+        // User-supplied input, not a server fault — keep it out of Sentry.
+        shouldBeCaptured: false,
+      });
+    }
+
+    const selectedIds = (selectedValues ?? "")
+      .split(",")
+      .filter((id) => id !== "");
+
     const where: Record<string, any> = {
       organizationId,
-      OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
+      OR: [{ id: { in: selectedIds } }],
     };
     /**
      * When searching for teamMember, we have to search for
@@ -136,7 +170,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       where.OR.push(
         { name: { contains: queryValue, mode: "insensitive" } },
         { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
-        { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
+        // Was a second `firstName` branch, so surname search silently matched
+        // nothing.
+        { user: { lastName: { contains: queryValue, mode: "insensitive" } } },
+        // Matched but never RETURNED — see the registry's `teamMember` select.
         { user: { email: { contains: queryValue, mode: "insensitive" } } }
       );
 
@@ -253,21 +290,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const queryData = (await db[name].dynamicFindMany({
       where,
-      include:
-        /** We need user's information to resolve teamMember's name */
-        name === "teamMember"
-          ? {
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  email: true,
-                },
-              },
-            }
-          : undefined,
+      // The registry — not this call site — decides what leaves the server.
+      // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
+      // spread below safe, instead of having to sanitise three separate paths.
+      select: getModelFilterConfig(name).select,
+      take: SEARCH_TAKE_LIMIT + selectedIds.length,
     })) as Array<Record<string, string>>;
 
     return data(

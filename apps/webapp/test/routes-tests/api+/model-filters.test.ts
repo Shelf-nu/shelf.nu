@@ -45,6 +45,10 @@ vi.mock("~/database/db.server", () => ({
     booking: { dynamicFindMany: dbMocks.dynamicFindMany },
     teamMember: { dynamicFindMany: dbMocks.dynamicFindMany },
     kit: { dynamicFindMany: dbMocks.dynamicFindMany },
+    category: { dynamicFindMany: dbMocks.dynamicFindMany },
+    tag: { dynamicFindMany: dbMocks.dynamicFindMany },
+    location: { dynamicFindMany: dbMocks.dynamicFindMany },
+    assetModel: { dynamicFindMany: dbMocks.dynamicFindMany },
   },
 }));
 
@@ -220,21 +224,153 @@ describe("GET /api/model-filters", () => {
     });
 
     it("keeps the id/name/color/metadata contract that existing pickers rely on", async () => {
+      // `category` rather than `teamMember`: the registry gives category a
+      // `color` but not a team member, so asserting `color` on a team member
+      // would be asserting a shape production can no longer produce.
       dbMocks.dynamicFindMany.mockResolvedValue([
-        { id: "tm-1", name: "Ada Lovelace", userId: "user-9", color: "#fff" },
+        { id: "cat-1", name: "Laptops", color: "#fff" },
+      ]);
+
+      const filters = await readFilters(
+        await callLoader("name=category&queryKey=name&queryValue=Lap")
+      );
+
+      expect(filters[0].id).toBe("cat-1");
+      expect(filters[0].name).toBe("Laptops");
+      expect(filters[0].color).toBe("#fff");
+      expect(filters[0].metadata).toMatchObject({ id: "cat-1" });
+    });
+
+    it("puts the record's own columns at the top level, as route loaders do", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([
+        { id: "tm-1", name: "Ada Lovelace", userId: "user-9" },
       ]);
 
       const filters = await readFilters(
         await callLoader("name=teamMember&queryKey=name&queryValue=Ada")
       );
 
-      expect(filters[0].id).toBe("tm-1");
-      expect(filters[0].name).toBe("Ada Lovelace");
-      expect(filters[0].color).toBe("#fff");
-      expect(filters[0].metadata).toMatchObject({ id: "tm-1" });
-      // The record's own columns are now top-level too, matching what a route
-      // loader hands the picker.
       expect(filters[0].userId).toBe("user-9");
+    });
+  });
+
+  describe("payload narrowing", () => {
+    /**
+     * Projects a row through a Prisma `select`, the way the database would.
+     *
+     * The mock returns whatever we hand it, so asserting on a hand-written row
+     * would prove nothing about the `select` — it would pass even if the loader
+     * dropped the select entirely. Projecting here makes the assertion depend
+     * on the select the loader actually sends.
+     */
+    function project(row: Record<string, any>, select: Record<string, any>) {
+      const out: Record<string, any> = {};
+      for (const [key, spec] of Object.entries(select)) {
+        if (!(key in row)) continue;
+        out[key] =
+          spec === true
+            ? row[key]
+            : project(row[key] ?? {}, (spec as { select: any }).select);
+      }
+      return out;
+    }
+
+    it("returns only registry fields, never the whole row", async () => {
+      // The full row, as it exists in the database.
+      const storedRow = {
+        id: "tm-1",
+        name: "Ada Lovelace",
+        userId: "user-9",
+        deletedAt: null,
+        user: {
+          id: "user-9",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          displayName: "Ada L",
+          email: "ada@example.com",
+        },
+      };
+
+      dbMocks.dynamicFindMany.mockImplementation(({ select }: any) =>
+        Promise.resolve([project(storedRow, select)])
+      );
+
+      const filters = await readFilters(
+        await callLoader("name=teamMember&queryKey=name&queryValue=Ada")
+      );
+
+      // The leak this closes: email reached the client through `...item`,
+      // `metadata` and `user` simultaneously.
+      expect(JSON.stringify(filters)).not.toContain("ada@example.com");
+      // …while the fields pickers actually read still arrive.
+      expect(filters[0].name).toBe("Ada Lovelace");
+      expect(filters[0].userId).toBe("user-9");
+      expect(filters[0].user.displayName).toBe("Ada L");
+    });
+
+    it("asks Prisma for the registry select", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader("name=teamMember&queryKey=name&queryValue=x");
+
+      const select = dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.select;
+      expect(select).toBeDefined();
+      expect(select.user.select.email).toBeUndefined();
+    });
+  });
+
+  describe("result cap", () => {
+    it("caps results but still admits every already-selected id", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader(
+        "name=category&queryKey=name&queryValue=x&selectedValues=c1,c2,c3"
+      );
+
+      const take = dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.take;
+      // Selected ids ride in the same OR, so a flat cap could evict them.
+      expect(take).toBe(100 + 3);
+    });
+
+    it("applies the base cap when nothing is selected", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader("name=category&queryKey=name&queryValue=x");
+
+      expect(dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.take).toBe(100);
+    });
+  });
+
+  describe("queryKey lockdown", () => {
+    it("rejects a queryKey the registry does not declare searchable", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      const response = await callLoader(
+        "name=booking&queryKey=description&queryValue=confidential"
+      );
+
+      // Was a blind-search oracle over columns no picker displays.
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(dbMocks.dynamicFindMany).not.toHaveBeenCalled();
+    });
+
+    it("still accepts the queryKey every call site uses", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      const response = await callLoader(
+        "name=category&queryKey=name&queryValue=x"
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    it("matches team members on last name, not first name twice", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader("name=teamMember&queryKey=name&queryValue=Lovelace");
+
+      const branches = JSON.stringify(lastWhere().OR);
+      expect(branches).toContain("lastName");
     });
   });
 
