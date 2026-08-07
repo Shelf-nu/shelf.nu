@@ -349,6 +349,13 @@ export default function KitDetailScreen() {
                     bg: colors.backgroundTertiary,
                     text: colors.muted,
                   };
+                  // Only show the "×N" kit-quantity line when we have a
+                  // formatted value — never a bare "×". Mirrors the assets
+                  // list/detail screens, which render nothing when
+                  // formatQuantity returns null (missing/non-finite qty).
+                  const kitQuantityLabel = isQuantityTracked(asset)
+                    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
+                    : null;
                   return (
                     <TouchableOpacity
                       key={asset.id}
@@ -389,16 +396,9 @@ export default function KitDetailScreen() {
                         <Text style={styles.assetTitle} numberOfLines={1}>
                           {asset.title}
                         </Text>
-                        {isQuantityTracked(asset) ? (
+                        {kitQuantityLabel ? (
                           <Text style={styles.assetMeta} numberOfLines={1}>
-                            {`×${
-                              formatQuantity(
-                                asset.kitQuantity,
-                                asset.unitOfMeasure
-                              ) ??
-                              asset.kitQuantity ??
-                              ""
-                            }`}
+                            {`×${kitQuantityLabel}`}
                           </Text>
                         ) : null}
                         <Text style={styles.assetMeta} numberOfLines={1}>

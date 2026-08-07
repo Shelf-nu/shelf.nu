@@ -47,6 +47,11 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: mobile-auth is the request-auth boundary — it resolves the actor and
+// org from a Supabase JWT. Stub requireMobileAuth/requireOrganizationAccess/
+// assertMobileCanUseBookings/getMobileUserContext so the test drives a
+// deterministic authenticated user + org without real JWT verification;
+// orthogonal to the slices/merged-kit serialization contract under test.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"

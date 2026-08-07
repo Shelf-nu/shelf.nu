@@ -287,13 +287,20 @@ export default function AssetDetailScreen() {
   // activity (server's getQuantityData null contract) — we fall back to the
   // plain total in that case.
   const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
+  // Available units for the low-stock check + the "Available" stat. Prefer the
+  // breakdown's `available`, but fall back to the plain total (`asset.quantity`)
+  // when the server omitted the breakdown: an idle QT asset (no custody/booking
+  // activity) returns a null breakdown yet can still sit at/below its threshold.
+  // Web derives `available` unconditionally (notifier + overview card), so
+  // gating on the breakdown here would hide low-stock on exactly the idle
+  // inventory the alert is for.
+  const availableUnits = breakdown?.available ?? asset.quantity ?? null;
   // Low-stock mirrors the web detail card: availability-aware
-  // `available <= minQuantity` (null threshold = not low). Only meaningful
-  // when the server sent a breakdown (has `available`) AND a threshold.
+  // `available <= minQuantity` (null threshold = not low).
   const isAvailableLowStock =
-    breakdown != null &&
+    availableUnits != null &&
     isLowStock({
-      available: breakdown.available,
+      available: availableUnits,
       minQuantity: asset.minQuantity ?? null,
     });
   // Status pill label. For a QUANTITY_TRACKED asset whose units span states
@@ -392,27 +399,34 @@ export default function AssetDetailScreen() {
                   </Text>
                   <Text style={styles.quantityTotalLabel}>total</Text>
                 </View>
-                {/* Per-status slices. When the breakdown is null (no activity)
-                    we show only the total above. */}
-                {breakdown && (
+                {/* "Available" always renders for a QT asset (so an idle asset
+                    at/below its low-stock threshold still shows the amber
+                    warning); the other status slices render only when the
+                    server sent a breakdown (null = no custody/booking activity,
+                    i.e. all units available). */}
+                {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
                       label="Available"
-                      value={`${breakdown.available}${unitSuffix}`}
+                      value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />
-                    <QuantityStat
-                      label="In custody"
-                      value={`${breakdown.inCustody}${unitSuffix}`}
-                    />
-                    <QuantityStat
-                      label="Reserved"
-                      value={`${breakdown.reserved}${unitSuffix}`}
-                    />
-                    <QuantityStat
-                      label="Checked out"
-                      value={`${breakdown.checkedOut}${unitSuffix}`}
-                    />
+                    {breakdown && (
+                      <>
+                        <QuantityStat
+                          label="In custody"
+                          value={`${breakdown.inCustody}${unitSuffix}`}
+                        />
+                        <QuantityStat
+                          label="Reserved"
+                          value={`${breakdown.reserved}${unitSuffix}`}
+                        />
+                        <QuantityStat
+                          label="Checked out"
+                          value={`${breakdown.checkedOut}${unitSuffix}`}
+                        />
+                      </>
+                    )}
                   </View>
                 )}
               </View>
