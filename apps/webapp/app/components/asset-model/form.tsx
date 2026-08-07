@@ -13,13 +13,19 @@
  */
 import { useEffect } from "react";
 import type { AssetModel } from "@prisma/client";
+import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import {
+  assetModelImageErrorAtom,
+  assetModelImageValidateFileAtom,
+} from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/settings.asset-models.new";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -27,8 +33,13 @@ import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+
+/** Links each image input to the <p> stating its accepted formats and size. */
+const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
+const PAGE_IMAGE_HELP_ID = "asset-model-image-help";
 
 /** Zod schema for creating/editing an asset model. */
 export const AssetModelFormSchema = z.object({
@@ -47,7 +58,7 @@ type AssetModelFormProps = {
   /** Pre-filled values for edit mode */
   assetModel?: Pick<
     AssetModel,
-    "name" | "description" | "defaultCategoryId" | "defaultValuation"
+    "name" | "description" | "defaultCategoryId" | "defaultValuation" | "image"
   >;
   /** The API URL to submit the form to (used in inline/dialog mode). */
   apiUrl?: string;
@@ -105,6 +116,22 @@ export default function AssetModelForm({
   const nameError =
     fetcherValidationErrors?.name?.message || zo.errors.name()?.message;
 
+  // Client-side file guard (type + 8MB cap). Deliberately SCOPED, not the shared
+  // `fileErrorAtom`: this dialog opens inside the asset form, whose own image
+  // input would otherwise surface — and clear — this field's error.
+  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  const fileError = useAtomValue(assetModelImageErrorAtom);
+
+  /**
+   * The image has no zod field (a File can't be parsed by the text schema), so
+   * its errors arrive either from the client-side guard or as the server's
+   * `field: "image"` ShelfError on the fetcher.
+   */
+  const inlineImageError =
+    (fetcher.data?.error?.additionalData?.field === "image"
+      ? fetcher.data.error.message
+      : undefined) ?? fileError;
+
   /* ------------------------------------------------------------------ */
   /*  Inline / dialog mode                                               */
   /* ------------------------------------------------------------------ */
@@ -116,6 +143,13 @@ export default function AssetModelForm({
         className="w-full rounded border border-gray-200 bg-white px-6 py-5"
         ref={zo.ref}
         action={apiUrl}
+        /**
+         * Multipart so this dialog can carry the cover image too. Without it the
+         * file input silently posts nothing and a model created from the asset
+         * form would have no image — leaving its assets nothing to inherit,
+         * which reads as "the feature doesn't work".
+         */
+        encType="multipart/form-data"
       >
         <div className="gap-4 md:flex md:items-end">
           <Input
@@ -139,6 +173,31 @@ export default function AssetModelForm({
             defaultValue={assetModel?.description || undefined}
           />
           <input type="hidden" name="preventRedirect" value="true" />
+        </div>
+
+        {/* Same cover-image field as the settings form, in a compact layout. */}
+        <div className="mt-4">
+          <Input
+            label="Image"
+            // Input spreads unknown props straight onto the <input> and adds no
+            // describedby of its own, so this is the only link between the field
+            // and its format/size requirements for assistive tech.
+            aria-describedby={INLINE_IMAGE_HELP_ID}
+            disabled={disabled}
+            accept={ACCEPT_SUPPORTED_IMAGES}
+            name="image"
+            type="file"
+            onChange={validateFile}
+            error={inlineImageError}
+            inputClassName="border-0 shadow-none p-0 rounded-none"
+          />
+          <p
+            id={INLINE_IMAGE_HELP_ID}
+            className="mt-1 text-[12px] text-gray-500"
+          >
+            Optional. Shown on every asset of this model that has no image of
+            its own. PNG, JPG, JPEG or WebP, max. 8 MB.
+          </p>
         </div>
 
         <div className="mt-4">
@@ -213,9 +272,29 @@ function FullPageForm({
     actionData?.error
   );
 
+  // Client-side file guard (type + 8MB cap) shared with the asset/kit image
+  // inputs, so all three surfaces reject the same files with the same copy.
+  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  const fileError = useAtomValue(assetModelImageErrorAtom);
+
+  /**
+   * The image upload has no zod field (a File can't be parsed by the text
+   * schema), so its errors arrive either as the client-side file guard's
+   * message or as the server's `field: "image"` ShelfError.
+   */
+  const imageError =
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ?? fileError;
+
   return (
     <Card className="w-full lg:w-min">
-      <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+      <Form
+        ref={zo.ref}
+        method="post"
+        className="flex w-full flex-col gap-2"
+        encType="multipart/form-data"
+      >
         {/* -- Top action bar (visible on md+) -- */}
         <div className="flex items-start justify-between border-b pb-5">
           <div>
@@ -320,6 +399,54 @@ function FullPageForm({
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
             </span>
+          </div>
+        </FormRow>
+
+        {/* -- Image -- */}
+        <FormRow
+          rowLabel="Image"
+          subHeading="Uploaded once and shown on every asset of this model that has no image of its own."
+          className="border-b-0 pt-[10px]"
+        >
+          <div>
+            {assetModel?.image ? (
+              // `imageUrl` is required alongside `withPreview`: the preview
+              // trigger is keyboard-focusable and labelled "Open preview for …",
+              // but its handler no-ops without a full-size URL — a dead control.
+              <ImageWithPreview
+                imageUrl={assetModel.image}
+                thumbnailUrl={assetModel.image}
+                alt={`${assetModel.name} image`}
+                className="mb-2 size-16 rounded border object-cover"
+                withPreview
+              />
+            ) : null}
+            <p id={PAGE_IMAGE_HELP_ID} className="hidden lg:block">
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
+            </p>
+            <Input
+              disabled={disabled}
+              accept={ACCEPT_SUPPORTED_IMAGES}
+              name="image"
+              type="file"
+              onChange={validateFile}
+              label="Image"
+              hideLabel
+              /**
+               * The requirements text is duplicated for the two breakpoints, so
+               * both ids are referenced — whichever copy is display:none is
+               * absent from the accessibility tree, leaving exactly one
+               * description. `Input` spreads unknown props onto the <input> and
+               * adds no describedby of its own, so nothing is being overridden.
+               */
+              aria-describedby={`${PAGE_IMAGE_HELP_ID} ${PAGE_IMAGE_HELP_ID}-sm`}
+              error={imageError}
+              className="mt-2"
+              inputClassName="border-0 shadow-none p-0 rounded-none"
+            />
+            <p id={`${PAGE_IMAGE_HELP_ID}-sm`} className="mt-2 lg:hidden">
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
+            </p>
           </div>
         </FormRow>
 

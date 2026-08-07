@@ -177,6 +177,8 @@ import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
   getAssetModel,
+  getInheritableAssetModelImage,
+  isAssetModelImageUrl,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
@@ -1505,6 +1507,28 @@ export async function createAsset({
             },
           },
         });
+
+        /**
+         * Inherit the model's cover image when this asset has none of its own.
+         * The model's image is uploaded and stored ONCE — the asset just points
+         * at the same storage object — so a workspace with 100 units of the
+         * same model uploads one file instead of 100 identical ones.
+         * An explicitly-supplied `mainImage` always wins.
+         */
+        if (!mainImage) {
+          const inherited = await getInheritableAssetModelImage({
+            assetModelId,
+            organizationId,
+          });
+
+          if (inherited) {
+            Object.assign(data, {
+              mainImage: inherited.image,
+              mainImageExpiration: inherited.imageExpiration,
+              thumbnailImage: inherited.thumbnailImage,
+            });
+          }
+        }
       }
 
       // Placement can't be set inline in the asset create (the AssetLocation
@@ -2231,6 +2255,34 @@ export async function updateAsset({
           disconnect: true,
         },
       });
+
+      /**
+       * Drop an inherited cover image alongside the link. Without this the
+       * asset would keep showing a model image it no longer belongs to — two
+       * signals to reconcile ("no model" + "the model's photo"). An image the
+       * user uploaded for THIS asset is left untouched.
+       *
+       * The edit route always sends `assetModelId: assetModelId || null`, so
+       * this branch also runs on every save of an already-model-less asset. Only
+       * a save that actually removes a link needs reconciling, so the read is
+       * skipped when there was no link to begin with.
+       */
+      if (mainImage === undefined) {
+        const currentAsset = await db.asset.findUnique({
+          where: { id, organizationId },
+          select: { mainImage: true, assetModelId: true },
+        });
+
+        const isRemovingLink = currentAsset?.assetModelId != null;
+
+        if (isRemovingLink && isAssetModelImageUrl(currentAsset.mainImage)) {
+          Object.assign(data, {
+            mainImage: null,
+            mainImageExpiration: null,
+            thumbnailImage: null,
+          });
+        }
+      }
     } else if (assetModelId) {
       // Org-scope guard before the connect — Prisma's FK only enforces
       // that the AssetModel row exists, not that it belongs to the
@@ -2248,7 +2300,7 @@ export async function updateAsset({
       // org-scoped index lookup, only on the link branch.
       const currentAsset = await db.asset.findUnique({
         where: { id, organizationId },
-        select: { type: true },
+        select: { type: true, mainImage: true, assetModelId: true },
       });
       if (currentAsset && currentAsset.type === AssetType.QUANTITY_TRACKED) {
         throw new ShelfError({
@@ -2270,6 +2322,41 @@ export async function updateAsset({
           },
         },
       });
+
+      /**
+       * Reconcile the inherited cover image with the newly-linked model. Same
+       * one-upload-many-assets contract as `createAsset`; an image the user
+       * uploaded for this asset always wins, as does an image being set in this
+       * very update.
+       *
+       * This ASSIGNS unconditionally (rather than only when the new model has
+       * an image) so that re-linking an inheriting asset to a model with no
+       * image clears the old model's photo instead of leaving the asset showing
+       * model A's picture while linked to model B.
+       *
+       * Gated on the link actually changing: the edit route resends the current
+       * `assetModelId` on every save, so without this an unrelated metadata edit
+       * would cost a model read plus a Supabase signed-URL request each time. A
+       * model whose image changed has already been propagated to its assets by
+       * `propagateAssetModelImageToAssets`, so there is nothing to catch up on.
+       */
+      const isChangingModel = currentAsset?.assetModelId !== assetModelId;
+      const hasOwnImage =
+        currentAsset?.mainImage != null &&
+        !isAssetModelImageUrl(currentAsset.mainImage);
+
+      if (isChangingModel && mainImage === undefined && !hasOwnImage) {
+        const inherited = await getInheritableAssetModelImage({
+          assetModelId,
+          organizationId,
+        });
+
+        Object.assign(data, {
+          mainImage: inherited?.image ?? null,
+          mainImageExpiration: inherited?.imageExpiration ?? null,
+          thumbnailImage: inherited?.thumbnailImage ?? null,
+        });
+      }
     }
 
     /** Connect the new location id */

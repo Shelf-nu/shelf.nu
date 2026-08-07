@@ -16,7 +16,9 @@ import AssetModelForm, {
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getAssetModel,
+  refreshExpiredAssetModelImages,
   updateAssetModel,
+  updateAssetModelImage,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -59,9 +61,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title };
 
+    /**
+     * Supabase signed URLs live for 72h, so an older model image would render
+     * broken in the form's preview. Re-sign before shipping it to the client.
+     */
+    const [refreshedAssetModel] = await refreshExpiredAssetModelImages([
+      assetModel,
+    ]);
+
     return payload({
       header,
-      assetModel,
+      assetModel: refreshedAssetModel,
       categories,
       totalCategories,
       currency: currentOrganization?.currency,
@@ -93,8 +103,14 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    /**
+     * Multipart form (optional cover image) — clone so the text fields and the
+     * streaming file parser each get their own read of the body.
+     */
+    const clonedRequest = request.clone();
+
     const parsedPayload = parseData(
-      await request.formData(),
+      await clonedRequest.formData(),
       AssetModelFormSchema,
       { additionalData: { userId, id, organizationId } }
     );
@@ -102,6 +118,18 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     await updateAssetModel({
       ...parsedPayload,
       id,
+      organizationId,
+    });
+
+    /**
+     * Stores a newly-picked image and re-points every inheriting asset at it.
+     * No-ops when the user didn't pick a file, so a plain Save keeps the
+     * current image.
+     */
+    await updateAssetModelImage({
+      request,
+      assetModelId: id,
+      userId: authSession.userId,
       organizationId,
     });
 
