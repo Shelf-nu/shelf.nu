@@ -267,4 +267,30 @@ describe("bookingWriteScopeClause", () => {
       });
     }
   );
+
+  /**
+   * The clause allow-lists ADMIN / OWNER rather than deny-listing the two
+   * restricted roles, so a role added to `OrganizationRoles` later lands in the
+   * RESTRICTED branch by default. That direction is the safe one: the picker
+   * under-offers, which someone notices, instead of offering rows no rule
+   * covered.
+   */
+  it("restricts an unrecognised role rather than waving it through", () => {
+    const futureRole = "AUDITOR" as OrganizationRoles;
+
+    expect(bookingWriteScopeClause({ userId: ME, role: futureRole })).toEqual({
+      OR: [{ creatorId: ME }, { custodianUserId: ME }],
+    });
+  });
+
+  it("covers every role in the enum, so a new one cannot slip past unreviewed", () => {
+    // Fails the moment `OrganizationRoles` grows a member: whoever adds it has
+    // to decide which side of this clause it belongs on.
+    expect(Object.values(OrganizationRoles).sort()).toEqual([
+      OrganizationRoles.ADMIN,
+      OrganizationRoles.BASE,
+      OrganizationRoles.OWNER,
+      OrganizationRoles.SELF_SERVICE,
+    ]);
+  });
 });

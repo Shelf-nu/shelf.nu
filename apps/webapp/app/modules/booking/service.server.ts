@@ -9555,14 +9555,15 @@ export async function getBookings(params: {
    */
   custodianTeamMemberIds?: string[] | null;
   /**
-   * RESTRICTION scoping results to bookings this user may MUTATE — see
+   * RESTRICTION scoping results to bookings this person may MUTATE — see
    * {@link bookingWriteScopeClause}. Set only by pickers whose selection feeds
    * an action gated by `validateBookingOwnership`; omit for read-only lists.
-   * Requires {@link writableByRole} to be passed too.
+   *
+   * ONE object rather than two sibling params on purpose: a half-set pair
+   * (id without role, or role without id) would silently skip the restriction
+   * entirely. Both halves are required together or not at all.
    */
-  writableByUserId?: string | null;
-  /** The caller's effective role, for {@link writableByUserId}. */
-  writableByRole?: OrganizationRoles | null;
+  writableBy?: { userId: string; role: OrganizationRoles } | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
@@ -9590,8 +9591,7 @@ export async function getBookings(params: {
     statuses,
     custodianScope,
     custodianTeamMemberIds,
-    writableByUserId,
-    writableByRole,
+    writableBy,
     assetIds,
     bookingTo,
     excludeBookingIds,
@@ -9698,16 +9698,13 @@ export async function getBookings(params: {
      * bookings they are allowed to WRITE to. Set by mutation-target pickers
      * (the "Add to existing booking" dialogs), never by read-only lists.
      *
-     * A scalar user id rather than a where-input, so a call site cannot hand
-     * this a request-controlled predicate — the clause itself is fixed by
+     * Scalars rather than a where-input, so a call site cannot hand this a
+     * request-controlled predicate — the clause itself is fixed by
      * {@link bookingWriteScopeClause}. AND-ed alongside `custodianScope`, so
      * the two intersect and neither can widen the other.
      */
-    if (writableByRole && writableByUserId) {
-      const writeScope = bookingWriteScopeClause({
-        userId: writableByUserId,
-        role: writableByRole,
-      });
+    if (writableBy) {
+      const writeScope = bookingWriteScopeClause(writableBy);
 
       if (writeScope) {
         andClauses.push(writeScope);
@@ -12925,8 +12922,7 @@ export async function loadBookingsData({
     //    separate from the read rule because the workspace visibility toggle
     //    does NOT grant write: without this, enabling it offers a restricted
     //    user bookings the action then rejects with a 403.
-    writableByUserId: userId,
-    writableByRole: role,
+    writableBy: { userId, role },
   });
 
   // Set up header and model name

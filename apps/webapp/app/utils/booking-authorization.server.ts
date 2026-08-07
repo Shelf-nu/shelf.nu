@@ -98,10 +98,15 @@ export function bookingWriteScopeClause({
   userId: string;
   role: OrganizationRoles;
 }): Prisma.BookingWhereInput | undefined {
-  if (
-    role !== OrganizationRoles.SELF_SERVICE &&
-    role !== OrganizationRoles.BASE
-  ) {
+  // ALLOW-list, not a deny-list on SELF_SERVICE/BASE. A role added to the enum
+  // later defaults to RESTRICTED here, so the picker under-offers (a visible
+  // gap) rather than offering rows nobody checked. The gate below still
+  // deny-lists, matching what it has always enforced — so for a hypothetical
+  // new role this clause is deliberately the stricter of the two.
+  const canWriteToEveryBooking =
+    role === OrganizationRoles.ADMIN || role === OrganizationRoles.OWNER;
+
+  if (canWriteToEveryBooking) {
     return undefined;
   }
 
