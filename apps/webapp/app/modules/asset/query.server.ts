@@ -2075,6 +2075,19 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
+      -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic — same
+      -- reasoning as the custody aggregation below. BarcodeCell renders only
+      -- the first two elements as chips and collapses the rest into a "+N"
+      -- control that previews element 2, so the array's order decides which
+      -- codes a user actually sees. jsonb_agg without an explicit ORDER BY
+      -- has an undefined input order, so an asset with 3+ barcodes of one
+      -- type would otherwise show a different pair between page loads.
+      -- Oldest-first (createdAt, id) is the same key the per-type barcode
+      -- scalar columns below use, so element 0 of this array is the same
+      -- barcode those columns sort on.
+      -- NOTE: keep backticks and dollar-brace sequences out of this comment.
+      -- It lives inside a Prisma.sql template literal, so either one ends the
+      -- literal and turns the rest of the SQL into JavaScript.
       SELECT COALESCE(
         jsonb_agg(
           jsonb_build_object(
@@ -2082,6 +2095,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'type', b.type,
             'value', b.value
           )
+          ORDER BY b."createdAt" ASC, b.id ASC
         ),
         '[]'::jsonb
       )

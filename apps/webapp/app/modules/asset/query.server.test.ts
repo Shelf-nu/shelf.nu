@@ -927,6 +927,56 @@ describe("assetQueryFragment", () => {
     });
   });
 
+  describe("barcodes aggregation ordering", () => {
+    /**
+     * Isolates the `barcodes` jsonb_agg block and collapses whitespace, so
+     * the assertions survive a re-indent by prettier. The per-type
+     * `barcode_<Type>` scalar columns further down carry the same ORDER BY,
+     * so a whole-SQL `toContain` would pass even with the aggregate
+     * unordered — the slice is what makes these tests meaningful.
+     */
+    function getBarcodesAggregateSql() {
+      const sql = getFragmentSqlString(
+        assetQueryFragment({ withBarcodes: true })
+      );
+      const start = sql.indexOf("jsonb_agg(");
+      const end = sql.indexOf("AS barcodes", start);
+
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+
+      return sql.slice(start, end).replace(/\s+/g, " ");
+    }
+
+    it("orders the barcodes aggregation deterministically", () => {
+      // BarcodeCell slices this array: barcodes.slice(0, 2) decides which
+      // chips a user sees, and hiddenBarcodes[0] decides which code the "+N"
+      // control previews. jsonb_agg has an undefined input order without an
+      // explicit ORDER BY, so without this the visible pair could differ
+      // between page loads for an asset with 3+ barcodes of one type.
+      expect(getBarcodesAggregateSql()).toContain(
+        `) ORDER BY b."createdAt" ASC, b.id ASC )`
+      );
+    });
+
+    it("uses the same sort key as the per-type barcode scalar columns", () => {
+      const sql = getFragmentSqlString(
+        assetQueryFragment({ withBarcodes: true })
+      );
+
+      // The scalar columns pick their value with ORDER BY createdAt, id
+      // LIMIT 1. Element 0 of the aggregated array has to be that same
+      // barcode, or the rendered chip and the sort key disagree.
+      expect(getBarcodesAggregateSql()).toContain(
+        `ORDER BY b."createdAt" ASC, b.id ASC`
+      );
+      expect(sql).toContain(
+        `WHERE b."assetId" = a.id AND b.type = 'Code128'
+      ORDER BY b."createdAt" ASC, b.id ASC`
+      );
+    });
+  });
+
   describe("withCustomFieldDefinitions option", () => {
     it("includes full definitions by default (matches AdvancedIndexAsset type)", () => {
       const fragment = assetQueryFragment();
