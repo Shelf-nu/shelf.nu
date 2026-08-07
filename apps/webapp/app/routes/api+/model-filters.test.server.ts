@@ -74,20 +74,33 @@ const clause = vi.hoisted(() => ({
       { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
     ],
   }),
+  buildCustodianScope: (scope: { userId: string; teamMemberIds?: string[] }) =>
+    scope.teamMemberIds?.length
+      ? {
+          OR: [
+            { custodianUserId: scope.userId },
+            { custodianTeamMemberId: { in: scope.teamMemberIds } },
+          ],
+        }
+      : { custodianUserId: scope.userId },
 }));
 
 const bookingMocks = vi.hoisted(() => ({
   resolveCustodianScope: vi.fn(),
 }));
 
-// why: service.server pulls in the whole booking domain (schedulers, emails);
-// the clause itself is pure, so a local equivalent keeps the test fast.
+// why: service.server pulls in the whole booking domain (schedulers, emails).
+// `custodianScopeClause` is pure, so a local equivalent keeps the test fast;
+// `resolveCustodianScope` is the one DB read, stubbed to a fixed scope.
 vi.mock("~/modules/booking/service.server", () => ({
   bookingDraftVisibilityClause: clause.buildDraftVisibility,
+  custodianScopeClause: clause.buildCustodianScope,
   resolveCustodianScope: bookingMocks.resolveCustodianScope,
 }));
 
 const ORG_ID = "org-1";
+/** Team-member rows the fixture user holds in the workspace. */
+const TEAM_MEMBER_IDS = ["tm-1"];
 
 /**
  * Builds the loader args for a given query string.
@@ -134,6 +147,24 @@ async function readFilters(response: Response) {
 const DRAFT_VISIBILITY = clause.buildDraftVisibility("user-1");
 
 /**
+ * READ restriction — the standard visibility rule, matching custody on EITHER
+ * link. Must be the same shape `getBookings` builds for the loader that seeded
+ * the picker, or the list changes the moment the user types.
+ */
+const CUSTODIAN_SCOPE = clause.buildCustodianScope({
+  userId: "user-1",
+  teamMemberIds: TEAM_MEMBER_IDS,
+});
+
+/**
+ * WRITE restriction — mirrors `validateBookingOwnership`, which is what the
+ * "Add to existing booking" actions enforce on submit.
+ */
+const WRITE_SCOPE = {
+  OR: [{ creatorId: "user-1" }, { custodianUserId: "user-1" }],
+};
+
+/**
  * Points the session at a workspace where the caller holds `role`.
  *
  * @param role - Caller's role in the workspace.
@@ -154,6 +185,10 @@ describe("GET /api/model-filters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setRole(OrganizationRoles.OWNER);
+    bookingMocks.resolveCustodianScope.mockResolvedValue({
+      userId: "user-1",
+      teamMemberIds: TEAM_MEMBER_IDS,
+    });
   });
 
   describe("result shape", () => {
@@ -290,19 +325,40 @@ describe("GET /api/model-filters", () => {
 
         expect(lastWhere().AND).toEqual([
           DRAFT_VISIBILITY,
-          { custodianUserId: "user-1" },
+          CUSTODIAN_SCOPE,
+          WRITE_SCOPE,
         ]);
       }
     );
 
     it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-      "lets %s users see all bookings when the workspace enables it",
+      "matches custody on EITHER link, as the seeding loader does",
+      async (role) => {
+        setRole(role, false);
+
+        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+
+        // The regression: matching `custodianUserId` alone dropped bookings
+        // custodied through a legacy team-member row, so they showed in the
+        // seeded list and vanished the moment the user typed.
+        expect(lastWhere().AND).toContainEqual({
+          OR: [
+            { custodianUserId: "user-1" },
+            { custodianTeamMemberId: { in: TEAM_MEMBER_IDS } },
+          ],
+        });
+      }
+    );
+
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "lifts the read restriction for %s when the workspace enables it",
       async (role) => {
         setRole(role, true);
 
         await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
 
-        expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
+        expect(lastWhere().AND).not.toContainEqual(CUSTODIAN_SCOPE);
+        expect(bookingMocks.resolveCustodianScope).not.toHaveBeenCalled();
       }
     );
 
@@ -316,5 +372,61 @@ describe("GET /api/model-filters", () => {
         expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY]);
       }
     );
+
+    it("cannot be widened by a request param, whatever the caller sends", async () => {
+      setRole(OrganizationRoles.SELF_SERVICE, false);
+
+      // `scopeToCustodian` used to be the ONLY thing applying this restriction,
+      // so omitting it returned every booking row in the workspace. Sending it
+      // — or its negation — must now make no difference at all.
+      await loader(
+        buildArgs(
+          "name=booking&queryKey=name&queryValue=&scopeToCustodian=false&selectedValues=someone-elses-booking"
+        )
+      );
+
+      expect(lastWhere().AND).toEqual([
+        DRAFT_VISIBILITY,
+        CUSTODIAN_SCOPE,
+        WRITE_SCOPE,
+      ]);
+    });
+  });
+
+  describe("booking write scope", () => {
+    beforeEach(() => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+    });
+
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "keeps %s inside what the submitting action accepts, setting ON",
+      async (role) => {
+        setRole(role, true);
+
+        await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+
+        // Without this the picker offers bookings `validateBookingOwnership`
+        // then rejects with a 403 — a dead end for the user.
+        expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY, WRITE_SCOPE]);
+      }
+    );
+
+    it("does not constrain roles that may write to every booking", async () => {
+      setRole(OrganizationRoles.ADMIN, false);
+
+      await loader(buildArgs("name=booking&queryKey=name&queryValue=x"));
+
+      // Asserting on the clause, not on the string "creatorId" — the
+      // draft-visibility clause legitimately carries that key.
+      expect(lastWhere().AND).not.toContainEqual(WRITE_SCOPE);
+    });
+
+    it("does not leak into non-booking searches", async () => {
+      setRole(OrganizationRoles.SELF_SERVICE, false);
+
+      await loader(buildArgs("name=kit&queryKey=name&queryValue=x"));
+
+      expect(lastWhere().AND).toBeUndefined();
+    });
   });
 });

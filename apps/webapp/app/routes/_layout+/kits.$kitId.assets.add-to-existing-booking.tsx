@@ -68,17 +68,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, canSeeAllBookings } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, role, canSeeAllBookings } = await requirePermission(
+      {
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }
+    );
 
     const loaderData = await loadBookingsData({
       request,
       organizationId,
       userId: authSession?.userId,
+      role,
       canSeeAllBookings,
       ids: kitId ? [kitId] : undefined,
     });

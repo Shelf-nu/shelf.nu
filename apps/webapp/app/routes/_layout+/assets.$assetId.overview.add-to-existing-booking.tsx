@@ -62,12 +62,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, canSeeAllBookings } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, role, canSeeAllBookings } = await requirePermission(
+      {
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }
+    );
 
     // loadBookingsData + the asset lookup are independent (both only
     // need organizationId from requirePermission above), so parallelise
@@ -77,6 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         userId: authSession?.userId,
+        role,
         canSeeAllBookings,
         ids: assetId ? [assetId] : undefined,
       }),
