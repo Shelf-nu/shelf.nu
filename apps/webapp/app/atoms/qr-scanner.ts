@@ -683,6 +683,64 @@ export const quickCheckoutQtyAssetAtom = atom(
   }
 );
 
+/** Synthetic QR-key prefix for quick-checkin of INDIVIDUAL assets. */
+export const QUICK_CHECKIN_INDIVIDUAL_PREFIX = "ind-checkin:";
+
+/** Synthetic QR-key prefix for quick-checkout of INDIVIDUAL assets. */
+export const QUICK_CHECKOUT_INDIVIDUAL_PREFIX = "ind-checkout:";
+
+/** Inserts a synthetic scanned-item entry for a pending INDIVIDUAL asset. */
+export const quickCheckinIndividualAssetAtom = atom(
+  null,
+  (get, set, asset: Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }>) => {
+    const key = `${QUICK_CHECKIN_INDIVIDUAL_PREFIX}${asset.bookingAssetId}`;
+    const current = get(scannedItemsAtom);
+    if (current[key]) return;
+    set(scannedItemsAtom, {
+      [key]: {
+        type: "asset",
+        codeType: "qr",
+        data: {
+          id: asset.id,
+          bookingAssetId: asset.bookingAssetId,
+          title: asset.title,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          kitId: asset.kitId ?? null,
+          type: "INDIVIDUAL",
+        } as unknown as AssetFromQr,
+      },
+      ...current,
+    });
+  }
+);
+
+/** Inserts a synthetic scanned-item entry for a pending INDIVIDUAL asset during partial checkout. */
+export const quickCheckoutIndividualAssetAtom = atom(
+  null,
+  (get, set, asset: Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }>) => {
+    const key = `${QUICK_CHECKOUT_INDIVIDUAL_PREFIX}${asset.bookingAssetId}`;
+    const current = get(scannedItemsAtom);
+    if (current[key]) return;
+    set(scannedItemsAtom, {
+      [key]: {
+        type: "asset",
+        codeType: "qr",
+        data: {
+          id: asset.id,
+          bookingAssetId: asset.bookingAssetId,
+          title: asset.title,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          kitId: asset.kitId ?? null,
+          type: "INDIVIDUAL",
+        } as unknown as AssetFromQr,
+      },
+      ...current,
+    });
+  }
+);
+
 /*******************************/
 
 /* BOOKING FULFIL-AND-CHECKOUT ATOMS */

@@ -54,6 +54,8 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
   scannedItemsAtom,
+  quickCheckinIndividualAssetAtom,
+  QUICK_CHECKIN_INDIVIDUAL_PREFIX,
 } from "~/atoms/qr-scanner";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
@@ -419,6 +421,9 @@ export default function PartialCheckinDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const quickCheckinQtyAsset = useSetAtom(quickCheckinQtyAssetAtom);
+  const quickCheckinIndividualAsset = useSetAtom(
+    quickCheckinIndividualAssetAtom
+  );
 
   /**
    * BookingAsset id of the most-recently-added quick-checkin row. The
@@ -1290,17 +1295,21 @@ export default function PartialCheckinDrawer({
    * 600ms so subsequent re-renders don't keep stealing focus.
    */
   const handleQuickCheckin = useCallback(
-    (asset: QtyExpectedAsset) => {
-      quickCheckinQtyAsset(asset);
-      setRecentlyAddedBookingAssetId(asset.bookingAssetId);
-      if (recentlyAddedTimerRef.current) {
-        clearTimeout(recentlyAddedTimerRef.current);
+    (asset: BookingExpectedAsset) => {
+      if (asset.kind === "QUANTITY_TRACKED") {
+        quickCheckinQtyAsset(asset);
+        setRecentlyAddedBookingAssetId(asset.bookingAssetId);
+        if (recentlyAddedTimerRef.current) {
+          clearTimeout(recentlyAddedTimerRef.current);
+        }
+        recentlyAddedTimerRef.current = setTimeout(() => {
+          setRecentlyAddedBookingAssetId(null);
+        }, 600);
+      } else {
+        quickCheckinIndividualAsset(asset);
       }
-      recentlyAddedTimerRef.current = setTimeout(() => {
-        setRecentlyAddedBookingAssetId(null);
-      }, 600);
     },
-    [quickCheckinQtyAsset]
+    [quickCheckinQtyAsset, quickCheckinIndividualAsset]
   );
 
   /**
@@ -1939,10 +1948,12 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     })();
 
   // An active synthetic entry (via quick-checkin) lives under a key
-  // prefixed by `qty-checkin:` + the slice's bookingAssetId. Used below to
+  // prefixed by `qty-checkin:` or `ind-checkin:` + the slice's bookingAssetId. Used below to
   // pick between the "Scanned" and "Checked in without scan" badges.
   const isQuickCheckin = Boolean(
-    bookingAssetId && items[`${QUICK_CHECKIN_QR_PREFIX}${bookingAssetId}`]
+    bookingAssetId &&
+      (items[`${QUICK_CHECKIN_QR_PREFIX}${bookingAssetId}`] ||
+        items[`${QUICK_CHECKIN_INDIVIDUAL_PREFIX}${bookingAssetId}`])
   );
 
   // Use custom configurations for partial check-in context
@@ -2007,7 +2018,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       badgeText: "Checked in without scan",
       tooltipTitle: "Marked in without scanning",
       tooltipContent:
-        "This quantity-tracked asset was added via the Check in without scanning button — no QR scan required.",
+        "This asset was added via the Check in without scanning button — no QR scan required.",
       priority: 50,
       className: "bg-indigo-50 border-indigo-200 text-indigo-700",
     },

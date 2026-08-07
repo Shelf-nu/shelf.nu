@@ -275,7 +275,7 @@ describe("PartialCheckinDrawer", () => {
     useRouteLoaderDataMock.mockReturnValue({ minimizedSidebar: false });
   });
 
-  it("exposes 'Check in without scanning' only on pending qty-tracked rows", () => {
+  it("exposes 'Check in without scanning' on pending individual and qty-tracked rows", () => {
     const assets: BookingExpectedAsset[] = [
       individual({ id: "asset-ind-1", title: "Camera body" }),
       qty({ id: "asset-qty-1", title: "Battery" }),
@@ -293,20 +293,16 @@ describe("PartialCheckinDrawer", () => {
     const buttons = screen.queryAllByRole("button", {
       name: /check in without scanning/i,
     });
-    // Exactly one — the qty-tracked pending row.
-    expect(buttons).toHaveLength(1);
+    // Both pending individual and qty-tracked rows have it.
+    expect(buttons).toHaveLength(2);
 
-    // The pending-qty row title must be adjacent to the button. Walk up
-    // to the row container and assert the Battery title lives there.
-    const row = buttons[0].closest("tr");
-    expect(row).not.toBeNull();
-    expect(within(row!).getByText("Battery")).toBeInTheDocument();
+    const row1 = buttons[0].closest("tr");
+    expect(row1).not.toBeNull();
+    expect(within(row1!).getByText("Camera body")).toBeInTheDocument();
 
-    // The individual assets (pending + already reconciled) must not
-    // surface the button. Already-reconciled rows also render under a
-    // collapser (closed by default), so absence of the button is the
-    // invariant we care about.
-    expect(screen.queryByText("Camera body")).toBeInTheDocument();
+    const row2 = buttons[1].closest("tr");
+    expect(row2).not.toBeNull();
+    expect(within(row2!).getByText("Battery")).toBeInTheDocument();
   });
 
   it("click inserts a synthetic-keyed entry into scannedItemsAtom", async () => {

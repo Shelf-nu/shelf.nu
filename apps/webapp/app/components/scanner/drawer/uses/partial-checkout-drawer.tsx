@@ -21,6 +21,8 @@ import {
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
+  quickCheckoutIndividualAssetAtom,
+  QUICK_CHECKOUT_INDIVIDUAL_PREFIX,
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckoutDialog from "~/components/booking/checkout-dialog";
@@ -341,6 +343,9 @@ export default function PartialCheckoutDrawer({
   // entry into `scannedItemsAtom`. Wired to the pending-list's
   // `onQuickAction` below.
   const quickCheckoutQtyAsset = useSetAtom(quickCheckoutQtyAssetAtom);
+  const quickCheckoutIndividualAsset = useSetAtom(
+    quickCheckoutIndividualAssetAtom
+  );
 
   // Per-slice qty state — keyed by `bookingAssetId`, NOT `asset.id`, so a
   // single qty asset booked under multiple slices (kit-driven +
@@ -982,10 +987,14 @@ export default function PartialCheckoutDrawer({
    * render.
    */
   const handleQuickCheckout = useCallback(
-    (asset: QtyExpectedAsset) => {
-      quickCheckoutQtyAsset(asset);
+    (asset: BookingExpectedAsset) => {
+      if (asset.kind === "QUANTITY_TRACKED") {
+        quickCheckoutQtyAsset(asset);
+      } else {
+        quickCheckoutIndividualAsset(asset);
+      }
     },
-    [quickCheckoutQtyAsset]
+    [quickCheckoutQtyAsset, quickCheckoutIndividualAsset]
   );
 
   /**
@@ -1185,13 +1194,12 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // default checkout badges and the indigo "Checked out without
   // scan" marker. Mirrors check-in's `isQuickCheckin` probe.
   const scannedBookingAssetId =
-    asset.type === AssetType.QUANTITY_TRACKED
-      ? (asset as unknown as { bookingAssetId?: string | null })
-          .bookingAssetId ?? null
-      : null;
+    (asset as unknown as { bookingAssetId?: string | null }).bookingAssetId ??
+    null;
   const isQuickCheckout = Boolean(
     scannedBookingAssetId &&
-      items[`${QUICK_CHECKOUT_QR_PREFIX}${scannedBookingAssetId}`]
+      (items[`${QUICK_CHECKOUT_QR_PREFIX}${scannedBookingAssetId}`] ||
+        items[`${QUICK_CHECKOUT_INDIVIDUAL_PREFIX}${scannedBookingAssetId}`])
   );
 
   // Use custom configurations for partial check-out context
@@ -1283,7 +1291,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       badgeText: "Checked out without scan",
       tooltipTitle: "Marked out without scanning",
       tooltipContent:
-        "This quantity-tracked asset was added via the Check out without scanning button — no QR scan required.",
+        "This asset was added via the Check out without scanning button — no QR scan required.",
       priority: 50,
       className: "bg-indigo-50 border-indigo-200 text-indigo-700",
     },
