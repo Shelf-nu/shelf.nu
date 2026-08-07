@@ -36,7 +36,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { updateAssetQrCode } from "~/modules/asset/service.server";
 import { ShelfError } from "~/utils/error";
-import { action } from "./qr.link-asset";
+import { action } from "~/routes/api+/mobile+/qr.link-asset";
 
 /**
  * Tests for POST /api/mobile/qr/link-asset — the native takeover of the web
@@ -44,7 +44,7 @@ import { action } from "./qr.link-asset";
  * (not found / unclaimed / other org / already linked), the org-scoping of
  * the user-supplied assetId, and the success envelope.
  *
- * @see {@link file://./qr.link-asset.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.link-asset.ts}
  */
 
 /** Shape of the `data()` result the route action returns. */

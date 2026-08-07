@@ -16,7 +16,7 @@ import {
   checkQuantityAvailable,
   checkQuantityNotBelowCommitted,
   describeOverCommitment,
-} from "./guards.js";
+} from "./guards";
 
 /* ------------------------- checkQuantityAvailable ------------------------- */
 

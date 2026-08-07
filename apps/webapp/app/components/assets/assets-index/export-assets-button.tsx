@@ -2,11 +2,15 @@
  * Export button for the assets index.
  *
  * Offers two formats — "Standard" (human/analytics CSV mirroring the on-screen
- * columns) and "Import-ready" (headers/values shaped for re-import into another
- * workspace) — and a column scope (Visible vs All), via a Radix Popover.
+ * columns) and "Import-ready" (headers/values shaped for the create and update
+ * importers) — and a column scope (Visible vs All), via a Radix Popover.
+ * Import-ready always includes an `id` column, so the same file can recreate
+ * assets in another workspace OR round-trip back through the update importer
+ * to edit these same assets — one format now serves both jobs.
  *
  * @see {@link file://./../../../utils/import-ready-export.server.ts} import-ready builder
  * @see {@link file://./../../../routes/_layout+/assets.export.$fileName[.csv].tsx} export route
+ * @see {@link file://./../../../utils/import-update.server.ts} update importer that consumes this file
  */
 import { useId, useState } from "react";
 import {
@@ -246,7 +250,7 @@ export function ExportAssetsButton() {
               checked={format === "import"}
               onChange={() => handleFormatChange("import")}
               label="Import-ready"
-              hint="Re-import into another workspace"
+              hint="Recreate elsewhere, or re-import to update these"
             />
           </fieldset>
 
@@ -270,8 +274,8 @@ export function ExportAssetsButton() {
 
           {format === "import" ? (
             <p className="mb-4 text-xs text-gray-500">
-              Import-ready always includes the fields required to recreate
-              assets.
+              Includes asset IDs plus every field needed to recreate assets —
+              the same file also works to update these assets later.
             </p>
           ) : null}
 

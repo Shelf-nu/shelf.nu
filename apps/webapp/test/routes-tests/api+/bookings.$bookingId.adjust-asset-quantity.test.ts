@@ -53,7 +53,7 @@ const consumptionMocks = vi.hoisted(() => ({
   // The route validates via `assertAssetQuantityAvailable` (windowed guard).
   // Stub it to a no-op resolve so these ownership-guard tests exercise ONLY
   // the authorization branch — the availability math has its own coverage in
-  // `availability.server.test.ts` / this route's `.test.server.ts`. Mocking
+  // `availability.server.test.ts` / this route's `.availability.test.ts`. Mocking
   // the module here also keeps the real `availability.server` (and its heavy
   // `booking/service.server` import chain) out of this test's module graph.
   assertAssetQuantityAvailable: vi.fn().mockResolvedValue(undefined),

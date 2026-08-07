@@ -36,9 +36,9 @@
  * // singleton directly; both take their Prisma client as an explicit `tx`/`db`
  * // argument, which this suite always supplies as the fixture-backed fake.
  */
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
-import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
+import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
 
@@ -125,6 +125,14 @@ function createFakeClient(fixture: {
   sessions: FixtureSession[];
   assets?: FixtureAsset[];
   assetKits?: FixtureAssetKit[];
+  /**
+   * Live `Asset.status` per asset id. Both formulas gate their legacy
+   * all-at-once branch on this, because a quick checkout flips every asset it
+   * processed to CHECKED_OUT while an asset ADDED to the booking later stays
+   * AVAILABLE (GitHub #2815). Defaults to CHECKED_OUT, which is what the
+   * pre-existing fixtures model: assets that really are off the shelf.
+   */
+  assetStatuses?: Record<string, AssetStatus>;
 }) {
   const bookingById = new Map(fixture.bookings.map((b) => [b.id, b]));
   const assets = fixture.assets ?? [];
@@ -211,6 +219,13 @@ function createFakeClient(fixture: {
               bookingId: row.bookingId,
               quantity: row.quantity,
               assetKitId: row.assetKitId,
+              // Both formulas read the live asset status to decide whether the
+              // legacy all-at-once branch applies to THIS asset.
+              asset: {
+                status:
+                  fixture.assetStatuses?.[row.assetId] ??
+                  AssetStatus.CHECKED_OUT,
+              },
               // Neither formula under test reads `booking.from`/`.to` for the
               // checked-out computation (that's only consulted by the
               // `reserved` side of `getAssetAvailabilityBatch`, which this
@@ -260,6 +275,42 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
 
     expect(real).toBe(5);
     expect(batch.get("a1")?.checkedOut).toBe(real);
+  });
+
+  it("agree that an asset added AFTER an all-at-once checkout holds no units", async () => {
+    // GitHub #2815. Both assets sit on the SAME zero-session ONGOING booking,
+    // so the booking-level legacy signal fires for both. Only the live asset
+    // status tells them apart: `a1` was on the booking when it was checked out
+    // (CHECKED_OUT), `a2` was added afterwards and `updateBookingAssets`
+    // deliberately left it AVAILABLE. Treating `a2` as fully checked out
+    // inflated its checked-out count and starved its availability.
+    const client = createFakeClient({
+      bookingAssets: [
+        { assetId: "a1", bookingId: "legacy", quantity: 5 },
+        { assetId: "a2", bookingId: "legacy", quantity: 20 },
+      ],
+      bookings: [
+        { id: "legacy", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      assetStatuses: {
+        a1: AssetStatus.CHECKED_OUT,
+        a2: AssetStatus.AVAILABLE,
+      },
+    });
+
+    const realA1 = await computeCheckedOutForAsset(client, "a1", ORG_ID);
+    const realA2 = await computeCheckedOutForAsset(client, "a2", ORG_ID);
+    const batch = await getAssetAvailabilityBatch(["a1", "a2"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+
+    expect(realA1).toBe(5);
+    expect(realA2).toBe(0);
+    expect(batch.get("a1")?.checkedOut).toBe(realA1);
+    expect(batch.get("a2")?.checkedOut).toBe(realA2);
   });
 
   it("agree on a partial checkout (booked minus claimed remains on the shelf)", async () => {

@@ -2,7 +2,7 @@
   "name": "@shelf/quantity-control",
   "version": "0.0.0",
   "private": true,
-  "description": "Pure, dependency-free quantity/availability domain for QUANTITY_TRACKED assets, shared by the webapp (and, later, the companion app) so their availability math never drifts.",
+  "description": "Pure, dependency-free quantity/availability domain for QUANTITY_TRACKED assets, shared by the webapp and the companion app so their availability math never drifts.",
   "type": "module",
   "exports": {
     ".": {

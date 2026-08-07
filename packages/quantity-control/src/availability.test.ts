@@ -18,8 +18,8 @@ import {
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
   resolveIntervalTo,
-} from "./availability.js";
-import type { AvailabilityInterval } from "./types.js";
+} from "./availability";
+import type { AvailabilityInterval } from "./types";
 
 /** Terse Date builder — days from a fixed epoch, so intervals read clearly. */
 const EPOCH = Date.UTC(2026, 0, 1);

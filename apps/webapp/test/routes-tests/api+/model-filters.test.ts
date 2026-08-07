@@ -8,8 +8,8 @@
  * and the row silently renders as nothing — a blank dropdown with a non-zero
  * "Showing N out of M" footer.
  *
- * @see {@link file://./model-filters.ts}
- * @see {@link file://./../../hooks/use-model-filters.ts}
+ * @see {@link file://../../../app/routes/api+/model-filters.ts}
+ * @see {@link file://../../../app/hooks/use-model-filters.ts}
  */
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
