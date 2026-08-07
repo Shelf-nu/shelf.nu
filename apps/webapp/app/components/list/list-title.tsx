@@ -55,14 +55,15 @@ type ListTitleProps = {
    * inside 2 kit rows. Neither number was wrong; "items" just never said what
    * it counted, leaving the reader to work it out.
    *
-   * Called with the number of rows being described (the page's rows, or the
-   * total when the list fits on one page). Return a phrase, not a sentence —
-   * it renders inline and may be followed by "out of N".
+   * Takes no argument on purpose: a surface that can describe its rows knows
+   * the rows, and passing a count invited an implementation to ignore it and
+   * silently disagree with the number ListTitle thought it was labelling.
+   * Return a phrase, not a sentence — it renders inline and may be followed by
+   * "out of N".
    *
-   * @param count - Rows being described.
    * @returns e.g. `"18 assets and 2 kits"`.
    */
-  countLabel?: (count: number) => ReactNode;
+  countLabel?: () => ReactNode;
 };
 
 export default function ListTitle({
@@ -160,14 +161,14 @@ export default function ListTitle({
             {perPage < totalItems ? (
               <p>
                 {countLabel
-                  ? countLabel(rowCount)
+                  ? countLabel()
                   : `${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>
                 {countLabel
-                  ? countLabel(totalItems)
+                  ? countLabel()
                   : `${totalItems} ${rowCount === 1 ? singular : plural}`}
               </span>
             )}

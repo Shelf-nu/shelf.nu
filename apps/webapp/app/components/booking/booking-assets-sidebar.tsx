@@ -39,6 +39,7 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { describeBookingRows } from "~/utils/booking-rows";
 import { tw } from "~/utils/tw";
 import {
   InsufficientStockBadge,
@@ -671,7 +672,11 @@ export function BookingAssetsSidebar({
             <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
               <h5 className="text-left capitalize">Assets & kits</h5>
               <p>
-                <span>{paginatedItems.length} items</span>
+                {/* Same helper the booking overview uses. This drawer groups
+                    kits into one row exactly as the overview does, so a bare
+                    "N items" here disagreed with the "N assets" in this very
+                    drawer's own header one line above. */}
+                <span>{describeBookingRows(paginatedItems)}</span>
               </p>
             </div>
 

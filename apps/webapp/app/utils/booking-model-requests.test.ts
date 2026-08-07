@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  countReservedModelUnits,
   countUnassignedModelUnits,
   getOutstandingModelRequests,
 } from "./booking-model-requests";
@@ -101,6 +102,21 @@ describe("countUnassignedModelUnits", () => {
   it("returns 0 when there is no outstanding work", () => {
     expect(countUnassignedModelUnits([])).toBe(0);
     expect(countUnassignedModelUnits(undefined)).toBe(0);
+  });
+
+  it("pairs with the reserved total to form the displayed X of Y", () => {
+    // The section renders "4 of 5 units still to assign". Both halves come
+    // from the same outstanding set, so they can never describe different
+    // populations.
+    const requests = [
+      { quantity: 3, fulfilledQuantity: 0, fulfilledAt: null },
+      { quantity: 2, fulfilledQuantity: 1, fulfilledAt: null },
+      // Fulfilled: contributes to NEITHER half.
+      { quantity: 9, fulfilledQuantity: 9, fulfilledAt: new Date() },
+    ];
+
+    expect(countUnassignedModelUnits(requests)).toBe(4);
+    expect(countReservedModelUnits(requests)).toBe(5);
   });
 
   it("re-counts a reservation that was fulfilled and then re-opened", () => {

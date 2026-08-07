@@ -6,6 +6,7 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import { describeBookingRows } from "~/utils/booking-rows";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import { BookingModelReservationsSection } from "./booking-model-reservations-section";
 import { BookingPagination } from "./booking-pagination";
@@ -377,38 +378,6 @@ interface BookingAssetsHeaderProps {
   itemsGetter: (data: any) => any[];
   manageAssetsUrl: string;
   manageAssetsButtonDisabled: any;
-}
-
-/**
- * Describes the Assets & Kits rows as what they actually are.
- *
- * A kit occupies ONE row but contains several assets, so a bare row count can
- * never match the bookings index, which counts assets. Saying "18 assets and 2
- * kits" instead of "20 items" makes the difference self-evident: the reader can
- * see the two kits are holding the rest, and each kit row states its own member
- * count. No arithmetic, and nothing to look up in another panel.
- *
- * Reads the CURRENT PAGE's rows rather than the loader's `assetsCount` /
- * `totalKits`, which describe the whole filtered set — on page 2 of a paginated
- * booking the header must describe page 2.
- *
- * @param items - The page's rows, as shaped by the loader.
- * @returns A phrase for `ListTitle`'s `countLabel`.
- */
-export function describeBookingRows(items: { type: string }[]): string {
-  const kits = items.filter((item) => item.type === "kit").length;
-  const assets = items.length - kits;
-
-  const parts: string[] = [];
-  // An all-kits booking should read "2 kits", not "0 assets and 2 kits".
-  if (assets > 0 || kits === 0) {
-    parts.push(`${assets} ${assets === 1 ? "asset" : "assets"}`);
-  }
-  if (kits > 0) {
-    parts.push(`${kits} ${kits === 1 ? "kit" : "kits"}`);
-  }
-
-  return parts.join(" and ");
 }
 
 function BookingAssetsHeader({

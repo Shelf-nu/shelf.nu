@@ -94,3 +94,30 @@ export function countUnassignedModelUnits(
     0
   );
 }
+
+/**
+ * Total units RESERVED across the requests that still have work outstanding.
+ *
+ * This is the denominator for {@link countUnassignedModelUnits}: 4 of 5 units
+ * still to assign means five were promised and one has been scanned in.
+ *
+ * Both numbers have to be shown together. Showing the remainder alone leaves a
+ * reader unable to tell whether "3 units" means three promised or three left,
+ * and the answer differs per row — which is precisely the ambiguity this
+ * module exists to remove.
+ *
+ * Counts only outstanding requests, so it agrees with the remainder it
+ * partners: a fully fulfilled request contributes to neither.
+ *
+ * @param modelRequests - The booking's model requests. Tolerates
+ *   `null`/`undefined`.
+ * @returns Total reserved units across outstanding requests.
+ */
+export function countReservedModelUnits(
+  modelRequests: CountableModelRequest[] | null | undefined
+): number {
+  return getOutstandingModelRequests(modelRequests).reduce(
+    (sum, req) => sum + Math.max(0, req.quantity),
+    0
+  );
+}

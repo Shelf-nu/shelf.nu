@@ -26,36 +26,47 @@ const lenses = {
 };
 
 describe("BookingModelReservationsSection", () => {
-  it("states units and models together so neither number is ambiguous", () => {
+  it("states remaining, reserved and model count so nothing is ambiguous", () => {
     render(
       <BookingModelReservationsSection modelRequests={[projectors, lenses]} />
     );
 
-    // 3 outstanding + 1 outstanding = 4 units, across 2 reservation rows.
-    // Showing only one of those numbers is what made the original UI unreadable.
-    expect(screen.getByText("4 units across 2 models")).toBeInTheDocument();
+    // 3 + 1 = 4 still to assign, out of 3 + 2 = 5 reserved, across 2 rows.
+    // Every number here is checkable against the rows below it by eye.
+    expect(
+      screen.getByText("4 of 5 units still to assign, across 2 models")
+    ).toBeInTheDocument();
   });
 
-  it("describes each row's outstanding work in words, not a bare quantity", () => {
+  it("uses ONE shape for every row, including untouched ones", () => {
     render(
       <BookingModelReservationsSection modelRequests={[projectors, lenses]} />
     );
 
-    expect(screen.getByText("3 units to assign")).toBeInTheDocument();
+    // The regression this guards: an untouched row used to drop its
+    // denominator ("3 units to assign") while a partially fulfilled one kept
+    // it ("1 of 2 units still to assign"). Two shapes for the same thing meant
+    // a reader could not tell whether a lone 3 was promised or remaining, and
+    // the header total could not be checked without inferring the rule.
+    expect(
+      screen.getByText("3 of 3 units still to assign")
+    ).toBeInTheDocument();
     expect(
       screen.getByText("1 of 2 units still to assign")
     ).toBeInTheDocument();
   });
 
-  it("uses singular wording for a single unit and a single model", () => {
+  it("keeps the shape when a single unit is reserved", () => {
     render(
       <BookingModelReservationsSection
         modelRequests={[{ ...projectors, quantity: 1 }]}
       />
     );
 
-    expect(screen.getByText("1 unit across 1 model")).toBeInTheDocument();
-    expect(screen.getByText("1 unit to assign")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 of 1 unit still to assign, across 1 model")
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 unit still to assign")).toBeInTheDocument();
   });
 
   it("renders nothing when every reservation is fulfilled", () => {

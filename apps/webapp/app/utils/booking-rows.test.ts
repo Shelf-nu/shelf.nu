@@ -6,9 +6,13 @@
  * the bookings index's asset count. The header used to say "20 items" next to
  * an index reading "25 assets" for the same booking, leaving the reader to work
  * out that two kit rows held the other seven.
+ *
+ * Shared by the booking overview AND the bookings-index assets drawer — the
+ * drawer had its own "N items" caption, so the same booking read two ways one
+ * click apart.
  */
 import { describe, expect, it } from "vitest";
-import { describeBookingRows } from "./booking-assets-column";
+import { describeBookingRows } from "./booking-rows";
 
 const asset = { type: "asset" };
 const kit = { type: "kit" };

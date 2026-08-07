@@ -33,6 +33,7 @@ import type { ReactNode } from "react";
 import { Package as PackageIcon } from "lucide-react";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
+  countReservedModelUnits,
   countUnassignedModelUnits,
   getOutstandingModelRequests,
 } from "~/utils/booking-model-requests";
@@ -70,27 +71,34 @@ type BookingModelReservationsSectionProps = {
 };
 
 /**
- * States a single reservation's outstanding work in plain words.
+ * States a single reservation's outstanding work.
  *
- * Deliberately a sentence rather than a bare `× N` in a Qty column: the same
- * column on asset rows means *booked* units while on a reservation it means
- * *remaining* units, and that unlabelled overload is what made these rows hard
- * to read.
+ * ALWAYS `"X of Y units still to assign"`, never a bare count, even when
+ * nothing has been assigned yet and X equals Y.
+ *
+ * An earlier version dropped the denominator on untouched rows, so a booking
+ * showed "3 units to assign" next to "1 of 2 units still to assign". Two rows
+ * of the same kind in two shapes, with the shape changing only once something
+ * had been scanned in. A reader could not tell whether the bare 3 meant three
+ * promised or three left, and checking the section total meant adding a bare
+ * number to the numerator of a fraction.
+ *
+ * Keeping one shape makes the whole section self-checking: the X's sum to the
+ * units still to assign, the Y's sum to the units reserved, and both totals
+ * appear in the header in the same `"X of Y"` form.
  *
  * @param request - The reservation.
- * @returns e.g. `"3 units to assign"`, or `"1 of 2 units still to assign"`
- *   once some have been scanned in.
+ * @returns e.g. `"3 of 3 units still to assign"`, `"1 of 2 units still to
+ *   assign"`.
  */
 function describeOutstanding(request: SectionModelRequest): string {
   const remaining = Math.max(0, request.quantity - request.fulfilledQuantity);
 
-  // In the partial case the noun agrees with the TOTAL ("1 of 2 units"), not
-  // the remainder, otherwise it reads "1 of 2 unit".
-  return request.fulfilledQuantity > 0
-    ? `${remaining} of ${request.quantity} ${
-        request.quantity === 1 ? "unit" : "units"
-      } still to assign`
-    : `${remaining} ${remaining === 1 ? "unit" : "units"} to assign`;
+  // The noun agrees with the TOTAL, not the remainder, or it reads
+  // "1 of 2 unit".
+  return `${remaining} of ${request.quantity} ${
+    request.quantity === 1 ? "unit" : "units"
+  } still to assign`;
 }
 
 /**
@@ -109,6 +117,7 @@ export function BookingModelReservationsSection({
   }
 
   const units = countUnassignedModelUnits(modelRequests);
+  const reserved = countReservedModelUnits(modelRequests);
 
   return (
     <div className={tw("overflow-hidden rounded border bg-white", className)}>
@@ -116,10 +125,13 @@ export function BookingModelReservationsSection({
         <h5 className="text-left text-text-sm font-semibold text-gray-900">
           Unassigned model reservations
         </h5>
-        {/* Both denominators in one line so no reader has to infer whether a
-            number counts rows or units. */}
+        {/* Same `"X of Y units"` shape the rows use, so the header is checkable
+            against them by eye: the rows' first numbers sum to X and their
+            second numbers sum to Y. Stating both stops a reader having to
+            guess whether a lone number means promised or remaining. */}
         <p className="text-sm text-gray-600">
-          {units} {units === 1 ? "unit" : "units"} across {outstanding.length}{" "}
+          {units} of {reserved} {reserved === 1 ? "unit" : "units"} still to
+          assign, across {outstanding.length}{" "}
           {outstanding.length === 1 ? "model" : "models"}
         </p>
       </div>
