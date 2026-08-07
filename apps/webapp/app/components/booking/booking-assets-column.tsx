@@ -185,17 +185,20 @@ export function BookingAssetsColumn() {
         <div className="mb-3 flex gap-4 lg:hidden"></div>
 
         <div className="flex flex-col">
-          {/* Filters */}
-          <div className="mb-2">
-            <BookingAssetsFilters />
-          </div>
+          {/* Outstanding model reservations sit ABOVE the search/sort bar,
+              not just above the table.
 
-          {/* Outstanding model reservations, ABOVE the assets table rather
-              than interleaved into it — they aren't assets, and keeping them
-              out is what lets the Assets & Kits header describe exactly the
-              rows beneath it. Fulfilled rows are filtered out inside the
-              section; they're history and live in the Models tab of
-              manage-assets as an audit trail. */}
+              The search box is labelled "Search assets & kits" and filters only
+              the assets table; reservations are deliberately unaffected. Placing
+              this section BELOW that bar implied the filter scoped it too, so a
+              search that changed the table while the reservations stayed put
+              read as a bug. Above the bar, the filter visually governs exactly
+              what it filters.
+
+              They also stay out of the table itself, which is what lets the
+              Assets & Kits header describe exactly the rows beneath it.
+              Fulfilled rows are filtered out inside the section; they're
+              history and live in the Models tab of manage-assets. */}
           <BookingModelReservationsSection
             modelRequests={booking.modelRequests}
             className="-mx-4 mb-2 md:mx-0"
@@ -232,6 +235,11 @@ export function BookingAssetsColumn() {
               />
             )}
           />
+
+          {/* Filters */}
+          <div className="mb-2">
+            <BookingAssetsFilters />
+          </div>
 
           {/* This is a fake table header */}
           <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t ">
