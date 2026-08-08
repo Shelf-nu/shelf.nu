@@ -9,6 +9,7 @@ import { Image } from "~/components/shared/image";
 import { useSearchParams } from "~/hooks/search-params";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetImage } from "../assets/asset-image/component";
@@ -174,9 +175,7 @@ const BookingPDFPreview = ({
   // model request was fulfilled concurrently) can't leak a fulfilled
   // historical row into the printed PDF. `fulfilledAt IS NULL` is the
   // canonical outstanding filter.
-  const outstandingModelRequests = (modelRequests ?? []).filter(
-    (req) => req.fulfilledAt === null
-  );
+  const outstandingModelRequests = getOutstandingModelRequests(modelRequests);
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
         booking.custodianUser.email

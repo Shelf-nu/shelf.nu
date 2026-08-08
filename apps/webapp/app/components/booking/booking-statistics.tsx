@@ -1,5 +1,6 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { BookingLifecycleProgress as BookingLifecycleProgressType } from "~/modules/booking/utils.server";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BookingLifecycleProgress as BookingLifecycleProgressBar } from "./booking-lifecycle-progress";
 import { CategoryBadge } from "../assets/category-badge";
@@ -15,6 +16,7 @@ export function BookingStatistics({
   totalAssets,
   kitsCount,
   assetsCount,
+  unassignedModelUnits,
   totalValue,
   allCategories,
   tags,
@@ -27,6 +29,11 @@ export function BookingStatistics({
   totalAssets: number;
   kitsCount: number;
   assetsCount: number;
+  /**
+   * Reserved model units still awaiting a physical asset. Counted in UNITS,
+   * not request rows, via `countUnassignedModelUnits`. `0` hides the row.
+   */
+  unassignedModelUnits: number;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
@@ -89,6 +96,46 @@ export function BookingStatistics({
           </span>
           <span className="text-right font-medium">{totalAssets}</span>
         </div>
+
+        {/* Reserved model units that have no physical asset behind them yet.
+            Shown ONLY when there are some, and in the same amber the
+            reservations section and the bookings-index pill use.
+
+            Every count above this row is concrete assets, which is correct and
+            was also completely silent about a booking still owing units. A
+            summary that omits the outstanding work reads as "this booking is
+            complete" — the exact impression that produced the original report.
+            @see {@link file://./booking-model-reservations-section.tsx} */}
+        {unassignedModelUnits > 0 && (
+          <>
+            <Separator />
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-sm text-gray-500">
+                Unassigned model units{" "}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <p>
+                      Units reserved against an asset model that have not been
+                      matched to a physical asset yet. They are not counted in
+                      the asset totals above, and they are not included in total
+                      value because no specific asset has been chosen.
+                    </p>
+                  }
+                />
+              </span>
+              <span
+                className="rounded-2xl px-2 py-[2px] text-right text-xs font-medium"
+                style={{
+                  backgroundColor: BADGE_COLORS.amber.bg,
+                  color: BADGE_COLORS.amber.text,
+                }}
+              >
+                {unassignedModelUnits}
+              </span>
+            </div>
+          </>
+        )}
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Total value</span>

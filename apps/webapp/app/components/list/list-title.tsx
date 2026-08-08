@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -42,6 +43,27 @@ type ListTitleProps = {
    * Optional class name for the title element
    */
   titleClassName?: string;
+
+  /**
+   * Describes the rendered rows in the surface's own words, replacing the
+   * default `"N items"`.
+   *
+   * The default noun comes from `modelName`, which is necessarily generic when
+   * a list holds more than one kind of row. The booking overview mixes assets
+   * and kits, so its header read "20 items" while the bookings index reported
+   * 25 assets for the same booking — the difference being the 7 assets folded
+   * inside 2 kit rows. Neither number was wrong; "items" just never said what
+   * it counted, leaving the reader to work it out.
+   *
+   * Takes no argument on purpose: a surface that can describe its rows knows
+   * the rows, and passing a count invited an implementation to ignore it and
+   * silently disagree with the number ListTitle thought it was labelling.
+   * Return a phrase, not a sentence — it renders inline and may be followed by
+   * "out of N".
+   *
+   * @returns e.g. `"18 assets and 2 kits"`.
+   */
+  countLabel?: () => ReactNode;
 };
 
 export default function ListTitle({
@@ -50,6 +72,7 @@ export default function ListTitle({
   disableSelectAllItems = false,
   itemsGetter,
   titleClassName,
+  countLabel,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -58,10 +81,27 @@ export default function ListTitle({
     modelName: { singular, plural },
   } = loaderData as unknown as IndexResponse;
 
+  /**
+   * SELECTION list. When `itemsGetter` is supplied it flattens composite rows
+   * into their selectable entities — the booking overview expands each kit row
+   * into its member assets plus the kit itself. Right for "select all", wrong
+   * for any count shown to a human.
+   */
   const items =
     typeof itemsGetter === "function"
       ? itemsGetter(loaderData)
       : loaderData.items;
+
+  /**
+   * DISPLAY count: rows actually rendered on this page.
+   *
+   * Must not come from `items` above. On the booking overview a 10-row page
+   * containing two kits (4 and 3 members) flattens to 17 selectable entities,
+   * so the header read "17 items out of 20" — a number matching neither the
+   * rows on screen nor the total. Identical to `items.length` on every list
+   * that passes no `itemsGetter`.
+   */
+  const rowCount = loaderData.items?.length ?? 0;
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
@@ -116,14 +156,20 @@ export default function ListTitle({
           </div>
         ) : (
           <div>
+            {/* Both branches pluralise on the count, not on `> 1` — an empty
+                list read "0 item". Only exactly one is singular. */}
             {perPage < totalItems ? (
               <p>
-                {items.length} {items.length > 1 ? plural : singular}{" "}
+                {countLabel
+                  ? countLabel()
+                  : `${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>
-                {totalItems} {items.length > 1 ? plural : singular}
+                {countLabel
+                  ? countLabel()
+                  : `${totalItems} ${rowCount === 1 ? singular : plural}`}
               </span>
             )}
           </div>
