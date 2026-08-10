@@ -29,7 +29,8 @@ import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { extractQrId } from "@/lib/qr-utils";
+import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { getActiveServer } from "@/lib/server";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
@@ -407,6 +408,20 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
+        // A Shelf URL from ANOTHER server would otherwise be resolved against
+        // this one and reported as "not found" — a baffling error for a code
+        // that is perfectly valid on the instance that minted it.
+        if (
+          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
+          "foreign"
+        ) {
+          Alert.alert(
+            "Different Shelf Server",
+            "This code belongs to a different Shelf server. Sign in to that server to use it."
+          );
+          return;
+        }
+
         // 1. Resolve code -> asset (QR, SAM id, or barcode)
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's

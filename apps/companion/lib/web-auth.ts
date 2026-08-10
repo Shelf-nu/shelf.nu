@@ -7,7 +7,7 @@
  * the web hands back a single-use authorization code via the
  * `shelf://auth-callback` deeplink. We exchange that code at
  * `POST /api/mobile/exchange` for a fresh, independent Supabase session and
- * install it with `supabase.auth.setSession`.
+ * install it with `getSupabase().auth.setSession`.
  *
  * No tokens ever appear in a URL — only the short-lived, single-use code.
  *
@@ -17,8 +17,9 @@
 import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
-import { API_BASE_URL } from "./api";
-import { supabase } from "./supabase";
+import { getApiBaseUrl } from "./api";
+import { resolveServerForEmail } from "./server";
+import { getSupabase } from "./supabase";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
@@ -90,15 +91,28 @@ async function createPkcePair(): Promise<{
  *
  * Opens the web SSO page in the system browser, waits for the `shelf://`
  * callback, exchanges the returned single-use code for a fresh session, and
- * calls `supabase.auth.setSession` (which fires `onAuthStateChange`, so the
+ * calls `getSupabase().auth.setSession` (which fires `onAuthStateChange`, so the
  * existing auth context navigates the user into the app).
  *
  * Never throws — failures are returned as `{ error }` for the caller to display.
  *
+ * @param email - The email typed on the login screen. Its domain decides which
+ *   Shelf server the SSO hand-off targets, so callers must not pass an empty
+ *   string: that would silently start the flow against Shelf Cloud.
  * @returns `{ error: null }` on success or user cancellation, otherwise
  *   `{ error: <message> }`.
  */
-export async function signInViaWeb(): Promise<SsoSignInResult> {
+export async function signInViaWeb(email: string): Promise<SsoSignInResult> {
+  // Point the app at the right server BEFORE opening the browser: the SSO
+  // hand-off and the code exchange must both happen against that server.
+  const discovery = await resolveServerForEmail(email);
+  if (!discovery.ok) return { error: discovery.message };
+
+  // Captured once, deliberately: re-reading this after the browser round trip
+  // would be correct today but silently wrong if anything switched servers
+  // mid-flow. The authorization code is only valid on the server that minted it.
+  const baseUrl = getApiBaseUrl();
+
   try {
     // PKCE (S256): generate a verifier now and send only its challenge to the
     // web SSO start, so the server binds the challenge to the minted code. The
@@ -106,7 +120,7 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
     // intercepted `shelf://` code is useless without it (this closes the Android
     // custom-scheme deeplink interception risk).
     const { verifier, challenge } = await createPkcePair();
-    const startUrl = `${API_BASE_URL}/sso-login?platform=mobile&code_challenge=${encodeURIComponent(
+    const startUrl = `${baseUrl}/sso-login?platform=mobile&code_challenge=${encodeURIComponent(
       challenge
     )}`;
 
@@ -133,7 +147,7 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
     const timeout = setTimeout(() => controller.abort(), 15_000);
     let response: Response;
     try {
-      response = await fetch(`${API_BASE_URL}/api/mobile/exchange`, {
+      response = await fetch(`${baseUrl}/api/mobile/exchange`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code, codeVerifier: verifier }),
@@ -158,7 +172,7 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
       };
     }
 
-    const { error } = await supabase.auth.setSession({
+    const { error } = await getSupabase().auth.setSession({
       access_token: payload.accessToken,
       refresh_token: payload.refreshToken,
     });

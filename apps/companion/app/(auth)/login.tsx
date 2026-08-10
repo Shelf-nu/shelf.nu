@@ -19,7 +19,12 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
-import { API_BASE_URL } from "@/lib/api";
+import { getApiBaseUrl } from "@/lib/api";
+import {
+  getActiveServer,
+  resolveServerForEmail,
+  subscribeToServerChange,
+} from "@/lib/server";
 import ShelfIcon from "@/components/brand/shelf-icon";
 import ShelfWordmark from "@/components/brand/shelf-wordmark";
 
@@ -36,6 +41,15 @@ export default function LoginScreen() {
   const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
   const router = useRouter();
   const params = useLocalSearchParams<{ error?: string }>();
+
+  // Which Shelf server we're connected to. Discovery can switch this mid-screen
+  // (the user types an enterprise email and taps Sign In), so it must re-render
+  // rather than be read once.
+  const [server, setServer] = useState(getActiveServer());
+  useEffect(
+    () => subscribeToServerChange(() => setServer(getActiveServer())),
+    []
+  );
 
   // Surface a sign-in error passed via navigation — e.g. an SSO exchange failure
   // that resolved while the auth-callback route was covering this screen on Android
@@ -92,10 +106,20 @@ export default function LoginScreen() {
   const handleSsoLogin = async () => {
     Keyboard.dismiss();
     setError(null);
+
+    const trimmedEmail = email.trim();
+    // why: the server is resolved from the email domain, so with an empty field
+    // we would silently open Shelf Cloud's SSO page — wrong for every
+    // enterprise user, and it would look like the feature simply doesn't work.
+    if (!trimmedEmail) {
+      setError("Enter your work email so we can find your organization.");
+      return;
+    }
+
     setIsSsoSubmitting(true);
     // Opens the web SSO flow in the system browser; resolves once the app
     // receives the callback and installs the session (or the user cancels).
-    const { error: ssoError } = await signInViaWeb();
+    const { error: ssoError } = await signInViaWeb(trimmedEmail);
     setIsSsoSubmitting(false);
     if (ssoError) {
       // On Android the auth-callback route is mounted on top of this screen while
@@ -123,12 +147,19 @@ export default function LoginScreen() {
    * flow is the source of truth and rejects SSO users server-side; the in-app
    * sheet survives the user switching to their mail app for the code and back.
    */
-  const handleForgotPassword = () => {
+  const handleForgotPassword = async () => {
     Keyboard.dismiss();
     setError(null);
-    WebBrowser.openBrowserAsync(`${API_BASE_URL}/forgot-password`).catch(() => {
-      setError("Couldn't open the password reset page. Please try again.");
-    });
+    // Best-effort: land on the right server's reset page when we can tell which
+    // one it is. With an empty field this falls through to the active server,
+    // which for a first-run enterprise user means Shelf Cloud — acceptable,
+    // since SSO organizations disable password auth and never reach this link.
+    if (email.trim()) await resolveServerForEmail(email.trim());
+    WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`).catch(
+      () => {
+        setError("Couldn't open the password reset page. Please try again.");
+      }
+    );
   };
 
   return (
@@ -155,6 +186,15 @@ export default function LoginScreen() {
             <View style={styles.wordmarkWrap}>
               <ShelfWordmark width={100} color={colors.foreground} />
             </View>
+            {/* Only for a non-cloud server: on Shelf Cloud the chip would be
+                noise on every user's login screen. */}
+            {!server.isCloud && (
+              <View style={styles.serverChip}>
+                <Text style={styles.serverChipText}>
+                  Connected to {server.name}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* ── Welcome Text ──────────────────────────────────────── */}
@@ -308,6 +348,20 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   wordmarkWrap: {
     marginTop: spacing.md,
+  },
+  // borderLight/gray700 is the pair the DRAFT status badge already uses, so it
+  // is theme-aware and vetted for WCAG 2.1 AA contrast in light and dark.
+  serverChip: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.xl,
+    backgroundColor: colors.borderLight,
+  },
+  serverChipText: {
+    fontSize: fontSize.sm,
+    color: colors.gray700,
+    fontWeight: "500",
   },
   welcomeSection: {
     alignItems: "center",

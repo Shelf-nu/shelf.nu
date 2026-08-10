@@ -21,6 +21,7 @@ import {
   type AssetCustodyListEntry,
   type Location as LocationType,
   type TeamMember,
+  getApiBaseUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useOrg } from "@/lib/org-context";
@@ -601,10 +602,7 @@ export default function AssetDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${asset.qrCodes[0].id}`}
+                    value={`${getApiBaseUrl()}/qr/${asset.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}

@@ -17,6 +17,10 @@
  * @see {@link file://./../hooks/use-audit-init.ts}
  */
 import * as Sentry from "@sentry/react-native";
+import {
+  getActiveServer,
+  subscribeToServerChange,
+} from "./server/active-server";
 
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
 
@@ -41,6 +45,36 @@ export function initSentry() {
     tracesSampleRate: 0.1,
     sendDefaultPii: false,
   });
+}
+
+/**
+ * Tags subsequent Sentry events with the Shelf server the app is connected to,
+ * and keeps the tag current across server switches.
+ *
+ * Call once after `hydrateActiveServer()` resolves — NOT from `initSentry()`,
+ * which runs at module scope before the persisted server has been restored and
+ * would therefore always report "cloud".
+ *
+ * why: companion errors from every customer land in one Sentry project. Without
+ * this tag an enterprise-only regression is indistinguishable from a cloud one.
+ *
+ * @returns An unsubscribe function for the server-change listener.
+ */
+export function trackServerTag(): () => void {
+  const apply = () => {
+    const server = getActiveServer();
+    try {
+      Sentry.setTag(
+        "server",
+        server.isCloud ? "cloud" : new URL(server.baseUrl).host
+      );
+    } catch {
+      // Telemetry setup must never throw into the app.
+      Sentry.setTag("server", server.isCloud ? "cloud" : "unknown");
+    }
+  };
+  apply();
+  return subscribeToServerChange(apply);
 }
 
 /**
