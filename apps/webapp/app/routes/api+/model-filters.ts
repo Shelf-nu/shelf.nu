@@ -1,10 +1,32 @@
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import {
+  resolveCanSeeAllBookings,
+  resolveEffectiveRole,
+} from "~/utils/roles.server";
+
+/**
+ * Booking statuses a booking search returns when the caller does not ask for a
+ * specific set. Matches the historical behaviour of this endpoint: "upcoming"
+ * bookings only, which is what the asset-index advanced filter means by
+ * "Has upcoming bookings".
+ */
+const DEFAULT_BOOKING_SEARCH_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
 
 const BasicModelFilters = z.object({
   /** key of field for which we have to filter values */
@@ -46,6 +68,28 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
+    /**
+     * Comma-separated `BookingStatus` values the caller wants to search across.
+     *
+     * Different surfaces need different sets: the asset/kit "Add to existing
+     * booking" dialogs also offer DRAFT bookings, while the asset-index
+     * advanced filter is about *upcoming* bookings and deliberately excludes
+     * them. Defaults to the upcoming-only set so existing callers are
+     * unaffected.
+     */
+    status: z
+      .string()
+      .optional()
+      .refine(
+        (val) =>
+          val === undefined ||
+          val
+            .split(",")
+            .every((s) =>
+              Object.values(BookingStatus).includes(s.trim() as BookingStatus)
+            ),
+        { message: "Invalid booking status" }
+      ),
   }),
   BasicModelFilters.extend({
     name: z.literal("assetModel"),
@@ -61,10 +105,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganization({
-      userId,
-      request,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await getSelectedOrganization({ userId, request });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -126,7 +168,72 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (modelFilters.name === "booking") {
-      where.status = { in: ["RESERVED", "ONGOING", "OVERDUE"] };
+      where.status = {
+        in: modelFilters.status
+          ? (modelFilters.status
+              .split(",")
+              .map((s) => s.trim()) as BookingStatus[])
+          : DEFAULT_BOOKING_SEARCH_STATUSES,
+      };
+
+      /**
+       * A DRAFT booking is visible only to its creator. Every other booking
+       * read path enforces this — `getBookings`, `getMinimalBookings`, the CSV
+       * export and the mobile booking APIs all AND in the same clause — so a
+       * search that can now return DRAFT rows has to enforce it too, or typing
+       * would surface drafts the seeding loader deliberately hides.
+       *
+       * Server-derived from the session `userId`, never from a request param,
+       * and nested in a single AND member so the search `OR` above cannot widen
+       * it back open.
+       */
+      where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
+
+      const role = resolveEffectiveRole({ userOrganizations, organizationId });
+
+      /**
+       * Standard booking READ visibility: SELF_SERVICE / BASE users only see
+       * bookings they are custodian of, unless the workspace has switched the
+       * setting on.
+       *
+       * Resolved from the session role plus the organization's settings, never
+       * from a request param, and AND-ed so the search `OR` cannot widen it.
+       * The restriction used to be opt-in via a `scopeToCustodian` query param,
+       * which a caller could simply omit — every booking row in the workspace
+       * came back to a restricted user with the setting off.
+       *
+       * Shares `custodianScopeClause` with `getBookings` so the shape matches
+       * the loader that seeded the picker; matching only `custodianUserId` here
+       * dropped bookings custodied through a legacy team-member row as soon as
+       * the user typed.
+       */
+      if (!resolveCanSeeAllBookings({ role, currentOrganization })) {
+        where.AND.push(
+          custodianScopeClause(
+            await resolveCustodianScope({ userId, organizationId })
+          )
+        );
+      }
+
+      /**
+       * Standard booking WRITE authorization, AND-ed on top.
+       *
+       * Every reachable consumer of a booking search for a restricted role is a
+       * mutation-target picker — the two "Add to existing booking" dialogs. The
+       * asset-index advanced filter is the only read-only consumer, and
+       * `assets._index.tsx` refuses ADVANCED mode to SELF_SERVICE / BASE
+       * outright, so this never narrows a list they can otherwise reach.
+       *
+       * Independent of the visibility toggle on purpose: it mirrors
+       * `validateBookingOwnership`, which ignores that toggle. Offering rows the
+       * action rejects turns the picker into a 403 dead end. A future read-only
+       * booking search for these roles needs a purpose distinction here.
+       */
+      const writeScope = bookingWriteScopeClause({ userId, role });
+
+      if (writeScope) {
+        where.AND.push(writeScope);
+      }
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {
@@ -165,12 +272,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     return data(
       payload({
+        /**
+         * Search results must carry the SAME top-level fields as the records a
+         * route loader seeds the picker with, because `DynamicSelect` /
+         * `DynamicDropdown` hand whichever list is active to the very same
+         * `renderItem`.
+         *
+         * Spreading the raw record first is what keeps those two shapes in
+         * agreement: without it a `renderItem` reading a plain column — e.g.
+         * `item.status` in the booking pickers — silently got `undefined` the
+         * moment the user typed, and the row rendered as nothing at all. The
+         * explicit keys below still win, so the `id` / `name` / `color` /
+         * `metadata` / `user` contract is unchanged.
+         *
+         * No new data is exposed: `metadata` already carried the whole record.
+         */
         filters: queryData.map((item) => ({
+          ...item,
           id: item.id,
           name: item[queryKey],
           color: item?.color,
           metadata: item,
-          user: item?.user as any,
+          user: item?.user,
         })),
       })
     );

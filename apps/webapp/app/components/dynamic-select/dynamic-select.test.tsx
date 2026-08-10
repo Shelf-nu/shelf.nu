@@ -880,4 +880,48 @@ describe("DynamicSelect", () => {
       expect(screen.getByRole("button")).toHaveTextContent("Item 2");
     });
   });
+
+  describe("Validation error", () => {
+    function renderWithError(error?: string) {
+      return render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          error={error}
+        />
+      );
+    }
+
+    it("renders nothing extra when there is no error", () => {
+      renderWithError();
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("button")).not.toHaveAttribute(
+        "aria-describedby"
+      );
+    });
+
+    it("announces the message, because a picker that refuses to submit is otherwise silent", () => {
+      renderWithError("Please select an asset model");
+
+      // `role="alert"` is what makes submit-time validation audible — without
+      // it a screen-reader user only experiences the form not submitting.
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Please select an asset model"
+      );
+    });
+
+    it("points the trigger at the message via aria-describedby", () => {
+      renderWithError("Please select an asset model");
+
+      const describedBy = screen
+        .getByRole("button")
+        .getAttribute("aria-describedby");
+
+      expect(describedBy).toBeTruthy();
+      expect(screen.getByRole("alert")).toHaveAttribute("id", describedBy);
+    });
+  });
 });

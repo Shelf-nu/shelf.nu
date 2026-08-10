@@ -24,10 +24,10 @@ import {
   spacing,
   borderRadius,
   formatStatus,
-  formatDateTime,
   bookingCountdown,
   hitSlop,
 } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -98,6 +98,7 @@ function BookingsListContent() {
   } = useOrg();
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -294,7 +295,11 @@ function BookingsListContent() {
           activeOpacity={0.6}
           accessibilityLabel={`Booking: ${item.name}, ${formatStatus(
             item.status
-          )}, ${item.assetCount} assets`}
+          )}, ${item.assetCount} assets${
+            (item.outstandingModelUnitCount ?? 0) > 0
+              ? `, ${item.outstandingModelUnitCount} reserved`
+              : ""
+          }`}
           accessibilityRole="button"
         >
           <View style={styles.bookingHeader}>
@@ -351,6 +356,15 @@ function BookingsListContent() {
               />
               <Text style={styles.metaText}>
                 {item.assetCount} {item.assetCount === 1 ? "asset" : "assets"}
+                {/* A booking can hold reserved units with no concrete asset
+                    behind them yet, and `assetCount` only counts concrete
+                    rows. Without this the card reads "0 assets" while the
+                    action hint below says "Assign assets to check out" — and
+                    the reserved units are genuinely held, unavailable to
+                    everyone else. Same signal, every surface. */}
+                {(item.outstandingModelUnitCount ?? 0) > 0
+                  ? ` · ${item.outstandingModelUnitCount} reserved`
+                  : ""}
               </Text>
             </View>
 
@@ -403,7 +417,7 @@ function BookingsListContent() {
         </TouchableOpacity>
       );
     },
-    [router, colors, bookingStatusBadge, styles]
+    [router, colors, bookingStatusBadge, styles, formatDateTime]
   );
 
   if (orgLoading) {

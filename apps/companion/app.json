@@ -30,7 +30,11 @@
           "autoVerify": true,
           "category": ["BROWSABLE", "DEFAULT"],
           "data": [
-            { "scheme": "https", "host": "app.shelf.nu", "pathPrefix": "/qr/" },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/qr/"
+            },
             {
               "scheme": "https",
               "host": "app.shelf.nu",
@@ -92,6 +96,18 @@
         "projectId": "b6d6a6cb-c242-4474-815f-b55d5e691c58"
       }
     },
-    "owner": "shelfassetmanagement"
+    "owner": "shelfassetmanagement",
+    "runtimeVersion": "1.2.0",
+    "updates": {
+      "url": "https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD",
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
+    }
   }
 }

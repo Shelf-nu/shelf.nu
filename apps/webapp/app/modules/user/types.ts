@@ -12,6 +12,14 @@ export interface UpdateUserPayload {
   password?: string;
   confirmPassword?: string;
   usedFreeTrial?: boolean;
+  /** User's chosen short-date field order; null → not yet detected. */
+  dateFormat?: User["dateFormat"];
+  /** 12- vs 24-hour clock; null → not yet detected. */
+  timeFormat?: User["timeFormat"];
+  /** First day of the week for calendars; null → not yet detected. */
+  weekStart?: User["weekStart"];
+  /** IANA time-zone name; null → not yet detected. */
+  timeZone?: User["timeZone"];
 }
 
 export interface UpdateUserResponse {

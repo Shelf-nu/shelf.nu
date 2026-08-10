@@ -359,10 +359,7 @@ export default function AuditOverview() {
                   Created
                 </span>
                 <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <DateS
-                    date={session.createdAt}
-                    options={{ dateStyle: "short", timeStyle: "short" }}
-                  />
+                  <DateS date={session.createdAt} includeTime />
                 </div>
               </li>
               {session.dueDate && (
@@ -371,10 +368,7 @@ export default function AuditOverview() {
                     Due date
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS
-                      date={session.dueDate}
-                      options={{ dateStyle: "short", timeStyle: "short" }}
-                    />
+                    <DateS date={session.dueDate} includeTime />
                   </div>
                 </li>
               )}
@@ -384,10 +378,7 @@ export default function AuditOverview() {
                     Started
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS
-                      date={session.startedAt}
-                      options={{ dateStyle: "short", timeStyle: "short" }}
-                    />
+                    <DateS date={session.startedAt} includeTime />
                   </div>
                 </li>
               )}
@@ -397,10 +388,7 @@ export default function AuditOverview() {
                     Completed
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <DateS
-                      date={session.completedAt}
-                      options={{ dateStyle: "short", timeStyle: "short" }}
-                    />
+                    <DateS date={session.completedAt} includeTime />
                   </div>
                 </li>
               )}

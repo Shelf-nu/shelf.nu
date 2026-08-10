@@ -93,6 +93,19 @@ Add an `AttributeFilterPolicy` scoped to Shelf's entity ID, releasing `mail`, `g
 > [!NOTE]
 > On v5, SAML encoding lives in the attribute registry (`conf/attributes/`) — `mail`, `givenName`, `sn`, `eduPersonScopedAffiliation`, and `eduPersonEntitlement` ship pre-registered. `isMemberOf` (eduMember schema) may need its own registry rule if your deployment doesn't already release it.
 
+### Friendly name or OID — either works [#](#friendly-name-or-oid)
+
+`attributeID` in the filter must match whatever ID your resolver/registry actually assigns the attribute internally, and that isn't always the friendly name — depending on your deployment, an attribute can resolve only under its OID. If a rule with `PermitValueRule ANY` still releases nothing, switch `attributeID` to the OID form and retest:
+
+| Attribute  | Friendly name | OID                                 |
+| ---------- | ------------- | ----------------------------------- |
+| Email      | `mail`        | `urn:oid:0.9.2342.19200300.100.1.3` |
+| First name | `givenName`   | `urn:oid:2.5.4.42`                  |
+| Last name  | `sn`          | `urn:oid:2.5.4.4`                   |
+| Groups     | `isMemberOf`  | `urn:oid:1.3.6.1.4.1.5923.1.5.1.1`  |
+
+Shelf accepts either form automatically for every attribute above — there's nothing to tell us and nothing to reconfigure on our side, whichever one your IdP releases.
+
 ## 4. Assertion encryption — automatic [#](#assertion-encryption)
 
 Shelf publishes an encryption certificate in its metadata and accepts encrypted assertions, so your IdP encrypts automatically (Shibboleth's default when the SP advertises an encryption key). Nothing to configure — assertions are encrypted end-to-end.
@@ -156,6 +169,9 @@ Go to `/sso-login`, enter your domain, and sign in as a test user:
 
 **No email, or missing name/groups after a successful redirect back from Shibboleth.**
 Almost always a missing or mis-scoped `attribute-filter.xml` policy — the resolver may have the value, but nothing is released until a filter policy permits it to Shelf's entity ID. Check §3 first.
+
+**One attribute (e.g. last name) still doesn't release, even with a permissive `attribute-filter.xml` rule for it.**
+The rule's `attributeID` doesn't match the ID your resolver assigns that attribute internally — some deployments resolve a given attribute only under its OID, not its friendly name (or vice versa). Switch `attributeID` to the other form (table in §3) and retest; Shelf accepts either.
 
 **Login fails immediately after the Shibboleth screen, with no clear error.**
 Your IdP is issuing a `transient` NameID (the default). It must be `persistent` (or `emailAddress`) for the Shelf relying party — see §2.

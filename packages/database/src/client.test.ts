@@ -10,11 +10,14 @@
  *
  * @see ./client.ts
  */
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   getRetryableErrorCode,
+  isLockTableExhaustionError,
   isRetryablePrismaError,
   PRISMA_RETRYABLE_ERROR_CODES,
   withPrismaRetry,
@@ -64,6 +67,27 @@ function rejectedWithCode(error: unknown, code: string): boolean {
   );
 }
 
+/**
+ * Builds the Postgres shared-lock-table-exhaustion error (SQLSTATE 53200) as
+ * Prisma surfaces it: a `P2010` (raw query failed) carrying the SQLSTATE on
+ * `meta.code`, with the hint embedded in the message. Mirrors SHELF-WEBAPP-227.
+ *
+ * why: same as {@link prismaError} — the real `PrismaClientKnownRequestError`
+ * constructor is engine-coupled; a plain object with the fields the structural
+ * checks read reproduces the path faithfully.
+ */
+function lockExhaustionError(): Error & {
+  code: string;
+  meta: { code: string };
+} {
+  return Object.assign(
+    new Error(
+      "\nInvalid `prisma.$queryRaw()` invocation:\n\nRaw query failed. Code: `53200`. Message: `ERROR: out of shared memory\nHINT: You might need to increase max_locks_per_transaction.`"
+    ),
+    { code: "P2010", meta: { code: "53200" } }
+  );
+}
+
 test("getRetryableErrorCode", async (t) => {
   await t.test("reads `code` from a known-request error shape", () => {
     assert.equal(getRetryableErrorCode(prismaError("P1001")), "P1001");
@@ -86,6 +110,68 @@ test("getRetryableErrorCode", async (t) => {
     assert.equal(getRetryableErrorCode("just a string"), null);
     assert.equal(getRetryableErrorCode(null), null);
     assert.equal(getRetryableErrorCode(undefined), null);
+  });
+});
+
+test("isLockTableExhaustionError", async (t) => {
+  await t.test(
+    "detects lock-table exhaustion via the max_locks_per_transaction hint",
+    () => {
+      assert.equal(isLockTableExhaustionError(lockExhaustionError()), true);
+    }
+  );
+
+  await t.test("detects the hint when it rides only on `meta.message`", () => {
+    const error = Object.assign(new Error("Raw query failed. Code: `53200`."), {
+      code: "P2010",
+      meta: {
+        code: "53200",
+        message:
+          "ERROR: out of shared memory\nHINT: You might need to increase max_locks_per_transaction.",
+      },
+    });
+    assert.equal(isLockTableExhaustionError(error), true);
+  });
+
+  await t.test(
+    "does NOT match a generic 53200 out_of_memory WITHOUT the lock hint",
+    () => {
+      // 53200 is Postgres out_of_memory generally — backend OOM raises it too.
+      // Retrying a real memory-exhaustion read would deepen the incident, so a
+      // 53200 without the max_locks_per_transaction hint must not match.
+      const error = Object.assign(
+        new Error(
+          "Raw query failed. Code: `53200`. Message: `ERROR: out of memory`"
+        ),
+        {
+          code: "P2010",
+          meta: { code: "53200", message: "ERROR: out of memory" },
+        }
+      );
+      assert.equal(isLockTableExhaustionError(error), false);
+    }
+  );
+
+  await t.test(
+    "does NOT match a generic P2010 raw-query failure (different SQLSTATE)",
+    () => {
+      // A genuinely broken raw query is also a P2010 — matching on the bare
+      // code would swallow real bugs. Only the 53200 signature must match.
+      const error = Object.assign(
+        new Error(
+          'Raw query failed. Code: `42703`. column "foo" does not exist'
+        ),
+        { code: "P2010", meta: { code: "42703" } }
+      );
+      assert.equal(isLockTableExhaustionError(error), false);
+    }
+  );
+
+  await t.test("returns false for unrelated / non-object values", () => {
+    assert.equal(isLockTableExhaustionError(new Error("boom")), false);
+    assert.equal(isLockTableExhaustionError(prismaError("P1001")), false);
+    assert.equal(isLockTableExhaustionError(null), false);
+    assert.equal(isLockTableExhaustionError(undefined), false);
   });
 });
 
@@ -131,6 +217,48 @@ test("isRetryablePrismaError", async (t) => {
           operationIsRead: false,
         }),
         true
+      );
+    }
+  );
+
+  await t.test(
+    "lock-table exhaustion (53200) retries for reads but NOT writes",
+    () => {
+      // The statement failed acquiring locks before mutating anything, so a
+      // read is safe to re-run; a write path is left to fail fast (gated like
+      // the in-flight codes).
+      assert.equal(
+        isRetryablePrismaError(lockExhaustionError(), {
+          operationIsRead: true,
+        }),
+        true
+      );
+      assert.equal(
+        isRetryablePrismaError(lockExhaustionError(), {
+          operationIsRead: false,
+        }),
+        false
+      );
+    }
+  );
+
+  await t.test(
+    "does NOT retry a generic 53200 out_of_memory (no lock hint) on a read",
+    () => {
+      // Guards the narrowing: a real backend OOM (53200 without the hint) must
+      // fail fast, not get retried into a deeper memory incident.
+      const oom = Object.assign(
+        new Error(
+          "Raw query failed. Code: `53200`. Message: `ERROR: out of memory`"
+        ),
+        {
+          code: "P2010",
+          meta: { code: "53200", message: "ERROR: out of memory" },
+        }
+      );
+      assert.equal(
+        isRetryablePrismaError(oom, { operationIsRead: true }),
+        false
       );
     }
   );
@@ -204,6 +332,61 @@ test("withPrismaRetry", async (t) => {
       assert.equal(logs.length, 1);
       assert.match(logs[0], /P1017/);
       assert.match(logs[0], /retry 1\/2/);
+    }
+  );
+
+  await t.test(
+    "retries a 53200 lock-exhaustion error on a READ and logs the SQLSTATE",
+    async () => {
+      // SHELF-WEBAPP-227: the raw /assets query trips 53200 under load; a
+      // moment later the shared lock table has headroom again, so the retry
+      // succeeds and the user never sees the overload.
+      let calls = 0;
+      const delays: number[] = [];
+      const logs: string[] = [];
+
+      const result = await withPrismaRetry(
+        async () => {
+          calls += 1;
+          if (calls === 1) throw lockExhaustionError();
+          return "ok";
+        },
+        {
+          operationIsRead: true,
+          delay: async (ms) => {
+            delays.push(ms);
+          },
+          log: (message) => logs.push(message),
+        }
+      );
+
+      assert.equal(result, "ok");
+      assert.equal(calls, 2);
+      assert.deepEqual(delays, [500]);
+      assert.equal(logs.length, 1);
+      // The lock error rides on a P2010, so the log falls back to the SQLSTATE.
+      assert.match(logs[0], /53200/);
+    }
+  );
+
+  await t.test(
+    "does NOT retry a 53200 lock-exhaustion error on a WRITE",
+    async () => {
+      let calls = 0;
+
+      await assert.rejects(
+        () =>
+          withPrismaRetry(
+            async () => {
+              calls += 1;
+              throw lockExhaustionError();
+            },
+            { operationIsRead: false, log: () => {} }
+          ),
+        (error: unknown) => rejectedWithCode(error, "P2010")
+      );
+
+      assert.equal(calls, 1, "lock exhaustion on a write must fail fast");
     }
   );
 
@@ -363,4 +546,44 @@ test("withPrismaRetry", async (t) => {
     assert.equal(result, 42);
     assert.equal(calls, 1);
   });
+});
+
+test("createDatabaseClient wires the transient-retry extension onto the client", () => {
+  // The retry LOGIC is covered exhaustively above; this guards the WIRING — the
+  // exact regression that already happened once, when the monorepo migration
+  // silently dropped the retry `$extends` from this factory.
+  //
+  // A behavioral guard would have to intercept the applied extension chain, but
+  // Prisma's client is a Proxy (its `$extends` isn't reachable on the prototype)
+  // and injecting a fake base client perturbs Prisma's inferred client type
+  // enough to break downstream typechecks. So this asserts the wiring at the
+  // source level — the same cheap regression guard the repo uses elsewhere for
+  // seams that can't be mocked (see the raw-SQL `@map` column-name rule).
+  const source = readFileSync(
+    fileURLToPath(new URL("./client.ts", import.meta.url)),
+    "utf8"
+  );
+
+  const factoryStart = source.indexOf("export function createDatabaseClient");
+  assert.notEqual(factoryStart, -1, "createDatabaseClient factory not found");
+
+  // Bound the slice to the factory body — stop at the next top-level `export`
+  // (or EOF) so a `$extends` / `withPrismaRetry` reference elsewhere in the file
+  // can't satisfy these assertions after the factory wiring is removed. Collapse
+  // whitespace so the assertions survive prettier reformatting.
+  const afterFactory = source.indexOf("\nexport ", factoryStart + 1);
+  const factory = source
+    .slice(factoryStart, afterFactory === -1 ? undefined : afterFactory)
+    .replace(/\s+/g, " ");
+
+  assert.match(
+    factory,
+    /\$extends\(\{ query: \{ \$allModels: \{/,
+    "the retry query `$extends` appears to have been removed from createDatabaseClient"
+  );
+  assert.match(
+    factory,
+    /withPrismaRetry\(\(\) => query\(args\)/,
+    "createDatabaseClient no longer routes operations through withPrismaRetry"
+  );
 });

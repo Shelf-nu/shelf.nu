@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { formatDate, HARDCODED_DEFAULT_PREFS } from "./date-format";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
 
-const formatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "short",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
+// why: HARDCODED_DEFAULT_PREFS is the concrete fallback prefs the formatter
+// consumes; using it keeps these assertions independent of any user row.
+const prefs = HARDCODED_DEFAULT_PREFS;
 
 describe("sanitizeNoteContent", () => {
-  const sanitize = (content: string) => sanitizeNoteContent(content, formatter);
+  const sanitize = (content: string) => sanitizeNoteContent(content, prefs);
 
   it("strips markdoc link tags and decodes entities", () => {
     const content =
@@ -18,12 +17,21 @@ describe("sanitizeNoteContent", () => {
     expect(sanitize(content)).toBe('Booking "A" updated.');
   });
 
-  it("formats markdoc date tags respecting includeTime", () => {
-    const content =
-      'Due {% date value="2023-12-25T10:30:00.000Z" includeTime=false /%} and scheduled {% date value="2023-12-25T10:30:00.000Z" /%}.';
+  it("formats markdoc date tags via formatDate, respecting includeTime", () => {
+    const iso = "2023-12-25T10:30:00.000Z";
+    const content = `Due {% date value="${iso}" includeTime=false /%} and scheduled {% date value="${iso}" /%}.`;
+
+    const expectedDate = formatDate(iso, prefs);
+    const expectedDateTime = formatDate(iso, prefs, { includeTime: true });
 
     expect(sanitize(content)).toBe(
-      "Due 12/25/23 and scheduled 12/25/23, 10:30 AM."
+      `Due ${expectedDate} and scheduled ${expectedDateTime}.`
+    );
+  });
+
+  it("returns the raw value for an unparseable date", () => {
+    expect(sanitizeNoteContent('{% date value="not-a-date" /%}', prefs)).toBe(
+      "not-a-date"
     );
   });
 
@@ -56,31 +64,5 @@ describe("sanitizeNoteContent", () => {
 - two
 
 Bold text with link and code const x = 1.`);
-  });
-
-  it("handles real-world activity note content", () => {
-    const content =
-      '{% link to="/settings/team/users/94a8f5d8" text="Nikolayz Bonevz" /%} created a new reminder {% link to="/assets/asset-1/reminders?s=kekeroo" text="kekeroo" /%}.';
-
-    expect(sanitize(content)).toBe(
-      "Nikolayz Bonevz created a new reminder kekeroo."
-    );
-  });
-
-  it("falls back when formatter lacks resolvedOptions", () => {
-    const fallbackFormatter = {
-      format: (date: Date) => `formatted-${date.toISOString()}`,
-    } as unknown as Intl.DateTimeFormat;
-
-    const dateOnly = new Intl.DateTimeFormat("en-US", {
-      dateStyle: "short",
-    }).format(new Date("2024-01-15T12:00:00.000Z"));
-
-    expect(
-      sanitizeNoteContent(
-        '{% date value="2024-01-15T12:00:00.000Z" includeTime=false /%}',
-        fallbackFormatter
-      )
-    ).toBe(dateOnly);
   });
 });

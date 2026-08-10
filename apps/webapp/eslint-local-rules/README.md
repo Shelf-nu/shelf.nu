@@ -180,6 +180,40 @@ The rule does NOT flag:
 4. **Spread props**: `<Button {...props}>` (can't statically verify)
 5. **React Email buttons**: `Button` imported from `@react-email/components` (different component)
 
+### `no-test-files-in-routes`
+
+**Purpose**: Keep test files out of `app/routes/`.
+
+**Problem**: Vite's dev-server warmup (`server.warmup.clientFiles` in `vite.config.ts`) pulls **every** file under `app/routes/` into the **client** module graph. A co-located test is not a route — `ignoredRouteFiles` in `app/routes.ts` excludes it from the route tree — but warmup does not care, so as soon as it imports a `*.server` module React Router fails the transform:
+
+```
+Pre-transform error: Server-only module referenced by client
+  '~/modules/api/mobile-auth.server' imported by
+  'app/routes/api+/mobile+/qr.claim.test.ts'
+```
+
+Route tests exist to test loaders/actions, so they essentially always import a `*.server` module — every co-located route test breaks `pnpm webapp:dev`. Typecheck, lint and the unit suite all pass, so `validate` and CI never catch it. This has regressed more than once.
+
+**Solution**: Route tests live in `apps/webapp/test/routes-tests/`, mirroring the route path, and import the route via the `~/routes/...` alias.
+
+#### Examples
+
+❌ **Bad**:
+
+```ts
+// app/routes/api+/mobile+/qr.claim.test.ts
+import { action } from "./qr.claim";
+```
+
+✅ **Good**:
+
+```ts
+// test/routes-tests/api+/mobile+/qr.claim.test.ts
+import { action } from "~/routes/api+/mobile+/qr.claim";
+```
+
+The `*.test.server.ts` spelling is banned too — that infix only ever existed to dodge the warmup glob. The error message names the exact destination path to move the file to.
+
 ## Development
 
 To add new rules:

@@ -46,6 +46,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
       return "text";
     case "valuation":
     case "quantity":
+    case "minQuantity":
       return "number";
     case "availableToBook":
       return "boolean";
