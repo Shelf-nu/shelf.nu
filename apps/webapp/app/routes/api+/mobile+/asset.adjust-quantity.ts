@@ -112,7 +112,18 @@ export async function action({ request }: ActionFunctionArgs) {
     // why: safeParse + a 400 ShelfError mirrors the web route's parseData
     // behavior; raw `.parse` would surface a ZodError as a 500 through
     // makeShelfError's unknown-error branch (per custody.assign-quantity.ts).
-    const parsed = MobileAdjustQuantitySchema.safeParse(await request.json());
+    // The json() guard matters too: malformed JSON rejects with a
+    // SyntaxError, which the outer catch would otherwise report as a 500.
+    const body: unknown = await request.json().catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message: "Invalid request body",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    });
+    const parsed = MobileAdjustQuantitySchema.safeParse(body);
     if (!parsed.success) {
       throw new ShelfError({
         cause: parsed.error,

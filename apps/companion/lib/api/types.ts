@@ -472,12 +472,14 @@ export type QuantityCustodyResponse = {
 
 /**
  * Response of the mobile adjust-quantity endpoint — same envelope as the
- * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset
- * (may be absent when the refresh failed; the mutation still succeeded).
+ * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset.
+ * The route always serializes the key and sends `null` when the post-commit
+ * refresh failed (the mutation itself still succeeded), so the type carries
+ * `| null` to match the wire truth.
  */
 export type AdjustQuantityResponse = {
   success: boolean;
-  asset?: AssetDetail;
+  asset?: AssetDetail | null;
 };
 
 export type UpdateLocationResponse = {

@@ -817,7 +817,12 @@ export default function AssetDetailScreen() {
             <>
               <AdjustQuantitySheet
                 visible={showAdjustSheet}
-                availableQuantity={breakdown?.available ?? asset.quantity ?? 0}
+                // Physical removal cap (custodyAvailable chain), NOT
+                // `breakdown.available`: available subtracts the SUM of all
+                // future reservations, which over-restricts Remove when
+                // non-overlapping bookings exist. The server enforces the
+                // real floor (in-custody + peak concurrent reservations).
+                availableQuantity={assignMax}
                 unitOfMeasure={asset.unitOfMeasure}
                 onSubmit={(args) => void performAdjustQuantity(args)}
                 onClose={() => setShowAdjustSheet(false)}
