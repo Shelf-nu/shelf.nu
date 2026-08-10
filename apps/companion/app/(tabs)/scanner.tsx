@@ -18,7 +18,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
@@ -776,7 +776,7 @@ function ScannerContent() {
                   icon: "open-outline",
                   onPress: () => {
                     void openShelfWebUrl(
-                      `https://app.shelf.nu/qr/${unclaimedQrId}`
+                      `${getApiBaseUrl()}/qr/${unclaimedQrId}`
                     );
                     dismissResult();
                   },
@@ -1143,7 +1143,7 @@ function ScannerContent() {
               label: "Open in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1185,7 +1185,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };

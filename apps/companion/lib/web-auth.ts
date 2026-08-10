@@ -18,7 +18,7 @@ import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { getApiBaseUrl } from "./api";
-import { resolveServerForEmail } from "./server";
+import { getServerVersion, resolveServerForEmail } from "./server";
 import { getSupabase } from "./supabase";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
@@ -112,6 +112,10 @@ export async function signInViaWeb(email: string): Promise<SsoSignInResult> {
   // would be correct today but silently wrong if anything switched servers
   // mid-flow. The authorization code is only valid on the server that minted it.
   const baseUrl = getApiBaseUrl();
+  // Snapshot alongside it: the exchange below can take up to 15s, during which
+  // another entry point could switch servers. Installing a session minted by
+  // server A into server B's client would burn the single-use code for nothing.
+  const serverVersionAtStart = getServerVersion();
 
   try {
     // PKCE (S256): generate a verifier now and send only its challenge to the
@@ -170,6 +174,10 @@ export async function signInViaWeb(email: string): Promise<SsoSignInResult> {
       return {
         error: payload?.error?.message ?? "Sign-in failed. Please try again.",
       };
+    }
+
+    if (getServerVersion() !== serverVersionAtStart) {
+      return { error: "The server changed during sign-in. Please try again." };
     }
 
     const { error } = await getSupabase().auth.setSession({

@@ -88,6 +88,11 @@ export default function LoginScreen() {
     Keyboard.dismiss();
     setError(null);
 
+    // why: the disabled prop covers the button, but not the password field's
+    // onSubmitEditing nor the Face ID auto-submit effect. A password sign-in
+    // starting mid-SSO would switch servers under the in-flight exchange.
+    if (isSsoSubmitting) return;
+
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
       setError("Please enter both email and password.");
@@ -154,7 +159,16 @@ export default function LoginScreen() {
     // one it is. With an empty field this falls through to the active server,
     // which for a first-run enterprise user means Shelf Cloud — acceptable,
     // since SSO organizations disable password auth and never reach this link.
-    if (email.trim()) await resolveServerForEmail(email.trim());
+    if (isSubmitting || isSsoSubmitting) return;
+    if (email.trim()) {
+      const discovery = await resolveServerForEmail(email.trim());
+      // Surfacing this matters: silently falling through would open Shelf
+      // Cloud's reset page for a user whose org server we could not reach.
+      if (!discovery.ok) {
+        setError(discovery.message);
+        return;
+      }
+    }
     WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`).catch(
       () => {
         setError("Couldn't open the password reset page. Please try again.");
@@ -225,7 +239,7 @@ export default function LoginScreen() {
               returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
               blurOnSubmit={false}
-              editable={!isSubmitting}
+              editable={!isSubmitting && !isSsoSubmitting}
               accessibilityLabel="Email"
             />
 
@@ -253,7 +267,7 @@ export default function LoginScreen() {
               textContentType="password"
               returnKeyType="go"
               onSubmitEditing={handleLogin}
-              editable={!isSubmitting}
+              editable={!isSubmitting && !isSsoSubmitting}
               accessibilityLabel="Password"
             />
 
@@ -280,9 +294,12 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               testID="sign-in-button"
-              style={[styles.button, isSubmitting && styles.buttonDisabled]}
+              style={[
+                styles.button,
+                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+              ]}
               onPress={handleLogin}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isSsoSubmitting}
               activeOpacity={0.8}
               accessibilityLabel={
                 isSubmitting ? "Signing in" : "Sign in to your account"

@@ -415,10 +415,11 @@ function AuditScannerContent() {
           classifyScannedCode(data, getActiveServer().baseUrl).kind ===
           "foreign"
         ) {
-          Alert.alert(
-            "Different Shelf Server",
-            "This code belongs to a different Shelf server. Sign in to that server to use it."
-          );
+          // finalizeScan() BEFORE returning: this handler has no `finally`, and
+          // a bare return would leave isProcessingRef.current true forever —
+          // the guard above would then reject every later scan and the camera
+          // would stop delivering codes entirely.
+          finalizeScan();
           return;
         }
 

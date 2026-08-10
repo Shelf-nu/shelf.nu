@@ -175,7 +175,8 @@ export function getSupabase(): SupabaseClient {
 }
 
 /**
- * Replaces the live client with one pointed at `config`'s Supabase project.
+ * Replaces the live client with one pointed at `config`'s Supabase project, and
+ * stops the outgoing client's token auto-refresh.
  *
  * Callers are responsible for signing out of the previous client BEFORE calling
  * this, and for rearming anything subscribed to the old client's auth events —
@@ -185,6 +186,19 @@ export function getSupabase(): SupabaseClient {
  * @returns The newly created client.
  */
 export function rebuildSupabase(config: ServerConfig): SupabaseClient {
+  const previous = client;
+  // Reassign first, so a throw below can never leave `client` pointing at the
+  // server we just switched away from.
   client = createForServer(config.supabaseUrl, config.supabaseAnonKey);
+
+  // why: with `autoRefreshToken: true` and no `document` (React Native),
+  // GoTrueClient unconditionally starts a setInterval ticker that ONLY
+  // stopAutoRefresh() clears. Dropping the reference alone strands it for the
+  // process lifetime, still refreshing the previous server's session every 30s.
+  // Fire-and-forget: clearInterval happens synchronously inside, and a
+  // rejection must never block the switch. (`dispose()` does not exist in the
+  // pinned auth-js version.)
+  void previous?.auth.stopAutoRefresh().catch(() => {});
+
   return client;
 }

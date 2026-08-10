@@ -29,6 +29,7 @@ import {
   playScanSound,
 } from "@/lib/scan-sound";
 import { getActiveServer } from "@/lib/server";
+import { getApiBaseUrl } from "@/lib/api";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -382,7 +383,7 @@ export default function SettingsScreen() {
                     style: "destructive",
                     onPress: () =>
                       WebBrowser.openBrowserAsync(
-                        "https://app.shelf.nu/settings/general"
+                        `${getApiBaseUrl()}/settings/general`
                       ),
                   },
                 ]
@@ -408,6 +409,8 @@ export default function SettingsScreen() {
         For advanced features, visit{" "}
         <Text
           style={styles.companionFooterLink}
+          // why: the marketing site, not the user's instance — this one stays
+          // Shelf Cloud even for self-hosted users.
           onPress={() => WebBrowser.openBrowserAsync("https://app.shelf.nu")}
         >
           app.shelf.nu
