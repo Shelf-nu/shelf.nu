@@ -25,6 +25,7 @@ import {
   Prisma,
   TagUseFor,
 } from "@prisma/client";
+import { withPrismaRetry } from "@shelf/database";
 import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
@@ -1240,7 +1241,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       hasSearch: Boolean(search),
     });
 
-    const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
+    // Retry the raw read on transient DB failures. The auto-applied client
+    // retry extension covers model operations but NOT raw escapes like
+    // `$queryRaw`, so wrap it explicitly. This heavy query trips Postgres
+    // shared-lock-table exhaustion (SQLSTATE 53200) under the per-request fan-out
+    // on large workspaces (SHELF-WEBAPP-227); the pressure is momentary, so a
+    // short backed-off retry usually succeeds. `operationIsRead: true` — this is
+    // a pure read, safe to re-run. On exhausted retries it rethrows to the catch
+    // below, which surfaces as the friendly retryable 503 (see makeShelfError).
+    const result = await withPrismaRetry(
+      () => db.$queryRaw<AdvancedIndexQueryResult>(query),
+      { operationIsRead: true }
+    );
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
