@@ -619,7 +619,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     // @ts-expect-error mocked
     db.asset.count.mockResolvedValue(5);
     // AssetModel.name is free-form user input and lands in the note as
@@ -644,9 +644,13 @@ describe("upsertBookingModelRequest", () => {
       }
     ).mock.calls[0][0].content;
 
-    // Parse it exactly as the feed does: the only tag may be the actor link
-    // we emit ourselves...
+    // Parse it exactly as the feed does. Pin the count first: `every`
+    // is vacuously true on an empty array, so without this a change that
+    // stopped emitting our own links would leave both guards below
+    // asserting nothing. One actor link, and only that.
     const tags = markdocTagsIn(content);
+    expect(tags).toHaveLength(1);
+    // The only tag may be the actor link we emit ourselves...
     expect(tags.every((node) => node.tag === "link")).toBe(true);
     // ...and none of them may point anywhere the attacker chose.
     expect(
@@ -831,7 +835,7 @@ describe("removeBookingModelRequest", () => {
     });
 
     it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
-      expect.assertions(2);
+      expect.assertions(3);
       // @ts-expect-error mocked
       db.booking.findUnique.mockResolvedValue({
         id: BOOKING_ID,
@@ -862,7 +866,12 @@ describe("removeBookingModelRequest", () => {
         }
       ).mock.calls[0][0].content;
 
+      // Count first — `every` passes vacuously on an empty array, so this
+      // is what stops both guards below silently covering nothing if the
+      // note ever stopped emitting our own links. One actor link, and only
+      // that.
       const tags = markdocTagsIn(content);
+      expect(tags).toHaveLength(1);
       expect(tags.every((node) => node.tag === "link")).toBe(true);
       expect(
         tags.every(
@@ -1206,7 +1215,7 @@ describe("materializeModelRequestForAsset", () => {
   });
 
   it("cannot be used to inject a live Markdoc tag via the asset-model name or asset title", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     // Both values are free-form user input spliced into the scan note.
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
@@ -1240,7 +1249,12 @@ describe("materializeModelRequestForAsset", () => {
       }
     ).mock.calls[0][0].data.content;
 
+    // Count first — `every` passes vacuously on an empty array, so this is
+    // what stops both guards below silently covering nothing if the note
+    // ever stopped emitting our own links. This note carries two: the
+    // actor link and the scanned asset's link.
     const tags = markdocTagsIn(content);
+    expect(tags).toHaveLength(2);
     // Only the actor and asset links we emit ourselves...
     expect(tags.every((node) => node.tag === "link")).toBe(true);
     // ...and none of them points anywhere the attacker chose.

@@ -242,6 +242,11 @@ vitest.mock("~/database/db.server", () => ({
     // been materialised into concrete BookingAsset rows yet.
     bookingModelRequest: {
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: removeAssets reads each affected request to decrement
+      // `fulfilledQuantity` and clear `fulfilledAt`, then emits the
+      // reversal event off the before-state it read here.
+      findUnique: vitest.fn().mockResolvedValue(null),
+      update: vitest.fn().mockResolvedValue({}),
     },
     consumptionLog: {
       create: vitest.fn().mockResolvedValue({}),
@@ -6313,6 +6318,137 @@ describe("removeAssets", () => {
         bookingId: "booking-1",
         assetKitId: { in: ["assetkit-1"] },
       },
+    });
+  });
+
+  // why: removing an assigned asset is the one path that reopens a fulfilled
+  // model reservation without any operator edit. `fulfilledAt IS NULL` is the
+  // outstanding-work predicate, so a consumer replaying the event stream
+  // without this reversal reconstructs the reservation as still closed.
+  describe("model-request fulfilledAt reversal", () => {
+    // why: `clearAllMocks` resets call history but NOT implementations, so the
+    // per-test overrides below would otherwise leak into every later describe
+    // in this file. `db.asset.findMany` in particular carries an echo-the-ids
+    // `mockImplementation` that the cross-org guard depends on; clobbering it
+    // persistently broke the partial-checkin qty tests. Restore both.
+    afterEach(() => {
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) => {
+          const ids = args?.where?.id?.in;
+          return Promise.resolve(
+            Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+          );
+        }
+      );
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      (
+        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(null);
+    });
+
+    /** Booking + asset fixture whose removed asset carries an AssetModel. */
+    function arrangeModelRemoval(request: {
+      quantity: number;
+      fulfilledQuantity: number;
+      fulfilledAt: Date | null;
+    }) {
+      const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        {
+          id: "asset-1",
+          assetModelId: "model-1",
+          title: "Laptop #1",
+          type: AssetType.INDIVIDUAL,
+          unitOfMeasure: null,
+        },
+      ]);
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: "asset-1", quantity: 1 }]);
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      (
+        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({
+        ...request,
+        assetModel: { name: "Dell Latitude 5550" },
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBooking,
+        name: "Test Booking",
+        status: BookingStatus.DRAFT,
+      });
+      return mockBooking;
+    }
+
+    /** Every BOOKING_MODEL_REQUEST_CHANGED payload recorded this test. */
+    function modelRequestChangedEvents() {
+      return (
+        activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .flatMap((call) => call[0] as Array<Record<string, unknown>>)
+        .filter((event) => event?.action === "BOOKING_MODEL_REQUEST_CHANGED");
+    }
+
+    it("records the fulfilledAt reversal when a removal reopens a fulfilled request", async () => {
+      expect.assertions(1);
+      const fulfilledAt = new Date("2026-05-02T10:00:00Z");
+      // 3 of 3 units assigned, so the request is closed. Removing one
+      // reopens it.
+      const mockBooking = arrangeModelRemoval({
+        quantity: 3,
+        fulfilledQuantity: 3,
+        fulfilledAt,
+      });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(modelRequestChangedEvents()).toEqual([
+        expect.objectContaining({
+          action: "BOOKING_MODEL_REQUEST_CHANGED",
+          entityType: "BOOKING",
+          entityId: "booking-1",
+          bookingId: "booking-1",
+          field: "fulfilledAt",
+          fromValue: fulfilledAt.toISOString(),
+          toValue: null,
+          meta: {
+            assetModelId: "model-1",
+            assetModelName: "Dell Latitude 5550",
+          },
+        }),
+      ]);
+    });
+
+    it("records nothing when the request was never fulfilled", async () => {
+      expect.assertions(1);
+      // 2 of 3 assigned: already outstanding, so `fulfilledAt` was already
+      // null and the removal changes nothing about it. Gating on the
+      // computed next value alone would emit a spurious null → null event.
+      const mockBooking = arrangeModelRemoval({
+        quantity: 3,
+        fulfilledQuantity: 2,
+        fulfilledAt: null,
+      });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(modelRequestChangedEvents()).toEqual([]);
     });
   });
 
