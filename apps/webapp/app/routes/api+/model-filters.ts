@@ -8,6 +8,7 @@ import {
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
 import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -17,6 +18,7 @@ import {
 } from "~/utils/model-filters-registry.server";
 import {
   resolveCanSeeAllBookings,
+  resolveCanSeeAllCustody,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
 
@@ -76,6 +78,20 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     deletedAt: z.string().nullable().optional(),
     userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
     usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
+    /**
+     * Which question this custodian picker is asking — see
+     * `resolveCustodianPickerScope`. Selects a server-side rule; it supplies no
+     * ids and cannot widen one, because both rules are resolved from the
+     * session.
+     *
+     * Optional rather than `.default()`: a zod default makes the field
+     * REQUIRED in the inferred output type, which is what every call site's
+     * `model` prop is typed against. The fallback is applied in the loader
+     * instead, where it is also easier to see that it fails closed.
+     */
+    custodyPurpose: z
+      .enum(["custody-filter", "custody-assignment", "booking-custodian"])
+      .optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
@@ -197,6 +213,35 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       } else if (modelFilters.usersOnly) {
         // Filter to show only team members with users (exclude NRMs)
         where.user = { isNot: null };
+      }
+
+      /**
+       * Custody scoping, resolved from the session — never from the request.
+       * Every seeding loader restricts this picker; without the same rule here
+       * the list grew from "just me" to the entire roster the moment the user
+       * typed.
+       */
+      const role = resolveEffectiveRole({ userOrganizations, organizationId });
+      const custodyScope = resolveCustodianPickerScope({
+        // Fail closed: an unmigrated call site gets the NARROWER assignment
+        // rule, so it shows too few names rather than too many.
+        purpose: modelFilters.custodyPurpose ?? "custody-assignment",
+        role,
+        canSeeAllCustody: resolveCanSeeAllCustody({
+          role,
+          currentOrganization,
+        }),
+        userId,
+      });
+
+      // BASE may never assign custody, so there is nothing to offer and no
+      // reason to hit the database.
+      if (custodyScope.mode === "none") {
+        return data(payload({ filters: [] }));
+      }
+
+      if (custodyScope.mode === "self") {
+        where.userId = custodyScope.userId;
       }
     } else {
       where.OR.push({

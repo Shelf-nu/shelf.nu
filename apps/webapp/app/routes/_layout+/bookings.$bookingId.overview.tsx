@@ -148,6 +148,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userOrganizations,
       canSeeAllBookings,
+      canSeeAllCustody,
     } = await requirePermission({
       userId: authSession?.userId,
       request,
@@ -406,7 +407,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         selectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        filterByUserId: isSelfServiceOrBase,
+        // A sidebar FILTER, so the custody read-visibility rule governs — the
+        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
+        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
+        // the search endpoint.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
 

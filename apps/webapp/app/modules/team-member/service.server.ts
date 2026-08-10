@@ -243,11 +243,87 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   }
 };
 
+/** What a custodian picker is being used for. */
+export type CustodianPickerPurpose =
+  | "custody-filter"
+  | "custody-assignment"
+  | "booking-custodian";
+
+/** Resolved scope for a custodian picker. */
+export type CustodianPickerScope =
+  | { mode: "all" }
+  | { mode: "self"; userId: string }
+  | { mode: "none" };
+
+/**
+ * The scope one custodian picker should apply.
+ *
+ * Custodian pickers serve two different questions and a single rule cannot
+ * answer both:
+ *
+ * - `custody-filter` — "whose custody may I look at?" A read-visibility
+ *   question, so the workspace overrides (`selfServiceCanSeeCustody` /
+ *   `baseUserCanSeeCustody`, already resolved into `canSeeAllCustody`) govern.
+ * - `custody-assignment` — "who may I hand this ASSET to?" A business rule the
+ *   overrides never widen: SELF_SERVICE assigns only to itself and BASE may
+ *   not assign at all. The setting is about SEEING custody, not granting it.
+ * - `booking-custodian` — "who may this BOOKING be assigned to?" Distinct from
+ *   asset custody: BASE holds `booking:create`, so it must be able to put
+ *   itself on a booking even though it may never take custody of an asset.
+ *   Restricted roles get themselves; ADMIN / OWNER get everyone.
+ *
+ * Every custodian picker — seed and search alike — resolves through here, so
+ * the seeded list and the typed list cannot disagree. They previously did:
+ * the search applied no scope at all, so a restricted user saw only themselves
+ * until they typed, at which point the whole roster appeared.
+ *
+ * @param args.purpose - Which question this picker is asking.
+ * @param args.role - Effective role from `resolveEffectiveRole`.
+ * @param args.canSeeAllCustody - Resolved via `resolveCanSeeAllCustody`.
+ * @param args.userId - The caller, for the `self` mode.
+ * @returns `all` (unrestricted), `self` (own team-member rows), or `none`.
+ */
+export function resolveCustodianPickerScope({
+  purpose,
+  role,
+  canSeeAllCustody,
+  userId,
+}: {
+  purpose: CustodianPickerPurpose;
+  role: OrganizationRoles;
+  canSeeAllCustody: boolean;
+  userId: string;
+}): CustodianPickerScope {
+  if (purpose === "custody-assignment") {
+    // BASE may never take custody of an asset, whatever the override says.
+    if (role === OrganizationRoles.BASE) {
+      return { mode: "none" };
+    }
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      return { mode: "self", userId };
+    }
+    return { mode: "all" };
+  }
+
+  if (purpose === "booking-custodian") {
+    // Restricted roles book for themselves. Unlike asset custody this includes
+    // BASE, which holds `booking:create` and would otherwise be unable to name
+    // a custodian at all. Mirrors `getTeamMemberForForm`'s seed.
+    return role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE
+      ? { mode: "self", userId }
+      : { mode: "all" };
+  }
+
+  return canSeeAllCustody ? { mode: "all" } : { mode: "self", userId };
+}
+
 export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
   getAll,
   filterByUserId,
+  returnNone,
   userId,
   usersOnly,
 }: {
@@ -259,6 +335,14 @@ export async function getTeamMemberForCustodianFilter({
    * This is used for self service users to only show their own team members
    */
   filterByUserId?: boolean;
+  /**
+   * Return no team members at all.
+   *
+   * Used for the BASE assignment case, which `filterByUserId` cannot express:
+   * BASE may never assign custody, so an empty list is the correct answer
+   * rather than "their own row". Resolved via `resolveCustodianPickerScope`.
+   */
+  returnNone?: boolean;
   userId?: string;
   /**
    * If set to true, only return team members with users (exclude NRMs)
@@ -266,6 +350,10 @@ export async function getTeamMemberForCustodianFilter({
   usersOnly?: boolean;
 }) {
   try {
+    if (returnNone) {
+      return { teamMembers: [], totalTeamMembers: 0 };
+    }
+
     const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
       await Promise.all([
         db.teamMember.findMany({
@@ -389,7 +477,12 @@ export async function getTeamMemberForForm({
   usersOnly?: boolean;
 }) {
   try {
-    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
+    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member.
+    //
+    // This is the `booking-custodian` rule in `resolveCustodianPickerScope`,
+    // which the search endpoint resolves for the same picker. The two must stay
+    // in step: if this branch changes, change that purpose too, or the list
+    // will differ before and after the user types.
     if (isSelfServiceOrBase) {
       const teamMember = await db.teamMember.findFirst({
         where: {

@@ -529,6 +529,104 @@ describe("GET /api/model-filters", () => {
     });
   });
 
+  describe("teamMember custody scoping", () => {
+    beforeEach(() => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+    });
+
+    /** Points the session at a role plus a custody-override setting. */
+    function setCustodyRole(role: OrganizationRoles, override = false) {
+      orgMocks.getSelectedOrganization.mockResolvedValue({
+        organizationId: ORG_ID,
+        userOrganizations: [{ organization: { id: ORG_ID }, roles: [role] }],
+        currentOrganization: {
+          selfServiceCanSeeBookings: false,
+          baseUserCanSeeBookings: false,
+          selfServiceCanSeeCustody: override,
+          baseUserCanSeeCustody: override,
+        },
+      });
+    }
+
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "filter: restricts %s to their own rows when the override is off",
+      async (role) => {
+        setCustodyRole(role, false);
+
+        await callLoader(
+          "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-filter"
+        );
+
+        expect(lastWhere().userId).toBe("user-1");
+      }
+    );
+
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "filter: unrestricted for %s when the override is ON",
+      async (role) => {
+        setCustodyRole(role, true);
+
+        await callLoader(
+          "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-filter"
+        );
+
+        expect(lastWhere().userId).toBeUndefined();
+      }
+    );
+
+    it.each([true, false])(
+      "assignment: SELF_SERVICE stays self-only regardless of override (%s)",
+      async (override) => {
+        setCustodyRole(OrganizationRoles.SELF_SERVICE, override);
+
+        await callLoader(
+          "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-assignment"
+        );
+
+        expect(lastWhere().userId).toBe("user-1");
+      }
+    );
+
+    it.each([true, false])(
+      "assignment: BASE gets nothing regardless of override (%s)",
+      async (override) => {
+        setCustodyRole(OrganizationRoles.BASE, override);
+
+        const filters = await readFilters(
+          await callLoader(
+            "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-assignment"
+          )
+        );
+
+        expect(filters).toEqual([]);
+        expect(dbMocks.dynamicFindMany).not.toHaveBeenCalled();
+      }
+    );
+
+    it("defaults to the narrower assignment rule when purpose is absent", async () => {
+      setCustodyRole(OrganizationRoles.BASE, true);
+
+      const filters = await readFilters(
+        await callLoader("name=teamMember&queryKey=name&queryValue=x")
+      );
+
+      expect(filters).toEqual([]);
+    });
+
+    it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+      "never restricts %s",
+      async (role) => {
+        setCustodyRole(role, false);
+
+        await callLoader(
+          "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-assignment"
+        );
+
+        expect(lastWhere().userId).toBeUndefined();
+      }
+    );
+  });
+
   describe("booking write scope", () => {
     beforeEach(() => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
