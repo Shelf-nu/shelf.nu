@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import {
   buildFullAssetSearchOr,
   buildNarrowAssetSearchOr,
-  looksLikeAssetId,
+  isIdShapedSearch,
   splitAssetSearchTerms,
 } from "~/modules/asset/search.server";
 
@@ -49,10 +49,18 @@ export function buildMobileAssetSearchWhere(
   const searchTerms = splitAssetSearchTerms(search);
 
   if (searchTerms.length === 0) {
+    // Typed input that yields zero terms (whitespace / bare commas) must
+    // match NOTHING, not everything: in a debounced type-ahead a single
+    // typed space would otherwise flash the full unfiltered list.
+    // `id: { in: [] }` is the canonical always-false Prisma clause. Only a
+    // genuinely empty search string means "no filter".
+    if (search.length > 0) {
+      return { primary: { id: { in: [] } }, fallback: null };
+    }
     return { primary: {}, fallback: null };
   }
 
-  if (searchTerms.every(looksLikeAssetId)) {
+  if (isIdShapedSearch(searchTerms)) {
     return {
       primary: { OR: buildNarrowAssetSearchOr(searchTerms) },
       fallback: { OR: buildFullAssetSearchOr(searchTerms) },

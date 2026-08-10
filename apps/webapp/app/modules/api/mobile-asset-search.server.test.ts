@@ -19,15 +19,22 @@ import { buildMobileAssetSearchWhere } from "./mobile-asset-search.server";
 // @vitest-environment node
 
 describe("buildMobileAssetSearchWhere", () => {
-  it("returns an empty primary and no fallback when there is nothing to search", () => {
+  it("returns an empty primary and no fallback for a truly empty search", () => {
     expect(buildMobileAssetSearchWhere("")).toEqual({
       primary: {},
       fallback: null,
     });
-    expect(buildMobileAssetSearchWhere("  , ")).toEqual({
-      primary: {},
-      fallback: null,
-    });
+  });
+
+  it("matches NOTHING for non-blank input that yields zero terms", () => {
+    // A typed space or bare comma in a debounced type-ahead must not
+    // flash the full unfiltered list. `id: { in: [] }` is always false.
+    for (const input of ["  , ", "   ", ","]) {
+      expect(buildMobileAssetSearchWhere(input)).toEqual({
+        primary: { id: { in: [] } },
+        fallback: null,
+      });
+    }
   });
 
   it("uses the web full clause verbatim for word searches, with no fallback", () => {
@@ -35,6 +42,12 @@ describe("buildMobileAssetSearchWhere", () => {
 
     expect(primary).toEqual({ OR: buildFullAssetSearchOr(["tripod"]) });
     expect(fallback).toBeNull();
+
+    // Structural pins, independent of the builder (the equality above is
+    // wiring-only — it would still pass if the shared clause lost a field).
+    const groups = primary.OR as Array<{ OR: unknown[] }>;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.OR).toHaveLength(10);
   });
 
   it("matches description, tags, category, location, custodians, codes and custom fields", () => {
@@ -60,6 +73,12 @@ describe("buildMobileAssetSearchWhere", () => {
 
     expect(primary).toEqual({ OR: buildNarrowAssetSearchOr(["sam-0001"]) });
     expect(fallback).toEqual({ OR: buildFullAssetSearchOr(["sam-0001"]) });
+
+    // Structural pins: narrow = flat 5-column OR with no heavy branches;
+    // fallback = the 10-branch full group.
+    expect(primary.OR).toHaveLength(5);
+    expect(JSON.stringify(primary)).not.toContain("customFields");
+    expect((fallback!.OR as Array<{ OR: unknown[] }>)[0]!.OR).toHaveLength(10);
   });
 
   it("goes straight to the full clause when any term is not ID-shaped", () => {

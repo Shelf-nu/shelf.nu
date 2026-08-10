@@ -157,9 +157,10 @@ import {
   parseSortingOptions,
 } from "./query.server";
 import {
+  buildAssetStatusWhere,
   buildFullAssetSearchOr,
   buildNarrowAssetSearchOr,
-  looksLikeAssetId,
+  isIdShapedSearch,
   splitAssetSearchTerms,
 } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
@@ -663,7 +664,7 @@ export async function getAssets(params: {
         // clause only when it returns zero rows (fallback re-query below).
         // Column choice + rationale live on buildNarrowAssetSearchOr in
         // modules/asset/search.server.ts.
-        if (searchTerms.every(looksLikeAssetId)) {
+        if (isIdShapedSearch(searchTerms)) {
           shouldFallbackToFullSearch = true;
           where.OR = buildNarrowAssetSearchOr(searchTerms);
           // Remember how many entries belong to the search so the fallback can
@@ -686,18 +687,15 @@ export async function getAssets(params: {
       // truthful for qty-tracked — the row enters those states whenever ANY
       // unit does).
       if (status === AssetStatus.AVAILABLE) {
+        // QT-aware fragment shared with getAssetsWhereInput and the mobile
+        // assets endpoint — see buildAssetStatusWhere for the rationale.
         where.AND = [
           ...(Array.isArray(where.AND)
             ? where.AND
             : where.AND
             ? [where.AND]
             : []),
-          {
-            OR: [
-              { type: "INDIVIDUAL", status: AssetStatus.AVAILABLE },
-              { type: "QUANTITY_TRACKED" },
-            ],
-          },
+          buildAssetStatusWhere(status),
         ];
       } else {
         where.status = status;

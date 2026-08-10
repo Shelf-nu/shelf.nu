@@ -30,6 +30,11 @@ describe("splitAssetSearchTerms", () => {
     expect(splitAssetSearchTerms("   ")).toEqual([]);
     expect(splitAssetSearchTerms(" , , ")).toEqual([]);
   });
+
+  it("caps the number of honored terms as a query-cost guard", () => {
+    const fifteen = Array.from({ length: 15 }, (_, i) => `term${i}`).join(",");
+    expect(splitAssetSearchTerms(fifteen)).toHaveLength(10);
+  });
 });
 
 describe("looksLikeAssetId", () => {
@@ -61,27 +66,64 @@ describe("buildFullAssetSearchOr", () => {
     // tags, custodian names, QR id, barcode value, custom fields.
     expect(branches).toHaveLength(10);
 
-    const serialized = JSON.stringify(branches);
-    for (const fieldPath of [
-      '"title"',
-      '"sequentialId"',
-      '"description"',
-      '"category"',
-      '"assetLocations"',
-      '"tags"',
-      '"custody"',
-      '"firstName"',
-      '"lastName"',
-      '"qrCodes"',
-      '"barcodes"',
-      '"customFields"',
-    ]) {
-      expect(serialized).toContain(fieldPath);
+    // Walk the clause and collect EVERY substring filter — asserting the
+    // exact count and per-filter mode means losing case-insensitivity on
+    // any single branch fails, unlike a >= floor.
+    const containsFilters: Array<Record<string, unknown>> = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        node.forEach(walk);
+        return;
+      }
+      if (node && typeof node === "object") {
+        const record = node as Record<string, unknown>;
+        if ("contains" in record || "string_contains" in record) {
+          containsFilters.push(record);
+        }
+        Object.values(record).forEach(walk);
+      }
+    };
+    walk(branches);
+
+    // title, sequentialId, description, category.name, location.name,
+    // tag.name, custodian (name + firstName + lastName), qr id, barcode
+    // value, 6 custom-field JSON paths = 17 substring filters.
+    expect(containsFilters).toHaveLength(17);
+    for (const filter of containsFilters) {
+      expect(filter.mode).toBe("insensitive");
+      expect(filter.contains ?? filter.string_contains).toBe("tripod");
     }
 
-    // Every contains-filter is case-insensitive.
-    const modes = serialized.match(/"mode":"insensitive"/g) ?? [];
-    expect(modes.length).toBeGreaterThanOrEqual(10);
+    // Pin the matched COLUMNS structurally, not via substring presence.
+    /* eslint-disable @typescript-eslint/no-explicit-any -- why: intentional
+       deep-path probing of a where-clause literal; per-node types add noise
+       without safety here. */
+    const [
+      title,
+      sequentialId,
+      description,
+      category,
+      location,
+      tags,
+      custody,
+      qrCodes,
+      barcodes,
+      customFields,
+    ] = branches as Array<any>;
+    expect(title.title.contains).toBe("tripod");
+    expect(sequentialId.sequentialId.contains).toBe("tripod");
+    expect(description.description.contains).toBe("tripod");
+    expect(category.category.name.contains).toBe("tripod");
+    expect(location.assetLocations.some.location.name.contains).toBe("tripod");
+    expect(tags.tags.some.name.contains).toBe("tripod");
+    const custodianOr = custody.custody.some.custodian.OR;
+    expect(custodianOr[0].name.contains).toBe("tripod");
+    expect(custodianOr[1].user.OR[0].firstName.contains).toBe("tripod");
+    expect(custodianOr[1].user.OR[1].lastName.contains).toBe("tripod");
+    expect(qrCodes.qrCodes.some.id.contains).toBe("tripod");
+    expect(barcodes.barcodes.some.value.contains).toBe("tripod");
+    expect(customFields.customFields.some.OR).toHaveLength(6);
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   });
 
   it("searches every custom-field value shape", () => {

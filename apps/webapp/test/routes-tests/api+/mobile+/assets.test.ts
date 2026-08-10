@@ -194,3 +194,136 @@ describe("GET /api/mobile/assets", () => {
     });
   });
 });
+
+describe("GET /api/mobile/assets — status filter", () => {
+  it("returns 400 for an unknown status instead of silently unfiltering", async () => {
+    // Regression: an unrecognized status used to reach Prisma and 500;
+    // a later guard silently dropped the filter, which returned the FULL
+    // list under what the client believes is a filtered request. The
+    // contract is a loud 400.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=toString"
+      ),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(
+      (response.data as { error: { message: string } }).error.message
+    ).toContain("Invalid status filter");
+    expect(findManyMock).not.toHaveBeenCalled();
+  });
+
+  it("makes AVAILABLE QT-aware via the shared fragment", async () => {
+    // A QUANTITY_TRACKED row's status flips as soon as ANY unit is
+    // allocated even while free stock remains — raw equality would hide it
+    // from the Available pill. Mirrors getAssets.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=AVAILABLE"
+      ),
+    });
+
+    await loader(args);
+
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
+    expect(where).not.toHaveProperty("status");
+  });
+
+  it("keeps raw equality for non-AVAILABLE statuses", async () => {
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=IN_CUSTODY"
+      ),
+    });
+
+    await loader(args);
+
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ status: "IN_CUSTODY" });
+    expect(where).not.toHaveProperty("AND");
+  });
+});
+
+describe("GET /api/mobile/assets — search", () => {
+  it("re-queries with the full clause when an ID-shaped search matches nothing", async () => {
+    // The only two-query sequence in this loader. A regression here is
+    // silent (users just get zero results — the exact complaint that
+    // opened this ticket), so pin the mechanism: narrow first, full on
+    // zero rows, mirroring getAssets' fallback.
+    countMock.mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=SAM-0001"
+      ),
+    });
+
+    await loader(args);
+
+    expect(findManyMock).toHaveBeenCalledTimes(2);
+    const first = findManyMock.mock.calls[0]![0]!.where!;
+    const second = findManyMock.mock.calls[1]![0]!.where!;
+    // Narrow clause: flat OR over the 5 indexed columns.
+    expect(first.OR).toHaveLength(5);
+    expect(JSON.stringify(first)).not.toContain("customFields");
+    // Full clause: one 10-branch group per term, heavy branches included.
+    expect(second.OR).toHaveLength(1);
+    const fullGroup = (second.OR as Array<{ OR: unknown[] }>)[0]!;
+    expect(fullGroup.OR).toHaveLength(10);
+    expect(JSON.stringify(second)).toContain("customFields");
+  });
+
+  it("does not re-query when the narrow ID search finds rows", async () => {
+    countMock.mockResolvedValueOnce(3);
+
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=21035"
+      ),
+    });
+
+    await loader(args);
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches nothing (not everything) for whitespace/comma-only search", async () => {
+    // In a debounced type-ahead a single typed space must not flash the
+    // full unfiltered list.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=%20%2C%20"
+      ),
+    });
+
+    await loader(args);
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ id: { in: [] } });
+  });
+
+  it("pages deterministically with an id tiebreaker", async () => {
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    await loader(args);
+
+    expect(findManyMock.mock.calls[0]![0]!.orderBy).toEqual([
+      { createdAt: "desc" },
+      { id: "asc" },
+    ]);
+  });
+});

@@ -1,5 +1,21 @@
-import type { Prisma } from "@prisma/client";
-import { CUSTOM_FIELD_SEARCH_PATHS } from "./query.server";
+import { AssetStatus, type Prisma } from "@prisma/client";
+
+/**
+ * JSON paths inside `AssetCustomFieldValue.value` that hold searchable text.
+ * Owned here (not `query.server.ts`) so this module stays standalone — it
+ * previously imported the constant from the 2900-line advanced-index module,
+ * which transitively touches `db.server` and made these "pure" builders drag
+ * a database connection into their unit tests. `query.server.ts` imports it
+ * back from here for the advanced-index SQL.
+ */
+export const CUSTOM_FIELD_SEARCH_PATHS = [
+  "valueText",
+  "valueMultiLineText",
+  "valueOption",
+  "valueDate",
+  "valueBoolean",
+  "raw",
+] as const;
 
 /**
  * Single source of truth for the simple-mode asset search clauses.
@@ -17,10 +33,19 @@ import { CUSTOM_FIELD_SEARCH_PATHS } from "./query.server";
  */
 
 /**
+ * Upper bound on comma-separated terms honored per search. Each term adds a
+ * full 10-branch OR group (including the unindexed custom-fields JSON ILIKE),
+ * so an unbounded paste could fan a single request into an arbitrarily
+ * expensive query. Ten is far beyond any real search-box usage.
+ */
+export const MAX_ASSET_SEARCH_TERMS = 10;
+
+/**
  * Splits a raw search string into normalized search terms.
  *
- * Mirrors the historical `getAssets` behavior exactly: lowercase, trim, split
- * on commas (comma = "match any of these"), trim each term, drop empties.
+ * Mirrors the historical `getAssets` behavior: lowercase, trim, split on
+ * commas (comma = "match any of these"), trim each term, drop empties —
+ * capped at {@link MAX_ASSET_SEARCH_TERMS} terms as a query-cost guard.
  *
  * @param search - Raw search string from the request
  * @returns Normalized terms; empty array when nothing searchable remains
@@ -31,7 +56,53 @@ export function splitAssetSearchTerms(search: string): string[] {
     .trim()
     .split(",")
     .map((term) => term.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, MAX_ASSET_SEARCH_TERMS);
+}
+
+/**
+ * The shared narrow-vs-full policy: a search takes the narrow indexed fast
+ * path only when every term is ID-shaped. Both `getAssets` and the mobile
+ * assets endpoint make this decision through here so the policy cannot
+ * drift between surfaces.
+ *
+ * @param searchTerms - Normalized terms from {@link splitAssetSearchTerms}
+ * @returns true when the caller should query the narrow clause first and
+ *   fall back to the full clause on zero rows
+ */
+export function isIdShapedSearch(searchTerms: string[]): boolean {
+  return searchTerms.length > 0 && searchTerms.every(looksLikeAssetId);
+}
+
+/**
+ * Status fragment shared by every asset list surface.
+ *
+ * AVAILABLE is QT-aware: a QUANTITY_TRACKED row's status flips to
+ * IN_CUSTODY/CHECKED_OUT as soon as ANY unit is allocated even while free
+ * stock remains, so a raw equality filter would hide those rows from an
+ * "Available" view. AVAILABLE therefore matches available INDIVIDUAL rows OR
+ * any QUANTITY_TRACKED row; every other status keeps raw equality (already
+ * truthful for QT rows).
+ *
+ * Callers compose it per their local convention: the AVAILABLE form is an
+ * `OR` group meant to be appended to a `where.AND` (so it cannot collide
+ * with search `OR`s); the equality form can be spread at the top level.
+ *
+ * @param status - A validated `AssetStatus` enum value
+ * @returns A `Prisma.AssetWhereInput` fragment for the status filter
+ */
+export function buildAssetStatusWhere(
+  status: AssetStatus
+): Prisma.AssetWhereInput {
+  if (status === AssetStatus.AVAILABLE) {
+    return {
+      OR: [
+        { type: "INDIVIDUAL", status: AssetStatus.AVAILABLE },
+        { type: "QUANTITY_TRACKED" },
+      ],
+    };
+  }
+  return { status };
 }
 
 /**

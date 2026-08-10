@@ -10,6 +10,7 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
+import { CUSTOM_FIELD_SEARCH_PATHS } from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -19,15 +20,6 @@ import type { Column } from "../asset-index-settings/helpers";
  * assets are not incorrectly shown as "in custody".
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
-
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
 
 /**
  * Generates the SQL WHERE clause for asset filtering

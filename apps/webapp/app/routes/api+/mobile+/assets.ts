@@ -7,7 +7,8 @@ import {
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
-import { makeShelfError } from "~/utils/error";
+import { buildAssetStatusWhere } from "~/modules/asset/search.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
 /**
  * GET /api/mobile/assets?orgId=xxx&search=xxx&page=1&perPage=20&myCustody=true&status=IN_CUSTODY
@@ -53,6 +54,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const myCustody = url.searchParams.get("myCustody") === "true";
     const statusFilter = url.searchParams.get("status");
 
+    // An unknown status must fail loudly: silently dropping the filter
+    // would return the entire unfiltered list under what the client
+    // believes is a filtered request, and letting it through to Prisma
+    // used to crash with a 500. 400 matches the validation contract of
+    // the mobile mutation routes.
+    if (
+      statusFilter &&
+      !(Object.values(AssetStatus) as string[]).includes(statusFilter)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: `Invalid status filter: ${statusFilter}`,
+        additionalData: { statusFilter },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+    const statusWhere = statusFilter
+      ? buildAssetStatusWhere(statusFilter as AssetStatus)
+      : null;
+
     const baseWhere: Prisma.AssetWhereInput = {
       organizationId,
       ...(myCustody
@@ -71,35 +94,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           }
         : {}),
-      // Only pass through real enum values — an unknown status string used
-      // to reach Prisma and 500; now it simply doesn't filter. Checked via
-      // `Object.values` (not `in`) so prototype-chain keys like "toString"
-      // can't slip through.
-      //
-      // AVAILABLE is QT-aware, mirroring `getAssets`: a QUANTITY_TRACKED
-      // row's status flips to IN_CUSTODY/CHECKED_OUT as soon as ANY unit is
-      // allocated even while free stock remains, so raw equality would hide
-      // those rows from the Available pill. AVAILABLE therefore matches
-      // available INDIVIDUAL rows OR any QUANTITY_TRACKED row; the other
-      // statuses keep raw equality (already truthful for QT rows). Kept in
-      // `AND` so it composes with the search fragment's `OR`.
-      ...(statusFilter &&
-      (Object.values(AssetStatus) as string[]).includes(statusFilter)
-        ? statusFilter === AssetStatus.AVAILABLE
-          ? {
-              AND: [
-                {
-                  OR: [
-                    {
-                      type: "INDIVIDUAL" as const,
-                      status: AssetStatus.AVAILABLE,
-                    },
-                    { type: "QUANTITY_TRACKED" as const },
-                  ],
-                },
-              ],
-            }
-          : { status: statusFilter as AssetStatus }
+      // Status delegates to the QT-aware fragment shared with getAssets
+      // and getAssetsWhereInput (see buildAssetStatusWhere). The AVAILABLE
+      // form is an OR group, so it rides in `AND` to compose with the
+      // search fragment's `OR`; the equality form spreads at the top level.
+      ...(statusWhere
+        ? statusWhere.OR
+          ? { AND: [statusWhere] }
+          : statusWhere
         : {}),
     };
 
@@ -134,6 +136,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             minQuantity: true,
             unitOfMeasure: true,
             consumptionType: true,
+            // Canonical MOBILE_ASSET_SELECT parity — this list select had
+            // drifted (the detail endpoint already returns it).
+            assetModelId: true,
             // Keep `id` (list extra); helper only types `{ name }` but
             // structurally accepts the wider shape.
             category: { select: { id: true, name: true } },
@@ -166,7 +171,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
               },
             },
           },
-          orderBy: { createdAt: "desc" },
+          // Stable `id` tiebreaker for deterministic skip/take paging when
+          // rows tie on createdAt (bulk-imported assets share timestamps
+          // down to the millisecond) — mirrors getAssets.
+          orderBy: [{ createdAt: "desc" as const }, { id: "asc" as const }],
           skip,
           take: perPage,
         }),
