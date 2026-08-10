@@ -139,7 +139,7 @@ export const assetMutationsApi = {
     }
   ) =>
     apiFetch<AdjustQuantityResponse>(
-      `/api/mobile/assets/adjust-quantity?orgId=${orgId}`,
+      `/api/mobile/asset/adjust-quantity?orgId=${orgId}`,
       {
         method: "POST",
         body: JSON.stringify({ assetId, ...args }),

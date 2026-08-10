@@ -1,5 +1,10 @@
 /**
- * POST /api/mobile/assets/adjust-quantity
+ * POST /api/mobile/asset/adjust-quantity
+ *
+ * Named `asset.…` (singular) like every other mobile asset mutation — a
+ * plural `assets.adjust-quantity` gets captured by the loader-only
+ * `assets.$assetId` sibling ("adjust-quantity" parses as an asset id) and
+ * the POST 405s. Found the hard way on the simulator.
  *
  * Adjusts total stock of a QUANTITY_TRACKED asset. Mobile twin of the web's
  * `/api/assets/adjust-quantity` route — same Zod schema (incl. the
