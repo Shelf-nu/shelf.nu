@@ -173,17 +173,30 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       .split(",")
       .filter((id) => id !== "");
 
-    const where: Record<string, any> = {
-      organizationId,
-      OR: [{ id: { in: selectedIds } }],
-    };
+    /**
+     * Scoping shared by BOTH queries below — organization, status, and every
+     * permission clause pushed into `AND`. It deliberately carries no `OR`:
+     * the search predicate and the already-selected ids are issued as two
+     * separate queries, so the result cap cannot evict a selection.
+     *
+     * Both queries MUST be composed from this same object. A selected-ids
+     * query that skipped the custody scope, the draft-visibility clause or the
+     * booking write scope would return rows the search deliberately hides —
+     * turning a display bug into an IDOR, since `selectedValues` is
+     * caller-supplied.
+     */
+    const where: Record<string, any> = { organizationId };
+
+    /** Branches matching what the user typed. Never includes selected ids. */
+    const searchBranches: Record<string, any>[] = [];
+
     /**
      * When searching for teamMember, we have to search for
      * - teamMember's name
      * - teamMember's user firstName, lastName and email
      */
     if (modelFilters.name === "teamMember") {
-      where.OR.push(
+      searchBranches.push(
         { name: { contains: queryValue, mode: "insensitive" } },
         { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
         // Was a second `firstName` branch, so surname search silently matched
@@ -244,7 +257,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         where.userId = custodyScope.userId;
       }
     } else {
-      where.OR.push({
+      searchBranches.push({
         [queryKey]: { contains: queryValue, mode: "insensitive" },
       });
     }
@@ -333,14 +346,51 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ];
     }
 
-    const queryData = (await db[name].dynamicFindMany({
-      where,
-      // The registry — not this call site — decides what leaves the server.
-      // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
-      // spread below safe, instead of having to sanitise three separate paths.
-      select: getModelFilterConfig(name).select,
-      take: SEARCH_TAKE_LIMIT + selectedIds.length,
-    })) as Array<Record<string, string>>;
+    // The registry — not this call site — decides what leaves the server.
+    // Narrowing `item` here is what makes the `...item` / `metadata` / `user`
+    // spread below safe, instead of having to sanitise three separate paths.
+    const select = getModelFilterConfig(name).select;
+
+    /**
+     * Two queries rather than one capped `OR`.
+     *
+     * Sharing a single LIMIT across "what you typed" and "what you already
+     * picked" makes inclusion probabilistic: with more matches than the cap and
+     * no ordering, Postgres may fill every slot with search hits and drop the
+     * selected rows, so the picker cannot render or deselect them. Widening the
+     * cap by the selected count buys capacity, not inclusion.
+     *
+     * Both queries are composed from the same scoped `where`, so the
+     * caller-supplied `selectedValues` cannot reach past the permission clauses.
+     */
+    const [selectedRows, searchRows] = (await Promise.all([
+      selectedIds.length
+        ? db[name].dynamicFindMany({
+            where: { ...where, id: { in: selectedIds } },
+            select,
+            take: selectedIds.length,
+          })
+        : Promise.resolve([]),
+      db[name].dynamicFindMany({
+        where: { ...where, OR: searchBranches },
+        select,
+        take: SEARCH_TAKE_LIMIT,
+        // Without this the cap is nondeterministic — which N of M rows come
+        // back could differ between identical requests.
+        orderBy: { [queryKey]: "asc" },
+      }),
+    ])) as Array<Array<Record<string, string>>>;
+
+    // Selected first, then search hits, de-duplicated: a selected row can also
+    // match what the user typed.
+    const seenIds = new Set<string>();
+    const queryData = [...selectedRows, ...searchRows].filter((item) => {
+      if (seenIds.has(item.id)) {
+        return false;
+      }
+      seenIds.add(item.id);
+      return true;
+    });
 
     return data(
       payload({

@@ -320,24 +320,92 @@ describe("GET /api/model-filters", () => {
   });
 
   describe("result cap", () => {
-    it("caps results but still admits every already-selected id", async () => {
+    /** Splits the recorded calls into the selected-ids one and the search one. */
+    function splitCalls() {
+      const calls = dbMocks.dynamicFindMany.mock.calls.map((c: any[]) => c[0]);
+      return {
+        selected: calls.find((c) => c.where?.id?.in),
+        search: calls.find((c) => c.where?.OR),
+        all: calls,
+      };
+    }
+
+    it("fetches selected ids in their own query, so the cap cannot evict them", async () => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
 
       await callLoader(
         "name=category&queryKey=name&queryValue=x&selectedValues=c1,c2,c3"
       );
 
-      const take = dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.take;
-      // Selected ids ride in the same OR, so a flat cap could evict them.
-      expect(take).toBe(100 + 3);
+      const { selected, search } = splitCalls();
+
+      // One capped LIMIT shared across both branches made inclusion
+      // probabilistic; widening it by the selected count bought capacity, not
+      // inclusion.
+      expect(selected.where.id.in).toEqual(["c1", "c2", "c3"]);
+      expect(selected.take).toBe(3);
+      expect(search.take).toBe(100);
     });
 
-    it("applies the base cap when nothing is selected", async () => {
+    it("scopes the selected-ids query exactly like the search query", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader(
+        `name=booking&queryKey=name&queryValue=x&selectedValues=someone-elses-booking&status=${ADDABLE_BOOKING_STATUSES.join(
+          ","
+        )}`
+      );
+
+      const { selected, search } = splitCalls();
+
+      // `selectedValues` is caller-supplied. A selected query that skipped the
+      // permission clauses would return rows the search deliberately hides —
+      // a display bug turned into an IDOR.
+      expect(selected.where.organizationId).toBe(search.where.organizationId);
+      expect(selected.where.AND).toEqual(search.where.AND);
+      expect(selected.where.status).toEqual(search.where.status);
+    });
+
+    it("issues no selected-ids query when nothing is selected", async () => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
 
       await callLoader("name=category&queryKey=name&queryValue=x");
 
-      expect(dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.take).toBe(100);
+      const { selected, search, all } = splitCalls();
+
+      expect(selected).toBeUndefined();
+      expect(all).toHaveLength(1);
+      expect(search.take).toBe(100);
+    });
+
+    it("orders the search so the cap is deterministic", async () => {
+      dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+      await callLoader("name=category&queryKey=name&queryValue=x");
+
+      expect(splitCalls().search.orderBy).toEqual({ name: "asc" });
+    });
+
+    it("returns selected rows first and de-duplicates overlap", async () => {
+      // A selected row can also match what the user typed.
+      dbMocks.dynamicFindMany.mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          where?.id?.in
+            ? [{ id: "c1", name: "Selected" }]
+            : [
+                { id: "c1", name: "Selected" },
+                { id: "c9", name: "Searched" },
+              ]
+        )
+      );
+
+      const filters = await readFilters(
+        await callLoader(
+          "name=category&queryKey=name&queryValue=x&selectedValues=c1"
+        )
+      );
+
+      expect(filters.map((f: { id: string }) => f.id)).toEqual(["c1", "c9"]);
     });
   });
 
@@ -612,6 +680,33 @@ describe("GET /api/model-filters", () => {
 
       expect(filters).toEqual([]);
     });
+
+    /**
+     * The regression the fail-closed default caused: a FILTER surface that
+     * omitted `custodyPurpose` inherited the assignment rule, so BASE got a
+     * hard empty list and SELF_SERVICE collapsed to themselves — even though
+     * their loader seed contained the whole roster. Typing made valid names
+     * vanish.
+     */
+    it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+      "filter: %s with the override ON is not short-circuited to empty",
+      async (role) => {
+        setCustodyRole(role, true);
+        dbMocks.dynamicFindMany.mockResolvedValue([
+          { id: "tm-2", name: "Someone Else", userId: "user-2" },
+        ]);
+
+        const filters = await readFilters(
+          await callLoader(
+            "name=teamMember&queryKey=name&queryValue=x&custodyPurpose=custody-filter"
+          )
+        );
+
+        expect(dbMocks.dynamicFindMany).toHaveBeenCalled();
+        expect(filters).toHaveLength(1);
+        expect(filters[0].id).toBe("tm-2");
+      }
+    );
 
     it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
       "never restricts %s",
