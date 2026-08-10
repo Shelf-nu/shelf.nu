@@ -12,6 +12,7 @@ import { getAsset } from "~/modules/asset/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { createTeamMember } from "@factories";
 
 const dbMocks = vi.hoisted(() => {
   return {
@@ -463,33 +464,60 @@ describe("assets.$assetId.overview.assign-custody action", () => {
  * drive the `updateMany` count, which is what the database would actually
  * return, instead of stubbing a status read.
  */
+/** Ids shared by this suite, so a rename cannot silently desync an assertion. */
+const TEST_ORG_ID = "org-1";
+const TEST_ASSET_ID = "asset-123";
+const TEST_TEAM_MEMBER_ID = "team-member-123";
+
 describe("assign-custody — CHECKED_OUT conflict", () => {
   beforeEach(() => {
+    // why: the action reads `organizationId` off the permission result to
+    // org-scope every query. `requirePermission` resolves a wider context
+    // object than these tests exercise, so `Pick` documents the fields under
+    // test instead of casting the whole shape away.
     requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
+      organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
-      userOrganizations: [{ organizationId: "org-1" }],
-    } as any);
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    // why: custodian validation runs before the transaction; the factory keeps
+    // this row consistent with the rest of the suite. `user` is added on top
+    // because the route selects the custodian's linked user for the activity
+    // event, and that relation is outside the base `TeamMember` model.
     mockGetTeamMember.mockResolvedValue({
-      id: "team-member-123",
-      userId: "user-456",
+      ...createTeamMember({
+        id: TEST_TEAM_MEMBER_ID,
+        organizationId: TEST_ORG_ID,
+      }),
+      user: { id: "user-456", firstName: "Test", lastName: "User" },
     });
+
+    // why: the custody-creating `update` runs with `select: { id, title }`, so
+    // its resolved value is that narrow row — not a full Asset. Typing it as
+    // the actual selection is more honest than widening it with a factory.
     mockAssetUpdate.mockResolvedValue({
-      id: "asset-123",
+      id: TEST_ASSET_ID,
       title: "Test Asset",
-    } as any);
+    } satisfies { id: string; title: string });
   });
 
   it("refuses the claim and keeps the specific message when the row is filtered out", async () => {
     // count === 0 is what Postgres returns when the `not: CHECKED_OUT`
     // predicate excludes the row.
+    // why: `count: 0` is exactly what Postgres returns when the
+    // `not: CHECKED_OUT` predicate excludes the row — the signal the action
+    // branches on. Driving the count keeps this test on real DB behaviour
+    // rather than on a stubbed status read.
     dbMocks.asset.updateMany.mockResolvedValue({ count: 0 });
+    // why: the rejection path re-reads only the title, to name the asset in
+    // the conflict message.
     dbMocks.asset.findFirst.mockResolvedValue({ title: "Drill" });
 
     const formData = new FormData();
     formData.set(
       "custodian",
-      JSON.stringify({ id: "team-member-123", name: "Test Team Member" })
+      JSON.stringify({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
     );
 
     const response = await action(
@@ -514,12 +542,13 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
   });
 
   it("claims the asset atomically rather than reading its status first", async () => {
+    // why: `count: 1` means the guard matched and the claim landed.
     dbMocks.asset.updateMany.mockResolvedValue({ count: 1 });
 
     const formData = new FormData();
     formData.set(
       "custodian",
-      JSON.stringify({ id: "team-member-123", name: "Test Team Member" })
+      JSON.stringify({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
     );
 
     await action(
@@ -533,11 +562,11 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
 
     expect(dbMocks.asset.updateMany).toHaveBeenCalledWith({
       where: {
-        id: "asset-123",
-        organizationId: "org-1",
-        status: { not: "CHECKED_OUT" },
+        id: TEST_ASSET_ID,
+        organizationId: TEST_ORG_ID,
+        status: { not: AssetStatus.CHECKED_OUT },
       },
-      data: { status: "IN_CUSTODY" },
+      data: { status: AssetStatus.IN_CUSTODY },
     });
 
     // The happy path must not pay for a status read — it only runs when the
