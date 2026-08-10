@@ -77,6 +77,8 @@ declare global {
       COOKIE_DOMAIN: string;
       POSTHOG_API_KEY: string;
       POSTHOG_HOST: string;
+      COMPANION_SERVERS: string;
+      INSTANCE_NAME: string;
     }
   }
 }
@@ -230,6 +232,37 @@ export const POSTHOG_API_KEY = getEnv("POSTHOG_API_KEY", {
 });
 export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
   isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Companion-app server registry (Shelf Cloud only).
+ *
+ * JSON object mapping a lowercased email domain to the base URL of the Shelf
+ * instance that domain's users belong to, e.g.
+ * `{"acme.edu":"https://acme.i.shelf.nu"}`. Consumed exclusively by
+ * `resolveCompanionServer` so the storage can later become a database table
+ * without touching call sites.
+ *
+ * `isSecret: true` keeps the mapping out of the client-side `window.env`
+ * payload — it reveals which organisations run self-hosted Shelf.
+ *
+ * @see {@link file://./../modules/api/companion-servers.server.ts}
+ */
+export const COMPANION_SERVERS = getEnv("COMPANION_SERVERS", {
+  isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Human-readable name of this Shelf instance, surfaced to the companion app
+ * via `/api/mobile/config` and shown to the user as "Connected to <name>".
+ * Defaults to "Shelf" when unset.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
+  isSecret: false,
   isRequired: false,
 });
 

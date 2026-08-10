@@ -201,6 +201,49 @@ COLLECT_BUSINESS_INTEL=true
 # SHOW_HOW_DID_YOU_FIND_US=true  # Deprecated, use COLLECT_BUSINESS_INTEL instead
 ```
 
+## Companion app multi-server support
+
+The Companion mobile app connects to one Shelf server at a time and picks which
+one from the domain of the email the user types at login. Two environment
+variables drive that.
+
+### `INSTANCE_NAME`
+
+Human-readable name of this instance, served on `GET /api/mobile/config` and
+shown in the app as "Connected to \<name\>". Optional — defaults to `"Shelf"`.
+
+```bash
+INSTANCE_NAME="Acme University"
+```
+
+### `COMPANION_SERVERS`
+
+**Shelf Cloud only** — leave unset on self-hosted instances.
+
+A JSON object mapping a lowercased email domain to the base URL of the Shelf
+instance those users belong to. The app posts a domain to
+`POST /api/mobile/resolve-server` at login and connects to whatever comes back,
+so onboarding a customer is an environment change with **no app release**.
+
+```bash
+COMPANION_SERVERS='{"acme.edu":"https://acme.i.shelf.nu","acme.com":"https://acme.i.shelf.nu"}'
+```
+
+Rules:
+
+- Values **must** be `https://`. Non-https entries are ignored, and the domain
+  resolves as if it were absent.
+- A domain that is absent (or a malformed value anywhere in the JSON) resolves
+  to Shelf Cloud. The registry fails open by design — a bad value must never
+  block sign-in for cloud users.
+- The variable is treated as a **secret**: it is never included in the
+  browser-side `window.env`, because the mapping reveals which organisations
+  run self-hosted Shelf.
+- Multiple domains may point at the same instance (see the example above).
+
+Read only by `app/modules/api/companion-servers.server.ts`. When the registry
+eventually needs per-entry expiry or revocation, that one file changes.
+
 ## Notes
 
 - Changes to this file require a server restart to take effect
