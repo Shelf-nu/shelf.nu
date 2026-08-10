@@ -114,7 +114,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       await updateAssetModelImage({
         request,
         assetModelId: assetModel.id,
-        userId: authSession.userId,
         organizationId,
       });
     } catch (cause) {

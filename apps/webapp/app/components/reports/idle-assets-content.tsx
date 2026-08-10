@@ -45,6 +45,7 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },

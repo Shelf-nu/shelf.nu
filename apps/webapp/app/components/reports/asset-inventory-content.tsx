@@ -79,6 +79,7 @@ const ASSET_INVENTORY_COLUMNS: ColumnDef<AssetInventoryRow>[] = [
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },

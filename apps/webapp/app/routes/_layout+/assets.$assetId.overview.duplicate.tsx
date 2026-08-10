@@ -16,6 +16,7 @@ import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -54,6 +55,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: {
+        // Model cover image for an asset with no image of its own — the
+        // duplicate dialog previews the source asset's rendered image.
+        ...ASSET_MODEL_IMAGE_SELECT,
         custody: { select: { quantity: true } },
       },
     });
@@ -168,6 +172,7 @@ export default function DuplicateAsset() {
                   mainImage: asset.mainImage,
                   thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
+                  assetModel: asset.assetModel ?? null,
                 }}
                 alt={`Image of ${asset.title}`}
                 className="size-full rounded-[4px] border object-cover"

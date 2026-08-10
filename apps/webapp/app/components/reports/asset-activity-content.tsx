@@ -40,6 +40,7 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },

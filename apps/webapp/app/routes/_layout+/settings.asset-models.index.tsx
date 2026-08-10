@@ -18,10 +18,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  getAssetModels,
-  refreshExpiredAssetModelImages,
-} from "~/modules/asset-model/service.server";
+import { getAssetModels } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -62,14 +59,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     const totalPages = Math.ceil(totalAssetModels / perPage);
 
-    /**
-     * Supabase signed URLs expire after 72h, so re-sign any that lapsed before
-     * shipping the rows to the client — otherwise the thumbnails render broken.
-     * Same treatment the kit and asset lists give their images.
-     */
-    const refreshedAssetModels =
-      await refreshExpiredAssetModelImages(assetModels);
-
     const header: HeaderData = {
       title: "Asset Models",
       subHeading:
@@ -83,7 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: refreshedAssetModels,
+        items: assetModels,
         search,
         page,
         totalItems: totalAssetModels,
@@ -149,7 +138,10 @@ export default function AssetModelsIndexPage() {
 const AssetModelItem = ({
   item,
 }: {
-  item: Pick<AssetModel, "id" | "description" | "name" | "image"> & {
+  item: Pick<
+    AssetModel,
+    "id" | "description" | "name" | "image" | "thumbnailImage"
+  > & {
     _count: {
       assets: number;
     };
@@ -169,7 +161,7 @@ const AssetModelItem = ({
           // matching call site in components/asset-model/form.tsx.
           <ImageWithPreview
             imageUrl={item.image}
-            thumbnailUrl={item.image}
+            thumbnailUrl={item.thumbnailImage ?? item.image}
             alt={`${item.name} image`}
             className="size-10 shrink-0 rounded border object-cover"
             withPreview

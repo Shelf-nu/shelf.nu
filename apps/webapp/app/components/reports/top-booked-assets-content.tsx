@@ -62,6 +62,7 @@ const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },
@@ -230,6 +231,7 @@ export function TopBookedAssetsContent({
                     asset={{
                       id: topAsset.assetId,
                       thumbnailImage: topAsset.thumbnailImage,
+                      assetModel: topAsset.assetModel,
                     }}
                     alt={`Image of ${topAsset.assetName}`}
                     className="size-8 rounded object-cover ring-1 ring-gray-200"

@@ -15,6 +15,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import {
+  clearAssetMainImage,
   getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
@@ -206,6 +207,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       payload: parsedData,
       customFieldDef: customFields,
     });
+
+    /**
+     * "Use the model's image instead" / "Remove image" — drops the asset's own
+     * image so `resolveAssetImage` falls through to its model's cover image,
+     * or to the placeholder when it has no model.
+     *
+     * Runs BEFORE the upload so that a submit which both clears and uploads
+     * ends up with the newly-uploaded image rather than nothing.
+     */
+    if (formData.get("clearMainImage") === "true") {
+      await clearAssetMainImage({ id, organizationId });
+    }
 
     await updateAssetMainImage({
       request,

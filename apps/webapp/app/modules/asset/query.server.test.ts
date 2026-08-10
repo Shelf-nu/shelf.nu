@@ -791,6 +791,29 @@ describe("assetQueryFragment", () => {
     return sql.strings.join("?");
   }
 
+  describe("asset model cover image", () => {
+    // why: raw SQL is opaque to typecheck — Prisma.sql is just a string, and the
+    // row type is a user-supplied cast. Asserting the column names is the only
+    // cheap regression guard, and it also catches a template literal that got
+    // truncated (e.g. by a stray backtick inside a SQL comment).
+    it("projects the model's image columns off the existing am join", () => {
+      const sql = getFragmentSqlString(assetQueryFragment());
+
+      expect(sql).toContain('am.image AS "assetModelImage"');
+      expect(sql).toContain(
+        'am."thumbnailImage" AS "assetModelThumbnailImage"'
+      );
+    });
+
+    it("keeps using the already-present AssetModel join", () => {
+      const joins = assetQueryJoins.strings.join("?");
+      const joinCount = joins.split('LEFT JOIN public."AssetModel" am').length;
+
+      // Exactly one join — the image columns must not add a second one.
+      expect(joinCount - 1).toBe(1);
+    });
+  });
+
   describe("custody output", () => {
     it("only includes booking custody when asset status is CHECKED_OUT", () => {
       const fragment = assetQueryFragment();

@@ -84,6 +84,7 @@ export function CustodySnapshotContent({
             name={row.original.assetName}
             thumbnailImage={row.original.thumbnailImage}
             assetId={row.original.assetId}
+            assetModel={row.original.assetModel}
           />
         ),
       },

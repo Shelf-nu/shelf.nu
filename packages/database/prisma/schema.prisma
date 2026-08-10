@@ -424,11 +424,19 @@ model Category {
  * and provides default field values when creating new assets from the model.
  */
 model AssetModel {
-  id              String    @id @default(cuid())
-  name            String
-  description     String?
-  image           String?
-  imageExpiration DateTime?
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  /// Public URL (bucket `files`) of the model's cover image. Rendered by any
+  /// asset of this model that has no image of its own. Public — and therefore
+  /// never-expiring and cacheable — like Location.imageUrl; see
+  /// resolveAssetImage() for the cascade.
+  image String?
+
+  /// Public URL of the 108px thumbnail generated alongside `image`. Used at
+  /// list sizes so inheriting assets never render the full-size original.
+  thumbnailImage String?
 
   // Template defaults (applied when creating a new asset from this model)
   defaultCategoryId String?

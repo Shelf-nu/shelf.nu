@@ -16,7 +16,6 @@ import AssetModelForm, {
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getAssetModel,
-  refreshExpiredAssetModelImages,
   updateAssetModel,
   updateAssetModelImage,
 } from "~/modules/asset-model/service.server";
@@ -61,17 +60,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title };
 
-    /**
-     * Supabase signed URLs live for 72h, so an older model image would render
-     * broken in the form's preview. Re-sign before shipping it to the client.
-     */
-    const [refreshedAssetModel] = await refreshExpiredAssetModelImages([
-      assetModel,
-    ]);
-
     return payload({
       header,
-      assetModel: refreshedAssetModel,
+      assetModel,
       categories,
       totalCategories,
       currency: currentOrganization?.currency,
@@ -129,7 +120,6 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     await updateAssetModelImage({
       request,
       assetModelId: id,
-      userId: authSession.userId,
       organizationId,
     });
 

@@ -1,4 +1,5 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "./image-select";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {
@@ -75,6 +76,9 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
+    // See the note in `assetIndexFields` — the detail page renders the same
+    // cascade, and its "From model" badge reads the resolved source.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
@@ -204,6 +208,10 @@ export const assetIndexFields = ({
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
@@ -327,6 +335,10 @@ export const advancedAssetIndexFields = () => {
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: {
       select: {
         quantity: true,

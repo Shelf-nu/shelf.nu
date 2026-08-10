@@ -40,6 +40,7 @@ const createAssetNeedingThumbnail = (
     id: "asset-1",
     thumbnailImage: null,
     mainImage: "https://x/storage/v1/object/sign/assets/foo.jpg?token=t",
+    assetModel: null,
     ...overrides,
   }) as unknown as AssetForThumbnail;
 
@@ -54,6 +55,7 @@ const createExpiredPreviewAsset = (): AssetForPreview =>
     thumbnailImage: "https://x/storage/v1/object/sign/assets/foo-thumbnail.jpg",
     mainImage: "https://x/storage/v1/object/sign/assets/foo.jpg?token=t",
     mainImageExpiration: new Date("2000-01-01T00:00:00.000Z"),
+    assetModel: null,
   }) as unknown as AssetForPreview;
 
 describe("AssetImage thumbnail resilience", () => {
@@ -272,5 +274,98 @@ describe("AssetImage thumbnail resilience", () => {
     const img = screen.getByAltText("Pic") as HTMLImageElement;
     expect(img.src).toContain("thumb-9.jpg");
     expect(img.src).not.toContain("thumb-1.jpg");
+  });
+});
+
+/**
+ * Builds an asset with no image of its own, linked to a model that has one —
+ * the inheriting state introduced by the asset-model cover image feature.
+ */
+const createInheritingAsset = (
+  modelThumbnail: string | null = "https://cdn/model-thumb.jpg"
+): AssetForPreview =>
+  ({
+    id: "asset-3",
+    thumbnailImage: null,
+    mainImage: null,
+    mainImageExpiration: null,
+    assetModel: {
+      image: "https://cdn/model-main.jpg",
+      thumbnailImage: modelThumbnail,
+    },
+  }) as unknown as AssetForPreview;
+
+describe("AssetImage model-image inheritance", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the model's thumbnail when the asset has no image", () => {
+    render(<AssetImage asset={createInheritingAsset()} alt="Canon R5" />);
+
+    expect(screen.getByAltText("Canon R5")).toHaveAttribute(
+      "src",
+      "https://cdn/model-thumb.jpg"
+    );
+  });
+
+  it("falls back to the model's full-size image when it has no thumbnail", () => {
+    render(<AssetImage asset={createInheritingAsset(null)} alt="Canon R5" />);
+
+    expect(screen.getByAltText("Canon R5")).toHaveAttribute(
+      "src",
+      "https://cdn/model-main.jpg"
+    );
+  });
+
+  // why: both repair endpoints write to the ASSET row, and a model's cover
+  // image is a public URL that never expires — so for an inherited image there
+  // is nothing to repair and the call would target the wrong row. Firing one
+  // per list row is what turns a large page into a rate-limit event.
+  it("never calls the per-asset repair endpoints for an inherited image", async () => {
+    const fetchMock = vi.spyOn(global, "fetch");
+
+    render(
+      <AssetImage asset={createInheritingAsset()} alt="Canon R5" withPreview />
+    );
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the placeholder and makes no request with neither image", async () => {
+    const fetchMock = vi.spyOn(global, "fetch");
+
+    render(
+      <AssetImage
+        asset={
+          {
+            id: "asset-4",
+            thumbnailImage: null,
+            mainImage: null,
+            mainImageExpiration: null,
+            assetModel: null,
+          } as unknown as AssetForPreview
+        }
+        alt="No image"
+        withPreview
+      />
+    );
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+
+    // `withPreview` renders the thumbnail AND the dialog's full-size img with
+    // the same alt text; assert on the first (the visible thumbnail).
+    expect(screen.getAllByAltText("No image")[0]).toHaveAttribute(
+      "src",
+      "/static/images/asset-placeholder.jpg"
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

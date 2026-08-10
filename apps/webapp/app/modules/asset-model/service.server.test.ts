@@ -2,17 +2,14 @@ import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { createAssetModel as createAssetModelFactory } from "@factories";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { parseFileFormData } from "~/utils/storage.server";
 import {
-  clearInheritedAssetModelImages,
   createAssetModel,
   createAssetModelsIfNotExists,
   getAssetModels,
   getAssetModel,
-  getInheritableAssetModelImage,
-  isAssetModelImageUrl,
-  propagateAssetModelImageToAssets,
-  refreshExpiredAssetModelImages,
   updateAssetModel,
+  updateAssetModelImage,
   deleteAssetModel,
   bulkDeleteAssetModels,
 } from "./service.server";
@@ -37,22 +34,34 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: Supabase storage is a network boundary — stub the signing call so the
-// thumbnail derivation can be asserted without hitting it. getThumbnailStoragePath
-// is pure, so it keeps its real implementation.
+// why: parseFileFormData streams a multipart body to Supabase storage — a
+// network boundary. Stubbing it lets the URL/persist wiring be asserted without
+// an upload. getFileUploadPath is pure, so it keeps its real implementation.
 vitest.mock("~/utils/storage.server", async () => {
   const actual = await vitest.importActual<Record<string, unknown>>(
     "~/utils/storage.server"
   );
   return {
     ...actual,
-    createSignedUrl: vitest.fn(
-      ({ filename }: { filename: string }) =>
-        `https://xyz.supabase.co/storage/v1/object/sign/assets/${filename}?token=signed`
-    ),
     parseFileFormData: vitest.fn(),
   };
 });
+
+// why: the Supabase admin client is a network client; only its pure public-URL
+// builder is exercised here, so a stub that mirrors the real URL shape is enough.
+vitest.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: () => ({
+    storage: {
+      from: (bucket: string) => ({
+        getPublicUrl: (path: string) => ({
+          data: {
+            publicUrl: `https://xyz.supabase.co/storage/v1/object/public/${bucket}/${path}`,
+          },
+        }),
+      }),
+    },
+  }),
+}));
 
 describe("createAssetModel", () => {
   beforeEach(() => {
@@ -472,16 +481,9 @@ describe("createAssetModelsIfNotExists", () => {
 describe("bulkDeleteAssetModels", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // @ts-expect-error mock setup — no inheriting assets unless a test says so
-    db.asset.findMany.mockResolvedValue([]);
   });
 
   it("deletes specific asset models by IDs", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.findMany.mockResolvedValue([
-      { id: "model-1" },
-      { id: "model-2" },
-    ]);
     // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
 
@@ -490,13 +492,6 @@ describe("bulkDeleteAssetModels", () => {
       organizationId: "org-123",
     });
 
-    expect(db.assetModel.findMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["model-1", "model-2"] },
-        organizationId: "org-123",
-      },
-      select: { id: true },
-    });
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["model-1", "model-2"] },
@@ -507,12 +502,6 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes all asset models when ALL_SELECTED key is present", async () => {
     // @ts-expect-error mock setup
-    db.assetModel.findMany.mockResolvedValue([
-      { id: "model-1" },
-      { id: "model-2" },
-      { id: "model-3" },
-    ]);
-    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
 
     await bulkDeleteAssetModels({
@@ -520,440 +509,89 @@ describe("bulkDeleteAssetModels", () => {
       organizationId: "org-123",
     });
 
-    // The id set is resolved from the org-wide filter first, so the
-    // inherited-image cleanup and the delete cover exactly the same models.
-    expect(db.assetModel.findMany).toHaveBeenCalledWith({
-      where: { organizationId: "org-123" },
-      select: { id: true },
-    });
+    // why: the assets of a deleted model need no image cleanup — they never
+    // stored a copy, so ON DELETE SET NULL alone drops them to the placeholder.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["model-1", "model-2", "model-3"] },
-        organizationId: "org-123",
+      where: { organizationId: "org-123" },
+    });
+  });
+});
+
+describe("updateAssetModelImage", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("stores public urls for the image and its thumbnail, scoped to the org", async () => {
+    vitest.mocked(parseFileFormData).mockResolvedValue(
+      new Map([
+        [
+          "image",
+          JSON.stringify({
+            originalPath: "org-1/asset-models/model-1/abc.jpg",
+            thumbnailPath: "org-1/asset-models/model-1/abc-thumbnail.jpg",
+          }),
+        ],
+      ]) as unknown as FormData
+    );
+
+    const result = await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toContain(
+      "/object/public/files/org-1/asset-models/model-1/abc.jpg"
+    );
+    expect(db.assetModel.update).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
+      data: {
+        image: expect.stringContaining("abc.jpg"),
+        thumbnailImage: expect.stringContaining("abc-thumbnail.jpg"),
       },
     });
   });
 
-  it("clears inherited images from the deleted models' assets before deleting", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.findMany.mockResolvedValue([{ id: "model-1" }]);
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      {
-        id: "asset-inheriting",
-        mainImage: MODEL_IMAGE_URL,
-        assetModelId: "model-1",
-      },
-      {
-        id: "asset-own-image",
-        mainImage: OWN_ASSET_IMAGE_URL,
-        assetModelId: "model-1",
-      },
-    ]);
-    // @ts-expect-error mock setup
-    db.asset.updateMany.mockResolvedValue({ count: 1 });
-    // @ts-expect-error mock setup
-    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+  // why: a plain "Save" on the model form posts an empty file input; it must not
+  // clear an image the user uploaded earlier.
+  it("no-ops when the form carries no file, keeping the current image", async () => {
+    vitest
+      .mocked(parseFileFormData)
+      .mockResolvedValue(new Map() as unknown as FormData);
 
-    await bulkDeleteAssetModels({
-      assetModelIds: ["model-1"],
-      organizationId: "org-123",
+    const result = await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
     });
 
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-inheriting"] },
-        organizationId: "org-123",
-        // Guarded on the image the row was observed to have, so a concurrent
-        // per-asset upload is never clobbered.
-        mainImage: MODEL_IMAGE_URL,
-      },
+    expect(result).toBeNull();
+    expect(db.assetModel.update).not.toHaveBeenCalled();
+  });
+
+  it("stores a null thumbnail when the parser returned a bare path", async () => {
+    vitest
+      .mocked(parseFileFormData)
+      .mockResolvedValue(
+        new Map([
+          ["image", "org-1/asset-models/model-1/abc.jpg"],
+        ]) as unknown as FormData
+      );
+
+    await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetModel.update).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
       data: {
-        mainImage: null,
-        mainImageExpiration: null,
+        image: expect.stringContaining("abc.jpg"),
         thumbnailImage: null,
       },
     });
-    // why: after the delete, ON DELETE SET NULL has erased the link that
-    // identifies inheriting assets — the cleanup must run first.
-    expect(
-      vitest.mocked(db.asset.updateMany).mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      vitest.mocked(db.assetModel.deleteMany).mock.invocationCallOrder[0]
-    );
-  });
-});
-
-describe("refreshExpiredAssetModelImages", () => {
-  const expiredModel = {
-    id: "model-1",
-    organizationId: "org-123",
-    image: MODEL_IMAGE_URL,
-    imageExpiration: new Date("2020-01-01T00:00:00.000Z"),
-  };
-
-  beforeEach(() => {
-    vitest.clearAllMocks();
-  });
-
-  it("leaves an unexpired image alone", async () => {
-    const fresh = {
-      ...expiredModel,
-      imageExpiration: new Date("2999-01-01T00:00:00.000Z"),
-    };
-
-    await expect(refreshExpiredAssetModelImages([fresh])).resolves.toEqual([
-      fresh,
-    ]);
-    expect(db.assetModel.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("re-signs an expired image, guarded on the image it read", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.updateMany.mockResolvedValue({ count: 1 });
-
-    const [refreshed] = await refreshExpiredAssetModelImages([expiredModel]);
-
-    expect(db.assetModel.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "model-1",
-        organizationId: "org-123",
-        image: MODEL_IMAGE_URL,
-      },
-      data: {
-        image: expect.stringContaining("-models/model-1/"),
-        imageExpiration: expect.any(Date),
-      },
-    });
-    expect(refreshed.image).not.toBe(MODEL_IMAGE_URL);
-  });
-
-  // why: a cover replaced (and propagated to this model's assets) between the
-  // read and this write must not be overwritten with a re-signed URL for the
-  // superseded object.
-  it("discards the refresh when a newer cover already won", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.updateMany.mockResolvedValue({ count: 0 });
-
-    const [refreshed] = await refreshExpiredAssetModelImages([expiredModel]);
-
-    expect(refreshed.image).toBe(MODEL_IMAGE_URL);
-  });
-});
-
-describe("clearInheritedAssetModelImages", () => {
-  beforeEach(() => {
-    vitest.clearAllMocks();
-  });
-
-  it("clears only the assets that were showing their model's image", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      {
-        id: "asset-inheriting",
-        mainImage: MODEL_IMAGE_URL,
-        assetModelId: "model-1",
-      },
-      {
-        id: "asset-own-image",
-        mainImage: OWN_ASSET_IMAGE_URL,
-        assetModelId: "model-1",
-      },
-      { id: "asset-no-image", mainImage: null, assetModelId: "model-1" },
-    ]);
-    // @ts-expect-error mock setup
-    db.asset.updateMany.mockResolvedValue({ count: 1 });
-
-    const count = await clearInheritedAssetModelImages({
-      assetModelIds: ["model-1"],
-      organizationId: "org-123",
-    });
-
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-inheriting"] },
-        organizationId: "org-123",
-        // Guarded on the image the row was observed to have, so a concurrent
-        // per-asset upload is never clobbered.
-        mainImage: MODEL_IMAGE_URL,
-      },
-      data: {
-        mainImage: null,
-        mainImageExpiration: null,
-        thumbnailImage: null,
-      },
-    });
-    expect(count).toBe(1);
-  });
-
-  it("writes nothing when no asset was inheriting", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      {
-        id: "asset-own-image",
-        mainImage: OWN_ASSET_IMAGE_URL,
-        assetModelId: "model-1",
-      },
-    ]);
-
-    const count = await clearInheritedAssetModelImages({
-      assetModelIds: ["model-1"],
-      organizationId: "org-123",
-    });
-
-    expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(count).toBe(0);
-  });
-
-  it("short-circuits on an empty model list", async () => {
-    const count = await clearInheritedAssetModelImages({
-      assetModelIds: [],
-      organizationId: "org-123",
-    });
-
-    expect(db.asset.findMany).not.toHaveBeenCalled();
-    expect(count).toBe(0);
-  });
-});
-
-/* ====================================================================== */
-/*  Cover image                                                            */
-/* ====================================================================== */
-
-/** A signed URL for an image stored under model `model-1`'s folder. */
-const MODEL_IMAGE_URL =
-  "https://xyz.supabase.co/storage/v1/object/sign/assets/user-123/asset-models/model-1/image-1700000000000.png?token=abc";
-/** A re-signed URL for the SAME object (different token — refresh happened). */
-const MODEL_IMAGE_URL_RESIGNED =
-  "https://xyz.supabase.co/storage/v1/object/sign/assets/user-123/asset-models/model-1/image-1700000000000.png?token=zzz";
-/** The shared 108px thumbnail sitting next to that model image. */
-const MODEL_THUMBNAIL_URL =
-  "https://xyz.supabase.co/storage/v1/object/sign/assets/user-123/asset-models/model-1/image-1700000000000-thumbnail.png?token=abc";
-/** An image the user uploaded for one specific asset. */
-const OWN_ASSET_IMAGE_URL =
-  "https://xyz.supabase.co/storage/v1/object/sign/assets/user-123/asset-abc/main-image-1700000000000?token=abc";
-
-describe("isAssetModelImageUrl", () => {
-  it("recognises an asset-model image by its storage path", () => {
-    expect(isAssetModelImageUrl(MODEL_IMAGE_URL)).toBe(true);
-    expect(isAssetModelImageUrl(MODEL_IMAGE_URL, "model-1")).toBe(true);
-  });
-
-  it("still recognises the image after the signed URL was re-signed", () => {
-    // why: refreshExpiredAssetImages rewrites the token on the asset row, so an
-    // exact-URL comparison would lose track of the inheritance. The path is
-    // the stable part.
-    expect(isAssetModelImageUrl(MODEL_IMAGE_URL_RESIGNED, "model-1")).toBe(
-      true
-    );
-  });
-
-  it("does not claim another model's image", () => {
-    expect(isAssetModelImageUrl(MODEL_IMAGE_URL, "model-2")).toBe(false);
-  });
-
-  it("does not claim an image the user uploaded for the asset itself", () => {
-    expect(isAssetModelImageUrl(OWN_ASSET_IMAGE_URL)).toBe(false);
-    expect(isAssetModelImageUrl(OWN_ASSET_IMAGE_URL, "model-1")).toBe(false);
-  });
-
-  it("treats a missing image as not inherited", () => {
-    expect(isAssetModelImageUrl(null)).toBe(false);
-    expect(isAssetModelImageUrl(undefined)).toBe(false);
-    expect(isAssetModelImageUrl("")).toBe(false);
-  });
-});
-
-describe("getInheritableAssetModelImage", () => {
-  beforeEach(() => {
-    vitest.clearAllMocks();
-  });
-
-  it("returns the model's image plus its derived shared thumbnail", async () => {
-    const imageExpiration = new Date("2026-08-01T00:00:00.000Z");
-    // @ts-expect-error mock setup
-    db.assetModel.findFirst.mockResolvedValue({
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-    });
-
-    const result = await getInheritableAssetModelImage({
-      assetModelId: "model-1",
-      organizationId: "org-123",
-    });
-
-    expect(db.assetModel.findFirst).toHaveBeenCalledWith({
-      where: { id: "model-1", organizationId: "org-123" },
-      select: { image: true, imageExpiration: true },
-    });
-    expect(result).toEqual({
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-      // Derived from the image path by the same rule the upload wrote it with,
-      // so a fresh asset renders at list size without a generate-thumbnail hop.
-      thumbnailImage:
-        "https://xyz.supabase.co/storage/v1/object/sign/assets/user-123/asset-models/model-1/image-1700000000000-thumbnail.png?token=signed",
-    });
-  });
-
-  it("returns null when the model has no image", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.findFirst.mockResolvedValue({
-      image: null,
-      imageExpiration: null,
-    });
-
-    await expect(
-      getInheritableAssetModelImage({
-        assetModelId: "model-1",
-        organizationId: "org-123",
-      })
-    ).resolves.toBeNull();
-  });
-
-  it("returns null for a model outside the organization", async () => {
-    // @ts-expect-error mock setup
-    db.assetModel.findFirst.mockResolvedValue(null);
-
-    await expect(
-      getInheritableAssetModelImage({
-        assetModelId: "foreign-model",
-        organizationId: "org-123",
-      })
-    ).resolves.toBeNull();
-  });
-});
-
-describe("propagateAssetModelImageToAssets", () => {
-  const imageExpiration = new Date("2026-08-01T00:00:00.000Z");
-
-  beforeEach(() => {
-    vitest.clearAllMocks();
-  });
-
-  it("re-stamps assets with no image and assets already inheriting, but never an asset with its own image", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      { id: "asset-no-image", mainImage: null },
-      { id: "asset-inheriting", mainImage: MODEL_IMAGE_URL_RESIGNED },
-      { id: "asset-own-image", mainImage: OWN_ASSET_IMAGE_URL },
-    ]);
-    // The two inheriting rows have different observed images, so they land in
-    // two grouped, individually-guarded writes of one row each.
-    // @ts-expect-error mock setup
-    db.asset.updateMany.mockResolvedValue({ count: 1 });
-
-    const count = await propagateAssetModelImageToAssets({
-      assetModelId: "model-1",
-      organizationId: "org-123",
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-      thumbnailImage: MODEL_THUMBNAIL_URL,
-    });
-
-    expect(db.asset.findMany).toHaveBeenCalledWith({
-      where: { assetModelId: "model-1", organizationId: "org-123" },
-      select: { id: true, mainImage: true },
-    });
-    // Two writes: the rows are grouped by the image each was observed to have,
-    // and every predicate carries that value so a concurrent per-asset upload
-    // can't be clobbered.
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-no-image"] },
-        organizationId: "org-123",
-        mainImage: null,
-      },
-      data: {
-        mainImage: MODEL_IMAGE_URL,
-        mainImageExpiration: imageExpiration,
-        // why: the shared thumbnail is stamped too, so N inheriting assets
-        // don't each fire /api/asset/generate-thumbnail to build the one
-        // object that already exists.
-        thumbnailImage: MODEL_THUMBNAIL_URL,
-      },
-    });
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-inheriting"] },
-        organizationId: "org-123",
-        mainImage: MODEL_IMAGE_URL_RESIGNED,
-      },
-      data: {
-        mainImage: MODEL_IMAGE_URL,
-        mainImageExpiration: imageExpiration,
-        thumbnailImage: MODEL_THUMBNAIL_URL,
-      },
-    });
-    expect(db.asset.updateMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: { in: expect.arrayContaining(["asset-own-image"]) },
-        }),
-      })
-    );
-    expect(count).toBe(2);
-  });
-
-  it("writes nothing when every asset has its own image", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      { id: "asset-own-image", mainImage: OWN_ASSET_IMAGE_URL },
-    ]);
-
-    const count = await propagateAssetModelImageToAssets({
-      assetModelId: "model-1",
-      organizationId: "org-123",
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-      thumbnailImage: MODEL_THUMBNAIL_URL,
-    });
-
-    expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(count).toBe(0);
-  });
-
-  it("writes nothing when the model has no assets", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([]);
-
-    const count = await propagateAssetModelImageToAssets({
-      assetModelId: "model-1",
-      organizationId: "org-123",
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-      thumbnailImage: MODEL_THUMBNAIL_URL,
-    });
-
-    expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(count).toBe(0);
-  });
-
-  // why: the inheriting/own-image decision is made in app code against a prior
-  // read. Without the observed image in the predicate, an upload landing in that
-  // gap would be overwritten by the model cover.
-  it("reports no change for an asset whose image moved between the read and the write", async () => {
-    // @ts-expect-error mock setup
-    db.asset.findMany.mockResolvedValue([
-      { id: "asset-racing", mainImage: null },
-    ]);
-    // Zero rows matched: the row no longer holds the image we observed.
-    // @ts-expect-error mock setup
-    db.asset.updateMany.mockResolvedValue({ count: 0 });
-
-    const count = await propagateAssetModelImageToAssets({
-      assetModelId: "model-1",
-      organizationId: "org-123",
-      image: MODEL_IMAGE_URL,
-      imageExpiration,
-      thumbnailImage: MODEL_THUMBNAIL_URL,
-    });
-
-    expect(db.asset.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ mainImage: null }),
-      })
-    );
-    expect(count).toBe(0);
   });
 });

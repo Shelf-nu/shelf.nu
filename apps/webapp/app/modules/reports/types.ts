@@ -305,6 +305,9 @@ export interface IdleAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   category: string | null;
   location: string | null;
   /** Date of last booking checkout, null if never booked */
@@ -344,6 +347,9 @@ export interface CustodySnapshotRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   category: string | null;
   location: string | null;
   custodianId: string;
@@ -385,6 +391,9 @@ export interface TopBookedAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   category: string | null;
   location: string | null;
   /** Number of times booked in the timeframe */
@@ -481,6 +490,9 @@ export interface AssetInventoryRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   category: string | null;
   location: string | null;
   status: string;
@@ -548,6 +560,9 @@ export interface AssetUtilizationRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   category: string | null;
   location: string | null;
   /** Total days in the period */
@@ -600,6 +615,9 @@ export interface AssetActivityRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   /** Type of activity */
   activityType: AssetActivityType;
   /** Human-readable description */

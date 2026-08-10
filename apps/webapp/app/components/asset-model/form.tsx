@@ -36,6 +36,7 @@ import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import When from "../when/when";
 
 /** Links each image input to the <p> stating its accepted formats and size. */
 const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
@@ -58,8 +59,17 @@ type AssetModelFormProps = {
   /** Pre-filled values for edit mode */
   assetModel?: Pick<
     AssetModel,
-    "name" | "description" | "defaultCategoryId" | "defaultValuation" | "image"
-  >;
+    | "name"
+    | "description"
+    | "defaultCategoryId"
+    | "defaultValuation"
+    | "image"
+    | "thumbnailImage"
+  > & {
+    /** Assets of this model that currently show its cover image (i.e. have no
+     * image of their own). Drives the blast-radius hint under the field. */
+    _count?: { assets: number };
+  };
   /** The API URL to submit the form to (used in inline/dialog mode). */
   apiUrl?: string;
   /** Callback function to handle cancel action when form is used inline. */
@@ -415,7 +425,7 @@ function FullPageForm({
               // but its handler no-ops without a full-size URL — a dead control.
               <ImageWithPreview
                 imageUrl={assetModel.image}
-                thumbnailUrl={assetModel.image}
+                thumbnailUrl={assetModel.thumbnailImage ?? assetModel.image}
                 alt={`${assetModel.name} image`}
                 className="mb-2 size-16 rounded border object-cover"
                 withPreview
@@ -447,6 +457,19 @@ function FullPageForm({
             <p id={`${PAGE_IMAGE_HELP_ID}-sm`} className="mt-2 lg:hidden">
               Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
             </p>
+            {/*
+              Blast radius: replacing this image changes what these assets show
+              immediately — nothing is copied, so every one of them resolves the
+              new URL on its next render.
+            */}
+            <When truthy={Boolean(assetModel?._count?.assets)}>
+              <p className="mt-2 text-[12px] text-gray-500">
+                Used by <b>{assetModel?._count?.assets}</b>{" "}
+                {assetModel?._count?.assets === 1 ? "asset" : "assets"} that
+                {assetModel?._count?.assets === 1 ? " doesn't" : " don't"} have
+                an image of their own.
+              </p>
+            </When>
           </div>
         </FormRow>
 

@@ -41,6 +41,7 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },

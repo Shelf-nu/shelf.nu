@@ -200,6 +200,10 @@ export type AdvancedIndexAsset = Pick<
   qrId: string; // QR code will always be available
   assetModelId?: string | null;
   assetModelName?: string | null;
+  /** The model's cover image, used when the asset has none of its own.
+   * Shaped as the nested relation the Prisma selects return so
+   * `resolveAssetImage` takes the same input on both index modes. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   /** Primary kit (oldest pivot row) — mirrors the LATERAL primary-pick
    * used by ORDER BY and filters. Kept alongside `kits` for back-compat
    * with consumers that only need the primary. */

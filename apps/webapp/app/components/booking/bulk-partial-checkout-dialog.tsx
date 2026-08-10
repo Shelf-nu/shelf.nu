@@ -653,6 +653,7 @@ export default function BulkPartialCheckoutDialog({
                                   mainImage: asset.mainImage,
                                   mainImageExpiration:
                                     asset.mainImageExpiration,
+                                  assetModel: asset.assetModel ?? null,
                                 }}
                                 alt={`${asset.title} main image`}
                               />
@@ -709,6 +710,7 @@ export default function BulkPartialCheckoutDialog({
                                 thumbnailImage: asset.thumbnailImage,
                                 mainImage: asset.mainImage,
                                 mainImageExpiration: asset.mainImageExpiration,
+                                assetModel: asset.assetModel ?? null,
                               }}
                               alt={`${asset.title} main image`}
                             />

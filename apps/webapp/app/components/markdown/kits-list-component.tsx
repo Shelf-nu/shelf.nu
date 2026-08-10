@@ -159,6 +159,10 @@ export function KitsListComponent({
                             mainImageExpiration: asset.mainImageExpiration
                               ? new Date(asset.mainImageExpiration)
                               : null,
+                            // why: /api/kits resolves the model cascade
+                            // server-side into `mainImage`, so there is no
+                            // nested model to pass here.
+                            assetModel: null,
                           }}
                           alt={`${asset.title} main image`}
                         />

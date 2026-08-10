@@ -56,6 +56,7 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
@@ -1518,6 +1519,8 @@ async function fetchIdleAssetRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
       type: true,
@@ -1580,6 +1583,7 @@ async function fetchIdleAssetRows(
       assetId: asset.id,
       assetName: asset.title,
       thumbnailImage: asset.thumbnailImage,
+      assetModel: asset.assetModel ?? null,
       category: asset.category?.name || null,
       location: getPrimaryLocation(asset)?.name || null,
       lastBookedAt,
@@ -1928,6 +1932,8 @@ async function fetchCustodyRows(
           mainImage: true,
           mainImageExpiration: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           valuation: true,
           type: true,
           unitOfMeasure: true,
@@ -1970,6 +1976,7 @@ async function fetchCustodyRows(
       assetName: c.asset.title,
       thumbnailImage:
         refreshedThumbnailByAssetId.get(c.asset.id) ?? c.asset.thumbnailImage,
+      assetModel: c.asset.assetModel ?? null,
       category: c.asset.category?.name || null,
       location: getPrimaryLocation(c.asset)?.name || null,
       custodianId: c.custodian.id,
@@ -2213,6 +2220,8 @@ async function fetchTopBookedAssetRows(
               mainImage: true,
               mainImageExpiration: true,
               thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: { select: { name: true } },
               assetLocations: {
                 select: {
@@ -2234,6 +2243,10 @@ async function fetchTopBookedAssetRows(
         id: string;
         title: string;
         thumbnailImage: string | null;
+        assetModel: {
+          image: string | null;
+          thumbnailImage: string | null;
+        } | null;
         category: string | null;
         location: string | null;
       };
@@ -2278,6 +2291,7 @@ async function fetchTopBookedAssetRows(
             id: asset.id,
             title: asset.title,
             thumbnailImage: asset.thumbnailImage,
+            assetModel: asset.assetModel ?? null,
             category: asset.category?.name || null,
             location: getPrimaryLocation(asset)?.name || null,
           },
@@ -2310,6 +2324,7 @@ async function fetchTopBookedAssetRows(
       thumbnailImage:
         refreshedThumbnailByAssetId.get(entry.asset.id) ??
         entry.asset.thumbnailImage,
+      assetModel: entry.asset.assetModel,
       category: entry.asset.category,
       location: entry.asset.location,
       bookingCount: entry.bookingCount,
@@ -3156,6 +3171,8 @@ async function fetchInventoryRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
       type: true,
@@ -3188,6 +3205,7 @@ async function fetchInventoryRows(
     assetId: a.id,
     assetName: a.title,
     thumbnailImage: a.thumbnailImage,
+    assetModel: a.assetModel ?? null,
     category: a.category?.name || null,
     location: getPrimaryLocation(a)?.name || null,
     status: a.status,
@@ -3634,6 +3652,8 @@ export async function assetUtilizationReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         valuation: true,
         type: true,
         quantity: true,
@@ -3703,6 +3723,7 @@ export async function assetUtilizationReport(
         assetId: asset.id,
         assetName: asset.title,
         thumbnailImage: asset.thumbnailImage,
+        assetModel: asset.assetModel ?? null,
         category: asset.category?.name || null,
         location: getPrimaryLocation(asset)?.name || null,
         totalDays,
@@ -3924,6 +3945,8 @@ export async function assetActivityReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
       },
     });
     const refreshedAssets = await refreshExpiredAssetImages(assets);
@@ -3943,6 +3966,7 @@ export async function assetActivityReport(
         assetId: event.assetId || "",
         assetName: asset?.title || "Unknown Asset",
         thumbnailImage: asset?.thumbnailImage || null,
+        assetModel: asset?.assetModel ?? null,
         activityType: mapActionToActivityType(event.action),
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,

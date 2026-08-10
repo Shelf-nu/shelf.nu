@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
@@ -656,6 +657,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Model cover image for assets with no image of their own
+                ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
                 // field worker can match the physical asset to the row.
                 // See `app/modules/barcode/display.ts`.
@@ -1043,6 +1046,8 @@ export async function getAssetsForAuditSession({
         title: true,
         mainImage: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         mainImageExpiration: true,
         // Asset-code resolution fields. Audits are the strongest use case —
         // a field worker matches the physical label to a row. See

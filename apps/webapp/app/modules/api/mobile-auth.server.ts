@@ -5,6 +5,11 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  serializeAssetImage,
+  type AssetImageSource,
+} from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -326,6 +331,11 @@ export const MOBILE_ASSET_SELECT = {
   title: true,
   status: true,
   mainImage: true,
+  thumbnailImage: true,
+  // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
+  // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
+  // so the companion inherits model images with no client release.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
@@ -471,7 +481,19 @@ export type MobileAssetResponse = {
   status: string;
   /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
   assetModelId?: string | null;
+  /**
+   * Image to render, with the model-image cascade already resolved: the
+   * asset's own image, else its model's cover image, else `null` (the
+   * companion draws its own placeholder — the placeholder PATH is never sent).
+   */
   mainImage: string | null;
+  /** 108px counterpart of {@link mainImage}, resolved from the same tier. */
+  thumbnailImage: string | null;
+  /**
+   * Where {@link mainImage} came from. Additive — lets the companion label an
+   * inherited image later without a second request.
+   */
+  imageSource: AssetImageSource;
   availableToBook: boolean;
   category: { name: string } | null;
   kitId: string | null;
@@ -530,6 +552,8 @@ export function shapeMobileAssetResponse(asset: {
   title: string;
   status: string;
   mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
   type: AssetType;
@@ -547,6 +571,14 @@ export function shapeMobileAssetResponse(asset: {
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  /**
+   * Collapse the model-image cascade before the row leaves the server. The
+   * companion reads `mainImage`/`thumbnailImage` directly and cannot be
+   * updated in lockstep with the API (native binary, no OTA for native
+   * changes), so resolving here is what makes inherited images work without a
+   * client release. `imageSource` is additive, for later provenance UI.
+   */
+  const image = serializeAssetImage(rest);
   // Aggregate custody rows by custodian so a holder with more than one row on
   // the same asset (e.g. a kit-driven row plus a standalone row) shows once
   // with their summed quantity rather than duplicated. Insertion order follows
@@ -571,9 +603,9 @@ export function shapeMobileAssetResponse(asset: {
     }
   }
   return {
-    // `...rest` carries the new scalar quantity fields (type, quantity,
-    // minQuantity, unitOfMeasure, consumptionType) through verbatim.
-    ...rest,
+    // `...image` carries `...rest` through verbatim (including the new scalar
+    // quantity fields) with the image cascade already resolved.
+    ...image,
     kitId: kit?.id ?? null,
     kit,
     location: assetLocations[0]?.location ?? null,

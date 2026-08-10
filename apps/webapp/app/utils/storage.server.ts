@@ -857,7 +857,7 @@ export function getFileUploadPath({
   typeId,
 }: {
   organizationId: string;
-  type: "locations" | "audits";
+  type: "locations" | "audits" | "asset-models";
   typeId: string;
 }) {
   return `${organizationId}/${type}/${typeId}/${id()}`;
