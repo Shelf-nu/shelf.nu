@@ -151,12 +151,17 @@ import type {
 } from "./move-units.types";
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import {
-  CUSTOM_FIELD_SEARCH_PATHS,
   buildAdvancedAssetsQuery,
   generateWhereClause,
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
+import {
+  buildFullAssetSearchOr,
+  buildNarrowAssetSearchOr,
+  looksLikeAssetId,
+  splitAssetSearchTerms,
+} from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -566,33 +571,6 @@ const unavailableBookingStatuses = [
 ];
 
 /**
- * Matches the shape of an asset identifier or barcode / QR id. Two forms:
- *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
- *     prefix when scanning or typing an ID
- *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
- *     digits, matching the format produced by getNextSequentialId
- *
- * Used by getAssets to run ID-shaped queries against a narrower OR clause
- * (sequentialId / barcodes.value / qrCodes.id) first, instead of the full
- * 10-branch chain. The narrower clause skips the slow paths — custodian
- * name traversal and the unindexed customFields JSON ILIKE — while still
- * covering every place an ID-shaped value is *most likely* to live.
- *
- * Because a bare number can equally be a real barcode OR a value embedded
- * in a title / description / custom field (indistinguishable by shape),
- * getAssets falls back to the full search when this narrow clause returns
- * zero rows — so nothing is ever silently missed. See the fallback re-query
- * in {@link getAssets}.
- *
- * Loose terms like "lab-12" or "AS1000" don't match here and go straight to
- * the full search, since they're more likely substrings of titles, custom
- * fields, etc.
- */
-function looksLikeAssetId(term: string): boolean {
-  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
-}
-
-/**
  * Fetches assets directly from the asset table with enhanced search capabilities
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
@@ -668,150 +646,26 @@ export async function getAssets(params: {
     }
 
     if (search) {
-      const searchTerms = search
-        .toLowerCase()
-        .trim()
-        .split(",")
-        .map((term) => term.trim())
-        .filter(Boolean);
+      const searchTerms = splitAssetSearchTerms(search);
 
       if (searchTerms.length > 0) {
-        // Builder for the full multi-column clause: matches a term anywhere it
-        // can legitimately live — title, sequentialId, description, category,
-        // location, tags, custodian names, QR/barcode, and custom fields. It
-        // is the slow path (custodian relation traversal + an unindexed
-        // customFields JSON ILIKE), so for ID-shaped searches we run the
-        // narrow clause first and only build/use this when it finds nothing
-        // (see the fallback re-query further down). Defined as a closure so the
-        // clause is constructed only when actually needed.
-        buildFullSearchOr = () =>
-          searchTerms.map((term) => ({
-            OR: [
-              // Search in asset fields
-              { title: { contains: term, mode: "insensitive" } },
-              // Search in asset sequential id
-              { sequentialId: { contains: term, mode: "insensitive" } },
-              // Search in asset description
-              { description: { contains: term, mode: "insensitive" } },
-              // Search in related category
-              { category: { name: { contains: term, mode: "insensitive" } } },
-              // Search in related location — traverses the AssetLocation pivot
-              // since an asset can be placed at multiple locations.
-              {
-                assetLocations: {
-                  some: {
-                    location: {
-                      name: { contains: term, mode: "insensitive" },
-                    },
-                  },
-                },
-              },
-              // Search in related tags
-              {
-                tags: {
-                  some: { name: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search in custodian names — custody is a list relation, so
-              // traverse it with `some`.
-              {
-                custody: {
-                  some: {
-                    custodian: {
-                      OR: [
-                        { name: { contains: term, mode: "insensitive" } },
-                        {
-                          user: {
-                            OR: [
-                              {
-                                firstName: {
-                                  contains: term,
-                                  mode: "insensitive",
-                                },
-                              },
-                              {
-                                lastName: {
-                                  contains: term,
-                                  mode: "insensitive",
-                                },
-                              },
-                            ],
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-              },
-              // Search qr code id
-              {
-                qrCodes: {
-                  some: { id: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search barcode values
-              {
-                barcodes: {
-                  some: { value: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search in custom fields
-              {
-                customFields: {
-                  some: {
-                    OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                      value: {
-                        path: [jsonPath],
-                        string_contains: term,
-                        mode: "insensitive",
-                      },
-                    })),
-                  },
-                },
-              },
-            ],
-          }));
+        // Full multi-column clause (title, sequentialId, description,
+        // category, location, tags, custodian names, QR/barcode, custom
+        // fields) — shared with the mobile assets endpoint via
+        // modules/asset/search.server.ts so web and mobile search can't
+        // drift apart. It is the slow path, so for ID-shaped searches we run
+        // the narrow clause first and only build/use this when it finds
+        // nothing (see the fallback re-query further down). Kept as a
+        // closure so the clause is constructed only when actually needed.
+        buildFullSearchOr = () => buildFullAssetSearchOr(searchTerms);
 
-        // Fast path: when every term looks like an asset identifier — either
-        // bare digits ("21035", a UPC barcode) or canonical sequentialId
-        // ("SAM-0001") — narrow the OR clause to the columns where an
-        // ID-shaped value can legitimately live: sequentialId, barcode value,
-        // QR id, plus title and description. The ID columns are covered by
-        // trigram GIN indexes added in migration 20260525110348, and
-        // title/description are covered by the composite trigram GIN index
-        // Asset_title_description_idx — so the planner stays on indexed scans
-        // and a real ID lookup (the common case) returns immediately.
-        //
-        // title + description are included here (not deferred to the fallback)
-        // because a bare-numeric term often lives ONLY inside a title — e.g.
-        // searching "451" must match "KCI-451 Kids Resources Box". Without
-        // these branches the narrow query can still return rows (some OTHER
-        // asset matches "451" in an ID column), which suppresses the
-        // zero-row fallback and silently drops the title-only match.
-        //
-        // The fallback flag stays set so the remaining slow-path columns
-        // (custodian names, category/location/tags, custom-field JSON ILIKE)
-        // are still covered when this clause returns zero rows.
+        // Fast path for ID-shaped terms: narrow indexed clause first, full
+        // clause only when it returns zero rows (fallback re-query below).
+        // Column choice + rationale live on buildNarrowAssetSearchOr in
+        // modules/asset/search.server.ts.
         if (searchTerms.every(looksLikeAssetId)) {
           shouldFallbackToFullSearch = true;
-          where.OR = searchTerms.flatMap((term) => [
-            { sequentialId: { contains: term, mode: "insensitive" } },
-            {
-              barcodes: {
-                some: { value: { contains: term, mode: "insensitive" } },
-              },
-            },
-            {
-              qrCodes: {
-                some: { id: { contains: term, mode: "insensitive" } },
-              },
-            },
-            // Trigram-indexed (Asset_title_description_idx) — matches a
-            // bare-numeric substring embedded in a title/description directly
-            // in the fast path, without relying on the zero-row fallback.
-            { title: { contains: term, mode: "insensitive" } },
-            { description: { contains: term, mode: "insensitive" } },
-          ]);
+          where.OR = buildNarrowAssetSearchOr(searchTerms);
           // Remember how many entries belong to the search so the fallback can
           // swap them out without disturbing filter clauses appended later.
           narrowSearchOrCount = where.OR.length;

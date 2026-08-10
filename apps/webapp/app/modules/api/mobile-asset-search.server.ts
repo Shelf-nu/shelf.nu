@@ -1,44 +1,66 @@
 import type { Prisma } from "@prisma/client";
+import {
+  buildFullAssetSearchOr,
+  buildNarrowAssetSearchOr,
+  looksLikeAssetId,
+  splitAssetSearchTerms,
+} from "~/modules/asset/search.server";
 
 /**
- * Search fragment for the mobile assets list
+ * Search clauses for the mobile assets list
  * (routes/api+/mobile+/assets.ts).
  *
- * Mirrors the LIGHT branches of the web asset search (`buildFullSearchOr`,
- * modules/asset/service.server.ts): title, sequentialId, description,
- * category name and tag names. Every branch rides an existing GIN trigram
- * index (compound Asset title+description, Category.name, Tag.name — see
- * migration 20260525110348_add_trigram_indexes_for_simple_search), so no new
- * index is needed.
+ * Thin composition over the SHARED simple-mode search module
+ * (`modules/asset/search.server.ts`) — the same clause builders the web
+ * `getAssets` fetcher uses. Mobile search therefore matches exactly the
+ * fields web search matches (title, sequentialId, description, category,
+ * location, tags, custodian names, QR/barcode, custom fields) and inherits
+ * web's ID-shaped fast-path strategy: narrow indexed clause first, full
+ * clause only when the narrow one finds nothing.
+ */
+
+/** The two-step where fragments the mobile assets route queries with. */
+export interface MobileAssetSearchClauses {
+  /** Fragment for the first query. `{}` when there is nothing to search. */
+  primary: Prisma.AssetWhereInput;
+  /**
+   * Full-clause fragment to re-query with when `primary` (the narrow
+   * ID-shaped fast path) returns zero rows. `null` when `primary` already IS
+   * the full clause — or when there is no search — meaning no second query
+   * is ever needed.
+   */
+  fallback: Prisma.AssetWhereInput | null;
+}
+
+/**
+ * Builds the search fragments for the mobile assets list.
  *
- * Deliberately still NOT the web search's heavy branches — custodian-name
- * traversal, custom-fields JSON ILIKE, location names and QR/barcode values.
- * The first two are slow (relation fan-out + unindexed JSON scan), and codes
- * are scanned rather than typed on mobile.
+ * Mirrors `getAssets`' strategy exactly: ID-shaped terms (see
+ * `looksLikeAssetId`) take the narrow indexed clause with the full clause as
+ * a zero-row fallback; anything else goes straight to the full clause.
  *
  * @param search - Raw (already length-capped) search term from the request
- * @returns A spreadable `Prisma.AssetWhereInput` fragment — `{}` when the
- *   term is empty, otherwise an `OR` across the searchable fields
+ * @returns Spreadable primary/fallback where fragments — see
+ *   {@link MobileAssetSearchClauses}
  */
 export function buildMobileAssetSearchWhere(
   search: string
-): Prisma.AssetWhereInput {
-  if (!search) {
-    return {};
+): MobileAssetSearchClauses {
+  const searchTerms = splitAssetSearchTerms(search);
+
+  if (searchTerms.length === 0) {
+    return { primary: {}, fallback: null };
   }
 
-  const contains = { contains: search, mode: "insensitive" as const };
+  if (searchTerms.every(looksLikeAssetId)) {
+    return {
+      primary: { OR: buildNarrowAssetSearchOr(searchTerms) },
+      fallback: { OR: buildFullAssetSearchOr(searchTerms) },
+    };
+  }
 
   return {
-    OR: [
-      { title: contains },
-      // SAM id (e.g. "SAM-0001") — when the workspace display preference is
-      // SAM every asset row shows it, so a typed id must match here.
-      // `sequentialId` is indexed; a normal word term can't false-positive it.
-      { sequentialId: contains },
-      { description: contains },
-      { category: { name: contains } },
-      { tags: { some: { name: contains } } },
-    ],
+    primary: { OR: buildFullAssetSearchOr(searchTerms) },
+    fallback: null,
   };
 }
