@@ -404,7 +404,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        selectedTeamMembers: booking.custodianTeamMemberId
+        // Server-derived: this booking's own custodian, which the viewer may
+        // not otherwise be allowed to see. It has to render regardless, or the
+        // sidebar loses the chip for the custodian already on the booking.
+        trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
         // A sidebar FILTER, so the custody read-visibility rule governs — the

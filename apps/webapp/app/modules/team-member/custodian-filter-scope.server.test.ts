@@ -37,6 +37,11 @@ function rowsWhere() {
   return dbMocks.findMany.mock.calls[0]?.[0]?.where;
 }
 
+/** The `where` of the query that fetches already-selected members. */
+function selectedWhere() {
+  return dbMocks.findMany.mock.calls[1]?.[0]?.where;
+}
+
 /** The `where` of the count query. */
 function countWhere() {
   return dbMocks.count.mock.calls.at(-1)?.[0]?.where;
@@ -84,6 +89,59 @@ describe("getTeamMemberForCustodianFilter", () => {
     });
 
     expect(countWhere().user).toEqual({ isNot: null });
+  });
+
+  /**
+   * `selectedTeamMembers` is caller-controlled at almost every call site — it
+   * comes from `searchParams.getAll("teamMember")`. Fetching those ids scoped
+   * only by `organizationId` handed back any same-org member's row, including
+   * `user.email`, to a caller restricted to their own.
+   */
+  describe("selected ids", () => {
+    it("scopes caller-supplied selected ids like every other row", async () => {
+      await getTeamMemberForCustodianFilter({
+        organizationId: ORGANIZATION_ID,
+        userId: USER_ID,
+        filterByUserId: true,
+        selectedTeamMembers: ["someone-elses-team-member-id"],
+      });
+
+      const untrusted = selectedWhere().OR[0];
+
+      expect(untrusted.id).toEqual({ in: ["someone-elses-team-member-id"] });
+      // The leak: without these the caller got a colleague's row + email.
+      expect(untrusted.userId).toBe(USER_ID);
+      expect(untrusted.deletedAt).toBeNull();
+    });
+
+    it("exempts server-derived ids from the custody scope", async () => {
+      await getTeamMemberForCustodianFilter({
+        organizationId: ORGANIZATION_ID,
+        userId: USER_ID,
+        filterByUserId: true,
+        usersOnly: true,
+        trustedSelectedTeamMembers: ["the-bookings-own-custodian"],
+      });
+
+      const trusted = selectedWhere().OR[1];
+
+      // A booking's own custodian is legitimately outside the viewer's custody
+      // scope, and may be an NRM — scoping it would drop the custodian chip.
+      expect(trusted.id).toEqual({ in: ["the-bookings-own-custodian"] });
+      expect(trusted.userId).toBeUndefined();
+      expect(trusted.user).toBeUndefined();
+    });
+
+    it("keeps the organization scope on trusted ids", async () => {
+      await getTeamMemberForCustodianFilter({
+        organizationId: ORGANIZATION_ID,
+        userId: USER_ID,
+        trustedSelectedTeamMembers: ["some-id"],
+      });
+
+      // Trusted means "exempt from the custody scope", never "cross-org".
+      expect(selectedWhere().organizationId).toBe(ORGANIZATION_ID);
+    });
   });
 
   it("returns nothing and queries nothing when the scope is `none`", async () => {

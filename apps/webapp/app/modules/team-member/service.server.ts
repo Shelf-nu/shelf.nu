@@ -321,6 +321,7 @@ export function resolveCustodianPickerScope({
 export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
+  trustedSelectedTeamMembers = [],
   getAll,
   filterByUserId,
   returnNone,
@@ -328,7 +329,30 @@ export async function getTeamMemberForCustodianFilter({
   usersOnly,
 }: {
   organizationId: Organization["id"];
+  /**
+   * Ids the picker already has selected, as supplied by the CALLER — in
+   * practice `searchParams.getAll("teamMember")` at almost every call site.
+   *
+   * Treated as untrusted: the custody scope is applied to them exactly as it
+   * is to every other row. Anything else lets a restricted caller read a
+   * colleague's row, `user.email` included, by putting an arbitrary id in the
+   * query string.
+   */
   selectedTeamMembers?: TeamMember["id"][];
+  /**
+   * Ids the SERVER derived, which must render even though they sit outside the
+   * caller's custody scope — today only a booking's own custodian.
+   *
+   * HAZARD — never pass request input here. These skip the custody scope, so a
+   * caller-controlled value would be precisely the disclosure
+   * {@link selectedTeamMembers} exists to prevent. The organization scope still
+   * applies and is not optional.
+   *
+   * Needed because a booking's custodian may be someone the viewer cannot
+   * otherwise see, or an NRM under `usersOnly` — scoping those away drops the
+   * custodian chip from the form.
+   */
+  trustedSelectedTeamMembers?: TeamMember["id"][];
   getAll?: boolean;
   /**
    * IF set to true and userId is set, it will only return the teamMembers where the userId is equal to the one passed
@@ -390,7 +414,19 @@ export async function getTeamMemberForCustodianFilter({
           take: getAll ? undefined : 12,
         }),
         db.teamMember.findMany({
-          where: { organizationId, id: { in: selectedTeamMembers } },
+          where: {
+            organizationId,
+            OR: [
+              // Caller-supplied ids get the SAME scope as every other row.
+              // Fetching them org-scoped only handed a restricted caller any
+              // same-org member's row — including `user.email` — for any id
+              // they put in `?teamMember=`.
+              { ...scopedWhere, id: { in: selectedTeamMembers } },
+              // Server-derived ids are exempt from the custody scope but never
+              // from the org scope, which stays AND-ed above.
+              { id: { in: trustedSelectedTeamMembers } },
+            ],
+          },
           include: {
             user: {
               select: {
@@ -608,7 +644,10 @@ export async function getTeamMemberForForm({
 
     return await getTeamMemberForCustodianFilter({
       organizationId,
-      selectedTeamMembers,
+      // Server-derived: the DRAFT booking's own custodian, resolved above from
+      // the booking rather than from request input. Passed as trusted because
+      // an NRM custodian would otherwise be dropped by `usersOnly`.
+      trustedSelectedTeamMembers: selectedTeamMembers,
       getAll,
       userId,
       filterByUserId: false,
