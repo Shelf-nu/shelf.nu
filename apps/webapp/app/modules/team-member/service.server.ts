@@ -354,15 +354,27 @@ export async function getTeamMemberForCustodianFilter({
       return { teamMembers: [], totalTeamMembers: 0 };
     }
 
+    /**
+     * The custody scope, applied to the rows AND the total alike.
+     *
+     * Counting unscoped while the rows are scoped puts the workspace's
+     * team-member total into a restricted user's loader payload, and makes the
+     * picker's "showing N out of M" footer disagree with what the search
+     * endpoint returns for the same caller.
+     */
+    const scopedWhere = {
+      organizationId,
+      deletedAt: null,
+      userId: filterByUserId && userId ? userId : undefined,
+      ...(usersOnly ? { user: { isNot: null } } : {}),
+    };
+
     const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
       await Promise.all([
         db.teamMember.findMany({
           where: {
-            organizationId,
+            ...scopedWhere,
             id: { notIn: selectedTeamMembers },
-            deletedAt: null,
-            userId: filterByUserId && userId ? userId : undefined,
-            ...(usersOnly ? { user: { isNot: null } } : {}),
           },
           include: {
             user: {
@@ -391,13 +403,7 @@ export async function getTeamMemberForCustodianFilter({
             },
           },
         }),
-        db.teamMember.count({
-          where: {
-            organizationId,
-            deletedAt: null,
-            ...(usersOnly ? { user: { isNot: null } } : {}),
-          },
-        }),
+        db.teamMember.count({ where: scopedWhere }),
       ]);
 
     const teamMembers = [
