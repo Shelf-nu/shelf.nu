@@ -47,6 +47,13 @@ type UnassignedModelUnitsPillProps = {
    * guard.
    */
   count: number;
+  /**
+   * Whether units can still be assigned (see `canAssignModelUnits`). The pill
+   * is a call to attention in a triage list, so on a finished, cancelled or
+   * archived booking it renders nothing: flagging a booking nobody can act on
+   * is pure noise in the one list operators scan to decide what needs work.
+   */
+  canAssign: boolean;
 };
 
 /**
@@ -57,8 +64,9 @@ type UnassignedModelUnitsPillProps = {
  */
 export function UnassignedModelUnitsPill({
   count,
+  canAssign,
 }: UnassignedModelUnitsPillProps) {
-  if (count <= 0) {
+  if (count <= 0 || !canAssign) {
     return null;
   }
 

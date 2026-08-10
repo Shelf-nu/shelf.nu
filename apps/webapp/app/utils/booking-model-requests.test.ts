@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canAssignModelUnits,
   countReservedModelUnits,
   countUnassignedModelUnits,
   getOutstandingModelRequests,
@@ -135,5 +136,29 @@ describe("countUnassignedModelUnits", () => {
         { quantity: 5, fulfilledQuantity: 3, fulfilledAt: null },
       ])
     ).toHaveLength(1);
+  });
+});
+
+describe("canAssignModelUnits", () => {
+  it("allows assigning while the booking is live", () => {
+    for (const status of ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"]) {
+      expect(canAssignModelUnits(status)).toBe(true);
+    }
+  });
+
+  it("refuses once the booking is finished, cancelled or archived", () => {
+    // A cancelled booking was showing an amber "4 units unassigned" flag in the
+    // bookings list and "still to assign" on its page. Nothing will ever be
+    // assigned there, so both invite action nobody can take and the flag is
+    // noise in the list operators use to decide what needs work.
+    for (const status of ["COMPLETE", "CANCELLED", "ARCHIVED"]) {
+      expect(canAssignModelUnits(status)).toBe(false);
+    }
+  });
+
+  it("treats an unrecognised status as not assignable", () => {
+    // Fail closed: a status added later shouldn't silently start advertising
+    // work on a booking whose lifecycle nobody has reviewed here.
+    expect(canAssignModelUnits("SOME_FUTURE_STATUS")).toBe(false);
   });
 });

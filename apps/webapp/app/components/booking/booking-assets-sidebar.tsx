@@ -38,7 +38,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import {
+  canAssignModelUnits,
+  getOutstandingModelRequests,
+} from "~/utils/booking-model-requests";
 import { describeBookingRows } from "~/utils/booking-rows";
 import { tw } from "~/utils/tw";
 import {
@@ -655,6 +658,7 @@ export function BookingAssetsSidebar({
                 surface. */}
             <BookingModelReservationsSection
               modelRequests={booking.modelRequests}
+              canAssign={canAssignModelUnits(booking.status)}
               className="rounded-none border-x-0 border-t-0"
               renderAction={
                 canScanToAssign

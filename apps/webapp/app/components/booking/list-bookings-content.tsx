@@ -18,7 +18,10 @@ import { useLoaderData } from "react-router";
 import { hasCustody } from "~/modules/custody/utils";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { BADGE_COLORS } from "~/utils/badge-colors";
-import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
+import {
+  canAssignModelUnits,
+  countUnassignedModelUnits,
+} from "~/utils/booking-model-requests";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
@@ -294,6 +297,7 @@ export default function ListBookingsContent({
               signal rather than being folded into the number. */}
           <UnassignedModelUnitsPill
             count={countUnassignedModelUnits(item.modelRequests)}
+            canAssign={canAssignModelUnits(item.status)}
           />
           {item.hasStockConflict ? <StockConflictPill /> : null}
         </div>

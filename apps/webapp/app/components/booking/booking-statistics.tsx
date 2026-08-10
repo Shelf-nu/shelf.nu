@@ -17,6 +17,7 @@ export function BookingStatistics({
   kitsCount,
   assetsCount,
   unassignedModelUnits,
+  canAssignModelUnits: canAssign,
   totalValue,
   allCategories,
   tags,
@@ -34,6 +35,12 @@ export function BookingStatistics({
    * not request rows, via `countUnassignedModelUnits`. `0` hides the row.
    */
   unassignedModelUnits: number;
+  /**
+   * Whether those units can still be assigned. On a finished, cancelled or
+   * archived booking they are history, so the amber "needs attention" emphasis
+   * is dropped and the label reads in the past tense.
+   */
+  canAssignModelUnits: boolean;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
@@ -111,15 +118,20 @@ export function BookingStatistics({
             <Separator />
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-sm text-gray-500">
-                Unassigned model units{" "}
+                {canAssign
+                  ? "Unassigned model units"
+                  : "Model units never assigned"}{" "}
                 <InfoTooltip
                   iconClassName="size-4"
                   content={
                     <p>
-                      Units reserved against an asset model that have not been
-                      matched to a physical asset yet. They are not counted in
-                      the asset totals above, and they are not included in total
-                      value because no specific asset has been chosen.
+                      Units reserved against an asset model
+                      {canAssign
+                        ? " that have not been matched to a physical asset yet."
+                        : " that were never matched to a physical asset."}{" "}
+                      They are not counted in the asset totals above, and they
+                      are not included in total value because no specific asset
+                      was ever chosen.
                     </p>
                   }
                 />
@@ -127,8 +139,12 @@ export function BookingStatistics({
               <span
                 className="rounded-2xl px-2 py-[2px] text-right text-xs font-medium"
                 style={{
-                  backgroundColor: BADGE_COLORS.amber.bg,
-                  color: BADGE_COLORS.amber.text,
+                  backgroundColor: canAssign
+                    ? BADGE_COLORS.amber.bg
+                    : BADGE_COLORS.gray.bg,
+                  color: canAssign
+                    ? BADGE_COLORS.amber.text
+                    : BADGE_COLORS.gray.text,
                 }}
               >
                 {unassignedModelUnits}

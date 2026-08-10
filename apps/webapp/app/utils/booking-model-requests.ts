@@ -22,6 +22,35 @@
  */
 
 /**
+ * Whether more units can still be matched to physical assets on this booking.
+ *
+ * `true` only while the booking is live. On COMPLETE / CANCELLED / ARCHIVED
+ * nothing further will ever be assigned, so leftover reservations stop being
+ * outstanding WORK and become a historical fact.
+ *
+ * That distinction has to reach the UI or the signals lie: a cancelled booking
+ * was carrying an amber "4 units unassigned" flag in the bookings list and
+ * "4 of 5 units still to assign" on its page. Both invite action on a booking
+ * nobody can act on, and the flag is noise in the one list operators use to
+ * decide what needs attention.
+ *
+ * Mirrors the status gate in `ModelRequestRowActionsDropdown`, which already
+ * hides the per-row actions on these statuses; this simply makes the
+ * surrounding copy and emphasis agree with it.
+ *
+ * @param status - The booking's status.
+ * @returns `true` when units can still be assigned.
+ */
+export function canAssignModelUnits(status: string): boolean {
+  return (
+    status === "DRAFT" ||
+    status === "RESERVED" ||
+    status === "ONGOING" ||
+    status === "OVERDUE"
+  );
+}
+
+/**
  * Minimal `BookingModelRequest` shape these helpers need.
  *
  * Declared structurally (rather than importing the Prisma type) so callers

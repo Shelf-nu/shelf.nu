@@ -6,6 +6,7 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { describeBookingRows } from "~/utils/booking-rows";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import { BookingModelReservationsSection } from "./booking-model-reservations-section";
@@ -201,6 +202,7 @@ export function BookingAssetsColumn() {
               history and live in the Models tab of manage-assets. */}
           <BookingModelReservationsSection
             modelRequests={booking.modelRequests}
+            canAssign={canAssignModelUnits(booking.status)}
             className="-mx-4 mb-2 md:mx-0"
             /* Gives the outstanding work the same weight as "Scan to add" on
                the assets list below. Without it, assigning units meant either

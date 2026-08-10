@@ -76,6 +76,14 @@ type BookingModelReservationsSectionProps = {
    * short of starting a check-out.
    */
   headerAction?: ReactNode;
+  /**
+   * Whether units can still be assigned (see `canAssignModelUnits`). When
+   * false the booking is finished, cancelled or archived, so the leftover
+   * units are history rather than work: the copy switches to past tense and
+   * the amber emphasis drops away. Defaults to `true` for callers that only
+   * ever render live bookings.
+   */
+  canAssign?: boolean;
   /** Extra classes for the outer wrapper (surface-specific spacing). */
   className?: string;
 };
@@ -101,14 +109,21 @@ type BookingModelReservationsSectionProps = {
  * @returns e.g. `"3 of 3 units still to assign"`, `"1 of 2 units still to
  *   assign"`.
  */
-function describeOutstanding(request: SectionModelRequest): string {
+function describeOutstanding(
+  request: SectionModelRequest,
+  canAssign: boolean
+): string {
   const remaining = Math.max(0, request.quantity - request.fulfilledQuantity);
 
   // The noun agrees with the TOTAL, not the remainder, or it reads
   // "1 of 2 unit".
-  return `${remaining} of ${request.quantity} ${
-    request.quantity === 1 ? "unit" : "units"
-  } still to assign`;
+  const units = request.quantity === 1 ? "unit" : "units";
+
+  // Past tense once nothing can be assigned — "still to assign" on a
+  // cancelled booking states work that will never happen.
+  return canAssign
+    ? `${remaining} of ${request.quantity} ${units} still to assign`
+    : `${remaining} of ${request.quantity} ${units} never assigned`;
 }
 
 /**
@@ -119,6 +134,7 @@ export function BookingModelReservationsSection({
   modelRequests,
   renderAction,
   headerAction,
+  canAssign = true,
   className,
 }: BookingModelReservationsSectionProps) {
   const outstanding = getOutstandingModelRequests(modelRequests);
@@ -142,9 +158,9 @@ export function BookingModelReservationsSection({
             second numbers sum to Y. Stating both stops a reader having to
             guess whether a lone number means promised or remaining. */}
           <p className="text-sm text-gray-600">
-            {units} of {reserved} {reserved === 1 ? "unit" : "units"} still to
-            assign, across {outstanding.length}{" "}
-            {outstanding.length === 1 ? "model" : "models"}
+            {units} of {reserved} {reserved === 1 ? "unit" : "units"}{" "}
+            {canAssign ? "still to assign" : "never assigned"}, across{" "}
+            {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
           </p>
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
@@ -174,11 +190,15 @@ export function BookingModelReservationsSection({
                     <span
                       className="mt-1 inline-flex items-center rounded-2xl px-2 py-[2px] text-xs font-medium"
                       style={{
-                        backgroundColor: BADGE_COLORS.amber.bg,
-                        color: BADGE_COLORS.amber.text,
+                        backgroundColor: canAssign
+                          ? BADGE_COLORS.amber.bg
+                          : BADGE_COLORS.gray.bg,
+                        color: canAssign
+                          ? BADGE_COLORS.amber.text
+                          : BADGE_COLORS.gray.text,
                       }}
                     >
-                      {describeOutstanding(request)}
+                      {describeOutstanding(request, canAssign)}
                     </span>
                   </div>
                 </div>
