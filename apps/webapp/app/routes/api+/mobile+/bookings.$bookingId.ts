@@ -182,50 +182,82 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // = mixed standalone + kit-driven). Mobile clients that don't know
     // about `assetKitId` see the same flat shape they always did.
     //
-    // `kit`/`kitId` keep their legacy synthesis (the first AssetKit
-    // pointer the asset has at booking time) for older clients that
-    // still rely on those — but the `assetKitId` field is the accurate
-    // per-booking-slice signal when mobile is ready to adopt it.
+    // `slices` additively exposes the per-BookingAsset-row breakdown (Gap 1,
+    // Companion QT display parity) so the app can render standalone vs.
+    // kit-driven booked units separately instead of only the merged total.
+    type SliceRow = {
+      bookingAssetId: string;
+      quantity: number;
+      assetKitId: string | null;
+      kit: { id: string; name: string } | null;
+    };
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
       totalQuantity: number;
       assetKitIds: Set<string | null>;
+      slices: SliceRow[];
     };
     const byAssetId = new Map<string, CollapsedRow>();
     for (const ba of booking.bookingAssets) {
+      // Resolve THIS slice's kit by matching its assetKitId against the
+      // asset's memberships (assetKits[].id). Standalone slice
+      // (assetKitId null) → null.
+      const sliceKit =
+        ba.assetKitId != null
+          ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ??
+            null
+          : null;
+      const slice: SliceRow = {
+        bookingAssetId: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId,
+        kit: sliceKit,
+      };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
         existing.totalQuantity += ba.quantity;
         existing.assetKitIds.add(ba.assetKitId);
+        existing.slices.push(slice);
       } else {
         byAssetId.set(ba.asset.id, {
           assetId: ba.asset.id,
           first: ba,
           totalQuantity: ba.quantity,
           assetKitIds: new Set([ba.assetKitId]),
+          slices: [slice],
         });
       }
     }
 
     const assets = Array.from(byAssetId.values()).map((row) => {
       const { assetKits, ...rest } = row.first.asset;
-      const primaryKit = assetKits[0]?.kit ?? null;
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't
       // mis-attribute the slice to one of multiple sources.
       const unanimousAssetKitId =
         row.assetKitIds.size === 1 ? Array.from(row.assetKitIds)[0] : null;
+      // Merged kit = the kit of the unanimous membership, else null. This
+      // REPLACES the legacy `assetKits[0].kit` synthesis, which mislabelled
+      // standalone/mixed rows with an arbitrary membership. Safe for old
+      // clients: they already render a null kit (INDIVIDUAL assets have one).
+      const mergedKit =
+        unanimousAssetKitId != null
+          ? assetKits.find((ak) => ak.id === unanimousAssetKitId)?.kit ?? null
+          : null;
       return {
         ...rest,
-        kit: primaryKit,
-        kitId: primaryKit?.id ?? null,
+        kit: mergedKit,
+        kitId: mergedKit?.id ?? null,
         // Per-booking quantity (sum of all slices for this asset in
         // this booking).
         quantity: row.totalQuantity,
         // Per-row kit-source discriminator — `null` for standalone or
         // mixed (assets with both standalone and kit-driven slices).
         assetKitId: unanimousAssetKitId,
+        // Per-BookingAsset-slice breakdown (additive). One entry per slice; a
+        // QT asset booked standalone + via 2 kits has 3. Old clients ignore it.
+        slices: row.slices,
       };
     });
 

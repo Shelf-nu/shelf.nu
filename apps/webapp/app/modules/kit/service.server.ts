@@ -2349,11 +2349,17 @@ export async function bulkAssignKitCustody({
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
     if (someKitsNotAvailable) {
+      // User-input validation against a freshly-queried, real-time availability
+      // guard — not a server fault. A 400 keeps it out of the Sentry error
+      // pipeline (the outer catch inherits status/shouldBeCaptured from this
+      // cause). See SHELF-WEBAPP-226.
       throw new ShelfError({
         cause: null,
         message:
           "There are some unavailable kits. Please make sure you are selecting only available kits.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2378,11 +2384,15 @@ export async function bulkAssignKitCustody({
         asset.type !== "QUANTITY_TRACKED" && asset.status !== "AVAILABLE"
     );
     if (someAssetsUnavailable) {
+      // Same handled-validation class as the unavailable-kits guard above:
+      // a 400, not a captured 500. See SHELF-WEBAPP-226.
       throw new ShelfError({
         cause: null,
         message:
           "There are some unavailable assets in some kits. Please make sure you have all available assets in kits.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 

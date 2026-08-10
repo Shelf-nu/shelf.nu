@@ -92,6 +92,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
+  buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
@@ -778,18 +779,15 @@ export default function AssetOverview() {
    * Each entry pairs the field definition with its stored value (or null
    * if not set). This keeps fields in a stable position regardless of
    * whether they have values — no jumping when a user adds or clears data.
+   *
+   * The asset's own values are the primary source: `allCustomFieldDefs` is
+   * loaded ONLY for users who can update the asset, so building the list from
+   * it alone hid every custom field from BASE and SELF_SERVICE users.
    */
-  const customFieldsValueMap = new Map(
-    (asset?.customFields ?? [])
-      .filter((f) => f.value)
-      .map((f) => [f.customField.id, f])
-  );
-  const allCustomFields = (allCustomFieldDefs ?? [])
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((def) => ({
-      def,
-      storedValue: customFieldsValueMap.get(def.id) ?? null,
-    }));
+  const allCustomFields = buildAssetOverviewCustomFields({
+    storedValues: asset?.customFields ?? [],
+    editableDefinitions: allCustomFieldDefs ?? [],
+  });
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1258,8 +1256,15 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
-                  {allCustomFields.map(({ def, storedValue }) => {
+                  {allCustomFields.map(({ def, storedValue, isEditable }) => {
                     const hasValue = !!storedValue;
+                    /**
+                     * A field the action would refuse to write (its definition
+                     * is outside the asset's category scope) stays visible but
+                     * read-only — offering an editor there would dead-end on a
+                     * 400.
+                     */
+                    const canEditField = canEditAsset && isEditable;
                     const fieldValue = hasValue
                       ? (storedValue.value as unknown as ShelfAssetCustomFieldValueType["value"])
                       : null;
@@ -1271,8 +1276,8 @@ export default function AssetOverview() {
                       ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
-                    /* Hide "Not set" rows from view-only users */
-                    if (!hasValue && !canEditAsset) return null;
+                    /* Hide "Not set" rows from users who can't fill them in */
+                    if (!hasValue && !canEditField) return null;
 
                     return (
                       <InlineEditableField
@@ -1280,7 +1285,7 @@ export default function AssetOverview() {
                         fieldName={`customField-${def.id}`}
                         formFieldName="customField"
                         label={def.name}
-                        canEdit={canEditAsset}
+                        canEdit={canEditField}
                         extraHiddenInputs={{
                           customFieldId: def.id,
                         }}
