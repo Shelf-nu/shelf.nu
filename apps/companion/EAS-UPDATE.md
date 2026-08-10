@@ -21,13 +21,14 @@ ride an OTA bundle.
 ## Runtime version = app version
 
 `app.json` sets `runtimeVersion: "1.3.0"`, kept equal to the app version by
-hand. An OTA update only reaches builds whose **runtime version matches**. So an
-update published while the app is `1.3.0` reaches every **OTA-capable** `1.3.0`
-build (one built with `expo-updates`; the pre-`expo-updates` binaries — every
-store build up to and including 1.2.0 — can't check for updates at all), and is
-ignored by a future `1.4.0` build until you publish an update for `1.4.0`. This
-is the safety net: JS that assumes new native code can never land on a build
-that lacks it.
+hand. An OTA update only reaches builds whose **runtime version matches**, and
+only on the **channel** it was published to (see Channels below). So an update
+published to `production` for runtime `1.3.0` reaches the **OTA-capable**
+`1.3.0` production builds (ones built with `expo-updates`; the
+pre-`expo-updates` binaries — every store build up to and including 1.2.0 —
+can't check for updates at all), and is ignored by a future `1.4.0` build until
+you publish an update for `1.4.0`. This is the safety net: JS that assumes new
+native code can never land on a build that lacks it.
 
 > **Why a hard-coded string and not `{ "policy": "appVersion" }`.** `ios/` is
 > committed, so expo-updates classifies iOS as the **generic (bare)** workflow,
