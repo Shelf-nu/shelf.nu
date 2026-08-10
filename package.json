@@ -35,6 +35,7 @@
     "companion:build:android": "pnpm --filter @shelf/companion build:android",
     "companion:prebuild": "pnpm --filter @shelf/companion prebuild",
     "companion:prebuild:clean": "pnpm --filter @shelf/companion prebuild:clean",
+    "companion:test": "pnpm --filter @shelf/companion test",
     "companion:test:e2e": "pnpm --filter @shelf/companion test:e2e",
     "companion:test:e2e:suite": "pnpm --filter @shelf/companion test:e2e:suite --",
     "companion:doctor": "pnpm --filter @shelf/companion run doctor",
