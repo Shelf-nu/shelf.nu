@@ -368,6 +368,11 @@ export type KitDetailAsset = {
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
+  // QT-aware fields (additive; absent on older servers). `kitQuantity` is the
+  // units of this asset held by the kit (AssetKit.quantity).
+  type?: AssetType;
+  kitQuantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 export type KitDetail = {
@@ -554,6 +559,18 @@ export type BookingsResponse = {
   totalPages: number;
 };
 
+/**
+ * One BookingAsset slice of a QUANTITY_TRACKED asset on a booking: its booked
+ * units and its source (a kit, or standalone when `kit` is null). Additive —
+ * absent on older servers, in which case the app renders the merged row.
+ */
+export type BookingAssetSlice = {
+  bookingAssetId: string;
+  quantity: number;
+  assetKitId: string | null;
+  kit: { id: string; name: string } | null;
+};
+
 export type BookingAsset = {
   id: string;
   title: string;
@@ -571,6 +588,8 @@ export type BookingAsset = {
   unitOfMeasure?: string | null;
   consumptionType?: ConsumptionType | null;
   assetKitId?: string | null;
+  /** Per-slice breakdown; present when the server sends it (see gap 1). */
+  slices?: BookingAssetSlice[];
   /** Units currently checked out on this booking that can still be checked in. */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
