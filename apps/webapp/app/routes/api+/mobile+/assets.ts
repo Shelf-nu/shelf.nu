@@ -75,9 +75,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // to reach Prisma and 500; now it simply doesn't filter. Checked via
       // `Object.values` (not `in`) so prototype-chain keys like "toString"
       // can't slip through.
+      //
+      // AVAILABLE is QT-aware, mirroring `getAssets`: a QUANTITY_TRACKED
+      // row's status flips to IN_CUSTODY/CHECKED_OUT as soon as ANY unit is
+      // allocated even while free stock remains, so raw equality would hide
+      // those rows from the Available pill. AVAILABLE therefore matches
+      // available INDIVIDUAL rows OR any QUANTITY_TRACKED row; the other
+      // statuses keep raw equality (already truthful for QT rows). Kept in
+      // `AND` so it composes with the search fragment's `OR`.
       ...(statusFilter &&
       (Object.values(AssetStatus) as string[]).includes(statusFilter)
-        ? { status: statusFilter as AssetStatus }
+        ? statusFilter === AssetStatus.AVAILABLE
+          ? {
+              AND: [
+                {
+                  OR: [
+                    {
+                      type: "INDIVIDUAL" as const,
+                      status: AssetStatus.AVAILABLE,
+                    },
+                    { type: "QUANTITY_TRACKED" as const },
+                  ],
+                },
+              ],
+            }
+          : { status: statusFilter as AssetStatus }
         : {}),
     };
 
