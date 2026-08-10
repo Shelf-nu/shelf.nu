@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import {
+  fulfilModelRequestsForAssets,
   getAssetModelAvailability,
   getBookingModelTabData,
   materializeModelRequestForAsset,
@@ -485,8 +486,13 @@ describe("materializeModelRequestForAsset", () => {
       tx,
     });
 
+    // `requestId` is part of the contract, not incidental: the caller stamps
+    // it onto the `BookingAsset` row it creates so the booking records WHICH
+    // reservation each asset discharged. Dropping it silently would lose that
+    // link with no other symptom.
     expect(result).toEqual({
       matched: true,
+      requestId: "req-1",
       remaining: 2,
       modelName: "Dell Latitude 5550",
     });
@@ -534,6 +540,7 @@ describe("materializeModelRequestForAsset", () => {
 
     expect(result).toEqual({
       matched: true,
+      requestId: "req-1",
       remaining: 0,
       modelName: "Dell Latitude 5550",
     });
@@ -804,5 +811,180 @@ describe("getBookingModelTabData", () => {
       db.assetModel.findMany as ReturnType<typeof vitest.fn>
     ).mock.calls[0]?.[0];
     expect(findManyCall?.where).toEqual({ organizationId: ORG_ID });
+  });
+});
+
+/**
+ * `fulfilModelRequestsForAssets` is the chokepoint every add-assets surface
+ * routes through — web "Manage assets", the web scanner, the asset index and
+ * the mobile API. Its guarantees are what make those surfaces agree, so they
+ * are pinned here rather than left to whichever caller happens to be tested.
+ */
+describe("fulfilModelRequestsForAssets", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tx = db as any;
+
+  const asset = (id: string, assetModelId: string | null = MODEL_ID) => ({
+    id,
+    title: `Asset ${id}`,
+    assetModelId,
+    type: AssetType.INDIVIDUAL,
+  });
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue(null);
+  });
+
+  it("returns the reservation each asset discharged, keyed by asset", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // The map IS the provenance the caller persists. An empty map here means
+    // `BookingAsset.bookingModelRequestId` never gets stamped.
+    expect(result).toEqual(new Map([["asset-1", "req-1"]]));
+  });
+
+  it("omits assets that matched no outstanding reservation", async () => {
+    expect.assertions(1);
+    // findUnique default is null — no request exists for this model.
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1"), asset("asset-2", null)],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // Not an error: adding assets to a booking with no reservations is the
+    // overwhelmingly common case.
+    expect(result).toEqual(new Map());
+  });
+
+  it("decrements once per asset when several units of one model arrive together", async () => {
+    expect.assertions(2);
+    // A single 3-unit reservation, read fresh before each write. The service
+    // must see the previous increment, so the mock advances the counter the
+    // way the database would.
+    let fulfilledQuantity = 0;
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(() =>
+      Promise.resolve({
+        id: "req-1",
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        fulfilledQuantity,
+        fulfilledAt: null,
+        assetModel: { name: "Dell Latitude 5550" },
+      })
+    );
+    // @ts-expect-error mocked
+    db.bookingModelRequest.update.mockImplementation(
+      ({ data }: { data: { fulfilledQuantity: number } }) => {
+        fulfilledQuantity = data.fulfilledQuantity;
+        return Promise.resolve({});
+      }
+    );
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("a1"), asset("a2"), asset("a3")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // Three physical units delivered against a 3-unit promise must drain it
+    // exactly. Running these concurrently would let two reads observe the
+    // same `fulfilledQuantity` and lose an increment — which is why the
+    // helper loops sequentially.
+    expect(fulfilledQuantity).toBe(3);
+    expect(result.size).toBe(3);
+  });
+
+  it("stops decrementing once the reservation is full, so extras are plain assets", async () => {
+    expect.assertions(2);
+    let fulfilledQuantity = 0;
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(() =>
+      Promise.resolve({
+        id: "req-1",
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 1,
+        fulfilledQuantity,
+        fulfilledAt: null,
+        assetModel: { name: "Dell Latitude 5550" },
+      })
+    );
+    // @ts-expect-error mocked
+    db.bookingModelRequest.update.mockImplementation(
+      ({ data }: { data: { fulfilledQuantity: number } }) => {
+        fulfilledQuantity = data.fulfilledQuantity;
+        return Promise.resolve({});
+      }
+    );
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("a1"), asset("a2"), asset("a3")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // Over-delivery is legitimate — the operator may want more than they
+    // reserved. The extras join the booking as ordinary assets; only the
+    // first discharges the promise, so only it carries provenance.
+    expect(fulfilledQuantity).toBe(1);
+    expect(result).toEqual(new Map([["a1", "req-1"]]));
+  });
+
+  it("fulfils even when the caller threads no actor through", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 1,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    // `api/assets.add-to-booking` omits `userId` because it writes its own
+    // user-attributed note. Fulfilment must not depend on attribution: a
+    // reservation that survived for want of an actor would hard-block
+    // check-out.
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1")],
+      organizationId: ORG_ID,
+      tx,
+    });
+
+    expect(result).toEqual(new Map([["asset-1", "req-1"]]));
+    // The note is still written, in the system voice.
+    expect(db.bookingNote.create).toHaveBeenCalled();
   });
 });

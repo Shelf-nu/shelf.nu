@@ -2,11 +2,17 @@
  * BookingModelRequest Service (Phase 3d — Book-by-Model)
  *
  * Lets a booking reserve N units of an `AssetModel` without picking
- * specific assets upfront. Concrete `BookingAsset` rows are only
- * created at scan-to-assign time via
- * {@link materializeModelRequestForAsset}, so downstream code (check-in,
- * conflict detection, PDF, email) keeps treating `BookingAsset.assetId`
- * as always pointing to a concrete asset.
+ * specific assets upfront. Downstream code (check-in, conflict detection,
+ * PDF, email) keeps treating `BookingAsset.assetId` as always pointing to a
+ * concrete asset, because a reservation never produces a `BookingAsset` row
+ * on its own — a real asset has to arrive.
+ *
+ * A reservation is discharged whenever a matching asset lands on the booking,
+ * regardless of how it got there: "Manage assets", the web scanner, the asset
+ * index, or the mobile API. Every one of those routes through
+ * {@link fulfilModelRequestsForAssets}. That helper's JSDoc explains why this
+ * is deliberately surface-independent — it used to be scanner-only, and the
+ * asymmetry hard-blocked check-out.
  *
  * ## Availability formula
  *
@@ -82,6 +88,100 @@ export type AssetModelAvailability = {
   reserved: number;
   available: number;
 };
+
+/**
+ * The concrete assets of a model that could be assigned to this booking right
+ * now — the pick-from-list counterpart to scanning.
+ *
+ * Until this existed, `materializeModelRequestForAsset` had exactly one
+ * production caller: the scan path. A workspace without a working scanner
+ * could create a model reservation but never discharge it, and unfulfilled
+ * reservations are a hard block on check-out, so the booking could not leave.
+ * See https://github.com/Shelf-nu/shelf.nu/issues/2831.
+ *
+ * Exclusions mirror {@link getAssetModelAvailability} exactly — INDIVIDUAL
+ * only, no custody, and nothing already committed to an overlapping booking.
+ * The two are deliberately separate functions rather than one: availability is
+ * UNIT arithmetic (it subtracts other bookings' outstanding model-request units
+ * from a pool), while this returns ROWS a human can tick. Keep the `where`
+ * clauses in step when either changes; a candidate list that disagrees with the
+ * "N / M available in this window" hint above it is the same class of defect
+ * this whole area has been cleaning up.
+ *
+ * Assets already on THIS booking are excluded too: adding one again would
+ * create a duplicate row rather than fulfil anything.
+ *
+ * @param args.assetModelId - Model whose units are being assigned.
+ * @param args.organizationId - Caller's org; scopes every query.
+ * @param args.bookingId - The booking being fulfilled (excluded from conflicts).
+ * @param args.from - Booking window start, for the overlap test.
+ * @param args.to - Booking window end.
+ * @returns Assignable assets, oldest first, with the fields a picker row needs.
+ * @throws {ShelfError} When the query fails.
+ */
+export async function getAssignableAssetsForModel({
+  assetModelId,
+  organizationId,
+  bookingId,
+  from,
+  to,
+}: GetAssetModelAvailabilityArgs) {
+  try {
+    const dateOverlap =
+      from && to
+        ? {
+            OR: [
+              { from: { lte: to }, to: { gte: from } },
+              { from: { gte: from }, to: { lte: to } },
+            ],
+          }
+        : {};
+
+    return await db.asset.findMany({
+      where: {
+        organizationId,
+        assetModelId,
+        type: AssetType.INDIVIDUAL,
+        // Free of custody.
+        custody: { none: {} },
+        // Not already on this booking — re-adding duplicates, never fulfils.
+        bookingAssets: { none: { bookingId } },
+        // Not committed to another booking that overlaps this window.
+        NOT: {
+          bookingAssets: {
+            some: {
+              bookingId: { not: bookingId },
+              booking: {
+                status: { in: [...ACTIVE_BOOKING_STATUSES] },
+                ...dateOverlap,
+              },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        mainImage: true,
+        thumbnailImage: true,
+        mainImageExpiration: true,
+        sequentialId: true,
+        preferredBarcodeId: true,
+        qrCodes: { take: 1, select: { id: true } },
+        barcodes: { select: { id: true, type: true, value: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to load assignable assets for this model.",
+      additionalData: { assetModelId, organizationId, bookingId },
+      label: "Booking",
+    });
+  }
+}
 
 /**
  * Compute availability for an `AssetModel` over a booking window.
@@ -777,7 +877,15 @@ type MaterializeArgs = {
    */
   asset: Pick<Asset, "id" | "title" | "assetModelId" | "type">;
   organizationId: string;
-  userId: string;
+  /**
+   * Actor for the activity note. Optional because not every add-assets path
+   * threads one through (`api/assets.add-to-booking` writes its own
+   * user-attributed note instead, so passing a user here would duplicate it).
+   * Fulfilment itself must not depend on attribution — a reservation that
+   * silently survived because the caller had no `userId` would hard-block
+   * check-out. Without an actor the note is written in the system voice.
+   */
+  userId?: string;
   /**
    * Interactive Prisma transaction client. Required — this function
    * must run in the same tx as the caller's `BookingAsset.create`
@@ -798,7 +906,10 @@ type MaterializeArgs = {
  * bookings render a historical readout instead of an empty state.
  *
  * Returns:
- *   - `{ matched: true, remaining }` — the scan consumed a request unit
+ *   - `{ matched: true, requestId, remaining }` — the scan consumed a request
+ *     unit. The caller MUST stamp `requestId` onto the `BookingAsset` row it
+ *     creates for this asset (`bookingModelRequestId`), or the link between
+ *     promise and delivery survives only in the activity note written below.
  *   - `{ matched: false }` — no outstanding request matches this asset's
  *     model (no row exists, or the row is already fully fulfilled);
  *     the caller should fall through to its existing "add as direct
@@ -814,7 +925,8 @@ export async function materializeModelRequestForAsset({
   userId,
   tx,
 }: MaterializeArgs): Promise<
-  { matched: true; remaining: number; modelName: string } | { matched: false }
+  | { matched: true; requestId: string; remaining: number; modelName: string }
+  | { matched: false }
 > {
   try {
     if (!asset.assetModelId) {
@@ -867,20 +979,26 @@ export async function materializeModelRequestForAsset({
     const remaining = existing.quantity - nextFulfilledQuantity;
 
     // Activity note — IN the tx so the note rolls back with the
-    // materialization if anything later in the scan pipeline fails.
-    const actor = await loadActor(userId);
+    // materialization if anything later in the pipeline fails.
+    const actor = userId ? await loadActor(userId) : null;
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
+    // Same sentence either way; only the subject changes, so the feed reads
+    // consistently whether or not the caller threaded an actor through.
+    const content = actor
+      ? `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
+      : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
     await tx.bookingNote.create({
       data: {
         type: "UPDATE",
-        content: `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`,
+        content,
         booking: { connect: { id: bookingId } },
       },
     });
 
     return {
       matched: true,
+      requestId: existing.id,
       remaining,
       modelName: existing.assetModel.name,
     };
@@ -897,6 +1015,94 @@ export async function materializeModelRequestForAsset({
       },
     });
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       fulfilModelRequestsForAssets                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Discharge a booking's outstanding model reservations using assets that are
+ * being added to it, whatever surface they arrived from.
+ *
+ * ## Why this is shared rather than scanner-local
+ *
+ * A `BookingModelRequest` means "this booking needs N units of model M, any
+ * units". Naming a concrete unit of M and putting it on the booking ANSWERS
+ * that — the promise and the delivery describe the same physical thing. If the
+ * reservation survives, the booking demands N unnamed units PLUS the named one,
+ * which is not what the operator asked for, and because unfulfilled requests
+ * are a hard block on check-out, the booking then cannot leave at all.
+ *
+ * Until this helper existed, {@link materializeModelRequestForAsset} had
+ * exactly one production caller: the scan path. Adding the very same asset
+ * through "Manage assets" (`updateBookingAssets`) left the reservation
+ * untouched — verified against a live database, not inferred: identical asset,
+ * identical reservation, scanner ⇒ `1/1 fulfilled, checkout allowed`, picker ⇒
+ * `0/1 fulfilled, checkout HARD BLOCKED`. The operator's only escape was to
+ * delete the reservation they had correctly made.
+ *
+ * Routing every add-assets path through here makes fulfilment a property of an
+ * asset landing on the booking, not of the device it was added with. Web
+ * scanner, "Manage assets", asset-index bulk add, the mobile
+ * `api/mobile/bookings.add-scanned-assets` endpoint and the companion app all
+ * inherit identical behaviour, and a future surface gets it by construction
+ * rather than by remembering to call this.
+ *
+ * Callers MUST persist the returned provenance — see
+ * {@link file://./../../../../../packages/database/prisma/schema.prisma}
+ * `BookingAsset.bookingModelRequestId`.
+ *
+ * @param args.bookingId - Booking being fulfilled.
+ * @param args.assets - The assets being added. Pre-fetched by every caller
+ *   already, so it is taken as data rather than re-queried here.
+ * @param args.organizationId - Caller's org, for the error payload.
+ * @param args.userId - Actor, for the per-assignment activity note.
+ * @param args.tx - Interactive transaction client. Required: the decrements,
+ *   the notes and the caller's `BookingAsset` writes must commit or roll back
+ *   as one.
+ * @returns `assetId → BookingModelRequest.id` for every asset that discharged
+ *   a reservation. Assets with no model, or whose model has no outstanding
+ *   request, are absent — that is the normal case, not an error.
+ * @throws {ShelfError} Only on internal failure.
+ */
+export async function fulfilModelRequestsForAssets({
+  bookingId,
+  assets,
+  organizationId,
+  userId,
+  tx,
+}: {
+  bookingId: string;
+  assets: Array<Pick<Asset, "id" | "title" | "assetModelId" | "type">>;
+  organizationId: string;
+  /** Optional actor for the notes — see {@link materializeModelRequestForAsset}. */
+  userId?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+}): Promise<Map<string, string>> {
+  const fulfilledRequestIdByAssetId = new Map<string, string>();
+
+  for (const asset of assets) {
+    // Sequential, not `Promise.all`: several assets of the SAME model compete
+    // for one request row, and each call reads `fulfilledQuantity` then writes
+    // back. Running them concurrently inside one transaction would let two
+    // reads see the same value and the second write clobber the first, so
+    // three scanned units would decrement a 3-unit reservation by one.
+    const result = await materializeModelRequestForAsset({
+      bookingId,
+      asset,
+      organizationId,
+      userId,
+      tx,
+    });
+
+    if (result.matched) {
+      fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
+    }
+  }
+
+  return fulfilledRequestIdByAssetId;
 }
 
 /* -------------------------------------------------------------------------- */

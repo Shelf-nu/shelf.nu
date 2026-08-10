@@ -10,6 +10,7 @@ import {
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
@@ -353,6 +354,12 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   materializeModelRequestForAsset: vitest
     .fn()
     .mockResolvedValue({ matched: true, remaining: 0 }),
+  // why: every add-assets path now discharges model reservations through this
+  // chokepoint. Its own behaviour is covered in
+  // booking-model-request/service.server.test.ts; here we only care WHICH
+  // assets each caller hands it, so the default is an empty result and tests
+  // assert on the call argument.
+  fulfilModelRequestsForAssets: vitest.fn().mockResolvedValue(new Map()),
 }));
 
 // why: spying on booking update email calls without executing
@@ -1646,6 +1653,49 @@ describe("updateBasicBooking", () => {
 describe("updateBookingAssets", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  /**
+   * Model reservations are discharged by an asset ARRIVING on the booking.
+   * `updateBookingAssets` is the "Manage assets" path, and that dialog reposts
+   * the operator's full selection on every save — so the set of assets it
+   * touched is NOT the set of assets that are new. Keying fulfilment off the
+   * former lets a plain re-save decrement the reservation again, and a 3-unit
+   * reservation reaches 3/3 with only two physical assets behind it. Nothing
+   * else in the system would flag that: the counts simply lie.
+   */
+  it("only offers newly added assets for model-request fulfilment", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+    // `asset-1` is already on the booking — the operator merely resubmitted it.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([{ assetId: "asset-1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+    });
+
+    const handedOver = vitest.mocked(fulfilModelRequestsForAssets).mock
+      .calls[0]?.[0].assets;
+
+    expect(handedOver?.map((a) => a.id)).toEqual(["asset-2"]);
+    // Stated explicitly: the resubmitted asset must not reach the helper at
+    // all, rather than being filtered somewhere downstream.
+    expect(handedOver?.map((a) => a.id)).not.toContain("asset-1");
   });
 
   const mockUpdateBookingAssetsParams = {

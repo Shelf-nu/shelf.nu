@@ -37,7 +37,7 @@ import {
 } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
-import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
+import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
@@ -2103,11 +2103,12 @@ async function checkoutBookingWritesWithinTx(
    * Checkout guard for unfulfilled `BookingModelRequest` rows. Model
    * requests (Book-by-Model) represent units that
    * were reserved at the model level but haven't been assigned to
-   * a concrete asset yet (the usual recovery path is to scan
-   * matching assets, which decrements the request). If any remain
-   * at checkout we refuse the RESERVED → ONGOING transition and
-   * surface the outstanding counts so the operator can either:
-   *   1. scan matching assets to drain the request, or
+   * a concrete asset yet. If any remain at checkout we refuse the
+   * RESERVED → ONGOING transition and surface the outstanding counts
+   * so the operator can either:
+   *   1. put matching assets on the booking — from "Manage assets", the
+   *      scanner, the asset index, or the mobile API; all of them drain
+   *      the request via {@link fulfilModelRequestsForAssets}, or
    *   2. edit the requests from manage-assets (allowed while the
    *      booking is still RESERVED — see the model-request service).
    * This is a hard block — there is no force-partial escape hatch
@@ -2156,7 +2157,12 @@ async function checkoutBookingWritesWithinTx(
       label,
       status: 400,
       shouldBeCaptured: false,
-      message: `Cannot check out — ${summary} still unassigned. Scan matching assets to fulfil the reservation.`,
+      // Names both routes out. It used to say "Scan matching assets", which
+      // was the literal truth — fulfilment only happened on the scan path — and
+      // left a workspace without a working scanner with no way to check the
+      // booking out at all. Adding a matching asset from "Manage assets" now
+      // discharges the reservation too, so the message says so.
+      message: `Cannot check out — ${summary} still unassigned. Add matching assets from "Manage assets", or scan them, to fulfil the reservation.`,
       additionalData: { outstanding },
     });
   }
@@ -8110,6 +8116,31 @@ export async function updateBookingAssets({
         }
       }
 
+      /**
+       * Assets that were ALREADY on this booking before this call.
+       *
+       * `addedAssetIds` is "every asset this call touched", which includes
+       * re-submitted ones — the manage-assets dialog posts the full selection
+       * every time, and the standalone insert is an upsert. Model-request
+       * fulfilment must not key off that set: re-saving the dialog without
+       * changing anything would decrement the reservation again, so a 3-unit
+       * reservation could reach 3/3 with only two physical assets behind it.
+       *
+       * Discharging a reservation is the consequence of a physical unit
+       * ARRIVING on the booking, so only genuinely new rows may do it. Read
+       * before the inserts below, or every asset looks pre-existing.
+       */
+      const preExistingAssetIds = new Set<string>(
+        addedAssetIds.length > 0
+          ? (
+              await tx.bookingAsset.findMany({
+                where: { bookingId: id, assetId: { in: addedAssetIds } },
+                select: { assetId: true },
+              })
+            ).map((row: { assetId: string }) => row.assetId)
+          : []
+      );
+
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique
         // `(bookingId, assetId) WHERE assetKitId IS NULL`. Re-submitting
@@ -8160,11 +8191,58 @@ export async function updateBookingAssets({
       // the same asset on this call — mirrors the actual booked count
       // even when the same asset is added both standalone and via N kits.
       if (addedAssetIds.length > 0) {
+        // `title` + `assetModelId` widen this select purely so the same rows
+        // can feed model-request fulfilment below without a second round-trip.
         const assetTypeRows = await tx.asset.findMany({
           where: { id: { in: addedAssetIds }, organizationId },
-          select: { id: true, type: true, unitOfMeasure: true },
+          select: {
+            id: true,
+            type: true,
+            unitOfMeasure: true,
+            title: true,
+            assetModelId: true,
+          },
         });
         const assetTypeById = new Map(assetTypeRows.map((a) => [a.id, a]));
+
+        /**
+         * Discharge any model reservation these assets answer.
+         *
+         * Naming a concrete unit of model M satisfies a "N units of M, any
+         * units" reservation — the promise and the delivery are the same
+         * physical thing. Before this ran here, only the scanner discharged
+         * reservations, so adding the very asset a booking had reserved left
+         * the request outstanding and check-out hard-blocked. See
+         * {@link fulfilModelRequestsForAssets} for the full rationale.
+         */
+        const fulfilledRequestIdByAssetId = await fulfilModelRequestsForAssets({
+          bookingId: b.id,
+          // Newly arrived rows only — see `preExistingAssetIds`.
+          assets: assetTypeRows.filter(
+            (asset: { id: string }) => !preExistingAssetIds.has(asset.id)
+          ),
+          organizationId,
+          userId,
+          tx,
+        });
+
+        // Persist which reservation each asset discharged. One matched request
+        // unit means one stamped row, so this targets a SINGLE row per asset,
+        // preferring the standalone row (the free-pool commitment the
+        // reservation stood in for) and otherwise the kit-driven one.
+        for (const [assetId, requestId] of fulfilledRequestIdByAssetId) {
+          await tx.$executeRaw`
+            UPDATE "BookingAsset" SET "bookingModelRequestId" = ${requestId}
+            WHERE "id" = (
+              SELECT "id" FROM "BookingAsset"
+              WHERE "bookingId" = ${b.id}
+                AND "assetId" = ${assetId}
+                AND "bookingModelRequestId" IS NULL
+              ORDER BY ("assetKitId" IS NOT NULL)
+              LIMIT 1
+            )
+          `;
+        }
 
         // Sum the booked quantity per asset across all rows this call
         // is responsible for. Standalone defaults to 1 when missing
@@ -11771,12 +11849,14 @@ async function createNotesForScannedAssetsAndKits({
  * {@link fulfilModelRequestsAndCheckout}.
  *
  * Performs the pure write-side of "add scanned assets":
- *   1. For every scanned asset, calls `materializeModelRequestForAsset` so
- *      that any outstanding `BookingModelRequest` for the asset's model is
- *      decremented (or deleted when it hits zero). Failures here roll the
+ *   1. Calls {@link fulfilModelRequestsForAssets} so any outstanding
+ *      `BookingModelRequest` for a scanned asset's model is decremented.
+ *      `updateBookingAssets` calls the same helper, so scanning and picking
+ *      from a list discharge reservations identically. Failures here roll the
  *      whole transaction back — the caller never ends up with concrete
  *      `BookingAsset` rows alongside a stale request count.
- *   2. Creates the `BookingAsset` rows on the booking.
+ *   2. Creates the `BookingAsset` rows on the booking, stamping
+ *      `bookingModelRequestId` on the row that discharged each reservation.
  *   3. If the booking is already ONGOING/OVERDUE, syncs the newly added
  *      asset + kit rows to CHECKED_OUT status so they reflect reality.
  *
@@ -11987,17 +12067,24 @@ async function addScannedAssetsToBookingWithinTx(
     scannedAssetsMeta.map((a) => [a.id, a])
   );
 
-  for (const assetId of allScannedAssetIds) {
-    const meta = scannedAssetsMetaById.get(assetId);
-    if (!meta) continue; // asset not found in org — caught later by FK
-    await materializeModelRequestForAsset({
-      bookingId,
-      asset: meta,
-      organizationId,
-      userId,
-      tx,
-    });
-  }
+  /**
+   * Provenance for the rows created below: which reservation each asset
+   * discharged. At most one request per asset, incremented by exactly one
+   * unit, so exactly ONE of the rows created for that asset may carry the
+   * stamp — see the `stampedAssetIds` guard at the create site.
+   *
+   * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
+   * skipped here and rejected by the FK on the create below.
+   */
+  const modelRequestIdByAssetId = await fulfilModelRequestsForAssets({
+    bookingId,
+    assets: allScannedAssetIds
+      .map((assetId) => scannedAssetsMetaById.get(assetId))
+      .filter((meta): meta is ScannedAssetMeta => meta !== undefined),
+    organizationId,
+    userId,
+    tx,
+  });
 
   /**
    * Resolve the slice quantity for kit-driven scans. When a kit QR is
@@ -12024,6 +12111,25 @@ async function addScannedAssetsToBookingWithinTx(
       : []
   );
 
+  /**
+   * Assets whose stamp has already been spent. One matched request unit means
+   * one stamped row: an asset arriving as a standalone scan AND via two kits
+   * creates three rows but discharged only a single unit, so stamping all
+   * three would make "which assets fulfilled this reservation?" over-count by
+   * two. Standalone wins because that row is the free-pool commitment the
+   * reservation was a promise of; a kit-only scan stamps its first slice.
+   */
+  const stampedAssetIds = new Set<string>();
+
+  /** Consumes the stamp for `assetId`, returning it at most once. */
+  function takeModelRequestId(assetId: string): string | null {
+    if (stampedAssetIds.has(assetId)) return null;
+    const requestId = modelRequestIdByAssetId.get(assetId);
+    if (!requestId) return null;
+    stampedAssetIds.add(assetId);
+    return requestId;
+  }
+
   const booking = await tx.booking.update({
     where: { id: bookingId, organizationId },
     data: {
@@ -12039,6 +12145,7 @@ async function addScannedAssetsToBookingWithinTx(
             assetId: id,
             quantity: quantities[id] ?? 1,
             assetKitId: null,
+            bookingModelRequestId: takeModelRequestId(id),
           })),
           // Kit-driven slices: `assetKitId` set. Quantity precedence:
           // explicit slice qty → kit's `AssetKit.quantity` → 1.
@@ -12047,6 +12154,7 @@ async function addScannedAssetsToBookingWithinTx(
             quantity:
               slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1,
             assetKitId: slice.assetKitId,
+            bookingModelRequestId: takeModelRequestId(slice.assetId),
           })),
         ],
       },
