@@ -255,6 +255,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
+        /**
+         * Refuse to take custody of an asset that is checked out on a booking.
+         *
+         * `Asset.status` is a single column, so the unconditional write below
+         * would silently overwrite `CHECKED_OUT` and the asset would stop being
+         * counted as off the shelf. Precedence is
+         * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`, per
+         * `reconcileAssetStatusForBookingExit`.
+         *
+         * Throwing (rather than filtering the write) mirrors
+         * `bulkCheckOutAssets`, which already rejects any asset that is not
+         * `AVAILABLE`: for an INDIVIDUAL asset there is one physical item, so a
+         * custody claim while it is out on a booking is a genuine conflict the
+         * operator needs to see, not something to silently skip. Read inside
+         * the tx so a concurrent checkout cannot slip in behind the check.
+         */
+        const current = await tx.asset.findFirst({
+          where: { id: assetId, organizationId },
+          select: { status: true, title: true },
+        });
+
+        if (current?.status === AssetStatus.CHECKED_OUT) {
+          throw new ShelfError({
+            cause: null,
+            title: "Asset is checked out",
+            message: `"${current.title}" is currently checked out on a booking, so it cannot be given to a custodian. Check the booking in first.`,
+            additionalData: { userId, assetId, custodianId },
+            label: "Assets",
+            shouldBeCaptured: false,
+            status: 400,
+          });
+        }
+
         await tx.custody.deleteMany({ where: { assetId } });
 
         const updated = await tx.asset.update({

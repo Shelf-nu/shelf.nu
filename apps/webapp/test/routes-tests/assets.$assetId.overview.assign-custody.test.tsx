@@ -18,6 +18,14 @@ const dbMocks = vi.hoisted(() => {
     asset: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: the action reads the asset's live status inside the tx and
+      // refuses the assignment when it is CHECKED_OUT, so a custody claim can
+      // never overwrite the "off the shelf" signal. Default to AVAILABLE so
+      // the pre-existing cases still exercise the happy path.
+      findFirst: vi.fn().mockResolvedValue({
+        status: "AVAILABLE",
+        title: "Test Asset",
+      }),
     },
     teamMember: {
       findMany: vi.fn(),
@@ -40,6 +48,7 @@ vi.mock("~/database/db.server", () => ({
     asset: {
       findUnique: dbMocks.asset.findUnique,
       update: dbMocks.asset.update,
+      findFirst: dbMocks.asset.findFirst,
     },
     teamMember: {
       findMany: dbMocks.teamMember.findMany,
@@ -52,7 +61,12 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         custody: { deleteMany: dbMocks.custody.deleteMany },
-        asset: { update: dbMocks.asset.update },
+        asset: {
+          update: dbMocks.asset.update,
+          // why: the action reads the live status inside the tx to refuse a
+          // custody claim on a CHECKED_OUT asset.
+          findFirst: dbMocks.asset.findFirst,
+        },
       })
     ),
   },

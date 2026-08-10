@@ -809,8 +809,16 @@ describe("deleteKit", () => {
     expect(db.kit.deleteMany).toHaveBeenCalled();
 
     // Drill flips to AVAILABLE; Pens does not (still has operator custody).
+    // The `status: { not: CHECKED_OUT }` guard is what stops this release
+    // advertising an asset that is still physically out on a booking — see
+    // `releaseAssetsToAvailableUnlessCheckedOut` and the behavioural suite
+    // at the bottom of this file.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["drill-1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["drill-1"] },
+        organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
+      },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -962,11 +970,15 @@ describe("bulkDeleteKits", () => {
       ])
     );
 
-    // Both assets flipped to AVAILABLE (no remaining custody).
+    // Both assets flipped to AVAILABLE (no remaining custody), guarded so a
+    // still-checked-out asset is never dragged back onto the shelf. This path
+    // also gained its org scope from the shared helper — it previously
+    // suppressed the `require-org-scope-on-id-queries` rule instead.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: expect.arrayContaining(["drill-1", "pen-1"]) },
         organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -1871,11 +1883,15 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
       ],
     });
 
-    // Asset status flipped to IN_CUSTODY for the inherited assets.
+    // Asset status flipped to IN_CUSTODY for the inherited assets — guarded
+    // so inheriting kit custody cannot erase CHECKED_OUT on a member that is
+    // still out on a booking. The caller's `assetsToInheritStatus` filter only
+    // excludes assets that already HAVE custody, which is a different question.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["asset-individual", "asset-qty"] },
         organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });
@@ -3962,5 +3978,119 @@ describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () =>
     expect(err.message).toContain("unavailable assets");
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+/**
+ * Custody release must never drag a still-checked-out asset back onto the
+ * shelf.
+ *
+ * Custody and bookings are independent commitments but `Asset.status` is one
+ * column, so an unguarded flip let whoever wrote last win. Releasing kit
+ * custody on an asset with units still out on an ONGOING booking advertised
+ * it as `AVAILABLE` on every picker, index and availability sum while it was
+ * physically gone. All five kit release paths now funnel through
+ * `releaseAssetsToAvailableUnlessCheckedOut`, so this suite drives one of them
+ * end to end rather than asserting Prisma argument shapes.
+ *
+ * The `updateMany` mock below models `UPDATE ... WHERE status <> $1`: drop the
+ * guard from the service and the write lands, turning these tests red.
+ */
+describe("kit custody release must not overwrite CHECKED_OUT", () => {
+  /** Stands in for the asset row's committed `status` column. */
+  let currentStatus: AssetStatus;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where?: { status?: { not?: AssetStatus } };
+        data?: { status?: AssetStatus };
+      }) => {
+        const excluded = where?.status?.not;
+        if (excluded !== undefined && currentStatus === excluded) {
+          return Promise.resolve({ count: 0 });
+        }
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({ count: 1 });
+      }
+    );
+  });
+
+  /** Releases the kit's custody with no custody rows left on the asset. */
+  async function releaseKitCustodyWithNoRemainingCustody() {
+    // `releaseCustody` derives `kit.assets` from the `assetKits` PIVOT rows
+    // (`assets: (kitRow.assetKits ?? []).map((ak) => ak.asset)`), so a fixture
+    // that sets a top-level `assets` array has it overwritten with `[]` and
+    // the flip silently never runs. Seed the pivot.
+    const kitWithCustody = {
+      id: "kit-1",
+      name: "Test Kit",
+      assetKits: [{ asset: { id: "asset-1", title: "Manfrotto Super Clamp" } }],
+      createdBy: { firstName: "John", lastName: "Doe" },
+      custody: {
+        id: "kc-1",
+        custodian: { id: "tm-1", name: "Jane Smith", user: { id: "user-9" } },
+      },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(kitWithCustody);
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue(kitWithCustody);
+    // `clearAllMocks` clears call history but NOT a queued
+    // `mockResolvedValueOnce` chain, so a leftover entry from the previous
+    // test would shift this one's queue and silently skip the flip. Reset the
+    // implementation, then drive both reads off the `select` shape rather
+    // than call order.
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockReset();
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ select }: { select?: Record<string, boolean> }) =>
+        // The still-custodied probe selects ONLY `assetId`; the
+        // cascade-delete read also asks for `teamMemberId`.
+        select?.teamMemberId
+          ? Promise.resolve([
+              {
+                assetId: "asset-1",
+                teamMemberId: "tm-1",
+                kitCustodyId: "kc-1",
+              },
+            ])
+          : // Nothing left, so the flip branch fires.
+            Promise.resolve([])
+    );
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await releaseCustody({
+      kitId: "kit-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  }
+
+  it("leaves a checked-out asset checked out when its kit custody is released", async () => {
+    currentStatus = AssetStatus.CHECKED_OUT;
+
+    await releaseKitCustodyWithNoRemainingCustody();
+
+    // Without this the test would pass vacuously whenever the release path
+    // stops reaching the flip at all (a stale mock, a refactor) — the status
+    // would simply never be touched.
+    expect(db.asset.updateMany).toHaveBeenCalled();
+    expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+  });
+
+  it("still returns an in-custody asset to AVAILABLE", async () => {
+    currentStatus = AssetStatus.IN_CUSTODY;
+
+    await releaseKitCustodyWithNoRemainingCustody();
+
+    expect(db.asset.updateMany).toHaveBeenCalled();
+    expect(currentStatus).toBe(AssetStatus.AVAILABLE);
   });
 });

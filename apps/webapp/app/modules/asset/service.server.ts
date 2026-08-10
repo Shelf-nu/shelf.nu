@@ -6299,10 +6299,24 @@ export async function bulkCheckInAssets({
         },
       });
 
-      /** Updating status of assets to AVAILABLE */
+      /**
+       * Updating status of assets to AVAILABLE.
+       *
+       * `status: { not: CHECKED_OUT }` — releasing custody must never put an
+       * asset that is still out on a booking back onto the shelf. `Asset.status`
+       * is a single column, so without the guard this bulk release advertised
+       * physically-absent assets as free on every picker, index and
+       * availability sum. Precedence
+       * (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+       * `reconcileAssetStatusForBookingExit`; the booking flows own the exit
+       * from `CHECKED_OUT`.
+       */
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
+        where: {
+          id: { in: assets.map((asset) => asset.id) },
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -7885,14 +7899,31 @@ export async function checkOutQuantity({
        * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
        * the asset as available even though it has units in custody, which
        * (e.g.) lets the kit-assign route bypass its
-       * `someUnavailableAsset` guard. Always a write because the asset
-       * status is no longer guaranteed to be `AVAILABLE` (could be a
-       * second checkout into the same asset), but the value is constant
-       * so it's a no-op in the already-`IN_CUSTODY` case.
+       * `someUnavailableAsset` guard.
+       *
+       * `CHECKED_OUT` WINS. A quantity-tracked asset can hold custody units
+       * and booking units at the same time, but `Asset.status` is a single
+       * column — so whoever writes last used to win, and assigning custody
+       * to an asset with units already out on an ONGOING booking silently
+       * erased `CHECKED_OUT`. That is not cosmetic: every reader of the
+       * "is this asset off the shelf" signal keys on this column, so the
+       * checked-out units stopped being counted and `Available` overstated
+       * free stock by exactly the booked quantity.
+       *
+       * The precedence is the one already documented on
+       * `reconcileAssetStatusForBookingExit` (`booking/service.server.ts`):
+       * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`. Constraining the UPDATE
+       * itself keeps the read-and-write atomic under the row lock rather
+       * than racing a concurrent checkout between a read and a write. The
+       * booking flows restore the correct terminal status on check-in /
+       * cancel, at which point the custody row (untouched here) takes over.
        */
-      await tx.asset.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-        where: { id: assetId },
+      await tx.asset.updateMany({
+        where: {
+          id: assetId,
+          organizationId,
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
@@ -8176,14 +8207,25 @@ export async function releaseQuantity({
        * `updateKitAssets` removal). We only flip when zero rows remain so
        * an asset that still has other operator or kit-allocated custody
        * keeps its IN_CUSTODY status.
+       *
+       * `CHECKED_OUT` WINS here too, and this direction is the more
+       * dangerous of the pair: releasing the last custody row while units
+       * are still out on an ONGOING booking would advertise the asset as
+       * `AVAILABLE` on every picker and index while it is physically gone.
+       * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
+       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
         where: { assetId },
       });
       if (remainingCustodyCount === 0) {
-        await tx.asset.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-          where: { id: assetId },
+        await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
       }
