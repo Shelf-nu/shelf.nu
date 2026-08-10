@@ -72,8 +72,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           }
         : {}),
       // Only pass through real enum values — an unknown status string used
-      // to reach Prisma and 500; now it simply doesn't filter.
-      ...(statusFilter && statusFilter in AssetStatus
+      // to reach Prisma and 500; now it simply doesn't filter. Checked via
+      // `Object.values` (not `in`) so prototype-chain keys like "toString"
+      // can't slip through.
+      ...(statusFilter &&
+      (Object.values(AssetStatus) as string[]).includes(statusFilter)
         ? { status: statusFilter as AssetStatus }
         : {}),
     };
