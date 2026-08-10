@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { buildMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -48,26 +49,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const where: Record<string, unknown> = {
       organizationId,
-      // Match on title OR sequentialId (SAM id, e.g. "SAM-0001"). When the
-      // workspace display preference is SAM, every asset row shows its SAM id,
-      // so a user typing that number must be able to find it here. Mirrors the
-      // web search's sequentialId branch (modules/asset/service.server.ts) but
-      // intentionally NOT the heavy branches (custodian-name traversal,
-      // custom-fields JSON) — those are slow and low-value on mobile.
-      // `sequentialId` is indexed; a normal word term can't false-positive it.
-      ...(search
-        ? {
-            OR: [
-              { title: { contains: search, mode: "insensitive" as const } },
-              {
-                sequentialId: {
-                  contains: search,
-                  mode: "insensitive" as const,
-                },
-              },
-            ],
-          }
-        : {}),
+      // Which fields match (title, SAM id, description, category, tags) and
+      // which web branches stay deliberately excluded is documented on the
+      // builder — see modules/api/mobile-asset-search.server.ts.
+      ...buildMobileAssetSearchWhere(search),
       ...(myCustody
         ? {
             // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for
