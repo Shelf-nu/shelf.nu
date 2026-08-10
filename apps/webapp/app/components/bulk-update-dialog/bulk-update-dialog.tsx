@@ -32,6 +32,8 @@ import {
 type BulkDialogType =
   | "location"
   | "category"
+  | "asset-model"
+  | "asset-model-remove"
   | "assign-custody"
   | "release-custody"
   | "trash"

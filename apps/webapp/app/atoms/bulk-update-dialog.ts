@@ -8,6 +8,8 @@ import type { BulkDialogType } from "~/components/bulk-update-dialog/bulk-update
 const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   location: false,
   category: false,
+  "asset-model": false,
+  "asset-model-remove": false,
   "assign-custody": false,
   "release-custody": false,
   "tag-add": false,

@@ -25,6 +25,7 @@ import {
   Prisma,
   TagUseFor,
 } from "@prisma/client";
+import { withPrismaRetry } from "@shelf/database";
 import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
@@ -1240,7 +1241,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       hasSearch: Boolean(search),
     });
 
-    const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
+    // Retry the raw read on transient DB failures. The auto-applied client
+    // retry extension covers model operations but NOT raw escapes like
+    // `$queryRaw`, so wrap it explicitly. This heavy query trips Postgres
+    // shared-lock-table exhaustion (SQLSTATE 53200) under the per-request fan-out
+    // on large workspaces (SHELF-WEBAPP-227); the pressure is momentary, so a
+    // short backed-off retry usually succeeds. `operationIsRead: true` — this is
+    // a pure read, safe to re-run. On exhausted retries it rethrows to the catch
+    // below, which surfaces as the friendly retryable 503 (see makeShelfError).
+    const result = await withPrismaRetry(
+      () => db.$queryRaw<AdvancedIndexQueryResult>(query),
+      { operationIsRead: true }
+    );
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
@@ -4260,6 +4272,8 @@ export async function getPaginatedAndFilterableAssets({
         totalCategories,
         locations,
         totalLocations,
+        assetModels,
+        totalAssetModels,
       },
       teamMembersData,
       { assets, totalAssets },
@@ -4316,6 +4330,15 @@ export async function getPaginatedAndFilterableAssets({
       cookie,
       locations: excludeLocationQuery ? [] : locations,
       totalLocations,
+      /**
+       * `getEntitiesWithSelectedValues` already queries these on every simple
+       * mode load and the results were being dropped at the destructure above.
+       * Forwarding them costs no extra query and is what seeds the asset model
+       * picker in the bulk "Update asset model" dialog — without it the picker
+       * opens blank for every simple mode workspace.
+       */
+      assetModels,
+      totalAssetModels,
       ...teamMembersData,
     };
   } catch (cause) {
@@ -6791,6 +6814,213 @@ export async function bulkUpdateAssetCategory({
       cause,
       message: "Something went wrong while bulk updating category.",
       additionalData: { userId, assetIds, organizationId, categoryId },
+      label,
+    });
+  }
+}
+
+/** Outcome of a bulk asset model update, used to build an honest toast. */
+export type BulkUpdateAssetModelResult = {
+  /**
+   * Whether the action linked assets to a model (`true`) or removed the link
+   * (`false`). The caller must branch on this rather than on `modelName`,
+   * which is only a label and can be blank.
+   */
+  linked: boolean;
+  /**
+   * How many assets the selection resolved to. Distinguishes "your filters
+   * matched nothing" from "nothing needed changing", which read identically
+   * from `updated: 0`.
+   */
+  resolved: number;
+  /** Assets whose `assetModelId` actually changed. */
+  updated: number;
+  /** Of `updated`, how many were moved off a different model rather than grouped for the first time. */
+  moved: number;
+  /** Selected assets left untouched because models are individually-tracked only. */
+  skippedQuantityTracked: number;
+  /** Name of the target model, or `null` when the action removed the link. */
+  modelName: string | null;
+};
+
+/**
+ * Links (or unlinks) many assets to a single AssetModel in one action.
+ *
+ * This is the bulk counterpart of the Asset Model picker on the asset edit
+ * form. It exists so an existing library can be grouped into models without
+ * editing assets one at a time or round-tripping through a CSV re-import.
+ *
+ * Behaviour worth knowing before you change it:
+ * - QUANTITY_TRACKED assets are **skipped**, not rejected. An asset model
+ *   describes N distinguishable units of one template, while a qty-tracked
+ *   asset is a stock pool, so `createAsset`/`updateAsset` both refuse that
+ *   link. A mixed selection is normal in a real library, so the batch applies
+ *   to the individually-tracked assets and reports the skip. Only a selection
+ *   with nothing eligible in it is an error.
+ * - The model's `defaultCategoryId` / `defaultValuation` are **not** applied.
+ *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
+ *   retro-applying them here would silently overwrite curated data on assets
+ *   that already exist.
+ * - No activity events and no notes are written. `ActivityAction` has no
+ *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
+ *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
+ *   bulk must emit exactly what singular emits. Adding the event properly
+ *   needs an additive enum migration plus the singular call site plus the
+ *   model-delete SetNull cascade, which is its own change.
+ *
+ * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
+ * @param params.assetModelId - Target model, or `null`/`""` to remove the link
+ * @param params.currentSearchParams - Active index filters, used to resolve a
+ *   cross-page "select all" into real ids
+ * @param params.settings - Asset index settings; decides simple vs advanced
+ *   filter resolution for that select-all
+ * @returns Counts describing what actually happened, for the caller's toast
+ * @throws {ShelfError} 404 when the model is not in this organization, 400
+ *   when every selected asset is quantity-tracked
+ */
+export async function bulkUpdateAssetModel({
+  userId,
+  assetIds,
+  organizationId,
+  assetModelId,
+  currentSearchParams,
+  settings,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  assetModelId: Asset["assetModelId"];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+}): Promise<BulkUpdateAssetModelResult> {
+  try {
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
+
+    /** An empty `assetModelId` is the "remove from asset model" request. */
+    const newAssetModelId = assetModelId || null;
+    const linked = newAssetModelId !== null;
+
+    if (resolvedIds.length === 0) {
+      return {
+        linked,
+        resolved: 0,
+        updated: 0,
+        moved: 0,
+        skippedQuantityTracked: 0,
+        modelName: null,
+      };
+    }
+
+    // why: `connect`-style writes are not org-scoped by Prisma, so a crafted
+    // foreign-org model id would otherwise be written verbatim onto this
+    // org's assets. Shared guard per .claude/rules/org-scope-user-supplied-ids.
+    let modelName: string | null = null;
+    if (newAssetModelId) {
+      // The guard returns the row it already had to read, so the toast label
+      // costs no extra query.
+      const model = await assertAssetModelBelongsToOrg({
+        assetModelId: newAssetModelId,
+        organizationId,
+      });
+      modelName = model.name;
+    }
+
+    /**
+     * Before-state, org-scoped. This read is also the ownership proof for the
+     * asset ids: `resolveAssetIdsForBulkOperation` returns a caller-supplied
+     * list verbatim when it is not a select-all, so nothing upstream has
+     * checked them against this organization yet.
+     */
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: { id: { in: resolvedIds }, organizationId },
+      select: { id: true, type: true, assetModelId: true },
+    });
+
+    const individuals = assetsBeforeUpdate.filter(
+      (asset) => asset.type !== AssetType.QUANTITY_TRACKED
+    );
+    const skippedQuantityTracked =
+      assetsBeforeUpdate.length - individuals.length;
+
+    /**
+     * Only the LINK direction errors here. Removing a link from a set of
+     * quantity-tracked assets is a legitimate no-op (they can never have had a
+     * model), so failing it would teach a rule the user did not break.
+     */
+    if (linked && individuals.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not allowed",
+        message:
+          "All selected assets are quantity-tracked. Asset models can only be linked to individually tracked assets.",
+        additionalData: { organizationId, userId, assetModelId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Skip rows that already point at the target so the counts stay honest. */
+    const assetsThatChange = individuals.filter(
+      (asset) => asset.assetModelId !== newAssetModelId
+    );
+
+    /**
+     * Assets taken off another model rather than grouped for the first time.
+     * Surfaced in the toast because it is the only signal that the previous
+     * model's book-by-model availability pool just shrank.
+     */
+    const moved = newAssetModelId
+      ? assetsThatChange.filter((asset) => asset.assetModelId !== null).length
+      : 0;
+
+    if (assetsThatChange.length > 0) {
+      await db.asset.updateMany({
+        where: {
+          id: { in: assetsThatChange.map((asset) => asset.id) },
+          organizationId,
+        },
+        data: { assetModelId: newAssetModelId },
+      });
+    }
+
+    return {
+      linked,
+      /**
+       * The org-verified count, not `resolvedIds.length`. A caller-supplied id
+       * list comes back from the resolver verbatim, so counting it would report
+       * "already in this asset model" for ids that simply are not in this
+       * organization, when "matched no assets" is the truth.
+       */
+      resolved: assetsBeforeUpdate.length,
+      updated: assetsThatChange.length,
+      moved,
+      /**
+       * Only meaningful when linking. On the unlink path a quantity-tracked
+       * asset was never going to change, so reporting it as "skipped" would
+       * invent a failure.
+       */
+      skippedQuantityTracked: linked ? skippedQuantityTracked : 0,
+      modelName,
+    };
+  } catch (cause) {
+    // why: the eligibility 400 and the cross-org 404 are the two errors the
+    // user is meant to read. The generic wrapper keeps the status but replaces
+    // the message, so re-throw our own errors untouched.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the asset model.",
+      additionalData: { userId, assetIds, organizationId, assetModelId },
       label,
     });
   }
