@@ -44,6 +44,14 @@ vi.mock("~/components/dynamic-dropdown/dynamic-dropdown", () => ({
   ),
 }));
 
+// why: stub the loader's server dependencies so the loader/render test runs
+// without a real database, permission resolver, or QR/kit services.
+// `roles.server` is mocked so `requirePermission` is controllable (the loader's
+// permission gate can be forced to pass or throw); the qr and kit service
+// modules are mocked to avoid their real DB-hitting calls (`getQr`,
+// `getPaginatedAndFilterableKits`) and keep the loader deterministic; and
+// `db.server`'s `teamMember.findMany/count` are stubbed because the loader
+// queries them to build the Custodian filter.
 vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 vi.mock("~/modules/qr/service.server", () => ({ getQr: vi.fn() }));
 vi.mock("~/modules/kit/service.server", () => ({
