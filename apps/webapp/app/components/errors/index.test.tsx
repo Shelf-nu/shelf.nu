@@ -2,7 +2,8 @@
  * Tests for {@link ErrorContent}: the report-an-issue wiring (button only
  * shows for authenticated app-layout errors, and the feedback modal receives
  * the error context rendered on the page), the not-found screen for genuine
- * 404s, and the Sentry capture rules for route-error boundary failures.
+ * 404s, the rate-limit screen for 429s, and the Sentry capture rules for
+ * route-error boundary failures.
  *
  * @see {@link file://./index.tsx}
  */
@@ -161,6 +162,24 @@ function buildRouterNotFoundError() {
   };
 }
 
+/**
+ * A rate-limited route error as it actually arrives in production
+ * (SHELF-WEBAPP-21S/221): `appLoaderRateLimit` is Hono middleware that
+ * responds with a plain `c.json(...)` 429 BEFORE the request reaches
+ * Remix's single-fetch data handling, so the client can't decode a Shelf
+ * `{ error: {...} }` payload from it — `.data` ends up a bare `Error`, the
+ * same shape `buildRouterNotFoundError` models for 404. `isRouteErrorResponse`
+ * still recognizes the status; `isRouteError` does not.
+ */
+function buildRateLimitedRouteError() {
+  return {
+    status: 429,
+    statusText: "Too Many Requests",
+    internal: true,
+    data: new Error("Too many requests. Please try again later."),
+  };
+}
+
 /** The workspace-switcher `additionalData` shape: a resource that exists,
  * but in a different organization the user belongs to. */
 function buildWorkspaceSwitcherAdditionalData() {
@@ -316,6 +335,42 @@ describe("ErrorContent not-found screen", () => {
   });
 });
 
+describe("ErrorContent rate-limited screen", () => {
+  beforeEach(() => {
+    mockUser = { id: "user_123" };
+  });
+
+  it("renders a calm rate-limit screen for a 429 (not the generic 'unexpected error' framing)", () => {
+    mockRouteError = buildRateLimitedRouteError();
+    renderErrorContent();
+
+    expect(screen.getByText("Too many requests")).toBeTruthy();
+    expect(screen.getByText(/doing that a bit too quickly/i)).toBeTruthy();
+    // Not the alarming generic framing (SHELF-WEBAPP-21S/221's actual bug:
+    // this text is what real users saw for a transient rate limit)
+    expect(screen.queryByText(/Oops, something went wrong/i)).toBeNull();
+    expect(
+      screen.queryByText(/If the issues persists, please contact support/i)
+    ).toBeNull();
+    // Only "Back to home" is offered — no Reload/Report actions
+    expect(screen.queryByRole("link", { name: /reload page/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /report this issue/i })
+    ).toBeNull();
+  });
+
+  it("prefers a Shelf-shaped 429 payload's own message when present", () => {
+    mockRouteError = buildRouteError({
+      status: 429,
+      message: "You've hit the bulk-action limit. Try again in a minute.",
+      label: "RateLimit",
+    });
+    renderErrorContent();
+
+    expect(screen.getByText(/hit the bulk-action limit/i)).toBeTruthy();
+  });
+});
+
 describe("ErrorContent capturing route-error boundary failures to Sentry", () => {
   beforeEach(() => {
     mockUser = { id: "user_123" };
@@ -373,6 +428,16 @@ describe("ErrorContent capturing route-error boundary failures to Sentry", () =>
     renderErrorContent();
 
     await waitFor(() => expect(screen.getByText("Not found")).toBeTruthy());
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("does not capture a rate-limited 429 (transient — expected terminal state, SHELF-WEBAPP-21S/221)", async () => {
+    mockRouteError = buildRateLimitedRouteError();
+    renderErrorContent();
+
+    await waitFor(() =>
+      expect(screen.getByText("Too many requests")).toBeTruthy()
+    );
     expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
