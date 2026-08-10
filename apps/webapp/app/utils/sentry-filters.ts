@@ -24,11 +24,14 @@ import type { ErrorEvent } from "@sentry/react-router";
  * - `403` — permission denied / an expired or already-consumed claim
  *   (e.g. "This scan can no longer be updated" on an expired QR claim).
  * - `404` — the resource genuinely does not exist.
+ * - `429` — rate limited (e.g. `appLoaderRateLimit`'s per-(user, path) cap
+ *   on `.data` revalidations). Transient by design — the client is expected
+ *   to hit this occasionally, not a bug to triage.
  *
- * All OTHER 4xx (400/409/422/429, …) and every 5xx stay captured — those can
+ * All OTHER 4xx (400/409/422, …) and every 5xx stay captured — those can
  * indicate real client/server problems worth triaging.
  */
-export const EXPECTED_ERROR_BOUNDARY_STATUSES = [403, 404] as const;
+export const EXPECTED_ERROR_BOUNDARY_STATUSES = [403, 404, 429] as const;
 
 /**
  * Whether a status is an expected error-boundary terminal state that must not
@@ -37,7 +40,7 @@ export const EXPECTED_ERROR_BOUNDARY_STATUSES = [403, 404] as const;
  * (a `NaN` from a missing tag is correctly treated as "not expected").
  *
  * @param status - The HTTP status code (or `NaN`/`undefined` when unknown)
- * @returns `true` only for the expected statuses (403, 404)
+ * @returns `true` only for the expected statuses (403, 404, 429)
  */
 export function isExpectedErrorBoundaryStatus(
   status: number | undefined
