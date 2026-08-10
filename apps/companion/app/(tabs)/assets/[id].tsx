@@ -39,6 +39,7 @@ import { useDateFormatter } from "@/lib/use-date-formatter";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -132,6 +133,7 @@ export default function AssetDetailScreen() {
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [showAdjustSheet, setShowAdjustSheet] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
 
   // Quantity-custody steps (QUANTITY_TRACKED assets only). Non-null values
@@ -171,6 +173,35 @@ export default function AssetDetailScreen() {
       asset.id,
       locationId
     );
+    if (err) Alert.alert("Error", err);
+    else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await fetchAsset();
+    }
+    setIsActionLoading(false);
+  };
+
+  // ── Adjust Quantity (stock) ─────────────────────────
+
+  /**
+   * Applies a stock adjustment and refreshes the asset. Web
+   * QuickAdjustDialog parity: Add maps to RESTOCK, Remove maps to LOSS —
+   * the server writes the ConsumptionLog row and fires the low-stock alert.
+   */
+  const performAdjustQuantity = async (args: {
+    direction: "add" | "subtract";
+    quantity: number;
+    note?: string;
+  }) => {
+    if (!currentOrg || !asset) return;
+    setShowAdjustSheet(false);
+    setIsActionLoading(true);
+    const { error: err } = await api.adjustQuantity(currentOrg.id, asset.id, {
+      quantity: args.quantity,
+      direction: args.direction,
+      category: args.direction === "add" ? "RESTOCK" : "LOSS",
+      note: args.note,
+    });
     if (err) Alert.alert("Error", err);
     else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -382,6 +413,25 @@ export default function AssetDetailScreen() {
                     {totalQuantityLabel}
                   </Text>
                   <Text style={styles.quantityTotalLabel}>total</Text>
+                  {/* Stock adjust — server requires asset:update, so the
+                      affordance is hidden from roles that would 403. */}
+                  {canUpdateAsset && (
+                    <TouchableOpacity
+                      style={styles.adjustButton}
+                      onPress={() => setShowAdjustSheet(true)}
+                      disabled={isActionLoading}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Adjust quantity"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name="swap-vertical"
+                        size={14}
+                        color={colors.foreground}
+                      />
+                      <Text style={styles.adjustButtonText}>Adjust</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 {/* Per-status slices. When the breakdown is null (no activity)
                     we show only the total above. */}
@@ -741,6 +791,13 @@ export default function AssetDetailScreen() {
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
             <>
+              <AdjustQuantitySheet
+                visible={showAdjustSheet}
+                availableQuantity={breakdown?.available ?? asset.quantity ?? 0}
+                unitOfMeasure={asset.unitOfMeasure}
+                onSubmit={(args) => void performAdjustQuantity(args)}
+                onClose={() => setShowAdjustSheet(false)}
+              />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
                 title="Assign Quantity"
@@ -995,6 +1052,24 @@ const useStyles = createStyles((colors, shadows) => ({
   quantityTotalLabel: {
     fontSize: fontSize.base,
     color: colors.muted,
+  },
+  adjustButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: "auto",
+    alignSelf: "center",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.white,
+  },
+  adjustButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foreground,
   },
   quantityBreakdownRow: {
     flexDirection: "row",

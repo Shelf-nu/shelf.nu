@@ -1,0 +1,53 @@
+# Adjust stock quantity on a QUANTITY_TRACKED asset (PR: feat/mobile-adjust-quantity)
+#
+# Precondition: app foregrounded with a signed-in session (qa-admin1 /
+# GRANULAR WORKSPACE) — uses the no-login pattern, so NO launchApp/clearState.
+# Test asset: "QA Qty Test — Tripod (10 pcs)" (cmqzf1xt20001s0iitjd72rkb),
+# starting quantity 10, no custody.
+#
+# Verifies: Adjust button on the quantity card → Add 5 (RESTOCK) → total 15
+# → Adjust → Remove 5 (LOSS) → total restored to 10. DB cross-check happens
+# outside Maestro (prisma script).
+appId: com.shelf.companion
+---
+# Assets tab → find the tripod via search (search now matches web fields)
+- tapOn: "Assets"
+- tapOn:
+    id: "search-input"
+    optional: true
+- inputText: "QA Qty Test"
+- extendedWaitUntil:
+    visible: "QA Qty Test — Tripod (10 pcs)"
+    timeout: 10000
+- tapOn: "QA Qty Test — Tripod (10 pcs)"
+
+# Quantity card shows 10 + the new Adjust affordance
+- extendedWaitUntil:
+    visible: "10 pcs"
+    timeout: 10000
+- assertVisible: "Adjust quantity"
+
+# Add 5 (RESTOCK). The sheet seeds the input with "1" and focuses it on
+# open, so erase before typing or the value becomes "15".
+- tapOn: "Adjust quantity"
+- extendedWaitUntil:
+    visible: "Adjust Quantity"
+    timeout: 5000
+- eraseText
+- inputText: "5"
+- tapOn: "Add"
+- extendedWaitUntil:
+    visible: "15 pcs"
+    timeout: 15000
+
+# Remove 5 (LOSS) → back to 10
+- tapOn: "Adjust quantity"
+- extendedWaitUntil:
+    visible: "Adjust Quantity"
+    timeout: 5000
+- eraseText
+- inputText: "5"
+- tapOn: "Remove"
+- extendedWaitUntil:
+    visible: "10 pcs"
+    timeout: 15000

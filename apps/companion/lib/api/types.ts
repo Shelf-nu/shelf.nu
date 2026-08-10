@@ -465,6 +465,16 @@ export type QuantityCustodyResponse = {
   asset?: AssetDetail;
 };
 
+/**
+ * Response of the mobile adjust-quantity endpoint — same envelope as the
+ * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset
+ * (may be absent when the refresh failed; the mutation still succeeded).
+ */
+export type AdjustQuantityResponse = {
+  success: boolean;
+  asset?: AssetDetail;
+};
+
 export type UpdateLocationResponse = {
   asset: {
     id: string;
