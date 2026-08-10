@@ -7838,6 +7838,7 @@ export async function updateBookingAssets({
   userId,
   quantities,
   kitSlices,
+  skipBookingNote,
 }: Pick<Booking, "id" | "organizationId"> & {
   /**
    * Standalone assets to add (no kit attribution). Kit-driven rows are
@@ -7862,6 +7863,30 @@ export async function updateBookingAssets({
    * picker, asset bulk actions) omit this and only add standalone rows.
    */
   kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
+  /**
+   * Opt out of the booking-side `"… added … to the booking."` note written
+   * near the end of this function. Callers that compose their OWN
+   * booking-side note MUST pass `true`.
+   *
+   * Without it the booking activity feed shows the same add twice, and for a
+   * single INDIVIDUAL asset the two rows are byte-identical: the service's
+   * `wrapAssetWithCountForNote` degrades to the same bare asset link the
+   * caller's `wrapAssetsWithDataForNote` emits at count 1, because
+   * `formatUnitCount` returns null for anything that is not
+   * QUANTITY_TRACKED. A reader cannot tell whether one asset was added or
+   * two — the audit trail says something untrue.
+   *
+   * Until now the ONLY way to suppress this note was to pass a non-empty
+   * `kitIds`, which is why the kit routes are unaffected and the asset route
+   * is not: `kitIds` was standing in for "the caller writes its own note",
+   * and a caller with no kits had no way to say so. This flag states the
+   * ownership directly instead of inferring it.
+   *
+   * Scope is the BOOKING-side note only. Asset-side notes (`createNotes`),
+   * `BOOKING_ASSETS_ADDED` events and model-request fulfilment all still
+   * happen — those are keyed to different feeds and must not be suppressed.
+   */
+  skipBookingNote?: boolean;
 }) {
   try {
     const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
@@ -8286,10 +8311,13 @@ export async function updateBookingAssets({
 
     // BOOKING ACTIVITY LOG: Log asset addition activity
     // Creates user-attributed note when assets are added to a booking
-    // Skip note creation if kits are involved - kit notes are created separately
+    // Skip note creation if kits are involved (kit notes are created
+    // separately), or if the caller told us it writes its own booking-side
+    // note (`skipBookingNote`). The `kitIds` arm was doing both jobs; the
+    // explicit flag is what a non-kit caller needs to avoid a duplicate.
     // Note creation is best-effort — the booking update already succeeded,
     // so we log failures instead of throwing to prevent false error reports.
-    if (!kitIds || kitIds.length === 0) {
+    if (!skipBookingNote && (!kitIds || kitIds.length === 0)) {
       try {
         // Widen the select to type+unitOfMeasure so the single-asset
         // branch can prefix a unit count ("added 50 units of Pens to

@@ -660,6 +660,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: newAssetIds, // Only the newly added assets
         userId,
         quantities: newQuantities,
+        // This route writes its own booking-side note below (the one that
+        // carries the quantity annotations). Without this the service writes
+        // a second one that is byte-identical for a single INDIVIDUAL asset,
+        // so the feed reports one add twice. `userId` is still passed — it
+        // attributes the BOOKING_ASSETS_ADDED events and the model-request
+        // assignment notes, which are separate concerns.
+        skipBookingNote: true,
       });
 
       /**
@@ -817,6 +824,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: changedAssetIds,
         userId,
         quantities: changedQuantities,
+        // These assets are ALREADY on the booking — this is a pure quantity
+        // edit. The service derives `addedAssetIds` from everything the call
+        // touched, not from what is new, so without this it logs a phantom
+        // "added X to the booking." for an asset that was already there. The
+        // route's own "adjusted booked quantity" note below is the truthful
+        // record of what happened.
+        skipBookingNote: true,
       });
 
       /**

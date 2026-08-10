@@ -650,6 +650,13 @@ describe("manage-assets route validation", () => {
         assetIds: ["asset3"], // only the new asset
         quantities: {},
         userId: "user123",
+        // This route writes its own booking-side note (below, carrying the
+        // quantity annotations). The service must NOT write a second one —
+        // for a single INDIVIDUAL asset the two are byte-identical, so the
+        // feed reported one add twice. Asserted here because the exact-object
+        // form makes a silent regression impossible: dropping the flag fails
+        // this test rather than quietly restoring the duplicate.
+        skipBookingNote: true,
       });
 
       // Verify per-asset note creation. The route now uses markdoc link

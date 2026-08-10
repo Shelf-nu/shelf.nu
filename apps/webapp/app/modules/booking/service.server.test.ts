@@ -1656,6 +1656,66 @@ describe("updateBookingAssets", () => {
   });
 
   /**
+   * The booking activity feed must record one add as ONE event.
+   *
+   * `updateBookingAssets` writes a booking-side note as a side effect, and the
+   * only way to opt out used to be passing a non-empty `kitIds` — that flag was
+   * standing in for "the caller writes its own note". A non-kit caller that also
+   * wrote one (manage-assets) had no way to say so, so a single add produced two
+   * rows. For one INDIVIDUAL asset they were byte-identical, because
+   * `formatUnitCount` returns null off QUANTITY_TRACKED and the service's
+   * single-asset wrapper then collapses to the same bare link the route emits.
+   * A reader could not tell one add from two — the audit trail stated something
+   * untrue, which is the one thing an audit trail may not do.
+   */
+  it("writes the booking-side note by default", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+    });
+
+    // Callers that do NOT compose their own note still get one — removing the
+    // note wholesale would leave those feeds silent instead of duplicated.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalled();
+  });
+
+  it("suppresses the booking-side note when the caller owns it", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      skipBookingNote: true,
+    });
+
+    expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+  });
+
+  /**
    * Model reservations are discharged by an asset ARRIVING on the booking.
    * `updateBookingAssets` is the "Manage assets" path, and that dialog reposts
    * the operator's full selection on every save — so the set of assets it
