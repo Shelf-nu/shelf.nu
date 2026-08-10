@@ -40,6 +40,9 @@ vi.mock("~/utils/env", () => ({
   INSTANCE_NAME: "Acme University",
 }));
 
+// why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
+// DISABLE_SSO env var. Pinning it keeps the asserted payload deterministic
+// regardless of the local or CI environment.
 vi.mock("~/config/shelf.config", () => ({
   config: { disableSSO: false },
 }));

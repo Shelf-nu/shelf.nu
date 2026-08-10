@@ -137,6 +137,38 @@ test("parseServerConfigResponse rejects missing and empty fields", () => {
   }
 });
 
+test("parseServerConfigResponse rejects a host-less supabase URL", () => {
+  // "https://" passes a bare prefix check, and normalizeBaseUrl then strips it
+  // to "https:" — an unusable endpoint persisted as the Supabase URL, failing
+  // opaquely at sign-in instead of here with an actionable reason.
+  for (const supabaseUrl of ["https://", "https:///"]) {
+    const result = parseServerConfigResponse(
+      { ...validBody, supabaseUrl },
+      "https://acme.i.shelf.nu",
+      false
+    );
+    assert.deepEqual(result, { ok: false, reason: "malformed" }, supabaseUrl);
+  }
+});
+
+test("parseServerConfigResponse rejects a host-less base URL", () => {
+  for (const baseUrl of ["https://", "https:///"]) {
+    const result = parseServerConfigResponse(validBody, baseUrl, false);
+    assert.deepEqual(result, { ok: false, reason: "malformed" }, baseUrl);
+  }
+});
+
+test("parseServerConfigResponse rejects a scheme-relative URL", () => {
+  // `new URL("https:xyz.supabase.co")` parses fine for special schemes, so the
+  // prefix check has to stay alongside the parse.
+  const result = parseServerConfigResponse(
+    { ...validBody, supabaseUrl: "https:xyz.supabase.co" },
+    "https://acme.i.shelf.nu",
+    false
+  );
+  assert.deepEqual(result, { ok: false, reason: "insecure" });
+});
+
 test("parseServerConfigResponse falls back to a default name", () => {
   const result = parseServerConfigResponse(
     { ...validBody, name: "   " },

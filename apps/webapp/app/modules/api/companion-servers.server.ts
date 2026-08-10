@@ -40,13 +40,38 @@ function getRegistry(): Record<string, string> | null {
     return null;
   }
 
-  const entries: Record<string, string> = {};
+  // why: a null-prototype map. A plain object answers a lookup for
+  // `constructor` / `__proto__` / `toString` from the prototype chain, which is
+  // neither a string nor nullish — so `?? null` never fires, the documented
+  // `string | null` contract breaks, and JSON.stringify drops the `baseUrl` key
+  // entirely for those inputs.
+  const entries: Record<string, string> = Object.create(null);
+
   for (const [domain, url] of Object.entries(parsed)) {
     if (typeof url !== "string") continue;
     // https only — the companion app refuses plaintext, so an http entry is
     // dead config. Dropping it here keeps the failure at "unknown domain"
     // rather than a confusing client-side error.
+    //
+    // Keep this prefix check even though we parse below: `new URL()` resolves
+    // scheme-relative forms for special schemes, so `https:acme.example.com`
+    // parses to a perfectly good https URL with a hostname. Parsing ALONE
+    // would therefore widen what we accept, not narrow it.
     if (!url.startsWith("https://")) continue;
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      continue;
+    }
+
+    // Must be usable as a BASE url. `https://` has no host to reach, and a
+    // query or fragment would swallow the `/api/mobile/...` path the companion
+    // concatenates onto this — it would silently fetch the site root and get
+    // HTML back.
+    if (!parsedUrl.hostname || parsedUrl.search || parsedUrl.hash) continue;
+
     entries[domain.trim().toLowerCase()] = url.replace(/\/+$/, "");
   }
 

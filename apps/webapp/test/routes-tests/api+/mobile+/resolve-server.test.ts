@@ -33,12 +33,21 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: isolates the route from env/registry wiring so these tests assert the
-// HTTP contract, not the registry's own parsing — that is covered by
-// app/modules/api/companion-servers.server.test.ts.
-vi.mock("~/modules/api/companion-servers.server", () => ({
-  resolveCompanionServer: (domain: string) =>
-    domain === "acme.edu" ? "https://acme.i.shelf.nu" : null,
+// why: mock ONLY the resolver's environment input, not the resolver itself.
+// `resolveCompanionServer` is internal business logic (a pure function over an
+// env string), and stubbing it would let a change to its return contract slip
+// through with both this suite and the resolver's own suite green while the
+// deployed endpoint ships a wrong body. `importActual` is spread in because the
+// route pulls `~/utils/http.server`, which reads SERVER_URL / URL_SHORTENER
+// from this module at import time.
+const mockEnv = {
+  COMPANION_SERVERS: JSON.stringify({ "acme.edu": "https://acme.i.shelf.nu" }),
+};
+vi.mock("~/utils/env", async () => ({
+  ...(await vi.importActual<typeof import("~/utils/env")>("~/utils/env")),
+  get COMPANION_SERVERS() {
+    return mockEnv.COMPANION_SERVERS;
+  },
 }));
 
 const { action } = await import("~/routes/api+/mobile+/resolve-server");

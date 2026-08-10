@@ -128,6 +128,31 @@ export function normalizeBaseUrl(url: string): string {
 }
 
 /**
+ * Whether a string is usable as an https base URL — correct scheme AND a real
+ * host.
+ *
+ * A bare `"https://"` clears a `startsWith` check and then normalises to
+ * `"https:"`, which would be persisted as a server or Supabase endpoint and
+ * fail opaquely at sign-in rather than here, where the failure carries a
+ * reason. Callers keep their `startsWith("https://")` check as well: `new URL`
+ * resolves scheme-relative forms for special schemes, so `https:example.com`
+ * parses to a valid https URL and parsing alone would widen what we accept.
+ *
+ * @param value - The candidate URL.
+ * @returns `true` only when it parses as https with a non-empty host.
+ */
+function hasUsableHttpsHost(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    // Assert the hostname explicitly rather than relying on the constructor to
+    // throw — React Native's URL polyfill is laxer than Node's.
+    return parsed.protocol === "https:" && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Validates a `/api/mobile/config` response and turns it into a `ServerConfig`.
  *
  * @param json - Parsed response body, typed `unknown` because a server can
@@ -146,6 +171,9 @@ export function parseServerConfigResponse(
   // tokens will flow to this origin.
   if (!baseUrl.startsWith("https://")) {
     return { ok: false, reason: "insecure" };
+  }
+  if (!hasUsableHttpsHost(baseUrl)) {
+    return { ok: false, reason: "malformed" };
   }
 
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
@@ -171,6 +199,9 @@ export function parseServerConfigResponse(
 
   if (!supabaseUrl.startsWith("https://")) {
     return { ok: false, reason: "insecure" };
+  }
+  if (!hasUsableHttpsHost(supabaseUrl)) {
+    return { ok: false, reason: "malformed" };
   }
 
   if (mobileApiVersion < MIN_SERVER_MOBILE_API_VERSION) {
