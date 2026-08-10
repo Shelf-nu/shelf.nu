@@ -18,6 +18,10 @@ const dbMocks = vi.hoisted(() => {
     asset: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: the status guard now rides on the UPDATE itself
+      // (`status: { not: CHECKED_OUT }`), so the action claims the asset with
+      // `updateMany` and branches on the returned count. Default to a hit.
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       // why: the action reads the asset's live status inside the tx and
       // refuses the assignment when it is CHECKED_OUT, so a custody claim can
       // never overwrite the "off the shelf" signal. Default to AVAILABLE so
@@ -49,6 +53,7 @@ vi.mock("~/database/db.server", () => ({
       findUnique: dbMocks.asset.findUnique,
       update: dbMocks.asset.update,
       findFirst: dbMocks.asset.findFirst,
+      updateMany: dbMocks.asset.updateMany,
     },
     teamMember: {
       findMany: dbMocks.teamMember.findMany,
@@ -63,9 +68,10 @@ vi.mock("~/database/db.server", () => ({
         custody: { deleteMany: dbMocks.custody.deleteMany },
         asset: {
           update: dbMocks.asset.update,
-          // why: the action reads the live status inside the tx to refuse a
-          // custody claim on a CHECKED_OUT asset.
+          // why: `findFirst` runs only on the rejection path, to name the
+          // asset in the conflict message.
           findFirst: dbMocks.asset.findFirst,
+          updateMany: dbMocks.asset.updateMany,
         },
       })
     ),
@@ -380,10 +386,22 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       },
     });
 
+    // The status write moved onto its own guarded `updateMany`
+    // (`status: { not: CHECKED_OUT }`) so it is atomic against a concurrent
+    // checkout; the `update` below now only creates the custody row.
+    // Asserting both keeps that split visible to the next reader.
+    expect(dbMocks.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-123",
+        organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
+      },
+      data: { status: AssetStatus.IN_CUSTODY },
+    });
+
     expect(mockAssetUpdate).toHaveBeenCalledWith({
       where: { id: "asset-123", organizationId: "org-1" },
       data: expect.objectContaining({
-        status: AssetStatus.IN_CUSTODY,
         custody: {
           create: {
             custodian: { connect: { id: "team-member-123" } },
@@ -431,5 +449,99 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect(mockAssetUpdate).not.toHaveBeenCalled();
     expect(createNoteMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A custody claim must never overwrite `CHECKED_OUT`, and when it is refused the
+ * operator must be told why.
+ *
+ * The guard rides on the UPDATE (`status: { not: CHECKED_OUT }`) rather than a
+ * preceding `findFirst`: Postgres runs at READ COMMITTED, so a plain SELECT
+ * takes no row lock and a checkout committing between read and write would be
+ * silently overwritten — the exact bug this PR closes. These tests therefore
+ * drive the `updateMany` count, which is what the database would actually
+ * return, instead of stubbing a status read.
+ */
+describe("assign-custody — CHECKED_OUT conflict", () => {
+  beforeEach(() => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+    mockAssetUpdate.mockResolvedValue({
+      id: "asset-123",
+      title: "Test Asset",
+    } as any);
+  });
+
+  it("refuses the claim and keeps the specific message when the row is filtered out", async () => {
+    // count === 0 is what Postgres returns when the `not: CHECKED_OUT`
+    // predicate excludes the row.
+    dbMocks.asset.updateMany.mockResolvedValue({ count: 0 });
+    dbMocks.asset.findFirst.mockResolvedValue({ title: "Drill" });
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Test Team Member" })
+    );
+
+    const response = await action(
+      createActionArgs({
+        request: new Request(
+          "https://example.com/assets/asset-123/overview/assign-custody",
+          { method: "POST", body: formData }
+        ),
+      })
+    );
+
+    expect((response as Response).status).toBe(400);
+
+    // The `.catch` around the transaction must re-throw ShelfError causes
+    // unchanged. ShelfError never inherits `message`, so wrapping would swap
+    // this for the generic "Something went wrong" text the form renders.
+    const body = await (response as Response).json();
+    expect(body.error.message).toContain("currently checked out on a booking");
+
+    // No custody row is written when the claim is refused.
+    expect(dbMocks.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("claims the asset atomically rather than reading its status first", async () => {
+    dbMocks.asset.updateMany.mockResolvedValue({ count: 1 });
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Test Team Member" })
+    );
+
+    await action(
+      createActionArgs({
+        request: new Request(
+          "https://example.com/assets/asset-123/overview/assign-custody",
+          { method: "POST", body: formData }
+        ),
+      })
+    );
+
+    expect(dbMocks.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-123",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
+      data: { status: "IN_CUSTODY" },
+    });
+
+    // The happy path must not pay for a status read — it only runs when the
+    // claim is refused.
+    expect(dbMocks.asset.findFirst).not.toHaveBeenCalled();
   });
 });
