@@ -7,9 +7,10 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
+import { getNrmSelectionWhere } from "./nrm-scope";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -648,17 +649,32 @@ export async function getTeamMember({
   }
 }
 
+/**
+ * Soft-deletes the selected NRMs, refusing the whole batch if any of them
+ * still holds custody.
+ *
+ * @param params.nrmIds - Selected ids, or a list containing ALL_SELECTED_KEY
+ * @param params.organizationId - The active organization
+ * @param params.search - The index's active search, forwarded on select-all so
+ *   the delete matches exactly the rows the user had in front of them
+ * @returns The Prisma batch payload for the soft-delete
+ * @throws {ShelfError} If any selected member holds custody, or the write fails
+ */
 export async function bulkDeleteNRMs({
   nrmIds,
   organizationId,
+  search,
 }: {
   nrmIds: TeamMember["id"][];
   organizationId: TeamMember["organizationId"];
+  search?: string | null;
 }) {
   try {
-    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
-      ? { organizationId }
-      : { id: { in: nrmIds }, organizationId };
+    // Derived from the shared NRM scope. A bare `{ organizationId }` here would
+    // soft-delete EVERY TeamMember row in the org on select-all — including the
+    // rows backing registered users, which are not NRMs and are not listed on
+    // this index.
+    const where = getNrmSelectionWhere({ nrmIds, organizationId, search });
 
     const teamMembers = await db.teamMember.findMany({
       where,
@@ -679,10 +695,21 @@ export async function bulkDeleteNRMs({
       });
     }
 
+    // The write re-asserts the full read predicate rather than trusting the ids
+    // alone. Selection and write are two round trips, so a row can stop being a
+    // deletable NRM in between — accept an invite, be soft-deleted by someone
+    // else, or acquire custody after the guard above ran. Restating the scope
+    // (plus the custody check, which the read could only evaluate in JS) makes
+    // those rows fall out of the write instead of being soft-deleted on stale
+    // ids. Rows that changed are skipped, not fatal: `updateMany` simply matches
+    // fewer rows.
     return await db.teamMember.updateMany({
       where: {
-        id: { in: teamMembers.map((tm) => tm.id) },
-        organizationId,
+        ...getNrmSelectionWhere({
+          nrmIds: teamMembers.map((tm) => tm.id),
+          organizationId,
+        }),
+        custodies: { none: {} },
       },
       data: { deletedAt: new Date() },
     });
