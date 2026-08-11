@@ -326,12 +326,17 @@ export type RemovedPlanningBookingSlice = {
  * {@link mergeStandaloneCollisionsForKitDetachment}, so neither reports on nor
  * merges a row that is about to disappear.
  *
- * Caller contract: `assetKitIds` MUST already be org-scoped — same contract as
- * {@link preserveKitDrivenPlacements}.
+ * Org-scoped in the queries themselves, not by caller discipline: this DELETES
+ * rows, so a stray `AssetKit` id from another org would destroy another
+ * tenant's booking data. `organizationId` is a required param so the compiler
+ * forces every call site to supply it, matching its read-only sibling
+ * {@link getReservedBookingImpactForAssetKits} (see
+ * `.claude/rules/org-scope-user-supplied-ids.md`).
  *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
- * @param assetKitIds `AssetKit` rows about to be deleted; must be org-scoped
+ * @param assetKitIds `AssetKit` rows about to be deleted
  * @param options.actorUserId Acting user, for the event actor + note attribution
+ * @param options.organizationId Acting org — rows outside it are never touched
  * @param options.reason What removed the membership — picks the note wording.
  *   `"kit-deleted"` for the kit-deletion cascade (the asset never left the kit,
  *   the kit ceased to exist); `"membership-removed"` otherwise.
@@ -343,9 +348,11 @@ export async function removeKitSlicesFromPlanningBookings(
   assetKitIds: string[],
   {
     actorUserId,
+    organizationId,
     reason = "membership-removed",
   }: {
     actorUserId: string;
+    organizationId: string;
     reason?: "membership-removed" | "kit-deleted";
   }
 ): Promise<RemovedPlanningBookingSlice[]> {
@@ -358,7 +365,12 @@ export async function removeKitSlicesFromPlanningBookings(
     tx.bookingAsset.findMany({
       where: {
         assetKitId: { in: assetKitIds },
-        booking: { status: { in: PLANNING_BOOKING_STATUSES } },
+        // Both clauses on the booking: `organizationId` is the tenancy guard
+        // (`BookingAsset` has no org column of its own), `status` the scope.
+        booking: {
+          organizationId,
+          status: { in: PLANNING_BOOKING_STATUSES },
+        },
       },
       // Snapshot before the delete — quantity and titles are unrecoverable
       // afterwards, and the notes/events below need both.
@@ -384,8 +396,7 @@ export async function removeKitSlicesFromPlanningBookings(
       },
     }),
     tx.assetKit.findMany({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetKitIds` are org-scoped by this helper's caller contract
-      where: { id: { in: assetKitIds } },
+      where: { id: { in: assetKitIds }, organizationId },
       select: { id: true, kitId: true, kit: { select: { name: true } } },
     }),
   ]);
@@ -605,9 +616,9 @@ export async function removeKitSlicesFromPlanningBookings(
   }
 
   // `createSystemBookingNotes` verifies every booking belongs to the org it is
-  // handed, so notes are batched per organization. In practice that is a single
-  // batch — `assetKitIds` are org-scoped by the caller contract — but grouping
-  // keeps the helper correct rather than merely lucky.
+  // handed, so notes are batched per organization. Always a single batch now
+  // that the read filters on `organizationId`, but the grouping is kept so the
+  // helper stays correct if the read ever widens.
   const notesByOrg = new Map<
     string,
     Array<{ bookingId: string; content: string }>
@@ -2092,6 +2103,7 @@ async function performKitDeletion({
     // Runs before the merge so that only surviving rows are merged.
     await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
       actorUserId: userId,
+      organizationId,
       // The asset never left the kit here — the kit stopped existing.
       reason: "kit-deleted",
     });
@@ -4854,6 +4866,7 @@ export async function updateKitAssets({
         // below sees a row that is about to disappear.
         await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
           actorUserId: userId,
+          organizationId,
         });
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
@@ -4897,6 +4910,7 @@ export async function updateKitAssets({
         // Same ordering rationale as the disconnect branch above.
         await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
           actorUserId: userId,
+          organizationId,
         });
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
@@ -5876,6 +5890,7 @@ export async function bulkRemoveAssetsFromKits({
       // below sees a row that is about to disappear.
       await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
         actorUserId: userId,
+        organizationId,
       });
       bulkDetachmentImpact = bulkDetachmentImpact.concat(
         await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)

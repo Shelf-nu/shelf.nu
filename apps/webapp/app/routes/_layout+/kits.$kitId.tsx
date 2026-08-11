@@ -346,6 +346,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             // should see a row that is about to disappear.
             await removeKitSlicesFromPlanningBookings(tx, assetKitIds, {
               actorUserId: userId,
+              organizationId,
             });
             const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
             await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);

@@ -13,6 +13,7 @@ import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters"
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
+import type { ReservedBookingForNotice } from "~/components/kits/reserved-booking-removal-notice";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -41,6 +42,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -52,7 +54,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.kit,
@@ -80,32 +82,70 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ]);
 
     /**
+     * The route only requires `kit`/`read`, which SELF_SERVICE and BASE both
+     * have — but neither has `kit`/`update`, the permission the removal itself
+     * is gated on (`intent2ActionMap.removeAsset` in the parent route). The
+     * reserved-booking warning below names bookings across the WHOLE
+     * organization, which those roles otherwise never see, and it describes an
+     * action they cannot perform — so it is computed only for callers who can
+     * actually remove an asset from the kit.
+     *
+     * Uses the server-side `hasPermission` (the `userHasPermission` validator
+     * has the `.client.` suffix and is stripped from the SSR bundle), passing
+     * `roles` explicitly to avoid its DB fallback lookup — same pattern as the
+     * asset overview loader's `canEditAsset`.
+     */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
+    const canUpdateKit = await hasPermission({
+      userId,
+      organizationId,
+      roles,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.update,
+    });
+
+    /**
      * Which RESERVED bookings would lose a slice if one of the rows on THIS
      * page were removed from the kit — the row's Remove dialog warns before
      * confirming. Second narrow fetch over the page's `AssetKit` ids (same
      * pattern as `getKitPickerMeta`), deliberately NOT a widening of the
      * parent route's `bookingAssets` include: that one loads every member of
      * the kit unpaginated, so we'd pay for the whole kit to serve one page.
+     *
+     * Left `undefined` for callers without kit-update — neither the query nor
+     * the booking names happen at all — and the key is then dropped from the
+     * payload entirely rather than shipped empty. The Remove dialog those
+     * roles never see defaults to no warning.
+     *
+     * `assetId -> reserved bookings holding it through this kit`.
      */
-    const assetKitIdsByAssetId = assets.items.flatMap((asset) =>
-      asset.assetKits
-        .filter((ak) => ak.kitId === kitId)
-        .map((ak) => [asset.id, ak.id] as const)
-    );
-    const reservedImpactByAssetKitId =
-      await getReservedBookingImpactForAssetKits({
-        assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
-        organizationId,
-      });
-    /** `assetId -> reserved bookings holding it through this kit`. */
-    const reservedBookingsByAssetId = Object.fromEntries(
-      assetKitIdsByAssetId
-        .map(
-          ([assetId, assetKitId]) =>
-            [assetId, reservedImpactByAssetKitId[assetKitId] ?? []] as const
-        )
-        .filter(([, bookings]) => bookings.length > 0)
-    );
+    let reservedBookingsByAssetId:
+      | Record<string, ReservedBookingForNotice[]>
+      | undefined;
+
+    if (canUpdateKit) {
+      const assetKitIdsByAssetId = assets.items.flatMap((asset) =>
+        asset.assetKits
+          .filter((ak) => ak.kitId === kitId)
+          .map((ak) => [asset.id, ak.id] as const)
+      );
+      const reservedImpactByAssetKitId =
+        await getReservedBookingImpactForAssetKits({
+          assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
+          organizationId,
+        });
+      reservedBookingsByAssetId = Object.fromEntries(
+        assetKitIdsByAssetId
+          .map(
+            ([assetId, assetKitId]) =>
+              [assetId, reservedImpactByAssetKitId[assetKitId] ?? []] as const
+          )
+          .filter(([, bookings]) => bookings.length > 0)
+      );
+    }
 
     const header: HeaderData = {
       title: kit ? `${kit.name}'s assets` : "Kit assets",
@@ -119,7 +159,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       ...assets,
-      reservedBookingsByAssetId,
+      ...(reservedBookingsByAssetId ? { reservedBookingsByAssetId } : {}),
       modelName,
     });
   } catch (cause) {
@@ -207,6 +247,8 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
   const { category, tags } = item;
   // Reserved bookings this asset is on THROUGH this kit — removing it from the
   // kit deletes their slice, so the row's Remove dialog names them first.
+  // Absent for roles without kit-update permission (the loader omits it), which
+  // is why every read below is optional — the dialog then warns about nothing.
   const { reservedBookingsByAssetId } = useLoaderData<typeof loader>();
   // Render only the single primary-location badge — a qty-tracked asset
   // can sit at multiple locations via AssetLocation.
@@ -327,7 +369,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
         <Td className="pr-4 text-right">
           <AssetRowActionsDropdown
             asset={item}
-            reservedBookings={reservedBookingsByAssetId[item.id] ?? []}
+            reservedBookings={reservedBookingsByAssetId?.[item.id] ?? []}
           />
         </Td>
       </When>

@@ -3978,6 +3978,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     const removed = await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
@@ -4033,6 +4034,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     // The read is scoped to the kit-driven rows for these memberships only.
@@ -4040,6 +4042,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     expect(readArgs.where).toEqual({
       assetKitId: { in: ["ak-1"] },
       booking: {
+        organizationId: "org-1",
         status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
       },
     });
@@ -4053,6 +4056,62 @@ describe("removeKitSlicesFromPlanningBookings", () => {
           .mock.calls
       )
     ).not.toContain("ba-standalone");
+  });
+
+  it("scopes both reads to the acting org, so a foreign membership id deletes nothing", async () => {
+    // why: this helper DELETES booking rows selected purely by `assetKitId`.
+    // Without `organizationId` in the query, a caller that ever passes an id it
+    // did not org-scope itself destroys another tenant's booking data. The mock
+    // applies whatever clauses the helper actually wrote — an absent org clause
+    // returns BOTH rows, the way Postgres would — so the foreign row is spared
+    // because of the query, not because the fixture left it out.
+    expect.assertions(3);
+
+    const foreignSlice = {
+      ...draftSlice,
+      id: "ba-other-org",
+      assetKitId: "ak-other-org",
+      booking: { ...draftSlice.booking, organizationId: "org-2" },
+    };
+    sliceReads().mockImplementationOnce(
+      ({
+        where,
+      }: {
+        where: {
+          assetKitId?: { in: string[] };
+          booking?: { organizationId?: string };
+        };
+      }) =>
+        Promise.resolve(
+          [draftSlice, foreignSlice].filter(
+            (row) =>
+              (where.assetKitId?.in ?? []).includes(row.assetKitId) &&
+              (where.booking?.organizationId === undefined ||
+                row.booking.organizationId === where.booking.organizationId)
+          )
+        )
+    );
+    membershipReads().mockResolvedValueOnce([membershipRow]);
+
+    const { removeKitSlicesFromPlanningBookings } = await import(
+      "./service.server"
+    );
+    const removed = await removeKitSlicesFromPlanningBookings(
+      db,
+      ["ak-1", "ak-other-org"],
+      { actorUserId: "user-1", organizationId: "org-1" }
+    );
+
+    // The membership lookup that feeds the note wording is scoped too.
+    const [membershipArgs] = membershipReads().mock.calls[0];
+    expect(membershipArgs.where).toEqual({
+      id: { in: ["ak-1", "ak-other-org"] },
+      organizationId: "org-1",
+    });
+    expect(removed.map((r) => r.bookingAssetId)).toEqual(["ba-draft"]);
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ba-draft"] } },
+    });
   });
 
   it("leaves a slice on an ONGOING booking alone", async () => {
@@ -4071,6 +4130,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
       ["ak-ongoing"],
       {
         actorUserId: "user-1",
+        organizationId: "org-1",
       }
     );
 
@@ -4086,6 +4146,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     const removed = await removeKitSlicesFromPlanningBookings(db, [], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     expect(removed).toEqual([]);
@@ -4128,6 +4189,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     const [events, tx] = (
@@ -4180,6 +4242,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     expect(db.bookingModelRequest.update).toHaveBeenCalledWith({
@@ -4221,6 +4284,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     const [{ notes }] = (
@@ -4284,6 +4348,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-a", "ak-b"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     const [events] = (recordEvents as unknown as ReturnType<typeof vitest.fn>)
@@ -4324,6 +4389,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
       reason: "kit-deleted",
     });
 
@@ -4353,6 +4419,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     );
     await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
       actorUserId: "user-1",
+      organizationId: "org-1",
     });
 
     expect(db.user.findUnique).toHaveBeenCalledWith({

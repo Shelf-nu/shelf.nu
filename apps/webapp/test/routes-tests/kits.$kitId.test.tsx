@@ -298,10 +298,13 @@ describe("kits/$kitId removeAsset action", () => {
 
     await action(createActionArgs(buildRemoveAssetRequest("asset-free")));
 
+    // `organizationId` is the destructive helper's tenancy guard — this route
+    // must hand it the org `requirePermission` resolved, not rely on the ids
+    // it happened to read being org-scoped.
     expect(removeKitSlicesFromPlanningBookings).toHaveBeenCalledWith(
       expect.anything(),
       ["ak-1"],
-      { actorUserId: "user-123" }
+      { actorUserId: "user-123", organizationId: "org-1" }
     );
     expect(preserveKitDrivenPlacements).toHaveBeenCalledWith(
       expect.anything(),
