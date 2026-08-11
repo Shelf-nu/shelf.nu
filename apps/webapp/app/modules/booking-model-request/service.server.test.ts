@@ -55,6 +55,11 @@ vitest.mock("~/database/db.server", () => ({
     bookingModelRequest: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       upsert: vitest.fn().mockResolvedValue({
+        // Equal timestamps = the CREATE branch ran (Prisma stamps both
+        // identically on create). Update-path tests override `updatedAt`
+        // to signal the UPDATE branch (see the service's `wasCreated`).
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
         id: "req-1",
         bookingId: "booking-1",
         assetModelId: "model-1",
@@ -460,6 +465,17 @@ describe("upsertBookingModelRequest", () => {
         fulfilledQuantity: 0,
         fulfilledAt: null,
       });
+      // The row exists, so the upsert runs its UPDATE branch — signal it
+      // via the timestamps the service's `wasCreated` inspects.
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        quantity: 3,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
 
       await upsertBookingModelRequest({
         bookingId: BOOKING_ID,
@@ -487,6 +503,40 @@ describe("upsertBookingModelRequest", () => {
       expect(eventsOfAction("BOOKING_MODEL_REQUESTED")).toEqual([]);
     });
 
+    it("records a change, not a duplicate REQUESTED, when it loses a create race", async () => {
+      expect.assertions(2);
+      // @ts-expect-error mocked
+      db.asset.count.mockResolvedValue(10);
+      // The pre-upsert read saw nothing (findUnique default: null), but a
+      // concurrent transaction created the row first: the upsert serialized
+      // on the unique constraint and ran its UPDATE branch. The result's
+      // distinct timestamps are the only truthful signal.
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        quantity: 5,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
+
+      await upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 5,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      });
+
+      // The transition is recorded (fromValue unknowable → null), and no
+      // second "requested" event pads the audit trail.
+      expect(eventsOfAction("BOOKING_MODEL_REQUEST_CHANGED")).toEqual([
+        expect.objectContaining({ field: "quantity", toValue: 5 }),
+      ]);
+      expect(eventsOfAction("BOOKING_MODEL_REQUESTED")).toEqual([]);
+    });
+
     it("preserves the original fulfilledAt when an unchanged quantity is re-saved", async () => {
       expect.assertions(2);
       const originallyFulfilledAt = new Date("2026-05-02T10:00:00Z");
@@ -498,6 +548,17 @@ describe("upsertBookingModelRequest", () => {
         quantity: 3,
         fulfilledQuantity: 3,
         fulfilledAt: originallyFulfilledAt,
+      });
+      // The row exists, so the upsert runs its UPDATE branch — signal it
+      // via the timestamps the service's `wasCreated` inspects.
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        quantity: 3,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
       });
 
       await upsertBookingModelRequest({
@@ -530,6 +591,17 @@ describe("upsertBookingModelRequest", () => {
         fulfilledQuantity: 0,
         fulfilledAt: null,
       });
+      // The row exists, so the upsert runs its UPDATE branch — signal it
+      // via the timestamps the service's `wasCreated` inspects.
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        quantity: 3,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
 
       await upsertBookingModelRequest({
         bookingId: BOOKING_ID,
@@ -554,6 +626,17 @@ describe("upsertBookingModelRequest", () => {
         quantity: 5,
         fulfilledQuantity: 3,
         fulfilledAt: null,
+      });
+      // The row exists, so the upsert runs its UPDATE branch — signal it
+      // via the timestamps the service's `wasCreated` inspects.
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        quantity: 3,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
       });
 
       await upsertBookingModelRequest({

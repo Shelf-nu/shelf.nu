@@ -660,7 +660,14 @@ export async function upsertBookingModelRequest({
         bookingId,
       };
 
-      if (previousQuantity == null) {
+      // `previousQuantity` comes from the pre-upsert read, so a concurrent
+      // create can make it stale: the second transaction serializes on the
+      // unique constraint, sees `existing === null`, but its upsert runs the
+      // UPDATE branch. The returned row settles which branch actually ran —
+      // Prisma stamps createdAt === updatedAt only on the create path.
+      const wasCreated =
+        request.createdAt.getTime() === request.updatedAt.getTime();
+      if (wasCreated) {
         await recordEvent(
           {
             ...eventBase,
@@ -705,7 +712,7 @@ export async function upsertBookingModelRequest({
         );
       }
 
-      return { request, booking, assetModel, previousQuantity };
+      return { request, booking, assetModel, previousQuantity, wasCreated };
     });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
@@ -715,15 +722,19 @@ export async function upsertBookingModelRequest({
     //   - increase : "increased the **Model** reservation from **M** to **N**."
     //   - decrease : "decreased the **Model** reservation from **M** to **N**."
     //   - no-op    : skip the note entirely (nothing actually changed)
-    const { assetModel, previousQuantity } = result;
+    const { assetModel, previousQuantity, wasCreated } = result;
     // Model names are user-supplied and render as literal text in the note.
     const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
-    if (previousQuantity == null) {
+    // Same race-safe discriminator as the event above: the upsert result,
+    // not the stale pre-read. In the lost-race case (wasCreated false but
+    // previousQuantity null) the quantity comparisons are unknowable, so
+    // the note is skipped — the event trail still records the change.
+    if (wasCreated) {
       content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
-    } else if (quantity > previousQuantity) {
+    } else if (previousQuantity != null && quantity > previousQuantity) {
       content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
-    } else if (quantity < previousQuantity) {
+    } else if (previousQuantity != null && quantity < previousQuantity) {
       content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
