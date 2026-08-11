@@ -34,6 +34,8 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { recordEvent } from "../activity-event/service.server";
+import type { ActorSnapshot } from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -466,10 +468,16 @@ type UpsertBookingModelRequestArgs = {
  * current availability inside a transaction so two concurrent upserts
  * can't both pass the guard and oversubscribe the pool.
  *
- * Writes a system booking note on success. Rejected when the booking
- * isn't in a state that accepts edits (we only allow DRAFT / RESERVED
- * here — ONGOING bookings must reconcile by scanning, not by editing
- * the intent).
+ * Writes a system booking note on success, plus a structured
+ * `ActivityEvent` per field that actually changed — `BOOKING_MODEL_REQUESTED`
+ * on create, `BOOKING_MODEL_REQUEST_CHANGED` for `quantity` and (separately)
+ * for `fulfilledAt`. Events go inside the transaction so a rollback can't
+ * leave a phantom entry in the audit trail; the note stays outside it,
+ * matching the concrete-asset add path in `updateBookingAssets`.
+ *
+ * Rejected when the booking isn't in a state that accepts edits (we only
+ * allow DRAFT / RESERVED here — ONGOING bookings must reconcile by scanning,
+ * not by editing the intent).
  */
 export async function upsertBookingModelRequest({
   bookingId,
@@ -488,6 +496,12 @@ export async function upsertBookingModelRequest({
         shouldBeCaptured: false,
       });
     }
+
+    // Loaded before the transaction opens: the actor read is a plain User
+    // lookup with nothing to serialise against the reservation write, and
+    // hoisting it keeps the interactive-tx window to the rows that matter.
+    // Serves both the in-tx event and the post-tx note.
+    const actor = await loadActorBestEffort(userId);
 
     const result = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -545,10 +559,18 @@ export async function upsertBookingModelRequest({
         where: {
           bookingId_assetModelId: { bookingId, assetModelId },
         },
-        select: { quantity: true, fulfilledQuantity: true },
+        // `fulfilledAt` is selected purely for the audit trail: it is the
+        // second field this upsert can change, and the payload-shapes rule
+        // wants its own event rather than one umbrella row.
+        select: {
+          quantity: true,
+          fulfilledQuantity: true,
+          fulfilledAt: true,
+        },
       });
       const previousQuantity = existing?.quantity ?? null;
       const existingFulfilled = existing?.fulfilledQuantity ?? 0;
+      const previousFulfilledAt = existing?.fulfilledAt ?? null;
 
       if (quantity < existingFulfilled) {
         throw new ShelfError({
@@ -589,8 +611,12 @@ export async function upsertBookingModelRequest({
       //   - update with newQuantity === fulfilledQuantity: mark complete
       //   - update with newQuantity > fulfilledQuantity: re-open (null)
       //   - update with newQuantity < fulfilledQuantity: rejected above
-      const justCompleted = quantity === existingFulfilled && quantity > 0;
-      const fulfilledAt = justCompleted ? new Date() : null;
+      const isComplete = quantity === existingFulfilled && quantity > 0;
+      // Keep the ORIGINAL stamp when the request was already complete. Saving
+      // an unchanged quantity is not a new fulfilment, and stamping `now()`
+      // again silently rewrites when the reservation actually completed — the
+      // one timestamp the audit trail has for it.
+      const fulfilledAt = isComplete ? previousFulfilledAt ?? new Date() : null;
 
       const request = await tx.bookingModelRequest.upsert({
         where: {
@@ -607,7 +633,86 @@ export async function upsertBookingModelRequest({
         },
       });
 
-      return { request, booking, assetModel, previousQuantity };
+      /**
+       * Activity events — inside the tx, so a later failure can't leave an
+       * event describing a reservation that never committed.
+       *
+       * One event per field that actually changed (see the
+       * record-event-payload-shapes rule), never one umbrella "request
+       * updated" row: `quantity` and `fulfilledAt` move independently and
+       * reports need to count them independently.
+       *
+       * `assetModelId` goes in `meta` because `ActivityEvent` has no
+       * assetModelId cross-ref column; `assetModelName` rides along as a
+       * point-in-time snapshot so a later model rename doesn't rewrite
+       * history (same reasoning as `actorSnapshot`).
+       */
+      const modelMeta = {
+        assetModelId: assetModel.id,
+        assetModelName: assetModel.name,
+      };
+      const eventBase = {
+        organizationId,
+        actorUserId: userId,
+        actorSnapshot: actor.snapshot,
+        entityType: "BOOKING" as const,
+        entityId: bookingId,
+        bookingId,
+      };
+
+      // `previousQuantity` comes from the pre-upsert read, so a concurrent
+      // create can make it stale: the second transaction serializes on the
+      // unique constraint, sees `existing === null`, but its upsert runs the
+      // UPDATE branch. The returned row settles which branch actually ran —
+      // Prisma stamps createdAt === updatedAt only on the create path.
+      const wasCreated =
+        request.createdAt.getTime() === request.updatedAt.getTime();
+      if (wasCreated) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUESTED",
+            meta: { ...modelMeta, quantity },
+          },
+          tx
+        );
+      } else if (quantity !== previousQuantity) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            field: "quantity",
+            fromValue: previousQuantity,
+            toValue: quantity,
+            meta: modelMeta,
+          },
+          tx
+        );
+      }
+
+      /**
+       * `fulfilledAt` gets its own event, and only when it genuinely flips
+       * set ⇄ unset. Comparing timestamps instead would fire on a no-op
+       * re-save of an already-complete request, which rewrites the stored
+       * `fulfilledAt` to `now()` without any real state change.
+       */
+      const wasFulfilled = previousFulfilledAt != null;
+      const isFulfilled = fulfilledAt != null;
+      if (existing && wasFulfilled !== isFulfilled) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            field: "fulfilledAt",
+            fromValue: previousFulfilledAt?.toISOString() ?? null,
+            toValue: fulfilledAt?.toISOString() ?? null,
+            meta: modelMeta,
+          },
+          tx
+        );
+      }
+
+      return { request, booking, assetModel, previousQuantity, wasCreated };
     });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
@@ -617,25 +722,31 @@ export async function upsertBookingModelRequest({
     //   - increase : "increased the **Model** reservation from **M** to **N**."
     //   - decrease : "decreased the **Model** reservation from **M** to **N**."
     //   - no-op    : skip the note entirely (nothing actually changed)
-    const { assetModel, previousQuantity } = result;
+    const { assetModel, previousQuantity, wasCreated } = result;
     // Model names are user-supplied and render as literal text in the note.
     const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
-    if (previousQuantity == null) {
+    // Same race-safe discriminator as the event above: the upsert result,
+    // not the stale pre-read. In the lost-race case (wasCreated false but
+    // previousQuantity null) the quantity comparisons are unknowable, so
+    // the note is skipped — the event trail still records the change.
+    if (wasCreated) {
       content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
-    } else if (quantity > previousQuantity) {
+    } else if (previousQuantity != null && quantity > previousQuantity) {
       content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
-    } else if (quantity < previousQuantity) {
+    } else if (previousQuantity != null && quantity < previousQuantity) {
       content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
-    if (content != null) {
+    // `actor.link` is null only when the actor lookup failed, in which case
+    // there is no name to attribute the note to — the event already carries
+    // `actorUserId`, so nothing about who acted is lost.
+    if (content != null && actor.link) {
       try {
-        const actor = await loadActor(userId);
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: content.replace("{actor}", actor),
+          content: content.replace("{actor}", actor.link),
         });
       } catch {
         // note failure is non-fatal — the reservation itself committed
@@ -669,6 +780,10 @@ type RemoveBookingModelRequestArgs = {
  * Delete a model-level request. Only allowed on DRAFT / RESERVED
  * bookings — ONGOING / OVERDUE must drain requests via scan-to-assign,
  * not manual cancellation (preserves intent audit).
+ *
+ * Emits `BOOKING_MODEL_REQUEST_REMOVED` inside the deleting transaction. The
+ * cancelled `quantity` rides in `meta` because the row itself is gone — after
+ * the delete this event is the only record that the commitment ever existed.
  */
 export async function removeBookingModelRequest({
   bookingId,
@@ -677,7 +792,20 @@ export async function removeBookingModelRequest({
   userId,
 }: RemoveBookingModelRequestArgs) {
   try {
-    const assetModelName = await db.$transaction(async (tx) => {
+    // Hoisted out of the tx for the same reason as in the upsert path, and
+    // reused by both the in-tx event and the post-tx note.
+    const actor = await loadActorBestEffort(userId);
+
+    /**
+     * The cancelled reservation, or `null` on the idempotent no-op path.
+     *
+     * Returns the `quantity` alongside the name because the note is written
+     * after the tx and the row is gone by then. Every sibling note in this
+     * file states the count ("reserved **3 × Model**", "decreased … from **5**
+     * to **2**"), and `updateBookingAssets` was reworked for exactly this on
+     * the concrete-asset side — cancellation was the one outlier.
+     */
+    const cancelled = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId, organizationId },
         select: { id: true, status: true },
@@ -736,18 +864,48 @@ export async function removeBookingModelRequest({
         where: { bookingId_assetModelId: { bookingId, assetModelId } },
       });
 
-      return existing.assetModel.name;
+      // In the same tx as the delete — a rolled-back cancellation must not
+      // leave an event claiming the reservation was cancelled.
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          actorSnapshot: actor.snapshot,
+          action: "BOOKING_MODEL_REQUEST_REMOVED",
+          entityType: "BOOKING",
+          entityId: bookingId,
+          bookingId,
+          meta: {
+            assetModelId,
+            assetModelName: existing.assetModel.name,
+            // The commitment being withdrawn. `fulfilledQuantity` is always 0
+            // here (the guard above rejects anything else), so the whole
+            // reservation is what's lost.
+            quantity: existing.quantity,
+          },
+        },
+        tx
+      );
+
+      return {
+        assetModelName: existing.assetModel.name,
+        quantity: existing.quantity,
+      };
     });
 
-    if (assetModelName) {
+    if (cancelled && actor.link) {
       try {
-        const actor = await loadActor(userId);
+        // Mirrors the create path's shape ("reserved **3 × Model** for this
+        // booking") so the pair reads symmetrically in the activity feed.
+        // Model names are user-supplied and render as literal text here.
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: `${actor} cancelled the model-level reservation for **${stripMarkdocDelimiters(
-            assetModelName
-          )}**.`,
+          content: `${actor.link} cancelled the **${
+            cancelled.quantity
+          } × ${stripMarkdocDelimiters(
+            cancelled.assetModelName
+          )}** reservation for this booking.`,
         });
       } catch {
         // non-fatal
@@ -811,6 +969,7 @@ type MaterializeArgs = {
 export async function materializeModelRequestForAsset({
   bookingId,
   asset,
+  organizationId,
   userId,
   tx,
 }: MaterializeArgs): Promise<
@@ -847,6 +1006,9 @@ export async function materializeModelRequestForAsset({
 
     const nextFulfilledQuantity = existing.fulfilledQuantity + 1;
     const justCompleted = nextFulfilledQuantity === existing.quantity;
+    // One timestamp shared by the row and the event that reports the change,
+    // so the audit trail and the column can never disagree by a few ms.
+    const fulfilledAt = justCompleted ? new Date() : null;
 
     await tx.bookingModelRequest.update({
       where: {
@@ -860,7 +1022,7 @@ export async function materializeModelRequestForAsset({
         // Stamp completion on the very scan that tipped us over. If
         // the operator later edits `quantity` upward, the upsert will
         // null this out again and re-open the request.
-        ...(justCompleted ? { fulfilledAt: new Date() } : {}),
+        ...(fulfilledAt ? { fulfilledAt } : {}),
       },
     });
 
@@ -874,10 +1036,66 @@ export async function materializeModelRequestForAsset({
     await tx.bookingNote.create({
       data: {
         type: "UPDATE",
-        content: `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`,
+        content: `${actor.link} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`,
         booking: { connect: { id: bookingId } },
       },
     });
+
+    /**
+     * One `BOOKING_MODEL_REQUEST_FULFILLED` per UNIT, carrying the concrete
+     * `assetId` — that is the join from "3 × Dell were promised" back to the
+     * specific serial numbers that satisfied the promise. Emitting one event
+     * per completed reservation instead would lose it.
+     *
+     * Same tx as the decrement above, and the actor snapshot is passed
+     * explicitly so `recordEvent` doesn't issue its own user lookup on every
+     * iteration of the caller's per-scanned-asset loop.
+     */
+    const modelMeta = {
+      assetModelId: asset.assetModelId,
+      assetModelName: existing.assetModel.name,
+    };
+    const eventBase = {
+      organizationId,
+      actorUserId: userId,
+      actorSnapshot: actor.snapshot,
+      entityType: "BOOKING" as const,
+      entityId: bookingId,
+      bookingId,
+    };
+
+    await recordEvent(
+      {
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_FULFILLED",
+        assetId: asset.id,
+        meta: {
+          ...modelMeta,
+          quantity: existing.quantity,
+          fulfilledQuantity: nextFulfilledQuantity,
+          remaining,
+        },
+      },
+      tx
+    );
+
+    // `fulfilledAt` flipping null → set is its own field change, and it gets
+    // the same event here as it does when an operator closes a request out by
+    // editing the quantity down — the field's history reads the same whichever
+    // path caused it.
+    if (fulfilledAt) {
+      await recordEvent(
+        {
+          ...eventBase,
+          action: "BOOKING_MODEL_REQUEST_CHANGED",
+          field: "fulfilledAt",
+          fromValue: null,
+          toValue: fulfilledAt.toISOString(),
+          meta: modelMeta,
+        },
+        tx
+      );
+    }
 
     return {
       matched: true,
@@ -903,8 +1121,45 @@ export async function materializeModelRequestForAsset({
 /*                                  helpers                                   */
 /* -------------------------------------------------------------------------- */
 
-/** Load the actor for an activity note and return the markdoc user link. */
-async function loadActor(userId: string): Promise<string> {
+/**
+ * The actor, in both forms this module needs: a markdoc link for the
+ * human-readable note and a snapshot for the structured activity event.
+ */
+type NoteActor = {
+  /** Markdoc user link spliced into note content. */
+  link: string;
+  /**
+   * Pre-computed snapshot handed to `recordEvent`. Without it `recordEvent`
+   * issues its own `user.findUnique` — inside a transaction, and once per
+   * event. `materializeModelRequestForAsset` runs in a per-scanned-asset loop
+   * inside the caller's tx, so that adds up against the interactive-tx budget
+   * (see the P2028 note on `recordEvents`). One read here serves both writes.
+   */
+  snapshot: ActorSnapshot;
+};
+
+/**
+ * Best-effort {@link loadActor}, for the paths that annotate a mutation which
+ * has to succeed regardless.
+ *
+ * `getUserByID` uses `findUniqueOrThrow`, so before the actor load was hoisted
+ * out of the note's own try/catch a vanished user only cost the note. Keep
+ * that: on failure the note is skipped and the event still records WHO acted
+ * via `actorUserId` — only the display snapshot is lost. Passing an explicit
+ * `null` snapshot also stops `recordEvent` retrying the same doomed lookup.
+ */
+async function loadActorBestEffort(
+  userId: string
+): Promise<{ link: string | null; snapshot: ActorSnapshot | null }> {
+  try {
+    return await loadActor(userId);
+  } catch {
+    return { link: null, snapshot: null };
+  }
+}
+
+/** Load the actor once, for both the activity note and the activity event. */
+async function loadActor(userId: string): Promise<NoteActor> {
   const user = await getUserByID(userId, {
     select: {
       id: true,
@@ -913,9 +1168,18 @@ async function loadActor(userId: string): Promise<string> {
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  return wrapUserLinkForNote({
-    id: userId,
-    firstName: user?.firstName,
-    lastName: user?.lastName,
-  });
+  return {
+    // `displayName` is deliberately not passed: `wrapUserLinkForNote` prefers
+    // it over first/last, and these notes have always rendered the real name.
+    link: wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    }),
+    snapshot: {
+      firstName: user?.firstName ?? null,
+      lastName: user?.lastName ?? null,
+      displayName: user?.displayName ?? null,
+    },
+  };
 }

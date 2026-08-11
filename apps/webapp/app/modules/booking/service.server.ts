@@ -10004,23 +10004,57 @@ export async function removeAssets({
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
-      // Count removals per assetModelId so we decrement each request
-      // in one update rather than N.
+      /**
+       * Count removals per assetModelId so we decrement each request in one
+       * update rather than N.
+       *
+       * `removedAssets` is derived from `assetIds`, which is the caller's
+       * REQUEST rather than the outcome — the bulk-remove handler passes
+       * every member of a selected kit, including members added to the kit
+       * after the booking was created and therefore never on it. Counting
+       * those would decrement a reservation, clear its `fulfilledAt` and
+       * emit a reopening event for units that never left the booking.
+       * `removedQtyByAssetId` was populated just above from the rows about
+       * to be deleted, so it is the record of what actually went; the same
+       * distinction gates the `BOOKING_ASSETS_REMOVED` events below.
+       *
+       * Deliberately still `+ 1` per asset, NOT a sum of the deleted rows'
+       * quantities: `fulfilledQuantity` counts ASSETS, not booked units
+       * (`materializeModelRequestForAsset` increments it by exactly 1 per
+       * scanned asset). Summing quantities here would over-decrement any
+       * asset whose standalone and kit-driven rows are both deleted.
+       * See `.claude/rules/quantity-semantics-per-surface.md`.
+       */
       const removalsByModel = new Map<string, number>();
       for (const asset of removedAssets) {
         if (!asset.assetModelId) continue;
+        if (!removedQtyByAssetId.has(asset.id)) continue;
         removalsByModel.set(
           asset.assetModelId,
           (removalsByModel.get(asset.assetModelId) ?? 0) + 1
         );
       }
 
+      /**
+       * `fulfilledAt` reversals to report, one per request this loop reopens.
+       * Batched and flushed after the loop so N affected models cost one
+       * insert rather than N — same reasoning as the `recordEvents` docs.
+       */
+      const modelRequestReopenEvents: ActivityEventInput[] = [];
+
       for (const [assetModelId, decrementBy] of removalsByModel) {
         const request = await tx.bookingModelRequest.findUnique({
           where: {
             bookingId_assetModelId: { bookingId: id, assetModelId },
           },
-          select: { quantity: true, fulfilledQuantity: true },
+          // `fulfilledAt` + the model name feed the reopen event below;
+          // without the before-state we cannot report what it changed from.
+          select: {
+            quantity: true,
+            fulfilledQuantity: true,
+            fulfilledAt: true,
+            assetModel: { select: { name: true } },
+          },
         });
         if (!request || request.fulfilledQuantity === 0) continue;
 
@@ -10046,7 +10080,41 @@ export async function removeAssets({
             ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
           },
         });
+
+        /**
+         * Report the reversal, but only on a genuine set → unset flip.
+         * `nextFulfilledAt === null` is also true for a request that was
+         * never complete, so gating on it alone would emit spurious
+         * null → null events on every removal from an outstanding request.
+         *
+         * This is the mirror of the null → timestamp events emitted in
+         * `booking-model-request/service.server.ts`. Without it the stream
+         * records reservations closing and never reopening, and
+         * `fulfilledAt IS NULL` consumers reconstruct this one as still
+         * fulfilled after the removal reopened it.
+         */
+        if (request.fulfilledAt != null && nextFulfilledAt === null) {
+          modelRequestReopenEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            field: "fulfilledAt",
+            fromValue: request.fulfilledAt.toISOString(),
+            toValue: null,
+            meta: {
+              assetModelId,
+              assetModelName: request.assetModel.name,
+            },
+          });
+        }
       }
+
+      // Same tx as the decrement above — a rolled-back removal must not
+      // leave an event claiming the reservation reopened.
+      await recordEvents(modelRequestReopenEvents, tx);
 
       /** When removing an asset from an ONGOING/OVERDUE booking we need to
        * reconcile each asset's terminal status — NOT blanket-flip to
