@@ -17,6 +17,8 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -108,6 +110,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 type: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Model cover image; collapsed into the flat image fields by
+                // `serializeAssetImage` below, so a member asset inheriting
+                // its model's photo is not blank on the kit detail screen.
+                ...ASSET_MODEL_IMAGE_SELECT,
                 category: { select: { id: true, name: true } },
                 // Post-Phase-4b: `Asset.location` was replaced by the
                 // `AssetLocation` pivot. Project the primary placement
@@ -140,7 +146,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const assets = assetKits.map((ak) => {
       const { assetLocations, ...rest } = ak.asset;
       return {
-        ...rest,
+        // Resolves the model-image cascade and drops the nested `assetModel`,
+        // so the companion keeps one source of truth for the image.
+        ...serializeAssetImage(rest),
         location: assetLocations[0]?.location ?? null,
         // Per-membership units of this asset in this kit (AssetKit.quantity).
         kitQuantity: ak.quantity,

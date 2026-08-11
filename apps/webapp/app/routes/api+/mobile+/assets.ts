@@ -7,6 +7,7 @@ import {
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 
@@ -124,6 +125,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             title: true,
             status: true,
             mainImage: true,
+            // Model cover image; `shapeMobileAssetResponse` resolves the cascade
+            // into the flat image fields the companion already reads.
+            ...ASSET_MODEL_IMAGE_SELECT,
             mainImageExpiration: true,
             thumbnailImage: true,
             // why: powers the scan-to-booking "not available to book" blocker.
@@ -192,15 +196,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
-    // shared helper, then re-attach the list-only extras
-    // (`mainImageExpiration`, `thumbnailImage`) that the helper's return type
-    // doesn't carry but the companion list view consumes.
+    // shared helper, then re-attach `mainImageExpiration` — a list-only extra
+    // the helper's return type doesn't carry but the companion consumes to
+    // drive its lazy refresh-image flow.
+    //
+    // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
+    // the helper resolves the model-image cascade, so the raw column would
+    // overwrite an inherited thumbnail with null.
     const shapedAssets = assets.map((asset) => {
-      const { mainImageExpiration, thumbnailImage, ...assetForHelper } = asset;
+      const { mainImageExpiration, ...assetForHelper } = asset;
       return {
         ...shapeMobileAssetResponse(assetForHelper),
         mainImageExpiration,
-        thumbnailImage,
       };
     });
 

@@ -27,7 +27,16 @@ export const BookingOverviewPDF = ({
   booking: {
     id: Booking["id"];
     name: Booking["name"];
-    assets: Partial<Asset>[];
+    assets: Array<
+      Partial<Asset> & {
+        /** Cover image of the asset's model, rendered when the asset has no
+         * image of its own. See `~/modules/asset/image-resolution`. */
+        assetModel?: {
+          image: string | null;
+          thumbnailImage: string | null;
+        } | null;
+      }
+    >;
   };
   timeStamp: number;
 }) => {
@@ -367,6 +376,7 @@ const BookingPDFPreview = ({
                         mainImage: asset.mainImage,
                         thumbnailImage: asset.thumbnailImage,
                         mainImageExpiration: asset.mainImageExpiration,
+                        assetModel: asset.assetModel ?? null,
                       }}
                       alt={`Image of ${asset.title}`}
                       className="!size-14 object-cover"

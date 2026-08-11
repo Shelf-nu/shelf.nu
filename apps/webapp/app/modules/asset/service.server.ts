@@ -3596,7 +3596,7 @@ export async function updateAssetMainImage({
   userId: User["id"];
   organizationId: Organization["id"];
   isNewAsset?: boolean;
-}) {
+}): Promise<boolean> {
   try {
     const fileData = await parseFileFormData({
       request,
@@ -3615,8 +3615,14 @@ export async function updateAssetMainImage({
 
     const image = fileData.get("mainImage") as string | null;
 
+    /**
+     * No file in the multipart body. Returning `false` (rather than bare
+     * `undefined`) lets the caller distinguish "user uploaded nothing" from
+     * "user uploaded a new image" — the edit action needs that to decide
+     * whether a pending clear should still apply.
+     */
     if (!image) {
-      return;
+      return false;
     }
 
     // Handle both the old string response and new stringified object response
@@ -3666,6 +3672,8 @@ export async function updateAssetMainImage({
         data: { path: mainImagePath },
       });
     }
+
+    return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
