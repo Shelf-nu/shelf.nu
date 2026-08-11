@@ -90,100 +90,6 @@ export type AssetModelAvailability = {
 };
 
 /**
- * The concrete assets of a model that could be assigned to this booking right
- * now — the pick-from-list counterpart to scanning.
- *
- * Until this existed, `materializeModelRequestForAsset` had exactly one
- * production caller: the scan path. A workspace without a working scanner
- * could create a model reservation but never discharge it, and unfulfilled
- * reservations are a hard block on check-out, so the booking could not leave.
- * See https://github.com/Shelf-nu/shelf.nu/issues/2831.
- *
- * Exclusions mirror {@link getAssetModelAvailability} exactly — INDIVIDUAL
- * only, no custody, and nothing already committed to an overlapping booking.
- * The two are deliberately separate functions rather than one: availability is
- * UNIT arithmetic (it subtracts other bookings' outstanding model-request units
- * from a pool), while this returns ROWS a human can tick. Keep the `where`
- * clauses in step when either changes; a candidate list that disagrees with the
- * "N / M available in this window" hint above it is the same class of defect
- * this whole area has been cleaning up.
- *
- * Assets already on THIS booking are excluded too: adding one again would
- * create a duplicate row rather than fulfil anything.
- *
- * @param args.assetModelId - Model whose units are being assigned.
- * @param args.organizationId - Caller's org; scopes every query.
- * @param args.bookingId - The booking being fulfilled (excluded from conflicts).
- * @param args.from - Booking window start, for the overlap test.
- * @param args.to - Booking window end.
- * @returns Assignable assets, oldest first, with the fields a picker row needs.
- * @throws {ShelfError} When the query fails.
- */
-export async function getAssignableAssetsForModel({
-  assetModelId,
-  organizationId,
-  bookingId,
-  from,
-  to,
-}: GetAssetModelAvailabilityArgs) {
-  try {
-    const dateOverlap =
-      from && to
-        ? {
-            OR: [
-              { from: { lte: to }, to: { gte: from } },
-              { from: { gte: from }, to: { lte: to } },
-            ],
-          }
-        : {};
-
-    return await db.asset.findMany({
-      where: {
-        organizationId,
-        assetModelId,
-        type: AssetType.INDIVIDUAL,
-        // Free of custody.
-        custody: { none: {} },
-        // Not already on this booking — re-adding duplicates, never fulfils.
-        bookingAssets: { none: { bookingId } },
-        // Not committed to another booking that overlaps this window.
-        NOT: {
-          bookingAssets: {
-            some: {
-              bookingId: { not: bookingId },
-              booking: {
-                status: { in: [...ACTIVE_BOOKING_STATUSES] },
-                ...dateOverlap,
-              },
-            },
-          },
-        },
-      },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        mainImage: true,
-        thumbnailImage: true,
-        mainImageExpiration: true,
-        sequentialId: true,
-        preferredBarcodeId: true,
-        qrCodes: { take: 1, select: { id: true } },
-        barcodes: { select: { id: true, type: true, value: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Failed to load assignable assets for this model.",
-      additionalData: { assetModelId, organizationId, bookingId },
-      label: "Booking",
-    });
-  }
-}
-
-/**
  * Compute availability for an `AssetModel` over a booking window.
  *
  * Safe to call from any loader/action path. Does not mutate. Excludes
@@ -968,7 +874,15 @@ export async function materializeModelRequestForAsset({
         },
       },
       data: {
-        fulfilledQuantity: nextFulfilledQuantity,
+        // Relative, not absolute. Two transactions that both read
+        // `fulfilledQuantity = 1` and both wrote the literal `2` used to lose a
+        // unit: two assets land, the request reads 2/3, and check-out stays
+        // blocked with no outstanding unit left to go and find. Web picker plus
+        // companion is a realistic pairing now that both discharge, so the
+        // cross-transaction race this PR makes reachable has to be closed here.
+        // Postgres evaluates `x = x + 1` against the row's committed value, so
+        // the second writer lands on top of the first.
+        fulfilledQuantity: { increment: 1 },
         // Stamp completion on the very scan that tipped us over. If
         // the operator later edits `quantity` upward, the upsert will
         // null this out again and re-open the request.
@@ -1082,6 +996,25 @@ export async function fulfilModelRequestsForAssets({
   tx: any;
 }): Promise<Map<string, string>> {
   const fulfilledRequestIdByAssetId = new Map<string, string>();
+
+  /**
+   * Short-circuit the overwhelmingly common case: the booking has no
+   * outstanding reservations, so no asset can discharge one.
+   *
+   * Without this, the loop below costs one sequential `findUnique` per
+   * model-tagged asset INSIDE the caller's interactive transaction. An
+   * assets-index select-all through `api/assets.add-to-booking` can carry
+   * hundreds of them, and Prisma's default interactive-transaction timeout is
+   * 5s — so a bulk add that worked before this PR could start failing with
+   * P2028 and roll the whole thing back. One indexed count up front is the
+   * difference between one round-trip and N.
+   */
+  if (assets.length === 0) return fulfilledRequestIdByAssetId;
+
+  const outstandingCount = await tx.bookingModelRequest.count({
+    where: { bookingId, fulfilledAt: null },
+  });
+  if (outstandingCount === 0) return fulfilledRequestIdByAssetId;
 
   for (const asset of assets) {
     // Sequential, not `Promise.all`: several assets of the SAME model compete

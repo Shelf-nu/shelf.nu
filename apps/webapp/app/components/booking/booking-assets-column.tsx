@@ -230,6 +230,13 @@ export function BookingAssetsColumn() {
                 request={request}
                 bookingId={booking.id}
                 bookingStatus={booking.status}
+                // The SAME filtered picker URL the "Add assets" button on this
+                // page uses. A bare `manage-assets` link drops
+                // `hideUnavailable`, so the picker stops excluding assets in
+                // custody, kit members, and assets already committed to an
+                // overlapping booking — ticking one either fails the save or
+                // double-books a unit the button beside it would have hidden.
+                manageAssetsUrl={manageAssetsUrl}
                 // Same gate the asset rows use. Without `canSeeActions` a
                 // BASE/SELF_SERVICE non-custodian saw reservation actions on a
                 // DRAFT booking while every asset control was hidden.

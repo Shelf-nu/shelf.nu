@@ -52,6 +52,11 @@ vitest.mock("~/database/db.server", () => ({
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
     },
     bookingModelRequest: {
+      // why: `fulfilModelRequestsForAssets` short-circuits on a count of the
+      // booking's outstanding reservations before doing any per-asset work
+      // (it avoids one round-trip per asset inside the caller's transaction).
+      // Default to 1 so the existing suites exercise the loop.
+      count: vitest.fn().mockResolvedValue(1),
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       upsert: vitest.fn().mockResolvedValue({
         id: "req-1",
@@ -506,7 +511,9 @@ describe("materializeModelRequestForAsset", () => {
           assetModelId: MODEL_ID,
         },
       },
-      data: { fulfilledQuantity: 1 },
+      // Relative, not absolute: two concurrent transactions that both read
+      // the same value must not lose one another's unit.
+      data: { fulfilledQuantity: { increment: 1 } },
     });
     // Row is NEVER deleted under the audit-trail schema.
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
@@ -550,7 +557,7 @@ describe("materializeModelRequestForAsset", () => {
     const updateCall = (
       db.bookingModelRequest.update as ReturnType<typeof vitest.fn>
     ).mock.calls[0]?.[0];
-    expect(updateCall?.data?.fulfilledQuantity).toBe(1);
+    expect(updateCall?.data?.fulfilledQuantity).toEqual({ increment: 1 });
     expect(updateCall?.data?.fulfilledAt).toBeInstanceOf(Date);
   });
 
@@ -899,8 +906,10 @@ describe("fulfilModelRequestsForAssets", () => {
     );
     // @ts-expect-error mocked
     db.bookingModelRequest.update.mockImplementation(
-      ({ data }: { data: { fulfilledQuantity: number } }) => {
-        fulfilledQuantity = data.fulfilledQuantity;
+      ({ data }: { data: { fulfilledQuantity: { increment: number } } }) => {
+        // Mirror what Postgres does with a relative update, so the next read
+        // in the loop sees the committed value.
+        fulfilledQuantity += data.fulfilledQuantity.increment;
         return Promise.resolve({});
       }
     );
@@ -938,8 +947,10 @@ describe("fulfilModelRequestsForAssets", () => {
     );
     // @ts-expect-error mocked
     db.bookingModelRequest.update.mockImplementation(
-      ({ data }: { data: { fulfilledQuantity: number } }) => {
-        fulfilledQuantity = data.fulfilledQuantity;
+      ({ data }: { data: { fulfilledQuantity: { increment: number } } }) => {
+        // Mirror what Postgres does with a relative update, so the next read
+        // in the loop sees the committed value.
+        fulfilledQuantity += data.fulfilledQuantity.increment;
         return Promise.resolve({});
       }
     );

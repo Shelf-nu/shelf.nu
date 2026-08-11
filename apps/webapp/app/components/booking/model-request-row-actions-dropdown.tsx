@@ -71,6 +71,13 @@ interface Props {
    *  (mirrors `manageAssetsButtonDisabled`). When false the menu has no
    *  actionable items and the whole popover is skipped. */
   canManage: boolean;
+  /**
+   * Destination for "Select assets to assign" — the booking-window-filtered
+   * `manage-assets` URL built by the parent. Required rather than defaulted:
+   * an unfiltered picker lists assets that cannot legally be added, and a
+   * silent fallback is exactly how the two entry points drifted apart.
+   */
+  manageAssetsUrl: string;
   fullWidth?: boolean;
 }
 
@@ -106,6 +113,7 @@ const ConditionalActionsDropdown = ({
   bookingId,
   bookingStatus,
   canManage,
+  manageAssetsUrl,
   fullWidth,
 }: Props) => {
   // `skipDefault: true` — no auto-open-on-QR-scan behaviour for this row.
@@ -130,13 +138,6 @@ const ConditionalActionsDropdown = ({
     request.fulfilledQuantity === 0;
 
   const scanUrl = `/bookings/${bookingId}/overview/scan-assets`;
-  /**
-   * The pick-from-a-list counterpart to scanning. Adding a matching asset
-   * from "Manage assets" discharges the reservation — same server path, same
-   * result. Listed FIRST because it is the one route that always works: it
-   * needs no camera, no scannable label, and no working scanner hardware.
-   */
-  const manageAssetsUrl = `/bookings/${bookingId}/overview/manage-assets`;
 
   return (
     <>
@@ -253,6 +254,7 @@ export const ModelRequestRowActionsDropdown = ({
   bookingId,
   bookingStatus,
   canManage,
+  manageAssetsUrl,
   fullWidth,
 }: Props) => {
   // SSR fallback: render a static trigger until hydration so server
@@ -281,6 +283,7 @@ export const ModelRequestRowActionsDropdown = ({
         bookingId={bookingId}
         bookingStatus={bookingStatus}
         canManage={canManage}
+        manageAssetsUrl={manageAssetsUrl}
         fullWidth={fullWidth}
       />
     </div>

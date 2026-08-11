@@ -3566,6 +3566,14 @@ describe("fulfilModelRequestsAndCheckout", () => {
       },
     ]);
     // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
+    // why: `addScannedAssetsToBookingWithinTx` first reads which scanned assets
+    // ALREADY hold a standalone row, so only newly-arrived ones can discharge a
+    // reservation. None do here, so this queued value is empty. It must come
+    // first — the chain below is order-dependent.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+
     // booking by this point (1 pre-existing HP + 3 newly materialized Dells).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>

@@ -8258,28 +8258,58 @@ export async function updateBookingAssets({
       }
 
       /**
-       * Assets that were ALREADY on this booking before this call.
+       * Which assets already hold a STANDALONE row on this booking.
        *
-       * `addedAssetIds` is "every asset this call touched", which includes
-       * re-submitted ones — the manage-assets dialog posts the full selection
-       * every time, and the standalone insert is an upsert. Model-request
-       * fulfilment must not key off that set: re-saving the dialog without
-       * changing anything would decrement the reservation again, so a 3-unit
-       * reservation could reach 3/3 with only two physical assets behind it.
+       * A model reservation is a promise of LOOSE units from the free pool, so
+       * it is discharged by a new standalone `BookingAsset` row and by nothing
+       * else. Two things follow, and both were wrong before:
        *
-       * Discharging a reservation is the consequence of a physical unit
-       * ARRIVING on the booking, so only genuinely new rows may do it. Read
-       * before the inserts below, or every asset looks pre-existing.
+       *  - The scope must be `assetKitId: null`. Without it, an asset present
+       *    only as a kit slice reads as "already here", so picking it to
+       *    discharge a reservation silently does nothing: the booking gains the
+       *    asset a second time and stays hard-blocked on check-out.
+       *  - Only NEW rows may discharge. `addedAssetIds` is "every asset this
+       *    call touched", and the manage-assets dialog reposts the whole
+       *    selection on every save against an upsert, so keying off it lets a
+       *    plain re-save decrement again — a 3-unit reservation reaching 3/3
+       *    with two physical assets behind it.
+       *
+       * Read BEFORE the inserts below, or every asset looks pre-existing.
+       *
+       * @see {@link file://./../booking-model-request/service.server.ts} —
+       *   `fulfilModelRequestsForAssets`, which the survivors are handed to.
        */
-      const preExistingAssetIds = new Set<string>(
+      const preExistingStandaloneAssetIds = new Set<string>(
         addedAssetIds.length > 0
           ? (
               await tx.bookingAsset.findMany({
-                where: { bookingId: id, assetId: { in: addedAssetIds } },
+                where: {
+                  bookingId: id,
+                  assetId: { in: addedAssetIds },
+                  assetKitId: null,
+                },
                 select: { assetId: true },
               })
             ).map((row: { assetId: string }) => row.assetId)
           : []
+      );
+
+      /**
+       * The assets whose standalone row is genuinely new on this call — the
+       * only ones allowed to discharge a reservation.
+       *
+       * Deliberately built from `standaloneAssetIds`, NOT `addedAssetIds`.
+       * The latter unions in `kitSlices[].assetId`, so a kit member would
+       * discharge a promise made for loose units: the section would drop to
+       * "1 of 2 units still to assign" when nothing loose had arrived, and the
+       * operator would pack one camera instead of two. It also contradicts
+       * `BookingAsset.bookingModelRequestId`'s own contract, which says the
+       * column is null for assets "pulled in via a kit".
+       */
+      const newlyStandaloneAssetIds = new Set<string>(
+        standaloneAssetIds.filter(
+          (assetId: string) => !preExistingStandaloneAssetIds.has(assetId)
+        )
       );
 
       await Promise.all([
@@ -8358,19 +8388,26 @@ export async function updateBookingAssets({
          */
         const fulfilledRequestIdByAssetId = await fulfilModelRequestsForAssets({
           bookingId: b.id,
-          // Newly arrived rows only — see `preExistingAssetIds`.
-          assets: assetTypeRows.filter(
-            (asset: { id: string }) => !preExistingAssetIds.has(asset.id)
+          // Only assets whose STANDALONE row is new on this call — see
+          // `newlyStandaloneAssetIds` for why kit slices and re-submitted
+          // rows are both excluded.
+          assets: assetTypeRows.filter((asset: { id: string }) =>
+            newlyStandaloneAssetIds.has(asset.id)
           ),
           organizationId,
           userId,
           tx,
         });
 
-        // Persist which reservation each asset discharged. One matched request
-        // unit means one stamped row, so this targets a SINGLE row per asset,
-        // preferring the standalone row (the free-pool commitment the
-        // reservation stood in for) and otherwise the kit-driven one.
+        // Persist which reservation each asset discharged.
+        //
+        // Scoped to `assetKitId IS NULL`, matching the rule that only a
+        // standalone row discharges. An earlier version ordered by
+        // `("assetKitId" IS NOT NULL)` to "prefer" the standalone row, but a
+        // preference is not a constraint: with no standalone row present the
+        // ordering simply fell through and stamped a kit-driven row, recording
+        // that a camera committed to a kit had answered a promise for a loose
+        // one. The `WHERE` refuses instead of guessing.
         for (const [assetId, requestId] of fulfilledRequestIdByAssetId) {
           await tx.$executeRaw`
             UPDATE "BookingAsset" SET "bookingModelRequestId" = ${requestId}
@@ -8378,8 +8415,8 @@ export async function updateBookingAssets({
               SELECT "id" FROM "BookingAsset"
               WHERE "bookingId" = ${b.id}
                 AND "assetId" = ${assetId}
+                AND "assetKitId" IS NULL
                 AND "bookingModelRequestId" IS NULL
-              ORDER BY ("assetKitId" IS NOT NULL)
               LIMIT 1
             )
           `;
@@ -8402,8 +8439,25 @@ export async function updateBookingAssets({
           );
         }
 
+        /**
+         * One event per asset that ACTUALLY arrived.
+         *
+         * `addedAssetIds` is every asset the call touched, so the pure
+         * quantity-edit path — which re-submits assets already on the booking —
+         * was emitting `BOOKING_ASSETS_ADDED` for assets that were already
+         * there. Suppressing the human-readable note via `skipBookingNote`
+         * without filtering here left the machine-readable feed, which reports
+         * aggregate, still claiming a phantom add. An asset is "added" if this
+         * call created its standalone row or any of its kit-driven rows.
+         */
+        const newlyAddedAssetIds = addedAssetIds.filter(
+          (assetId: string) =>
+            newlyStandaloneAssetIds.has(assetId) ||
+            !preExistingStandaloneAssetIds.has(assetId)
+        );
+
         await recordEvents(
-          addedAssetIds.map((assetId) => {
+          newlyAddedAssetIds.map((assetId: string) => {
             const asset = assetTypeById.get(assetId);
             return {
               organizationId,
@@ -10099,7 +10153,8 @@ export async function removeAssets({
       // are gone and we'd lose the count.
       const rowsBeingDeleted = await tx.bookingAsset.findMany({
         where: rowsToDeleteWhere,
-        select: { assetId: true, quantity: true },
+        // `bookingModelRequestId` drives the reservation rollback below.
+        select: { assetId: true, quantity: true, bookingModelRequestId: true },
       });
       for (const row of rowsBeingDeleted) {
         removedQtyByAssetId.set(
@@ -10110,43 +10165,59 @@ export async function removeAssets({
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
-      // Count removals per assetModelId so we decrement each request
-      // in one update rather than N.
-      const removalsByModel = new Map<string, number>();
-      for (const asset of removedAssets) {
-        if (!asset.assetModelId) continue;
-        removalsByModel.set(
-          asset.assetModelId,
-          (removalsByModel.get(asset.assetModelId) ?? 0) + 1
+      /**
+       * Re-open reservations that the removed rows had discharged.
+       *
+       * Counted from `bookingModelRequestId` — the row's own record of which
+       * promise it answered — NOT from `assetModelId`. Grouping by model
+       * counts every removed asset that merely SHARES a model with a
+       * reservation, including ones that never discharged anything:
+       *
+       *   Reserve 2 x Dell. Add 3 matching assets: two discharge the
+       *   reservation, the third is an ordinary add. Remove that third one and
+       *   the model-based count re-opened the reservation, hard-blocking
+       *   check-out while both discharging assets were still on the booking.
+       *   The operator's only escape was deleting a reservation that was
+       *   correctly satisfied.
+       *
+       * That was near-unreachable while only the scanner discharged
+       * reservations. Routing every add-assets surface through
+       * `fulfilModelRequestsForAssets` makes it routine, so the column this PR
+       * adds has to be read here, not just written.
+       */
+      const removalsByRequest = new Map<string, number>();
+      for (const row of rowsBeingDeleted) {
+        if (!row.bookingModelRequestId) continue;
+        removalsByRequest.set(
+          row.bookingModelRequestId,
+          (removalsByRequest.get(row.bookingModelRequestId) ?? 0) + 1
         );
       }
 
-      for (const [assetModelId, decrementBy] of removalsByModel) {
+      for (const [requestId, decrementBy] of removalsByRequest) {
         const request = await tx.bookingModelRequest.findUnique({
-          where: {
-            bookingId_assetModelId: { bookingId: id, assetModelId },
-          },
-          select: { quantity: true, fulfilledQuantity: true },
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `requestId` comes from BookingAsset rows on this booking, which was org-checked above
+          where: { id: requestId },
+          select: { quantity: true, fulfilledQuantity: true, bookingId: true },
         });
-        if (!request || request.fulfilledQuantity === 0) continue;
+        // Belt and braces: the FK guarantees it, but never touch a request
+        // belonging to another booking.
+        if (!request || request.bookingId !== id) continue;
+        if (request.fulfilledQuantity === 0) continue;
 
-        // Cap at 0 — if the operator removes more than what was
-        // materialised (they scanned direct + via request, now removing
-        // some), we only decrement the fulfilled share.
         const nextFulfilled = Math.max(
           0,
           request.fulfilledQuantity - decrementBy
         );
-        // If we're dropping below the reserved `quantity`, the request
-        // has outstanding units again — clear the completion stamp so
-        // the Reserved Models card + CTAs surface again.
+        // Dropping below the reserved `quantity` means there is outstanding
+        // work again — clear the completion stamp so the reservations section
+        // and its CTAs come back.
         const nextFulfilledAt =
           nextFulfilled < request.quantity ? null : undefined;
 
         await tx.bookingModelRequest.update({
-          where: {
-            bookingId_assetModelId: { bookingId: id, assetModelId },
-          },
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same row just proven to belong to this booking
+          where: { id: requestId },
           data: {
             fulfilledQuantity: nextFulfilled,
             ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
@@ -12274,17 +12345,52 @@ async function addScannedAssetsToBookingWithinTx(
   );
 
   /**
+   * Which scanned assets already hold a STANDALONE row on this booking.
+   *
+   * Same rule as `updateBookingAssets`: a reservation promises LOOSE units, so
+   * only a NEW standalone row discharges one. Passing every scanned id let the
+   * same reservation be discharged twice for one physical asset — scan a kit
+   * whose member is a match (kit row, 1 of 2), then scan that member's own QR
+   * (standalone row). The two partial uniques let both rows coexist, so it
+   * decremented again to 2/2, the check-out guard passed, and the booking left
+   * with one camera where two were promised. The mobile
+   * `bookings.add-scanned-assets` endpoint reaches this same code, so it was
+   * reachable from the app too.
+   */
+  const preExistingStandaloneScannedIds = new Set<string>(
+    allScannedAssetIds.length > 0
+      ? (
+          await tx.bookingAsset.findMany({
+            where: {
+              bookingId,
+              assetId: { in: allScannedAssetIds },
+              assetKitId: null,
+            },
+            select: { assetId: true },
+          })
+        ).map((row: { assetId: string }) => row.assetId)
+      : []
+  );
+
+  /**
    * Provenance for the rows created below: which reservation each asset
    * discharged. At most one request per asset, incremented by exactly one
    * unit, so exactly ONE of the rows created for that asset may carry the
    * stamp — see the `stampedAssetIds` guard at the create site.
+   *
+   * Candidates are the standalone scans only (`assetIds`), minus any that
+   * already have a standalone row. Kit slices are excluded: a kit-driven row
+   * is committed to its kit, not a loose unit, and
+   * `BookingAsset.bookingModelRequestId` is documented as null for assets
+   * pulled in via a kit.
    *
    * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
    * skipped here and rejected by the FK on the create below.
    */
   const modelRequestIdByAssetId = await fulfilModelRequestsForAssets({
     bookingId,
-    assets: allScannedAssetIds
+    assets: [...new Set(assetIds)]
+      .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
       .map((assetId) => scannedAssetsMetaById.get(assetId))
       .filter((meta): meta is ScannedAssetMeta => meta !== undefined),
     organizationId,
@@ -12319,11 +12425,15 @@ async function addScannedAssetsToBookingWithinTx(
 
   /**
    * Assets whose stamp has already been spent. One matched request unit means
-   * one stamped row: an asset arriving as a standalone scan AND via two kits
-   * creates three rows but discharged only a single unit, so stamping all
+   * exactly one stamped row: an asset arriving as a standalone scan AND via
+   * two kits creates three rows but discharged a single unit, so stamping all
    * three would make "which assets fulfilled this reservation?" over-count by
-   * two. Standalone wins because that row is the free-pool commitment the
-   * reservation was a promise of; a kit-only scan stamps its first slice.
+   * two.
+   *
+   * Only the STANDALONE row is ever eligible — a kit-driven row is committed
+   * to its kit rather than being a loose unit, and only standalone arrivals
+   * are handed to `fulfilModelRequestsForAssets` above, so a kit slice could
+   * never legitimately carry a stamp anyway.
    */
   const stampedAssetIds = new Set<string>();
 
@@ -12360,7 +12470,8 @@ async function addScannedAssetsToBookingWithinTx(
             quantity:
               slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1,
             assetKitId: slice.assetKitId,
-            bookingModelRequestId: takeModelRequestId(slice.assetId),
+            // Never stamped: a kit-driven row does not discharge a reservation.
+            bookingModelRequestId: null,
           })),
         ],
       },

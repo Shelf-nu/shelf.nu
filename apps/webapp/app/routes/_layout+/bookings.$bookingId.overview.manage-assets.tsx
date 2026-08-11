@@ -726,7 +726,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             });
           })
         );
+      } catch (noteError) {
+        Logger.error(
+          makeShelfError(noteError, {
+            userId,
+            bookingId,
+            newAssetIds,
+            context: "manage-assets per-asset add-note creation",
+          })
+        );
+      }
 
+      try {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
