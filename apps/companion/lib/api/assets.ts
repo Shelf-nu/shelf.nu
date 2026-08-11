@@ -62,15 +62,33 @@ export const assetsApi = {
    * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
+   * Wire contract for coordinates (matches the route's Zod schema): optional
+   * `latitude`/`longitude` query params, decimal degrees, both or neither
+   * (lat −90..90, lng −180..180). They are best-effort provenance — the
+   * server silently ignores invalid values and a resolve NEVER fails because
+   * of them, mirroring the web flow's non-fatal geolocation post.
+   *
    * @param codeId - The scanned QR id or normalized SAM id.
    * @param orgId - Caller's current workspace id; required for SAM lookups.
+   * @param coordinates - Optional GPS position captured at scan time (see
+   *   `lib/scan-location.ts`); attached to the recorded scan server-side.
    */
-  qr: (codeId: string, orgId?: string) =>
-    apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${
-        orgId ? `?orgId=${orgId}` : ""
-      }`
-    ),
+  qr: (
+    codeId: string,
+    orgId?: string,
+    coordinates?: { latitude: number; longitude: number } | null
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (orgId) searchParams.set("orgId", orgId);
+    if (coordinates) {
+      searchParams.set("latitude", String(coordinates.latitude));
+      searchParams.set("longitude", String(coordinates.longitude));
+    }
+    const query = searchParams.toString();
+    return apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`
+    );
+  },
 
   /**
    * Resolve a scanned code to an asset or kit **without recording** a scan,
