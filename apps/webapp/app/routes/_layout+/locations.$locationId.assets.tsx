@@ -303,6 +303,8 @@ export default function LocationAssets() {
                       name: "teamMember",
                       queryKey: "name",
                       deletedAt: null,
+                      // A read FILTER — the workspace custody override governs.
+                      custodyPurpose: "custody-filter",
                     }}
                     label="Filter by custodian"
                     placeholder="Search team members"

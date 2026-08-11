@@ -221,6 +221,12 @@ export function NotificationRecipientsField({
             deletedAt: null,
             userWithAdminAndOwnerOnly: true,
             usersOnly: true,
+            // why: no `custodyPurpose` on purpose. This picks admins to notify
+            // — neither custody nor a booking custodian — and
+            // `userWithAdminAndOwnerOnly` already does the narrowing. The
+            // endpoint's assignment fallback resolves to "all" for the
+            // ADMIN/OWNER users this is rendered for, and fails closed for
+            // anyone else, which is what we want here.
           }}
           initialDataKey="teamMembersForNotify"
           countKey="totalTeamMembersForNotify"
