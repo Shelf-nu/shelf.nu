@@ -3809,6 +3809,19 @@ describe("getAssets search fallback", () => {
     countMock.mockReset();
   });
 
+  it("matches nothing for typed input that yields zero terms", async () => {
+    // why: whitespace / bare-comma input must not return the full list —
+    // mirrors the mobile composer's fail-closed guard.
+    findManyMock.mockResolvedValueOnce([] as never);
+    countMock.mockResolvedValueOnce(0 as never);
+
+    await getAssets({ ...baseParams, search: " , " });
+
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(where.id).toEqual({ in: [] });
+    expect(where.OR).toBeUndefined();
+  });
+
   it("runs only the narrow indexed clause when an ID-shaped query matches", async () => {
     // why: first (and only) fetch returns a row, so no fallback is needed.
     findManyMock.mockResolvedValueOnce([{ id: "a1" }] as never);

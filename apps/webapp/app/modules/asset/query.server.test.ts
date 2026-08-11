@@ -307,6 +307,30 @@ function getSqlString(sql: ReturnType<typeof generateWhereClause>): string {
   return sql.strings.join("?");
 }
 
+describe("generateWhereClause - search fail-closed", () => {
+  const orgId = "org-1";
+
+  it("matches nothing for typed input that yields zero terms", () => {
+    // why: `?s=%20` arrives untrimmed as " " — truthy but zero terms. The
+    // advanced path must fail closed like getAssets does in simple mode,
+    // or the same search box answers differently per index mode.
+    const result = generateWhereClause(orgId, "   ", []);
+    expect(getSqlString(result)).toContain("AND FALSE");
+  });
+
+  it("does not fail closed for a genuinely empty search", () => {
+    const result = generateWhereClause(orgId, null, []);
+    expect(getSqlString(result)).not.toContain("AND FALSE");
+  });
+
+  it("builds search conditions for real terms", () => {
+    const result = generateWhereClause(orgId, "tripod", []);
+    const sql = getSqlString(result);
+    expect(sql).toContain("ILIKE");
+    expect(sql).not.toContain("AND FALSE");
+  });
+});
+
 describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
 
