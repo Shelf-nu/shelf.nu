@@ -20,7 +20,10 @@ import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  resolveCustodianPickerScope,
+} from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -53,7 +56,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role, isSelfServiceOrBase } =
+    const { organizationId, role, isSelfServiceOrBase, canSeeAllCustody } =
       await requirePermission({
         userId,
         request,
@@ -69,13 +72,33 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     /** Get team members for form teamMember select */
     const { teamMemberIds } = paramsValues;
+
+    /**
+     * An ASSIGNMENT picker: this drawer assigns custody. Self-service may only
+     * assign to themselves and BASE may not assign at all.
+     *
+     * The previous `filterByUserId: role === SELF_SERVICE` encoded only half of
+     * that — it evaluated to `false` for BASE, so this loader handed a BASE
+     * user the entire team roster. /scanner is gated on `asset:read`, which
+     * BASE holds, so that list was reachable. (The assign action itself is
+     * gated on `asset:custody`, which BASE lacks, so it was a disclosure rather
+     * than an escalation.)
+     */
+    const custodyScope = resolveCustodianPickerScope({
+      purpose: "custody-assignment",
+      role,
+      canSeeAllCustody,
+      userId,
+    });
+
     const teamMemberData = await getTeamMemberForCustodianFilter({
       organizationId,
       selectedTeamMembers: teamMemberIds,
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      filterByUserId: role === OrganizationRoles.SELF_SERVICE, // SElf service can only assign themselves and base users cant assign at all
+      filterByUserId: custodyScope.mode === "self",
+      returnNone: custodyScope.mode === "none",
       userId,
     });
     /** End team members */
