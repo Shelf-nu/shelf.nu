@@ -286,7 +286,12 @@ describe("relinkAssetQrCode (asset)", () => {
         organizationId: "org-1",
         userId: "user-1",
       })
-    ).rejects.toBeInstanceOf(ShelfError);
+    ).rejects.toMatchObject({
+      // why: user-caused guard, not a server fault — the mobile route
+      // documents 403 for it and clients must not retry it as a 5xx.
+      status: 403,
+      title: "QR already linked.",
+    });
   });
 
   it("relinks when QR is available", async () => {

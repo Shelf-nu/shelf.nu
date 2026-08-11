@@ -108,7 +108,13 @@ function LinkQrContent() {
    */
   const originOrgIdRef = useRef(currentOrg?.id);
   useEffect(() => {
-    if (!originOrgIdRef.current || !currentOrg?.id) return;
+    if (!currentOrg?.id) return;
+    // Org context can still be hydrating when this screen mounts; a one-shot
+    // useRef initializer would then pin `undefined` and never arm the guard.
+    if (!originOrgIdRef.current) {
+      originOrgIdRef.current = currentOrg.id;
+      return;
+    }
     if (currentOrg.id !== originOrgIdRef.current) {
       Alert.alert(
         "Workspace Changed",

@@ -157,22 +157,23 @@ describe("POST /api/mobile/qr/link-asset", () => {
     );
   });
 
-  it("maps the service's already-linked guard to its error", async () => {
+  it("maps the service's already-linked guard to its 403", async () => {
     vi.mocked(relinkAssetQrCode).mockRejectedValue(
       new ShelfError({
         cause: null,
         message:
           "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
         label: "QR",
-        status: 500,
+        status: 403,
       })
     );
 
-    const { body } = await callAction({
+    const { body, status } = await callAction({
       qrId: "qr-linked",
       assetId: "asset-1",
     });
 
+    expect(status).toBe(403);
     expect(body.error?.message).toContain("already linked to another asset");
   });
 
