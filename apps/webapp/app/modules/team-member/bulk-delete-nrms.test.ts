@@ -75,10 +75,26 @@ describe("bulkDeleteNRMs", () => {
 
     expect(dbMocks.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ["a", "b"] }, organizationId: ORG },
+        where: expect.objectContaining({ id: { in: ["a", "b"] } }),
         data: { deletedAt: expect.any(Date) },
       })
     );
+  });
+
+  it("re-asserts the NRM scope and custody guard in the write predicate", async () => {
+    dbMocks.findMany.mockResolvedValue([{ id: "a", _count: { custodies: 0 } }]);
+
+    await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
+
+    // The read and the write are two round trips. A row that stops being an
+    // NRM in between — gains a custody, accepts an invite, is deleted by
+    // someone else — must not be written by ids resolved before that change.
+    const { where } = dbMocks.updateMany.mock.calls[0][0];
+    expect(where).toEqual({
+      ...NRM_BASE_SCOPE,
+      id: { in: ["a"] },
+      custodies: { none: {} },
+    });
   });
 
   it("still refuses the batch when a selected member holds custody", async () => {

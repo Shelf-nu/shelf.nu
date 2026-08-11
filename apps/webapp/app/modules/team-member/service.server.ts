@@ -695,10 +695,21 @@ export async function bulkDeleteNRMs({
       });
     }
 
+    // The write re-asserts the full read predicate rather than trusting the ids
+    // alone. Selection and write are two round trips, so a row can stop being a
+    // deletable NRM in between — accept an invite, be soft-deleted by someone
+    // else, or acquire custody after the guard above ran. Restating the scope
+    // (plus the custody check, which the read could only evaluate in JS) makes
+    // those rows fall out of the write instead of being soft-deleted on stale
+    // ids. Rows that changed are skipped, not fatal: `updateMany` simply matches
+    // fewer rows.
     return await db.teamMember.updateMany({
       where: {
-        id: { in: teamMembers.map((tm) => tm.id) },
-        organizationId,
+        ...getNrmSelectionWhere({
+          nrmIds: teamMembers.map((tm) => tm.id),
+          organizationId,
+        }),
+        custodies: { none: {} },
       },
       data: { deletedAt: new Date() },
     });
