@@ -649,7 +649,12 @@ export async function getAssets(params: {
     if (search) {
       const searchTerms = splitAssetSearchTerms(search);
 
-      if (searchTerms.length > 0) {
+      if (searchTerms.length === 0) {
+        // Typed input that yields zero terms (whitespace / bare commas)
+        // matches NOTHING — a debounced type-ahead sending a single space
+        // must not return the full list. Mirrors the mobile composer.
+        where.id = { in: [] };
+      } else {
         // Full multi-column clause (title, sequentialId, description,
         // category, location, tags, custodian names, QR/barcode, custom
         // fields) — shared with the mobile assets endpoint via

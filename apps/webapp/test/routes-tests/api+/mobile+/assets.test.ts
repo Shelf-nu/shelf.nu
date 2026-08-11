@@ -214,6 +214,7 @@ describe("GET /api/mobile/assets — status filter", () => {
       (response.data as { error: { message: string } }).error.message
     ).toContain("Invalid status filter");
     expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
   });
 
   it("makes AVAILABLE QT-aware via the shared fragment", async () => {

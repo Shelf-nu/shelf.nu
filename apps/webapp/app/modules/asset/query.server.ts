@@ -10,7 +10,10 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
-import { CUSTOM_FIELD_SEARCH_PATHS } from "./search.server";
+import {
+  CUSTOM_FIELD_SEARCH_PATHS,
+  splitAssetSearchTerms,
+} from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -64,11 +67,10 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search
-      .trim()
-      .split(",")
-      .map((term) => term.trim())
-      .filter(Boolean);
+    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
+    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
+    // cannot fan into unbounded OR groups in the generated SQL.
+    const words = splitAssetSearchTerms(search);
 
     if (words.length > 0) {
       // Create OR conditions for each search term, searching across multiple fields
