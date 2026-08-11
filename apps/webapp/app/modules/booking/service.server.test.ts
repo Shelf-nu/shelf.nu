@@ -6348,12 +6348,22 @@ describe("removeAssets", () => {
       ).mockResolvedValue(null);
     });
 
-    /** Booking + asset fixture whose removed asset carries an AssetModel. */
-    function arrangeModelRemoval(request: {
-      quantity: number;
-      fulfilledQuantity: number;
-      fulfilledAt: Date | null;
-    }) {
+    /**
+     * Booking + asset fixture whose removed asset carries an AssetModel.
+     *
+     * `deletedRows` is the set of `BookingAsset` rows that were actually on
+     * the booking and so actually got deleted. It defaults to "the asset was
+     * there"; pass `[]` to model the caller REQUESTING an asset that never
+     * had a row on this booking.
+     */
+    function arrangeModelRemoval(
+      request: {
+        quantity: number;
+        fulfilledQuantity: number;
+        fulfilledAt: Date | null;
+      },
+      deletedRows?: Array<{ assetId: string; quantity: number }>
+    ) {
       const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
       (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
         {
@@ -6364,11 +6374,16 @@ describe("removeAssets", () => {
           unitOfMeasure: null,
         },
       ]);
+      // Rows actually on the booking and therefore actually deleted. Default
+      // to the asset being present; `deletedRows: []` models the caller
+      // requesting an asset that was never on this booking.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([{ assetId: "asset-1", quantity: 1 }]);
+      ).mockResolvedValue(deletedRows ?? [{ assetId: "asset-1", quantity: 1 }]);
       //@ts-expect-error missing vitest type
-      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      db.bookingAsset.deleteMany.mockResolvedValue({
+        count: (deletedRows ?? [{}]).length,
+      });
       (
         db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
       ).mockResolvedValue({
@@ -6427,6 +6442,30 @@ describe("removeAssets", () => {
           },
         }),
       ]);
+    });
+
+    it("touches nothing when the requested asset had no row on this booking", async () => {
+      expect.assertions(2);
+      // `assetIds` is the caller's REQUEST, not the outcome: the bulk-remove
+      // handler passes every member of a selected kit, including members
+      // added to the kit after the booking was created and therefore never
+      // on it. Counting those would decrement a reservation and forge a
+      // reopening event for units that never left.
+      const mockBooking = arrangeModelRemoval(
+        { quantity: 3, fulfilledQuantity: 3, fulfilledAt: new Date() },
+        []
+      );
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.bookingModelRequest.update).not.toHaveBeenCalled();
+      expect(modelRequestChangedEvents()).toEqual([]);
     });
 
     it("records nothing when the request was never fulfilled", async () => {

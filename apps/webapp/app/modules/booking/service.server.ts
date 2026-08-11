@@ -9826,11 +9826,31 @@ export async function removeAssets({
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
-      // Count removals per assetModelId so we decrement each request
-      // in one update rather than N.
+      /**
+       * Count removals per assetModelId so we decrement each request in one
+       * update rather than N.
+       *
+       * `removedAssets` is derived from `assetIds`, which is the caller's
+       * REQUEST rather than the outcome — the bulk-remove handler passes
+       * every member of a selected kit, including members added to the kit
+       * after the booking was created and therefore never on it. Counting
+       * those would decrement a reservation, clear its `fulfilledAt` and
+       * emit a reopening event for units that never left the booking.
+       * `removedQtyByAssetId` was populated just above from the rows about
+       * to be deleted, so it is the record of what actually went; the same
+       * distinction gates the `BOOKING_ASSETS_REMOVED` events below.
+       *
+       * Deliberately still `+ 1` per asset, NOT a sum of the deleted rows'
+       * quantities: `fulfilledQuantity` counts ASSETS, not booked units
+       * (`materializeModelRequestForAsset` increments it by exactly 1 per
+       * scanned asset). Summing quantities here would over-decrement any
+       * asset whose standalone and kit-driven rows are both deleted.
+       * See `.claude/rules/quantity-semantics-per-surface.md`.
+       */
       const removalsByModel = new Map<string, number>();
       for (const asset of removedAssets) {
         if (!asset.assetModelId) continue;
+        if (!removedQtyByAssetId.has(asset.id)) continue;
         removalsByModel.set(
           asset.assetModelId,
           (removalsByModel.get(asset.assetModelId) ?? 0) + 1
