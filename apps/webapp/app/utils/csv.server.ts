@@ -46,6 +46,7 @@ import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
@@ -1579,17 +1580,29 @@ export const buildCsvExportDataFromBookings = (
   return [Object.values(headers), ...rows];
 };
 
+/**
+ * Exports the selected NRMs to CSV.
+ *
+ * @param params.nrmIds - Selected ids, or a list containing ALL_SELECTED_KEY
+ * @param params.organizationId - The active organization
+ * @param params.search - The index's active search, forwarded on select-all so
+ *   "select all" exports what the user is actually looking at
+ * @returns The CSV string
+ * @throws {ShelfError} If the query or serialisation fails
+ */
 export async function exportNRMsToCsv({
   nrmIds,
   organizationId,
+  search,
 }: {
   nrmIds: TeamMember["id"][];
   organizationId: Organization["id"];
+  search?: string | null;
 }) {
   try {
-    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
-      ? { organizationId }
-      : { id: { in: nrmIds }, organizationId };
+    // Derived from the shared NRM scope so the export can never diverge from
+    // the index again (it used to select the whole org on select-all).
+    const where = getNrmSelectionWhere({ nrmIds, organizationId, search });
 
     const teamMembers = await db.teamMember.findMany({
       where,
@@ -1604,7 +1617,7 @@ export async function exportNRMsToCsv({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while exporting NRMs to csv.",
-      additionalData: { nrmIds, organizationId },
+      additionalData: { nrmIds, organizationId, search },
     });
   }
 }
