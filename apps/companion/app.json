@@ -14,7 +14,8 @@
       "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
-        "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits."
+        "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits.",
+        "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location."
       }
     },
     "android": {
@@ -23,7 +24,11 @@
         "backgroundColor": "#FF7809"
       },
       "package": "com.shelf.companion",
-      "permissions": ["android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
       "blockedPermissions": ["android.permission.RECORD_AUDIO"],
       "intentFilters": [
         {

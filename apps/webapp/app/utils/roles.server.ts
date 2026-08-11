@@ -126,6 +126,46 @@ export function resolveCanSeeAllBookings({
   );
 }
 
+/**
+ * Whether the caller may see custody information for people other than
+ * themselves.
+ *
+ * ADMIN / OWNER always can. SELF_SERVICE and BASE only when the workspace has
+ * switched their respective override on. Exported so callers outside
+ * {@link requirePermission} — notably `/api/model-filters` — resolve it
+ * identically; a surface that invents its own rule ends up disagreeing with
+ * the loader that seeded it.
+ *
+ * This governs VIEWING only. It never grants the right to assign custody:
+ * SELF_SERVICE may assign only to themselves and BASE may not assign at all,
+ * regardless of this flag. See `resolveCustodianPickerScope`.
+ *
+ * @param args.role - Effective role from {@link resolveEffectiveRole}.
+ * @param args.currentOrganization - Workspace whose override settings apply.
+ * @returns `true` when custody reads should NOT be restricted to the caller.
+ */
+export function resolveCanSeeAllCustody({
+  role,
+  currentOrganization,
+}: {
+  role: OrganizationRoles;
+  currentOrganization: {
+    selfServiceCanSeeCustody: boolean;
+    baseUserCanSeeCustody: boolean;
+  };
+}): boolean {
+  return (
+    // Admin/Owner always can see all
+    !isSelfServiceOrBaseRole(role) ||
+    // SELF_SERVICE can see all if org setting allows
+    (role === OrganizationRoles.SELF_SERVICE &&
+      currentOrganization.selfServiceCanSeeCustody) ||
+    // BASE can see all if org setting allows
+    (role === OrganizationRoles.BASE &&
+      currentOrganization.baseUserCanSeeCustody)
+  );
+}
+
 export async function requirePermission({
   userId,
   request,
@@ -185,15 +225,10 @@ export async function requirePermission({
   });
 
   // Determine if user can see all custody information
-  const canSeeAllCustody =
-    // Admin/Owner always can see all
-    !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeCustody) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeCustody);
+  const canSeeAllCustody = resolveCanSeeAllCustody({
+    role,
+    currentOrganization,
+  });
 
   // Determine if user can use barcodes based on organization settings
   const canUseBarcodes = currentOrganization.barcodesEnabled ?? false;

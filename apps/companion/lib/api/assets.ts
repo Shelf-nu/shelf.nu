@@ -62,15 +62,46 @@ export const assetsApi = {
    * field-scan contexts (scanner tab, deep links). To resolve a code WITHOUT
    * recording (e.g. the audit scanner), use {@link getScannedItem} instead.
    *
+   * Wire contract for coordinates (matches the route's Zod schema): optional
+   * `latitude`/`longitude` query params, decimal degrees, both or neither
+   * (lat −90..90, lng −180..180). They are best-effort provenance — the
+   * server silently ignores invalid values and a resolve NEVER fails because
+   * of them, mirroring the web flow's non-fatal geolocation post.
+   *
    * @param codeId - The scanned QR id or normalized SAM id.
    * @param orgId - Caller's current workspace id; required for SAM lookups.
+   * @param coordinates - Optional GPS position captured at scan time (see
+   *   `lib/scan-location.ts`); attached to the recorded scan server-side.
    */
-  qr: (codeId: string, orgId?: string) =>
-    apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${
-        orgId ? `?orgId=${orgId}` : ""
-      }`
-    ),
+  qr: (
+    codeId: string,
+    orgId?: string,
+    coordinates?: { latitude: number; longitude: number } | null
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (orgId) searchParams.set("orgId", orgId);
+    const query = searchParams.toString();
+    // Coordinates ride as HEADERS, never query params: URLs are captured by
+    // access logs and Sentry request breadcrumbs, and precise user GPS must
+    // stay out of every URL-shaped capture surface.
+    return apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
+      {
+        // why: this resolve RECORDS a scan server-side — a timed-out-but-
+        // landed request must not be auto-retried, or the same physical
+        // scan is recorded twice (same rule as the quantity mutations).
+        retry: false,
+        ...(coordinates
+          ? {
+              headers: {
+                "X-Scan-Latitude": String(coordinates.latitude),
+                "X-Scan-Longitude": String(coordinates.longitude),
+              },
+            }
+          : {}),
+      }
+    );
+  },
 
   /**
    * Resolve a scanned code to an asset or kit **without recording** a scan,

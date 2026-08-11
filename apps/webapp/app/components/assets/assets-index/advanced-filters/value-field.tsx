@@ -980,6 +980,10 @@ function CustodyEnumField({
       name: "teamMember" as const,
       queryKey: "name",
       deletedAt: null,
+      // A read FILTER — the workspace custody override governs. Advanced mode
+      // is ADMIN/OWNER-only today, so this is for consistency rather than a
+      // live fix, but it keeps the rule with the picker rather than the route.
+      custodyPurpose: "custody-filter" as const,
     },
     transformItem: (item: any) => item,
     renderItem: (item: any) => resolveTeamMemberName(item, true),

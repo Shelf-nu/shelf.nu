@@ -255,7 +255,13 @@ export default function QrLinkExisting() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"
