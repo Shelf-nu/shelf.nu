@@ -467,7 +467,12 @@ export type CustodyResponse = {
  */
 export type QuantityCustodyResponse = {
   success: boolean;
-  asset?: AssetDetail;
+  /**
+   * Refreshed viewer-shaped asset. The route always serializes the key and
+   * sends `null` when the post-commit refresh failed (the mutation itself
+   * still succeeded) — same wire contract as {@link AdjustQuantityResponse}.
+   */
+  asset?: AssetDetail | null;
 };
 
 /**
