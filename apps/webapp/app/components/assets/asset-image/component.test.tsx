@@ -298,6 +298,8 @@ const createInheritingAsset = (
 describe("AssetImage model-image inheritance", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // why: jitter delay is `Math.random() * 3000`; pin it to 0 for deterministic
+    // timer advancement.
     vi.spyOn(Math, "random").mockReturnValue(0);
   });
 
@@ -341,6 +343,8 @@ describe("AssetImage model-image inheritance", () => {
   });
 
   it("renders the placeholder and makes no request with neither image", async () => {
+    // why: fetch is the external network boundary; spy on it to assert the
+    // placeholder path issues no request at all.
     const fetchMock = vi.spyOn(global, "fetch");
 
     render(
@@ -367,5 +371,55 @@ describe("AssetImage model-image inheritance", () => {
       "/static/images/asset-placeholder.jpg"
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+  // why: fetch is the external network boundary; a refresh response is stubbed
+  // so the component stores a refreshed URL before the tier changes.
+  it("drops a refreshed asset url once the asset falls back to its model", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          asset: { mainImage: "https://x/refreshed.jpg", thumbnailImage: null },
+        }),
+        { status: 200 }
+      )
+    );
+
+    const own = {
+      id: "asset-5",
+      thumbnailImage: null,
+      mainImage: "https://x/storage/v1/object/sign/assets/own.jpg?token=t",
+      mainImageExpiration: new Date("2000-01-01T00:00:00.000Z"),
+      assetModel: null,
+    } as unknown as AssetForPreview;
+
+    const { rerender } = render(
+      <AssetImage asset={own} alt="Swap" withPreview />
+    );
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+
+    // Same id, but the asset no longer owns an image — it now inherits.
+    rerender(
+      <AssetImage
+        asset={
+          {
+            id: "asset-5",
+            thumbnailImage: null,
+            mainImage: null,
+            mainImageExpiration: null,
+            assetModel: {
+              image: "https://cdn/model-main.jpg",
+              thumbnailImage: "https://cdn/model-thumb.jpg",
+            },
+          } as unknown as AssetForPreview
+        }
+        alt="Swap"
+        withPreview
+      />
+    );
+
+    expect(screen.getAllByAltText("Swap")[0]).toHaveAttribute(
+      "src",
+      "https://cdn/model-thumb.jpg"
+    );
   });
 });

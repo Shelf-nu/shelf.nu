@@ -28,7 +28,6 @@ import {
   bulkUpdateAssetModel,
   buildAssetKitCreateData,
   checkOutQuantity,
-  clearAssetMainImage,
   createAsset,
   setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
@@ -4055,43 +4054,5 @@ describe("setKitCustodyAfterAssetImport — kit custody + member inheritance", (
     });
 
     expect(mockBulkAssignKitCustody).not.toHaveBeenCalled();
-  });
-});
-
-describe("clearAssetMainImage", () => {
-  beforeEach(() => {
-    vitest.mocked(db.asset.update).mockClear();
-  });
-
-  it("nulls every image field, scoped to the org", async () => {
-    await clearAssetMainImage({ id: "asset-1", organizationId: "org-1" });
-
-    expect(db.asset.update).toHaveBeenCalledWith({
-      where: { id: "asset-1", organizationId: "org-1" },
-      data: {
-        mainImage: null,
-        mainImageExpiration: null,
-        thumbnailImage: null,
-      },
-    });
-  });
-
-  // why: a lingering thumbnail would point at an image the asset no longer
-  // claims. `resolveAssetImage` ignores it, but nothing else should have to.
-  it("clears the thumbnail alongside the main image", async () => {
-    await clearAssetMainImage({ id: "asset-1", organizationId: "org-1" });
-
-    const call = vitest.mocked(db.asset.update).mock.calls[0][0];
-    expect(call.data).toHaveProperty("thumbnailImage", null);
-  });
-
-  it("wraps a failed update in a ShelfError", async () => {
-    vitest
-      .mocked(db.asset.update)
-      .mockRejectedValueOnce(new Error("db is down"));
-
-    await expect(
-      clearAssetMainImage({ id: "asset-1", organizationId: "org-1" })
-    ).rejects.toThrow(ShelfError);
   });
 });

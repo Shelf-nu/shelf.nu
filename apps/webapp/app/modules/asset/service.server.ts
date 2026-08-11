@@ -3727,52 +3727,6 @@ export async function replaceAssetPlacements({
   }
 }
 
-/**
- * Removes an asset's own image so it falls back down the image cascade.
- *
- * With a model linked, the asset then renders that model's cover image;
- * without one it renders the placeholder. This is the only way to reach the
- * fallback tier — an asset that once had its own image could otherwise never
- * show its model's again.
- *
- * All three fields are cleared together: a lingering `thumbnailImage` would be
- * a pointer to an image the asset no longer claims. `resolveAssetImage`
- * deliberately ignores it, but no other consumer should have to know that.
- *
- * The storage object is intentionally NOT deleted — orphan cleanup is a
- * separate concern, and the asset's notes still reference its history.
- *
- * @param params.id - Asset whose image is being cleared
- * @param params.organizationId - Org scope for the write
- * @throws {ShelfError} If the update fails
- * @see {@link file://./image-resolution.ts}
- */
-export async function clearAssetMainImage({
-  id,
-  organizationId,
-}: {
-  id: Asset["id"];
-  organizationId: Organization["id"];
-}) {
-  try {
-    await db.asset.update({
-      where: { id, organizationId },
-      data: {
-        mainImage: null,
-        mainImageExpiration: null,
-        thumbnailImage: null,
-      },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while removing this asset's image.",
-      additionalData: { id, organizationId },
-      label: "Assets",
-    });
-  }
-}
-
 export async function updateAssetMainImage({
   request,
   assetId,
@@ -3785,7 +3739,7 @@ export async function updateAssetMainImage({
   userId: User["id"];
   organizationId: Organization["id"];
   isNewAsset?: boolean;
-}) {
+}): Promise<boolean> {
   try {
     const fileData = await parseFileFormData({
       request,
@@ -3804,8 +3758,14 @@ export async function updateAssetMainImage({
 
     const image = fileData.get("mainImage") as string | null;
 
+    /**
+     * No file in the multipart body. Returning `false` (rather than bare
+     * `undefined`) lets the caller distinguish "user uploaded nothing" from
+     * "user uploaded a new image" — the edit action needs that to decide
+     * whether a pending clear should still apply.
+     */
     if (!image) {
-      return;
+      return false;
     }
 
     // Handle both the old string response and new stringified object response
@@ -3855,6 +3815,8 @@ export async function updateAssetMainImage({
         data: { path: mainImagePath },
       });
     }
+
+    return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({

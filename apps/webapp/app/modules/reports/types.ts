@@ -305,6 +305,11 @@ export interface IdleAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -347,6 +352,11 @@ export interface CustodySnapshotRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -391,6 +401,11 @@ export interface TopBookedAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -490,6 +505,11 @@ export interface AssetInventoryRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -560,6 +580,11 @@ export interface AssetUtilizationRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -615,6 +640,11 @@ export interface AssetActivityRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;

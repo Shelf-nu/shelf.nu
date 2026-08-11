@@ -39,6 +39,7 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
         assetModel={row.original.assetModel}
       />

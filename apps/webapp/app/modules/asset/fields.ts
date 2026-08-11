@@ -76,9 +76,6 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    // See the note in `assetIndexFields` — the detail page renders the same
-    // cascade, and its "From model" badge reads the resolved source.
-    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
@@ -127,7 +124,22 @@ export const getAssetOverviewFields = (
         },
       },
     },
-    assetModel: { select: { id: true, name: true } },
+    /**
+     * `id`/`name` drive the Asset Model property row; the image columns drive
+     * the inherited-image notice beside it.
+     *
+     * Merged into ONE key on purpose. A `...ASSET_MODEL_IMAGE_SELECT` spread
+     * higher in this same object literal was silently shadowed by this key —
+     * later keys win — so Prisma returned no image and the notice could never
+     * render. Keep both concerns here rather than reintroducing the spread.
+     */
+    assetModel: {
+      select: {
+        id: true,
+        name: true,
+        ...ASSET_MODEL_IMAGE_SELECT.assetModel.select,
+      },
+    },
     // A QUANTITY_TRACKED asset can sit in multiple kits at distinct slices.
     // Pull `quantity` so the asset-overview sidebar can list each kit with
     // its allocation and so the loader can derive a true "available" pool

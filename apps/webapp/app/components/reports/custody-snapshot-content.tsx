@@ -83,6 +83,7 @@ export function CustodySnapshotContent({
           <AssetCell
             name={row.original.assetName}
             thumbnailImage={row.original.thumbnailImage}
+            mainImage={row.original.mainImage}
             assetId={row.original.assetId}
             assetModel={row.original.assetModel}
           />

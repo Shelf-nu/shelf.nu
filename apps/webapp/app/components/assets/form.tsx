@@ -517,8 +517,19 @@ export const AssetForm = ({
    */
   const [clearMainImage, setClearMainImage] = useState(false);
 
-  /** True when the asset currently stores an image of its own. */
-  const hasOwnImage = Boolean(id && thumbnailImage && mainImageExpiration);
+  /**
+   * True when the asset currently stores an image of its own.
+   *
+   * Decided by `mainImage` ALONE, mirroring the resolver. Requiring a
+   * thumbnail or an expiration here would misclassify every asset that has an
+   * image but no thumbnail yet — CSV imports, duplicated assets and legacy
+   * rows all land in that state, and thumbnails are generated lazily. Such an
+   * asset would be told it "inherits" its model's image and would lose access
+   * to the Remove control.
+   *
+   * @see {@link file://./../../modules/asset/image-resolution.ts}
+   */
+  const hasOwnImage = Boolean(id && mainImage);
 
   /** Whether the preview should show the asset's own image. */
   const showOwnImagePreview = hasOwnImage && !clearMainImage;
@@ -956,14 +967,18 @@ export const AssetForm = ({
               so the user sees exactly what saving will produce — the model's
               picture, or the placeholder.
             */}
-            {id && thumbnailImage && mainImageExpiration && !clearMainImage ? (
+            {id && showOwnImagePreview ? (
               <AssetImage
                 className="size-16"
                 asset={{
                   id,
-                  thumbnailImage: thumbnailImage,
+                  // Null-safe: an asset can own an image without a thumbnail
+                  // (lazy generation) or without an expiration.
+                  thumbnailImage: thumbnailImage ?? null,
                   mainImage: mainImage ?? null,
-                  mainImageExpiration: new Date(mainImageExpiration),
+                  mainImageExpiration: mainImageExpiration
+                    ? new Date(mainImageExpiration)
+                    : null,
                   assetModel: inheritableAssetModelImage,
                 }}
                 alt={`${title} main image`}

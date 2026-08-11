@@ -757,10 +757,12 @@ export default function AssetOverview() {
    * The model's cover image, if the linked model has one. Used only to decide
    * whether to explain that the displayed image is inherited — the image
    * itself is resolved inside `AssetImage`.
+   *
+   * Read directly off the loader type, NOT through a cast: an `as {...}` here
+   * previously masked the fact that the select wasn't returning these columns
+   * at all, which is exactly the compile-time guard this feature relies on.
    */
-  const assetModelImage = (
-    asset as { assetModel?: { image?: string | null } | null }
-  ).assetModel?.image;
+  const assetModelImage = asset.assetModel?.image;
 
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length

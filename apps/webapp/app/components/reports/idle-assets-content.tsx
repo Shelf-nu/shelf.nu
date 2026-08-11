@@ -44,6 +44,7 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
         assetModel={row.original.assetModel}
       />

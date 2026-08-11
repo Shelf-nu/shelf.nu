@@ -504,11 +504,19 @@ export function BooleanCell({
 export function AssetCell({
   name,
   thumbnailImage,
+  mainImage,
   assetId,
   assetModel,
 }: {
   name: string;
   thumbnailImage: string | null;
+  /**
+   * The asset's OWN full-size image. Load-bearing, not decorative:
+   * `resolveAssetImage` decides the ownership tier from `mainImage` alone, so
+   * omitting it makes an asset that HAS its own image look like one that has
+   * none — it would render its model's cover, or the placeholder.
+   */
+  mainImage: string | null;
   assetId: string;
   /**
    * The asset's model cover image, rendered when the asset has none of its
@@ -523,6 +531,7 @@ export function AssetCell({
         asset={{
           id: assetId,
           thumbnailImage,
+          mainImage,
           assetModel,
         }}
         alt="" // Decorative - asset name is displayed in adjacent text

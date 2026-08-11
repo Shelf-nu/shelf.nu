@@ -196,11 +196,25 @@ export const AssetImage = ({
   // Create a stable cache-busting key that won't change on re-renders
   const [cacheBuster] = useState(isImageError ? `?t=${Date.now()}` : "");
 
-  // Prefer a freshly-refreshed URL, falling back to the resolved value. Use
-  // nullish coalescing (not `||`) so only `null` falls back, matching the
-  // `string | null` contract of these fields.
-  const currentThumbnail = refreshedThumbnailImage ?? resolved.thumbnailUrl;
-  const currentMainImage = refreshedMainImage ?? resolved.fullUrl;
+  /**
+   * Prefer a freshly-refreshed URL, falling back to the resolved value. Use
+   * nullish coalescing (not `||`) so only `null` falls back, matching the
+   * `string | null` contract of these fields.
+   *
+   * Gated on `canRepairImage` because a refreshed URL describes the ASSET's own
+   * row, and must not survive a fall-through to the model or placeholder tier.
+   * The reset effect below keys on `assetId`, so an asset that changes tier
+   * WITHOUT changing id would otherwise keep rendering its old image — which is
+   * exactly what "Remove image" / "Use the model's image instead" does: both
+   * `AssetImage` branches in the asset form share one slot with no `key`, so
+   * the same instance survives the swap.
+   */
+  const currentThumbnail = canRepairImage
+    ? refreshedThumbnailImage ?? resolved.thumbnailUrl
+    : resolved.thumbnailUrl;
+  const currentMainImage = canRepairImage
+    ? refreshedMainImage ?? resolved.fullUrl
+    : resolved.fullUrl;
 
   // Only add cache-buster if we've had an error and attempted refresh
   const imageUrl =
