@@ -10,6 +10,10 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
+import {
+  CUSTOM_FIELD_SEARCH_PATHS,
+  splitAssetSearchTerms,
+} from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -19,15 +23,6 @@ import type { Column } from "../asset-index-settings/helpers";
  * assets are not incorrectly shown as "in custody".
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
-
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
 
 /**
  * Generates the SQL WHERE clause for asset filtering
@@ -72,11 +67,10 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search
-      .trim()
-      .split(",")
-      .map((term) => term.trim())
-      .filter(Boolean);
+    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
+    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
+    // cannot fan into unbounded OR groups in the generated SQL.
+    const words = splitAssetSearchTerms(search);
 
     if (words.length > 0) {
       // Create OR conditions for each search term, searching across multiple fields
@@ -143,6 +137,11 @@ export function generateWhereClause(
         searchConditions,
         " OR "
       )})`;
+    } else {
+      // Typed input yielding zero terms (whitespace / bare commas) matches
+      // nothing — mirrors getAssets' fail-closed guard so the same search
+      // box behaves identically in simple and advanced mode.
+      whereClause = Prisma.sql`${whereClause} AND FALSE`;
     }
   }
 
