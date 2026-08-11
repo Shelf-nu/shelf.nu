@@ -11,6 +11,7 @@
  */
 
 import type { AssetType, BookingStatus, Currency } from "@prisma/client";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -312,7 +313,7 @@ export interface IdleAssetRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Date of last booking checkout, null if never booked */
@@ -359,7 +360,7 @@ export interface CustodySnapshotRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   custodianId: string;
@@ -408,7 +409,7 @@ export interface TopBookedAssetRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Number of times booked in the timeframe */
@@ -512,7 +513,7 @@ export interface AssetInventoryRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   status: string;
@@ -587,7 +588,7 @@ export interface AssetUtilizationRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Total days in the period */
@@ -647,7 +648,7 @@ export interface AssetActivityRow {
   mainImage: string | null;
   /** Cover image of the asset's model, rendered when the asset has no
    * image of its own. See `~/modules/asset/image-resolution`. */
-  assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  assetModel: ResolvableAssetModelImage;
   /** Type of activity */
   activityType: AssetActivityType;
   /** Human-readable description */

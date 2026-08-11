@@ -110,11 +110,20 @@ export const defaultValidateFileAtom = createValidateFileAtom({
 });
 
 // For asset image uploads we allow 8MB
-export const assetImageValidateFileAtom = createValidateFileAtom({
+/**
+ * Limits for asset-shaped image uploads. Shared by the asset image input and
+ * the asset-model cover image so the two cannot drift — they accept the same
+ * files and must reject them with the same copy.
+ */
+export const ASSET_IMAGE_VALIDATION = {
   maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
   sizeErrorMessage: "Max file size is 8MB",
   allowedTypesErrorMessage: "Allowed file types are: PNG, JPG, JPEG, or WebP",
-});
+};
+
+export const assetImageValidateFileAtom = createValidateFileAtom(
+  ASSET_IMAGE_VALIDATION
+);
 
 // For audit image uploads we use the default 4MB limit
 export const auditImageValidateFileAtom = createValidateFileAtom({
@@ -131,8 +140,4 @@ export const auditImageValidateFileAtom = createValidateFileAtom({
 export const {
   errorAtom: assetModelImageErrorAtom,
   validateAtom: assetModelImageValidateFileAtom,
-} = createScopedValidateFile({
-  maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
-  sizeErrorMessage: "Max file size is 8MB",
-  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG, JPEG, or WebP",
-});
+} = createScopedValidateFile(ASSET_IMAGE_VALIDATION);

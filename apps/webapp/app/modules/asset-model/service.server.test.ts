@@ -524,17 +524,15 @@ describe("updateAssetModelImage", () => {
   });
 
   it("stores public urls for the image and its thumbnail, scoped to the org", async () => {
-    vitest.mocked(parseFileFormData).mockResolvedValue(
-      new Map([
-        [
-          "image",
-          JSON.stringify({
-            originalPath: "org-1/asset-models/model-1/abc.jpg",
-            thumbnailPath: "org-1/asset-models/model-1/abc-thumbnail.jpg",
-          }),
-        ],
-      ]) as unknown as FormData
+    const withImage = new FormData();
+    withImage.set(
+      "image",
+      JSON.stringify({
+        originalPath: "org-1/asset-models/model-1/abc.jpg",
+        thumbnailPath: "org-1/asset-models/model-1/abc-thumbnail.jpg",
+      })
     );
+    vitest.mocked(parseFileFormData).mockResolvedValue(withImage);
 
     const result = await updateAssetModelImage({
       request: new Request("http://localhost", { method: "POST" }),
@@ -557,9 +555,7 @@ describe("updateAssetModelImage", () => {
   // why: a plain "Save" on the model form posts an empty file input; it must not
   // clear an image the user uploaded earlier.
   it("no-ops when the form carries no file, keeping the current image", async () => {
-    vitest
-      .mocked(parseFileFormData)
-      .mockResolvedValue(new Map() as unknown as FormData);
+    vitest.mocked(parseFileFormData).mockResolvedValue(new FormData());
 
     const result = await updateAssetModelImage({
       request: new Request("http://localhost", { method: "POST" }),
@@ -572,13 +568,9 @@ describe("updateAssetModelImage", () => {
   });
 
   it("stores a null thumbnail when the parser returned a bare path", async () => {
-    vitest
-      .mocked(parseFileFormData)
-      .mockResolvedValue(
-        new Map([
-          ["image", "org-1/asset-models/model-1/abc.jpg"],
-        ]) as unknown as FormData
-      );
+    const barePath = new FormData();
+    barePath.set("image", "org-1/asset-models/model-1/abc.jpg");
+    vitest.mocked(parseFileFormData).mockResolvedValue(barePath);
 
     await updateAssetModelImage({
       request: new Request("http://localhost", { method: "POST" }),

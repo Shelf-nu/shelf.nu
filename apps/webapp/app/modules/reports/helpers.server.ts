@@ -56,6 +56,7 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
@@ -2258,10 +2259,7 @@ async function fetchTopBookedAssetRows(
          * look like it inherits its model's cover.
          */
         mainImage: string | null;
-        assetModel: {
-          image: string | null;
-          thumbnailImage: string | null;
-        } | null;
+        assetModel: ResolvableAssetModelImage;
         category: string | null;
         location: string | null;
       };

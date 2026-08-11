@@ -37,14 +37,24 @@ export const ASSET_IMAGE_PLACEHOLDER = "/static/images/asset-placeholder.jpg";
  */
 export type AssetImageSource = "asset" | "model" | "placeholder";
 
+/**
+ * The model's cover image as every consumer loads it.
+ *
+ * Named rather than inlined because this shape is repeated across report row
+ * types, loader payloads and component props — a duplicated literal drifts the
+ * moment the cascade gains a field, and the drift is invisible until an image
+ * silently stops rendering.
+ */
+export type ResolvableAssetModelImage = {
+  image: string | null;
+  thumbnailImage: string | null;
+} | null;
+
 /** The minimum image shape any surface must load to resolve an asset's image. */
 export type AssetWithResolvableImage = {
   mainImage: string | null;
   thumbnailImage: string | null;
-  assetModel: {
-    image: string | null;
-    thumbnailImage: string | null;
-  } | null;
+  assetModel: ResolvableAssetModelImage;
 };
 
 /** The resolved URLs plus their provenance. */

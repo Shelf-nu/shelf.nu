@@ -4,7 +4,11 @@
  * @see {@link file://./image-resolution.ts}
  */
 import { describe, expect, it } from "vitest";
-import { ASSET_IMAGE_PLACEHOLDER, resolveAssetImage } from "./image-resolution";
+import {
+  ASSET_IMAGE_PLACEHOLDER,
+  resolveAssetImage,
+  serializeAssetImage,
+} from "./image-resolution";
 
 describe("resolveAssetImage", () => {
   it("prefers the asset's own image over its model's", () => {
@@ -108,9 +112,7 @@ describe("resolveAssetImage", () => {
 });
 
 describe("serializeAssetImage", () => {
-  it("flattens an inherited image into the asset's own image fields", async () => {
-    const { serializeAssetImage } = await import("./image-resolution");
-
+  it("flattens an inherited image into the asset's own image fields", () => {
     expect(
       serializeAssetImage({
         id: "asset-1",
@@ -134,9 +136,7 @@ describe("serializeAssetImage", () => {
   // why: the companion renders its own placeholder when mainImage is null, so
   // emitting the placeholder PATH here would break that branch on every asset
   // that has no image at all.
-  it("keeps the image fields null for the placeholder case", async () => {
-    const { serializeAssetImage } = await import("./image-resolution");
-
+  it("keeps the image fields null for the placeholder case", () => {
     expect(
       serializeAssetImage({
         id: "asset-1",
@@ -152,9 +152,7 @@ describe("serializeAssetImage", () => {
     });
   });
 
-  it("drops the nested assetModel from the payload", async () => {
-    const { serializeAssetImage } = await import("./image-resolution");
-
+  it("drops the nested assetModel from the payload", () => {
     const result = serializeAssetImage({
       id: "asset-1",
       mainImage: "https://cdn/asset-main.jpg",

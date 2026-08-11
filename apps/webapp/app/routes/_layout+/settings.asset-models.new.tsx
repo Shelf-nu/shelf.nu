@@ -19,8 +19,9 @@ import {
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -117,9 +118,23 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         organizationId,
       });
     } catch (cause) {
+      /**
+       * Best-effort rollback — the original upload failure is what surfaces to
+       * the user. But a rollback that ALSO fails leaves an orphaned, imageless
+       * model row behind, and swallowing it silently means nobody ever finds
+       * out. Log it so the orphan is discoverable.
+       */
       await deleteAssetModel({ id: assetModel.id, organizationId }).catch(
-        () => {
-          /* Best-effort rollback; the original failure is what matters. */
+        (rollbackCause: unknown) => {
+          Logger.error(
+            new ShelfError({
+              cause: rollbackCause,
+              message:
+                "Failed to roll back an asset model after its image upload failed — the model row may be orphaned.",
+              additionalData: { assetModelId: assetModel.id, organizationId },
+              label: "Asset Model",
+            })
+          );
         }
       );
       throw cause;
