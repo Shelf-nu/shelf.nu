@@ -80,13 +80,20 @@ export const assetsApi = {
   ) => {
     const searchParams = new URLSearchParams();
     if (orgId) searchParams.set("orgId", orgId);
-    if (coordinates) {
-      searchParams.set("latitude", String(coordinates.latitude));
-      searchParams.set("longitude", String(coordinates.longitude));
-    }
     const query = searchParams.toString();
+    // Coordinates ride as HEADERS, never query params: URLs are captured by
+    // access logs and Sentry request breadcrumbs, and precise user GPS must
+    // stay out of every URL-shaped capture surface.
     return apiFetch<QrResponse>(
-      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
+      coordinates
+        ? {
+            headers: {
+              "X-Scan-Latitude": String(coordinates.latitude),
+              "X-Scan-Longitude": String(coordinates.longitude),
+            },
+          }
+        : undefined
     );
   },
 

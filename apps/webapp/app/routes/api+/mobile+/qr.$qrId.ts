@@ -31,7 +31,7 @@ const ScanGeolocationSchema = z.object({
 });
 
 /**
- * Parses the optional `latitude`/`longitude` query params into the string
+ * Parses the optional `X-Scan-Latitude`/`X-Scan-Longitude` headers into the string
  * format the `Scan` model stores (`String(number)` — identical to the web
  * flow, which posts `position.coords.latitude.toString()` with no rounding).
  *
@@ -39,20 +39,28 @@ const ScanGeolocationSchema = z.object({
  * best-effort provenance and must not be able to break a resolve (matching the
  * non-fatal `createScan` catch below).
  *
- * @param searchParams - The resolve request's query params.
+ * Headers, deliberately NOT query params: URL query strings are captured
+ * verbatim by access logs, proxies, and Sentry's request breadcrumbs, which
+ * would write precise user GPS into every log pipeline. Headers keep the
+ * coordinates out of every URL-shaped capture surface.
+ *
+ * @param headers - The resolve request's headers.
  * @returns Normalized coordinate strings, or `null` when absent/invalid.
  */
 function parseScanGeolocation(
-  searchParams: URLSearchParams
+  headers: Headers
 ): { latitude: string; longitude: string } | null {
+  const latitude = headers.get("x-scan-latitude");
+  const longitude = headers.get("x-scan-longitude");
+
   // Both absent is the common no-GPS case — skip the parse entirely.
-  if (!searchParams.has("latitude") && !searchParams.has("longitude")) {
+  if (latitude === null && longitude === null) {
     return null;
   }
 
   const parsed = ScanGeolocationSchema.safeParse({
-    latitude: searchParams.get("latitude"),
-    longitude: searchParams.get("longitude"),
+    latitude,
+    longitude,
   });
   if (!parsed.success) return null;
 
@@ -76,8 +84,8 @@ function parseScanGeolocation(
  * mirroring the web's `get-scanned-item` split. SAM resolves have no backing QR
  * id, so nothing is recorded (matching web).
  *
- * Optional query params:
- * - `latitude` / `longitude` — best-effort GPS coordinates captured by the
+ * Optional headers:
+ * - `X-Scan-Latitude` / `X-Scan-Longitude` — best-effort GPS coordinates captured by the
  *   companion at scan time (decimal degrees; lat −90..90, lng −180..180).
  *   Stored on the scan record like the web flow's geolocation post. The web
  *   needs a separate authenticated follow-up POST (`updateScanGeolocation`)
@@ -120,9 +128,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // an error response for the scanner.
     if (result.recordableQrId) {
       // Best-effort GPS from the companion; null when absent or invalid.
-      const geolocation = parseScanGeolocation(
-        new URL(request.url).searchParams
-      );
+      const geolocation = parseScanGeolocation(request.headers);
 
       try {
         await createScan({

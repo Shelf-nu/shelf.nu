@@ -2,9 +2,11 @@
  * Scan geolocation (best-effort, never blocking)
  *
  * Supplies GPS coordinates for scan provenance — the "where" attached to the
- * recording QR resolve (`GET /api/mobile/qr/:qrId?latitude=…&longitude=…`),
- * bringing the companion to parity with the web QR flow, which posts the
- * browser's geolocation onto the scan record.
+ * recording QR resolve via the `X-Scan-Latitude` / `X-Scan-Longitude` request
+ * headers (headers, not query params, so precise GPS never appears in URLs
+ * that access logs or Sentry breadcrumbs capture), bringing the companion to
+ * parity with the web QR flow, which posts the browser's geolocation onto the
+ * scan record.
  *
  * Design rules (in priority order):
  *

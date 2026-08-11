@@ -31,7 +31,7 @@ import { loader } from "~/routes/api+/mobile+/qr.$qrId";
  * - error-payload propagation — the structured `reason`/`qrId` discriminator
  *   must reach the wire for unclaimed codes, and must be absent for plain
  *   failures (additive contract);
- * - optional scan geolocation — valid `latitude`/`longitude` query params are
+ * - optional scan geolocation — valid `X-Scan-Latitude`/`X-Scan-Longitude` headers are
  *   forwarded to `createScan` as strings (web format parity), while invalid /
  *   partial / absent coordinates are silently ignored and NEVER affect the
  *   resolve response.
@@ -43,9 +43,16 @@ import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 type DataResult<T> = { data: T; init: ResponseInit | null };
 
 /** Runs the loader and unwraps the data() envelope. */
-async function callLoader(qrId = "qr-1", search = "") {
+async function callLoader(
+  qrId = "qr-1",
+  search = "",
+  headers?: Record<string, string>
+) {
   const request = new Request(
-    `http://localhost/api/mobile/qr/${qrId}${search}`
+    `http://localhost/api/mobile/qr/${qrId}${search}`,
+    {
+      headers,
+    }
   );
   const result = await loader({
     request,
@@ -127,10 +134,12 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
   it("persists valid coordinates on the recorded scan (string format, web parity)", async () => {
     const qr = mockOkResolve();
 
-    const { body, status } = await callLoader(
-      "qr-1",
-      "?latitude=52.370216&longitude=4.895168"
-    );
+    const { body, status } = await callLoader("qr-1", "", {
+      // Mixed casing on purpose: Headers.get is case-insensitive, so the
+      // route must accept however the client capitalizes them.
+      "X-Scan-Latitude": "52.370216",
+      "x-scan-longitude": "4.895168",
+    });
 
     expect(status).toBe(200);
     expect(body.qr).toEqual(qr);
@@ -149,10 +158,10 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
     const qr = mockOkResolve();
 
     // lat 91 is outside −90..90 → the pair is dropped, nothing else changes.
-    const { body, status } = await callLoader(
-      "qr-1",
-      "?latitude=91&longitude=4.895168"
-    );
+    const { body, status } = await callLoader("qr-1", "", {
+      "X-Scan-Latitude": "91",
+      "X-Scan-Longitude": "4.895168",
+    });
 
     expect(status).toBe(200);
     expect(body.qr).toEqual(qr);
@@ -167,9 +176,15 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
 
     // why: `z.coerce.number()` would turn "" into 0 — assert the schema's
     // empty-string guard actually drops the pair instead of storing 0,0.
-    await callLoader("qr-1", "?latitude=&longitude=");
+    await callLoader("qr-1", "", {
+      "X-Scan-Latitude": "",
+      "X-Scan-Longitude": "",
+    });
     // Non-numeric garbage must also be dropped.
-    await callLoader("qr-1", "?latitude=abc&longitude=4.9");
+    await callLoader("qr-1", "", {
+      "X-Scan-Latitude": "abc",
+      "X-Scan-Longitude": "4.9",
+    });
 
     expect(createScan).toHaveBeenCalledTimes(2);
     for (const [args] of vi.mocked(createScan).mock.calls) {
