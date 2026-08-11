@@ -91,15 +91,26 @@ export const MODEL_FILTER_REGISTRY: Record<
       id: true,
       name: true,
       userId: true,
-      // No `email`: nothing renders it (`resolveTeamMemberName` only appends it
-      // when `includeEmail` is passed, and no call site passes it). The server
-      // `where` still MATCHES on email, so search-by-email keeps working.
       user: {
         select: {
           id: true,
           firstName: true,
           lastName: true,
           displayName: true,
+          /**
+           * Rendered, not incidental: every custodian picker labels its rows
+           * with `resolveTeamMemberName(item, true)` — the positional
+           * `includeEmail` — producing "Ada Lovelace (ada@example.com)". Drop
+           * this and the label silently loses its email the moment the user
+           * types, because every seeding loader returns the full user while
+           * only the search would not.
+           *
+           * Confidentiality here comes from WHICH ROWS come back, not from
+           * hiding a column: `resolveCustodianPickerScope` restricts the query
+           * to team members the caller is already allowed to see, and the
+           * seeds disclose exactly the same field for exactly those rows.
+           */
+          email: true,
         },
       },
     },

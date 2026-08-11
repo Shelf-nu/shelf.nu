@@ -281,13 +281,19 @@ describe("GET /api/model-filters", () => {
         id: "tm-1",
         name: "Ada Lovelace",
         userId: "user-9",
+        // Columns no picker reads. Previously every one of these reached the
+        // client through `...item`, `metadata` and `user` at once.
         deletedAt: null,
+        createdAt: "2020-01-01T00:00:00.000Z",
+        organizationId: "org-1",
         user: {
           id: "user-9",
           firstName: "Ada",
           lastName: "Lovelace",
           displayName: "Ada L",
           email: "ada@example.com",
+          // A user column the picker has no business seeing.
+          onboarded: true,
         },
       };
 
@@ -299,23 +305,40 @@ describe("GET /api/model-filters", () => {
         await callLoader("name=teamMember&queryKey=name&queryValue=Ada")
       );
 
-      // The leak this closes: email reached the client through `...item`,
-      // `metadata` and `user` simultaneously.
-      expect(JSON.stringify(filters)).not.toContain("ada@example.com");
-      // …while the fields pickers actually read still arrive.
+      const serialized = JSON.stringify(filters);
+      expect(serialized).not.toContain("createdAt");
+      expect(serialized).not.toContain("onboarded");
+      expect(serialized).not.toContain("deletedAt");
+
+      // Everything the picker label needs still arrives — including the email,
+      // which `resolveTeamMemberName(item, true)` renders as
+      // "Ada Lovelace (ada@example.com)". Omitting it would make the label
+      // change the moment the user types, because the seeding loaders all
+      // return it. What limits disclosure is WHICH ROWS come back — see the
+      // custody-scoping suite below — not hiding this column.
       expect(filters[0].name).toBe("Ada Lovelace");
       expect(filters[0].userId).toBe("user-9");
       expect(filters[0].user.displayName).toBe("Ada L");
+      expect(filters[0].user.email).toBe("ada@example.com");
     });
 
-    it("asks Prisma for the registry select", async () => {
+    it("asks Prisma for the registry select rather than the whole row", async () => {
       dbMocks.dynamicFindMany.mockResolvedValue([]);
 
       await callLoader("name=teamMember&queryKey=name&queryValue=x");
 
-      const select = dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0]?.select;
-      expect(select).toBeDefined();
-      expect(select.user.select.email).toBeUndefined();
+      const call = dbMocks.dynamicFindMany.mock.calls.at(-1)?.[0];
+
+      // A `select` at all is the point: without one this was a bare findMany
+      // returning every column of the row.
+      expect(call.select).toBeDefined();
+      expect(call.include).toBeUndefined();
+      expect(Object.keys(call.select).sort()).toEqual([
+        "id",
+        "name",
+        "user",
+        "userId",
+      ]);
     });
   });
 

@@ -47,13 +47,44 @@ describe("MODEL_FILTER_REGISTRY", () => {
     }
   );
 
-  it("never returns a team member's email", () => {
+  /**
+   * The email is RENDERED, not incidental: 21 call sites label picker rows with
+   * `resolveTeamMemberName(item, true)` — the positional `includeEmail` — so a
+   * row reads "Ada Lovelace (ada@example.com)".
+   *
+   * Omitting it here does not protect anything, because every seeding loader
+   * returns the full user for the very same rows; it only makes the label lose
+   * its email the moment the user types. What keeps a caller from seeing
+   * colleagues at all is `resolveCustodianPickerScope`, which decides which
+   * rows come back — see custodian-scope.server.test.ts.
+   */
+  it("returns the team member's email, which the pickers render", () => {
     const select = getModelFilterConfig("teamMember").select as {
       user: { select: Record<string, unknown> };
     };
 
-    expect(select.user.select.email).toBeUndefined();
-    expect(JSON.stringify(select)).not.toContain("email");
+    expect(select.user.select.email).toBe(true);
+  });
+
+  it("exposes no team-member field beyond what a picker label needs", () => {
+    const select = getModelFilterConfig("teamMember").select as {
+      user: { select: Record<string, unknown> };
+    } & Record<string, unknown>;
+
+    // Guards against the select quietly widening to the whole row again.
+    expect(Object.keys(select).sort()).toEqual([
+      "id",
+      "name",
+      "user",
+      "userId",
+    ]);
+    expect(Object.keys(select.user.select).sort()).toEqual([
+      "displayName",
+      "email",
+      "firstName",
+      "id",
+      "lastName",
+    ]);
   });
 
   it("does not register `asset` — it has no `name` column and no call site", () => {
