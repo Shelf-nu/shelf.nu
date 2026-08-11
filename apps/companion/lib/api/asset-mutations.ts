@@ -23,6 +23,7 @@ import type {
   UpdateAssetResponse,
   DeleteAssetResponse,
   UpdateImageResponse,
+  AdjustQuantityResponse,
 } from "./types";
 
 export const assetMutationsApi = {
@@ -119,6 +120,34 @@ export const assetMutationsApi = {
       method: "POST",
       body: JSON.stringify({ assetId }),
     }),
+
+  /**
+   * Adjust total stock of a QUANTITY_TRACKED asset (restock / remove /
+   * correction). Mobile twin of the web's /api/assets/adjust-quantity —
+   * the server validates the type gate, org scope and the row-locked
+   * negative-stock check, writes the ConsumptionLog row, and fires the
+   * low-stock alert when the threshold is crossed.
+   */
+  adjustQuantity: (
+    orgId: string,
+    assetId: string,
+    args: {
+      quantity: number;
+      direction: "add" | "subtract";
+      category: "RESTOCK" | "ADJUSTMENT" | "LOSS";
+      note?: string;
+    }
+  ) =>
+    apiFetch<AdjustQuantityResponse>(
+      `/api/mobile/asset/adjust-quantity?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId, ...args }),
+        // why: non-idempotent — a timed-out-but-landed request must not be
+        // auto-retried, or the adjustment double-applies.
+        retry: false,
+      }
+    ),
 
   /** Update asset image (multipart upload) */
   updateImage: (

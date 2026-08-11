@@ -61,6 +61,12 @@ interface Props {
   currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
   settings: AssetIndexSettings;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required, not
+   * optional: the custodian filter seed previously passed no scoping at all,
+   * and an optional field would let a caller silently restore that.
+   */
+  canSeeAllCustody: boolean;
 }
 
 const searchFieldTooltipText = `
@@ -443,6 +449,7 @@ export async function advancedModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
@@ -572,6 +579,9 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
+      // A FILTER. This passed no scoping argument at all, so the seed
+      // disagreed with the search endpoint for any restricted role.
+      filterByUserId: !canSeeAllCustody,
     }),
 
     // Kits

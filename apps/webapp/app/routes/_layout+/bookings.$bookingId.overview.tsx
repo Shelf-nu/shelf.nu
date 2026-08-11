@@ -148,6 +148,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userOrganizations,
       canSeeAllBookings,
+      canSeeAllCustody,
     } = await requirePermission({
       userId: authSession?.userId,
       request,
@@ -403,10 +404,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        selectedTeamMembers: booking.custodianTeamMemberId
+        // Server-derived: this booking's own custodian, which the viewer may
+        // not otherwise be allowed to see. It has to render regardless, or the
+        // sidebar loses the chip for the custodian already on the booking.
+        trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        filterByUserId: isSelfServiceOrBase,
+        // A sidebar FILTER, so the custody read-visibility rule governs — the
+        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
+        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
+        // the search endpoint.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
 
@@ -665,6 +673,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: string | null;
       }>
     >();
+    /**
+     * Live asset status per qty-tracked asset on this booking. Feeds the
+     * per-asset half of the legacy all-at-once fallback below — the status
+     * already rides along on `BOOKING_WITH_ASSETS_INCLUDE`, so this costs no
+     * extra query.
+     */
+    const assetStatusByAsset = new Map<string, AssetStatus>();
     for (const ba of booking.bookingAssets) {
       if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
       const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
@@ -674,6 +689,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: ba.assetKitId ?? null,
       });
       bookingAssetRowsByAsset.set(ba.assetId, arr);
+      assetStatusByAsset.set(ba.assetId, ba.asset.status);
     }
 
     /** Logs grouped by assetId (each carries its own category). */
@@ -851,24 +867,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
     // checkout in the bulk-checkout dialog + scanner drawer.
     //
+    // Decided PER ASSET, not per booking: an asset ADDED after that checkout is
+    // still AVAILABLE and genuinely has units left (GitHub #2815), and an asset
+    // that already has progressive claims needs no fallback at all. Keying on
+    // the booking having zero sessions would also flip every already-out asset
+    // back to "fully remaining" the moment one later batch records a session.
+    //
     // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
     // (modules/booking/service.server.ts), which the checkout-assets route uses;
     // this loader mirrors that logic in-memory to avoid an extra query per asset.
-    const isLegacyAllAtOnceCheckout =
-      checkoutSessions.length === 0 &&
-      (booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE);
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
 
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
-      if (isLegacyAllAtOnceCheckout && totalBooked > 0) {
-        remainingToCheckOutByAsset[assetId] = 0;
-        continue;
-      }
       let totalCheckedOut = 0;
       for (const row of rows) {
         totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
+      if (
+        isActiveBooking &&
+        totalBooked > 0 &&
+        totalCheckedOut === 0 &&
+        assetStatusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
+      ) {
+        remainingToCheckOutByAsset[assetId] = 0;
+        continue;
       }
       remainingToCheckOutByAsset[assetId] = Math.max(
         0,
