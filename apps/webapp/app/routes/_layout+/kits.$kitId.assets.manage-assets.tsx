@@ -28,6 +28,7 @@ import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { ReservedBookingRemovalNotice } from "~/components/kits/reserved-booking-removal-notice";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
@@ -57,7 +58,10 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { PickerAssetMeta } from "~/modules/kit/picker-meta.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
-import { updateKitAssets } from "~/modules/kit/service.server";
+import {
+  getReservedBookingImpactForAssetKits,
+  updateKitAssets,
+} from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -148,8 +152,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // Pull the current pivot rows for THIS kit, including
             // quantity, so the picker can pre-fill the qty input for
             // qty-tracked rows the user is already managing.
+            //
+            // `id` is the `AssetKit` id — the key the reserved-booking impact
+            // helper below is written against (`BookingAsset.assetKitId`).
             assetKits: {
               select: {
+                id: true,
                 asset: { select: { id: true } },
                 quantity: true,
               },
@@ -175,11 +183,35 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Hydrate per-asset picker metadata for the QUANTITY_TRACKED rows on
     // this page. See `getKitPickerMeta` for the strict-available formula
     // and its subtleties.
-    const pickerMetaByAssetId = await getKitPickerMeta({
-      kitId,
-      organizationId,
-      assetIds: assets.map((a) => a.id),
-    });
+    //
+    // In parallel: which RESERVED bookings would lose a slice if the user
+    // deselects one of the kit's current members. Deselecting is destructive
+    // here (the confirm dialog says "Add Assets to kit?"), so the dialog warns
+    // before it happens. Bounded by the kit's size — not the asset index page
+    // — and resolved in the loader so opening the dialog costs no round-trip.
+    const [pickerMetaByAssetId, reservedImpactByAssetKitId] = await Promise.all(
+      [
+        getKitPickerMeta({
+          kitId,
+          organizationId,
+          assetIds: assets.map((a) => a.id),
+        }),
+        getReservedBookingImpactForAssetKits({
+          assetKitIds: kit.assetKits.map((ak) => ak.id),
+          organizationId,
+        }),
+      ]
+    );
+
+    /** `assetId -> reserved bookings that hold it via THIS kit`. */
+    const reservedBookingsByAssetId = Object.fromEntries(
+      kit.assetKits
+        .map(
+          (ak) =>
+            [ak.asset.id, reservedImpactByAssetKitId[ak.id] ?? []] as const
+        )
+        .filter(([, bookings]) => bookings.length > 0)
+    );
 
     const modelName = {
       singular: "asset",
@@ -204,6 +236,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       kit,
+      reservedBookingsByAssetId,
       items: itemsWithPickerMeta,
       totalItems: totalAssets,
       categories,
@@ -262,8 +295,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * `aria-describedby` target for the reserved-booking warning. The confirm
+ * dialog has no `AlertDialogDescription`, so without this the notice would
+ * appear silently for screen-reader users.
+ */
+const RESERVED_NOTICE_ID = "manage-kit-assets-reserved-notice";
+
 export default function ManageAssetsInKit() {
-  const { kit, items, totalItems } = useLoaderData<LoaderData>();
+  const { kit, items, totalItems, reservedBookingsByAssetId } =
+    useLoaderData<LoaderData>();
   // why: `.map` returns a new array each render. The effects below depend on
   // these lists, so without memoisation each render fired the effect and
   // re-triggered a render via setSelectedBulkItems → infinite loop.
@@ -343,6 +384,28 @@ export default function ManageAssetsInKit() {
     }
     return out;
   }, [initialKitQuantities, quantities, selectedBulkItems]);
+
+  /**
+   * Kit members the user has deselected that a RESERVED booking depends on.
+   *
+   * Deselecting a row here removes the asset from the kit, which DELETES its
+   * kit-driven slice from every booking still being planned (see
+   * `removeKitSlicesFromPlanningBookings`). For a DRAFT that's unremarkable;
+   * for a RESERVED booking someone has committed dates and a custodian, so the
+   * confirm dialog names those bookings. Derived exactly like
+   * `qtyEditedInExistingKitRows` above — from the same selection atom.
+   */
+  const deselectedReservedImpact = useMemo(() => {
+    const deselectedAssetIds = Object.keys(reservedBookingsByAssetId).filter(
+      (assetId) => !selectedBulkItems.some((a) => a.id === assetId)
+    );
+    return {
+      assetCount: deselectedAssetIds.length,
+      bookings: deselectedAssetIds.flatMap(
+        (assetId) => reservedBookingsByAssetId[assetId]
+      ),
+    };
+  }, [reservedBookingsByAssetId, selectedBulkItems]);
 
   const kitIsInCustody =
     kit.status === KitStatus.IN_CUSTODY || kit.status === KitStatus.CHECKED_OUT;
@@ -571,7 +634,17 @@ export default function ManageAssetsInKit() {
                 </Button>
               </AlertDialogTrigger>
 
-              <AlertDialogContent>
+              <AlertDialogContent
+                // The dialog has no `AlertDialogDescription`, so Radix has
+                // nothing to announce beyond the heading. When the removal
+                // warning is present it IS the consequential part — point the
+                // dialog's description at it so it's read out on open.
+                aria-describedby={
+                  deselectedReservedImpact.bookings.length > 0
+                    ? RESERVED_NOTICE_ID
+                    : undefined
+                }
+              >
                 <div className="flex items-center gap-4">
                   <div className="flex size-12 items-center justify-center rounded-full bg-blue-200/20">
                     <div className="flex size-10 items-center justify-center rounded-full bg-blue-200/50">
@@ -622,6 +695,16 @@ export default function ManageAssetsInKit() {
                       has no location assigned.
                     </p>
                   )}
+                  {/* Removal warning: deselecting a row is destructive even
+                      though this dialog is titled "Add Assets to kit?" — the
+                      asset leaves the kit AND every reserved booking that
+                      holds it through this kit. Informs, never blocks. */}
+                  <ReservedBookingRemovalNotice
+                    id={RESERVED_NOTICE_ID}
+                    className="mb-3"
+                    assetCount={deselectedReservedImpact.assetCount}
+                    bookings={deselectedReservedImpact.bookings}
+                  />
                   <p>Are you sure you want to continue?</p>
                 </div>
 

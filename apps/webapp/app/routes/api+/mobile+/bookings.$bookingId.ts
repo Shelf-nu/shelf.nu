@@ -210,6 +210,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const assets = Array.from(byAssetId.values()).map((row) => {
       const { assetKits, ...rest } = row.first.asset;
+      // why: out of this rule — no `sourceKitId` fallback for detached kit
+      // residue. This response doesn't group by kit at all; `kit` is
+      // synthesised from `assetKits[0]` and is already documented above as an
+      // approximation kept for older clients. Adding snapshot resolution
+      // here would sharpen a field the client is meant to stop reading.
       const primaryKit = assetKits[0]?.kit ?? null;
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't

@@ -100,8 +100,11 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   // kit`. Previously the count was derived from `asset.quantity − operator
   // custody`, which is wrong once the kit can hold a strict subset of the
   // pool.
+  // `id` is the `AssetKit` id — `BookingAsset.assetKitId` points at it, so the
+  // kit page can resolve which reserved bookings a row's removal would empty
+  // (`getReservedBookingImpactForAssetKits`).
   assetKits: {
-    select: { kitId: true, quantity: true },
+    select: { id: true, kitId: true, quantity: true },
   },
   custody: {
     select: {

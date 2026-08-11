@@ -1562,9 +1562,11 @@ model BookingAsset {
   // membership changes, so a booking still knows the slice arrived as part
   // of a kit after the kit's contents change.
   //
-  // Read ONLY by duplication and kit-drift. All availability/quantity math
-  // keeps using `assetKitId`, which remains the source of truth for LIVE
-  // membership. The two are related, never redundant:
+  // Read by duplication, kit-drift, and display grouping (a slice whose asset
+  // has left the kit still renders under that kit on bookings past the planning
+  // stage). All availability/quantity math keeps using `assetKitId`, which
+  // remains the source of truth for LIVE membership. The two are related,
+  // never redundant:
   //   assetKitId NOT NULL -> sourceKitId NOT NULL, and they agree
   //   assetKitId NULL + sourceKitId NOT NULL -> detached kit residue
   //   both NULL                              -> genuine standalone slice

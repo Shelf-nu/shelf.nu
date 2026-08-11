@@ -12,6 +12,7 @@ import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
+import type { PdfSnapshotKit } from "./helpers";
 import {
   buildPdfAssetRows,
   filterBookingAssets,
@@ -129,22 +130,55 @@ export async function fetchAllPdfRelatedData(
     // (used later as the row key); the asset ids are deduped only for the
     // efficiency of the `rawAssets` fetch below, not for the render list.
     const visibleBookingAssets = filterBookingAssets(
-      (booking?.bookingAssets ?? []).map((ba) => ({
-        ...ba.asset,
-        kitId: ba.assetKitId,
-        kit:
-          ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null,
-        location: getPrimaryLocation(ba.asset),
-        // Slice-level fields carried through search filtering so each slice
-        // renders as its own PDF row with the correct quantity/key.
-        quantity: ba.quantity,
-        bookingAssetId: ba.id,
-      })),
+      (booking?.bookingAssets ?? []).map((ba) => {
+        // The slice's LIVE kit membership, when the asset is still in the kit.
+        const liveKit =
+          ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null;
+        return {
+          ...ba.asset,
+          // A real `Kit.id` — NOT `assetKitId`, which identifies a MEMBERSHIP
+          // row and is therefore unique per (asset, kit) pair. The search
+          // helper's "a matched asset surfaces its whole kit" re-expansion
+          // groups on this field, so a membership id would only ever
+          // re-expand the matched asset's own slices. `sourceKitId` keeps the
+          // grouping intact for a slice whose membership is gone.
+          kitId: liveKit?.id ?? ba.sourceKitId ?? null,
+          // why: out of this rule — resolved from the live membership only.
+          // Snapshot kits are fetched in the query below, which necessarily
+          // runs AFTER this filter (it is keyed on the search-visible ids). A
+          // detached-residue row is still surfaced by a kit-name search
+          // whenever any sibling row of the same kit matches directly, since
+          // re-expansion groups on the shared `kitId` above.
+          kit: liveKit,
+          location: getPrimaryLocation(ba.asset),
+          // Slice-level fields carried through search filtering so each slice
+          // renders as its own PDF row with the correct quantity/key.
+          // `assetKitId` resolves the live kit, `sourceKitId` the snapshot one.
+          assetKitId: ba.assetKitId,
+          sourceKitId: ba.sourceKitId,
+          quantity: ba.quantity,
+          bookingAssetId: ba.id,
+        };
+      }),
       sortParams?.search
     );
     const visibleAssetIds = [...new Set(visibleBookingAssets.map((a) => a.id))];
 
-    const [rawAssets, organization] = await Promise.all([
+    /**
+     * Kits referenced by a visible slice's durable `BookingAsset.sourceKitId`.
+     * Fetched because the PDF, unlike the booking overview, has no kit query of
+     * its own — a kit only ever reaches it through `asset.assetKits`, which is
+     * exactly what a detached slice no longer has.
+     */
+    const snapshotKitIds = [
+      ...new Set(
+        visibleBookingAssets
+          .map((slice) => slice.sourceKitId)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
+
+    const [rawAssets, organization, snapshotKits] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: visibleAssetIds },
@@ -200,6 +234,21 @@ export async function fetchAllPdfRelatedData(
           updatedAt: true,
         },
       }),
+      // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
+      // organization, so this lookup is org-scoped and an id that doesn't
+      // resolve simply leaves the slice rendering as a standalone row.
+      snapshotKitIds.length > 0
+        ? db.kit.findMany({
+            where: { id: { in: snapshotKitIds }, organizationId },
+            select: {
+              id: true,
+              name: true,
+              // Kit location — `groupAndSortAssetsByKit` sorts kit groups by
+              // it, so a snapshot kit must carry it like a live one.
+              location: { select: { name: true } },
+            },
+          })
+        : Promise.resolve<PdfSnapshotKit[]>([]),
     ]);
 
     if (!organization) {
@@ -216,7 +265,12 @@ export async function fetchAllPdfRelatedData(
     // and carrying its own booked quantity + unique row key. A QT asset booked
     // standalone + via two kits produces three rows here.
     const rawAssetsById = new Map(rawAssets.map((asset) => [asset.id, asset]));
-    const assets = buildPdfAssetRows(visibleBookingAssets, rawAssetsById);
+    const snapshotKitsById = new Map(snapshotKits.map((kit) => [kit.id, kit]));
+    const assets = buildPdfAssetRows(
+      visibleBookingAssets,
+      rawAssetsById,
+      snapshotKitsById
+    );
 
     // Group by kit and sort - this keeps each kit's per-slice rows contiguous.
     const sortedAssets = groupAndSortAssetsByKit(

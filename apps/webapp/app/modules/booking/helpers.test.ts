@@ -692,16 +692,31 @@ describe("buildPdfAssetRows", () => {
     });
     const rawAssetsById = new Map([["boards", boards]]);
 
-    // `kitId` here is the slice's `BookingAsset.assetKitId` (an AssetKit.id).
+    // `assetKitId` is the slice's `BookingAsset.assetKitId` (an AssetKit.id);
+    // `sourceKitId` is the real `Kit.id` and agrees with it while the
+    // membership lives.
     const slices: PdfBookingAssetSlice[] = [
       {
         id: "boards",
-        kitId: null,
+        assetKitId: null,
+        sourceKitId: null,
         quantity: 4,
         bookingAssetId: "ba-standalone",
       },
-      { id: "boards", kitId: "ak-b1", quantity: 3, bookingAssetId: "ba-b1" },
-      { id: "boards", kitId: "ak-b2", quantity: 3, bookingAssetId: "ba-b2" },
+      {
+        id: "boards",
+        assetKitId: "ak-b1",
+        sourceKitId: "kit-b1",
+        quantity: 3,
+        bookingAssetId: "ba-b1",
+      },
+      {
+        id: "boards",
+        assetKitId: "ak-b2",
+        sourceKitId: "kit-b2",
+        quantity: 3,
+        bookingAssetId: "ba-b2",
+      },
     ];
 
     const rows = buildPdfAssetRows(slices, rawAssetsById);
@@ -732,7 +747,15 @@ describe("buildPdfAssetRows", () => {
   it("renders a single quantity-1 row for an INDIVIDUAL asset", () => {
     const laptop = rawAsset({ id: "laptop", title: "Laptop" });
     const rows = buildPdfAssetRows(
-      [{ id: "laptop", kitId: null, quantity: 1, bookingAssetId: "ba-laptop" }],
+      [
+        {
+          id: "laptop",
+          assetKitId: null,
+          sourceKitId: null,
+          quantity: 1,
+          bookingAssetId: "ba-laptop",
+        },
+      ],
       new Map([["laptop", laptop]])
     );
 
@@ -748,7 +771,15 @@ describe("buildPdfAssetRows", () => {
 
   it("skips a slice whose asset didn't resolve instead of crashing", () => {
     const rows = buildPdfAssetRows(
-      [{ id: "ghost", kitId: null, quantity: 2, bookingAssetId: "ba-ghost" }],
+      [
+        {
+          id: "ghost",
+          assetKitId: null,
+          sourceKitId: null,
+          quantity: 2,
+          bookingAssetId: "ba-ghost",
+        },
+      ],
       new Map<string, RawPdfAsset>()
     );
 
@@ -771,12 +802,25 @@ describe("buildPdfAssetRows", () => {
       [
         {
           id: "boards",
-          kitId: null,
+          assetKitId: null,
+          sourceKitId: null,
           quantity: 4,
           bookingAssetId: "ba-standalone",
         },
-        { id: "boards", kitId: "ak-b1", quantity: 3, bookingAssetId: "ba-b1" },
-        { id: "boards", kitId: "ak-b2", quantity: 3, bookingAssetId: "ba-b2" },
+        {
+          id: "boards",
+          assetKitId: "ak-b1",
+          sourceKitId: "kit-b1",
+          quantity: 3,
+          bookingAssetId: "ba-b1",
+        },
+        {
+          id: "boards",
+          assetKitId: "ak-b2",
+          sourceKitId: "kit-b2",
+          quantity: 3,
+          bookingAssetId: "ba-b2",
+        },
       ],
       new Map([["boards", boards]])
     );
@@ -789,6 +833,109 @@ describe("buildPdfAssetRows", () => {
       "ba-b2",
       "ba-standalone",
     ]);
+  });
+
+  it("renders a detached slice under its original kit via sourceKitId", () => {
+    // The asset has since been removed from the kit: its `AssetKit` row is
+    // gone (so `assetKits` is empty and `assetKitId` was `SET NULL`'d), but
+    // the finished booking must still describe the job as containing that
+    // kit rather than a loose asset.
+    const tripod = rawAsset({ id: "tripod", title: "Tripod" });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "tripod",
+          assetKitId: null,
+          sourceKitId: "kit-camera",
+          quantity: 1,
+          bookingAssetId: "ba-tripod",
+        },
+      ],
+      new Map([["tripod", tripod]]),
+      new Map([
+        [
+          "kit-camera",
+          {
+            id: "kit-camera",
+            name: "Camera Kit",
+            location: { name: "Studio" },
+          },
+        ],
+      ])
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      bookingAssetId: "ba-tripod",
+      kitId: "kit-camera",
+      kit: {
+        id: "kit-camera",
+        name: "Camera Kit",
+        location: { name: "Studio" },
+      },
+    });
+  });
+
+  it("leaves a detached slice standalone when its source kit is not resolvable", () => {
+    // `sourceKitId`'s FK accepts a `Kit` in any organization, so the caller's
+    // lookup is org-scoped and can legitimately come back empty. That must
+    // degrade to a loose row, never crash.
+    const tripod = rawAsset({ id: "tripod", title: "Tripod" });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "tripod",
+          assetKitId: null,
+          sourceKitId: "kit-other-org",
+          quantity: 1,
+          bookingAssetId: "ba-tripod",
+        },
+      ],
+      new Map([["tripod", tripod]])
+    );
+
+    expect(rows[0]).toMatchObject({ kitId: null, kit: null });
+  });
+
+  it("prefers the live membership over the snapshot kit", () => {
+    // While the membership lives the two agree, but the live join stays the
+    // source of truth — a renamed/moved kit must render from current data.
+    const boards = rawAsset({
+      id: "boards",
+      assetKits: [
+        {
+          id: "ak-b1",
+          kit: { id: "kit-b1", name: "b1 (live)", location: null },
+        },
+      ],
+    });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "boards",
+          assetKitId: "ak-b1",
+          sourceKitId: "kit-b1",
+          quantity: 3,
+          bookingAssetId: "ba-b1",
+        },
+      ],
+      new Map([["boards", boards]]),
+      new Map([
+        [
+          "kit-b1",
+          { id: "kit-b1", name: "b1 (stale)", location: { name: "Nowhere" } },
+        ],
+      ])
+    );
+
+    expect(rows[0].kit).toEqual({
+      id: "kit-b1",
+      name: "b1 (live)",
+      location: null,
+    });
   });
 
   it("returns an empty array for no slices", () => {

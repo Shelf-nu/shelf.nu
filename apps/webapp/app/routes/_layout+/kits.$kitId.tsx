@@ -40,7 +40,9 @@ import {
   getKit,
   getKitCurrentBooking,
   mergeStandaloneCollisionsForKitDetachment,
+  preserveKitDrivenPlacements,
   relinkKitQrCode,
+  removeKitSlicesFromPlanningBookings,
 } from "~/modules/kit/service.server";
 import { createNote } from "~/modules/note/service.server";
 
@@ -338,8 +340,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               },
             });
             const assetKitIds = assetKitRows.map((ak: { id: string }) => ak.id);
+            // Runs FIRST: a booking that hasn't started tracks the kit's
+            // contents, so its slice is deleted rather than demoted to
+            // standalone. Neither the impact snapshot nor the collision merge
+            // should see a row that is about to disappear.
+            await removeKitSlicesFromPlanningBookings(tx, assetKitIds, {
+              actorUserId: userId,
+            });
             const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
             await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
+            // `AssetLocation.assetKit` is `onDelete: Cascade`, so the
+            // `assetKits: { deleteMany }` below would take the kit-driven
+            // placement with it and silently unplace the asset. Every sibling
+            // detach path already converts those rows to manual placements
+            // first; this one was missing the call.
+            await preserveKitDrivenPlacements(tx, assetKitIds);
 
             const updatedKit = await tx.kit.update({
               where: { id: kitId, organizationId },

@@ -15,6 +15,12 @@ import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/_layout+/kits.$kitId";
+import {
+  fetchAssetKitDetachmentImpact,
+  mergeStandaloneCollisionsForKitDetachment,
+  preserveKitDrivenPlacements,
+  removeKitSlicesFromPlanningBookings,
+} from "~/modules/kit/service.server";
 import { requirePermission } from "~/utils/roles.server";
 import { getUserByID } from "~/modules/user/service.server";
 
@@ -80,7 +86,9 @@ vi.mock("~/modules/kit/service.server", () => ({
   mergeStandaloneCollisionsForKitDetachment: vi
     .fn()
     .mockResolvedValue(undefined),
+  preserveKitDrivenPlacements: vi.fn().mockResolvedValue(undefined),
   relinkKitQrCode: vi.fn(),
+  removeKitSlicesFromPlanningBookings: vi.fn().mockResolvedValue([]),
 }));
 
 // why: barcode service is imported but unused in removeAsset path.
@@ -267,5 +275,49 @@ describe("kits/$kitId removeAsset action", () => {
     expect(dbMocks.custody.deleteMany).not.toHaveBeenCalled();
     expect(dbMocks.custody.count).not.toHaveBeenCalled();
     expect(dbMocks.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("runs the full kit→booking detach sequence, in order, before the pivot delete", async () => {
+    // why: the four helpers are order-sensitive and this route is the one
+    // detach path that wires them by hand rather than through the service.
+    // `removeKitSlicesFromPlanningBookings` must run first (so the impact
+    // snapshot and the merge never see a row that is about to disappear), and
+    // `preserveKitDrivenPlacements` must run before `kit.update` fires the
+    // `assetKits: { deleteMany }` that cascades placements away.
+    dbMocks.kit.update.mockResolvedValue({
+      name: "Available Kit",
+      custody: null,
+    });
+    dbMocks.assetKit.findMany.mockResolvedValue([
+      {
+        id: "ak-1",
+        quantity: 1,
+        asset: { type: "INDIVIDUAL", unitOfMeasure: null },
+      },
+    ]);
+
+    await action(createActionArgs(buildRemoveAssetRequest("asset-free")));
+
+    expect(removeKitSlicesFromPlanningBookings).toHaveBeenCalledWith(
+      expect.anything(),
+      ["ak-1"],
+      { actorUserId: "user-123" }
+    );
+    expect(preserveKitDrivenPlacements).toHaveBeenCalledWith(
+      expect.anything(),
+      ["ak-1"]
+    );
+
+    const order = (fn: { mock: { invocationCallOrder: number[] } }) =>
+      fn.mock.invocationCallOrder[0];
+    expect(order(vi.mocked(removeKitSlicesFromPlanningBookings))).toBeLessThan(
+      order(vi.mocked(fetchAssetKitDetachmentImpact))
+    );
+    expect(order(vi.mocked(fetchAssetKitDetachmentImpact))).toBeLessThan(
+      order(vi.mocked(mergeStandaloneCollisionsForKitDetachment))
+    );
+    expect(order(vi.mocked(preserveKitDrivenPlacements))).toBeLessThan(
+      dbMocks.kit.update.mock.invocationCallOrder[0]
+    );
   });
 });

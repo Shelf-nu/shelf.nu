@@ -1,5 +1,6 @@
 import {
   data,
+  useLoaderData,
   useParams,
   type LoaderFunctionArgs,
   type MetaFunction,
@@ -27,7 +28,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { getAssetsForKits } from "~/modules/kit/service.server";
+import {
+  getAssetsForKits,
+  getReservedBookingImpactForAssetKits,
+} from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -75,6 +79,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
+    /**
+     * Which RESERVED bookings would lose a slice if one of the rows on THIS
+     * page were removed from the kit — the row's Remove dialog warns before
+     * confirming. Second narrow fetch over the page's `AssetKit` ids (same
+     * pattern as `getKitPickerMeta`), deliberately NOT a widening of the
+     * parent route's `bookingAssets` include: that one loads every member of
+     * the kit unpaginated, so we'd pay for the whole kit to serve one page.
+     */
+    const assetKitIdsByAssetId = assets.items.flatMap((asset) =>
+      asset.assetKits
+        .filter((ak) => ak.kitId === kitId)
+        .map((ak) => [asset.id, ak.id] as const)
+    );
+    const reservedImpactByAssetKitId =
+      await getReservedBookingImpactForAssetKits({
+        assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
+        organizationId,
+      });
+    /** `assetId -> reserved bookings holding it through this kit`. */
+    const reservedBookingsByAssetId = Object.fromEntries(
+      assetKitIdsByAssetId
+        .map(
+          ([assetId, assetKitId]) =>
+            [assetId, reservedImpactByAssetKitId[assetKitId] ?? []] as const
+        )
+        .filter(([, bookings]) => bookings.length > 0)
+    );
+
     const header: HeaderData = {
       title: kit ? `${kit.name}'s assets` : "Kit assets",
     };
@@ -87,6 +119,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       ...assets,
+      reservedBookingsByAssetId,
       modelName,
     });
   } catch (cause) {
@@ -172,6 +205,9 @@ export default function KitAssets() {
 
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { category, tags } = item;
+  // Reserved bookings this asset is on THROUGH this kit — removing it from the
+  // kit deletes their slice, so the row's Remove dialog names them first.
+  const { reservedBookingsByAssetId } = useLoaderData<typeof loader>();
   // Render only the single primary-location badge — a qty-tracked asset
   // can sit at multiple locations via AssetLocation.
   const location = getPrimaryLocation(item);
@@ -289,7 +325,10 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
         })}
       >
         <Td className="pr-4 text-right">
-          <AssetRowActionsDropdown asset={item} />
+          <AssetRowActionsDropdown
+            asset={item}
+            reservedBookings={reservedBookingsByAssetId[item.id] ?? []}
+          />
         </Td>
       </When>
     </>

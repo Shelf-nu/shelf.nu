@@ -257,6 +257,13 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
     // detail loader). Standalone slices have `ba.assetKitId == null`
     // and render in the individual bucket regardless of whether the
     // asset happens to be in any kit.
+    //
+    // why: out of this rule — unlike the booking overview, this surface does
+    // NOT fall back to `BookingAsset.sourceKitId`, so a slice whose asset has
+    // left the kit shows here as a loose asset. `getBookings` feeds this list
+    // through an explicit `select` that omits `sourceKitId`, and there is no
+    // kit lookup on the path — resolving the snapshot would need the select,
+    // both hand-written payload types and a new query, for a compact sidebar.
     const sourceKit = ba.assetKitId
       ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
       : null;
