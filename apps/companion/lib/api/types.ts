@@ -467,7 +467,24 @@ export type CustodyResponse = {
  */
 export type QuantityCustodyResponse = {
   success: boolean;
-  asset?: AssetDetail;
+  /**
+   * Refreshed viewer-shaped asset. The route always serializes the key and
+   * sends `null` when the post-commit refresh failed (the mutation itself
+   * still succeeded) — same wire contract as {@link AdjustQuantityResponse}.
+   */
+  asset?: AssetDetail | null;
+};
+
+/**
+ * Response of the mobile adjust-quantity endpoint — same envelope as the
+ * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset.
+ * The route always serializes the key and sends `null` when the post-commit
+ * refresh failed (the mutation itself still succeeded), so the type carries
+ * `| null` to match the wire truth.
+ */
+export type AdjustQuantityResponse = {
+  success: boolean;
+  asset?: AssetDetail | null;
 };
 
 export type UpdateLocationResponse = {
