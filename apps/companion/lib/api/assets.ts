@@ -86,14 +86,20 @@ export const assetsApi = {
     // stay out of every URL-shaped capture surface.
     return apiFetch<QrResponse>(
       `/api/mobile/qr/${encodeURIComponent(codeId)}${query ? `?${query}` : ""}`,
-      coordinates
-        ? {
-            headers: {
-              "X-Scan-Latitude": String(coordinates.latitude),
-              "X-Scan-Longitude": String(coordinates.longitude),
-            },
-          }
-        : undefined
+      {
+        // why: this resolve RECORDS a scan server-side — a timed-out-but-
+        // landed request must not be auto-retried, or the same physical
+        // scan is recorded twice (same rule as the quantity mutations).
+        retry: false,
+        ...(coordinates
+          ? {
+              headers: {
+                "X-Scan-Latitude": String(coordinates.latitude),
+                "X-Scan-Longitude": String(coordinates.longitude),
+              },
+            }
+          : {}),
+      }
     );
   },
 
