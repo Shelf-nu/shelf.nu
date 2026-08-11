@@ -969,7 +969,7 @@ export const AssetForm = ({
             */}
             {id && showOwnImagePreview ? (
               <AssetImage
-                className="size-16"
+                className="size-16 shrink-0 rounded border object-cover"
                 asset={{
                   id,
                   // Null-safe: an asset can own an image without a thumbnail
@@ -985,7 +985,7 @@ export const AssetForm = ({
               />
             ) : inheritableAssetModelImage ? (
               <AssetImage
-                className="size-16"
+                className="size-16 shrink-0 rounded border object-cover"
                 asset={{
                   id: id ?? "new-asset",
                   mainImage: null,
