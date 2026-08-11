@@ -137,6 +137,11 @@ export function generateWhereClause(
         searchConditions,
         " OR "
       )})`;
+    } else {
+      // Typed input yielding zero terms (whitespace / bare commas) matches
+      // nothing — mirrors getAssets' fail-closed guard so the same search
+      // box behaves identically in simple and advanced mode.
+      whereClause = Prisma.sql`${whereClause} AND FALSE`;
     }
   }
 
