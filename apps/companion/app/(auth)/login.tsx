@@ -39,6 +39,9 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  /** Immediate lock for the reset link — state cannot block a same-tick retap. */
+  const resetPendingRef = useRef(false);
   const router = useRouter();
   const params = useLocalSearchParams<{ error?: string }>();
 
@@ -68,8 +71,20 @@ export default function LoginScreen() {
   const changeCountRef = useRef({ email: 0, password: 0 });
   const autoSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Mirrors `isSsoSubmitting` so deferred callers (the auto-submit timer) can
+   * read the CURRENT value rather than the one captured when they were armed.
+   */
+  const isSsoSubmittingRef = useRef(false);
+  isSsoSubmittingRef.current = isSsoSubmitting;
+
   useEffect(() => {
-    if (!email.trim() || !password || isSubmitting) return;
+    // isSsoSubmitting is a dependency so that starting SSO re-runs this effect
+    // and its cleanup CANCELS a pending auto-submit timer. Without it the timer
+    // survives, and the 500ms-later callback carries the isSsoSubmitting=false
+    // captured by the render that armed it — so the guard inside handleLogin
+    // reads a stale false and signs in underneath the SSO exchange.
+    if (!email.trim() || !password || isSubmitting || isSsoSubmitting) return;
 
     const { email: ec, password: pc } = changeCountRef.current;
     if (ec === 1 && pc === 1) {
@@ -82,7 +97,7 @@ export default function LoginScreen() {
     // why: handleLogin is defined inline below and recreated each render; including it
     // in deps would cause the effect to re-fire on every keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [email, password, isSubmitting]);
+  }, [email, password, isSubmitting, isSsoSubmitting]);
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -91,7 +106,9 @@ export default function LoginScreen() {
     // why: the disabled prop covers the button, but not the password field's
     // onSubmitEditing nor the Face ID auto-submit effect. A password sign-in
     // starting mid-SSO would switch servers under the in-flight exchange.
-    if (isSsoSubmitting) return;
+    // Read through the ref, not the state: a deferred caller (the auto-submit
+    // timer) holds the value from the render that created this closure.
+    if (isSsoSubmittingRef.current) return;
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
@@ -120,6 +137,12 @@ export default function LoginScreen() {
       setError("Enter your work email so we can find your organization.");
       return;
     }
+
+    // why: clear the autofill counters before flipping the flag. Otherwise a
+    // FAILED SSO flips isSsoSubmitting back to false, the auto-submit effect
+    // re-runs with the counts still at {1,1}, and the user gets a surprise
+    // password sign-in 500ms after explicitly choosing SSO.
+    changeCountRef.current = { email: 0, password: 0 };
 
     setIsSsoSubmitting(true);
     // Opens the web SSO flow in the system browser; resolves once the app
@@ -155,25 +178,39 @@ export default function LoginScreen() {
   const handleForgotPassword = async () => {
     Keyboard.dismiss();
     setError(null);
-    // Best-effort: land on the right server's reset page when we can tell which
-    // one it is. With an empty field this falls through to the active server,
-    // which for a first-run enterprise user means Shelf Cloud — acceptable,
-    // since SSO organizations disable password auth and never reach this link.
     if (isSubmitting || isSsoSubmitting) return;
-    if (email.trim()) {
-      const discovery = await resolveServerForEmail(email.trim());
-      // Surfacing this matters: silently falling through would open Shelf
-      // Cloud's reset page for a user whose org server we could not reach.
-      if (!discovery.ok) {
-        setError(discovery.message);
-        return;
+    // why: the ref is what actually serializes. Discovery can take up to 15s on
+    // a cache miss with no visible feedback, which is exactly when a user taps
+    // again — and a state flag cannot block a second tap in the same tick.
+    if (resetPendingRef.current) return;
+    resetPendingRef.current = true;
+    setIsResetting(true);
+
+    try {
+      // Best-effort: land on the right server's reset page when we can tell
+      // which one it is. With an empty field this falls through to the active
+      // server, which for a first-run enterprise user means Shelf Cloud —
+      // acceptable, since SSO organizations disable password auth and never
+      // reach this link.
+      if (email.trim()) {
+        const discovery = await resolveServerForEmail(email.trim());
+        // Surfacing this matters: silently falling through would open Shelf
+        // Cloud's reset page for a user whose org server we could not reach.
+        if (!discovery.ok) {
+          setError(discovery.message);
+          return;
+        }
       }
+      // Awaited inside the lock so it spans the presentation: releasing while
+      // the sheet is still opening would let a second tap hit expo-web-browser's
+      // "already presenting" rejection and paint a misleading error.
+      await WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`);
+    } catch {
+      setError("Couldn't open the password reset page. Please try again.");
+    } finally {
+      resetPendingRef.current = false;
+      setIsResetting(false);
     }
-    WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`).catch(
-      () => {
-        setError("Couldn't open the password reset page. Please try again.");
-      }
-    );
   };
 
   return (
@@ -283,8 +320,13 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               testID="forgot-password-link"
-              style={styles.forgotLink}
+              style={[
+                styles.forgotLink,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
+              ]}
               onPress={handleForgotPassword}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.7}
               accessibilityLabel="Forgot your password? Reset it on the web"
               accessibilityRole="link"
@@ -296,10 +338,11 @@ export default function LoginScreen() {
               testID="sign-in-button"
               style={[
                 styles.button,
-                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
               ]}
               onPress={handleLogin}
-              disabled={isSubmitting || isSsoSubmitting}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.8}
               accessibilityLabel={
                 isSubmitting ? "Signing in" : "Sign in to your account"
@@ -324,10 +367,11 @@ export default function LoginScreen() {
               testID="sso-sign-in-button"
               style={[
                 styles.ssoButton,
-                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
               ]}
               onPress={handleSsoLogin}
-              disabled={isSubmitting || isSsoSubmitting}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.8}
               accessibilityLabel="Sign in with SSO"
               accessibilityRole="button"

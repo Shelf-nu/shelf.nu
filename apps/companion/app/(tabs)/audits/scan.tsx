@@ -415,6 +415,17 @@ function AuditScannerContent() {
           classifyScannedCode(data, getActiveServer().baseUrl).kind ===
           "foreign"
         ) {
+          // Same feedback shape as every other rejected scan in this handler:
+          // a silent return would look like the camera simply ignored a code
+          // the user can see is valid.
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          showToast(
+            "error",
+            "Different Shelf Server",
+            "Sign in to that server to use this code."
+          );
+          announce("Different Shelf Server. Sign in to that server to use it.");
           // finalizeScan() BEFORE returning: this handler has no `finally`, and
           // a bare return would leave isProcessingRef.current true forever —
           // the guard above would then reject every later scan and the camera

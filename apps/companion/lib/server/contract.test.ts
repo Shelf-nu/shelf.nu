@@ -158,9 +158,10 @@ test("parseServerConfigResponse rejects a host-less base URL", () => {
   }
 });
 
-test("parseServerConfigResponse rejects a scheme-relative URL", () => {
-  // `new URL("https:xyz.supabase.co")` parses fine for special schemes, so the
-  // prefix check has to stay alongside the parse.
+test("parseServerConfigResponse rejects an authority-less https URL", () => {
+  // `new URL("https:xyz.supabase.co")` parses fine for special schemes —
+  // scheme present, slashes omitted — so the prefix check has to stay
+  // alongside the parse.
   const result = parseServerConfigResponse(
     { ...validBody, supabaseUrl: "https:xyz.supabase.co" },
     "https://acme.i.shelf.nu",

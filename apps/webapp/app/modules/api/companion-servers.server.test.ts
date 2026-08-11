@@ -87,11 +87,21 @@ describe("resolveCompanionServer", () => {
     }
   });
 
-  it("ignores a scheme-relative entry", () => {
-    // `new URL("https:acme.i.shelf.nu")` parses happily for special schemes, so
-    // parsing ALONE is not enough — the prefix check has to stay.
+  it("ignores an authority-less https entry", () => {
+    // `new URL("https:acme.i.shelf.nu")` parses happily for special schemes —
+    // scheme present, slashes omitted — so parsing ALONE is not enough and the
+    // prefix check has to stay.
     mockEnv.COMPANION_SERVERS = JSON.stringify({
       "acme.edu": "https:acme.i.shelf.nu",
+    });
+    expect(resolveCompanionServer("acme.edu")).toBeNull();
+  });
+
+  it("ignores a protocol-relative entry", () => {
+    // "//host" has no scheme at all, so it can never be the https base URL the
+    // companion needs.
+    mockEnv.COMPANION_SERVERS = JSON.stringify({
+      "acme.edu": "//acme.i.shelf.nu",
     });
     expect(resolveCompanionServer("acme.edu")).toBeNull();
   });
