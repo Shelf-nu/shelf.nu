@@ -27,6 +27,7 @@ import type {
   AssetEditLoaderData,
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
+import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
@@ -456,6 +457,39 @@ export const AssetForm = ({
   const navigate = useNavigate();
   const location = useLocation();
 
+  /**
+   * Snapshot of the referer as it was when this form first mounted.
+   *
+   * Deliberately ignores later updates to the `referer` prop — this is not a
+   * stale-state bug. The Referer header is only meaningful at the moment the
+   * user arrives. Any in-route navigation re-runs the loader and overwrites it
+   * with this page's own URL: picking a Category navigates to
+   * `/assets/new?category=<id>` (see the effect below), so the prop becomes
+   * `/assets/new` and "where I came from" is lost. ~93% of assets carry a
+   * category, so that is the normal path, not an edge case.
+   *
+   * Capturing once keeps Cancel pointing at the user's real origin (including
+   * its filters) for the whole life of the form.
+   */
+  const [initialReferer] = useState(referer);
+
+  /**
+   * Where Cancel goes. The referer is best-effort and unusable in three
+   * separate cases (absent prop, no Referer header, and self-reference).
+   * `resolveCancelTo` owns all three — see its JSDoc.
+   *
+   * The self-reference guard is still load-bearing even with the snapshot
+   * above: if this form ever mounts *after* an in-route navigation, the very
+   * first value it captures is already self-referential. Worst case it falls
+   * back to the index, which is exactly the pre-snapshot behaviour, so the
+   * snapshot can only ever improve the destination, never worsen it.
+   */
+  const cancelTo = resolveCancelTo({
+    referer: initialReferer,
+    currentPathname: location.pathname,
+    fallback: id ? `/assets/${id}` : "/assets",
+  });
+
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
     assetModels?: Array<{
@@ -643,7 +677,7 @@ export const AssetForm = ({
           <div className="hidden flex-1 justify-end gap-2 md:flex">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -1339,7 +1373,7 @@ export const AssetForm = ({
           <div className="flex flex-1 justify-end gap-2">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -1351,11 +1385,14 @@ export const AssetForm = ({
 
 const Actions = ({
   disabled,
-  referer,
+  cancelTo,
   showAddAnother = true,
 }: {
   disabled: boolean;
-  referer?: string | null;
+  /** Already-resolved Cancel destination. Must never be null/undefined —
+   * the caller applies the fallback, because `<Button to>` degrades
+   * silently (dead button on `undefined`, links to `/` on `null`). */
+  cancelTo: string;
   /** "Add another" submits the form and reloads `/assets/new?` to clear
    * the fields for a second entry. In bulk-create mode it makes no
    * sense — one submit already creates many assets, and the success
@@ -1369,7 +1406,7 @@ const Actions = ({
     </Button>
 
     <ButtonGroup>
-      <Button to={referer} variant="secondary" disabled={disabled}>
+      <Button to={cancelTo} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
       {showAddAnother ? <AddAnother disabled={disabled} /> : null}

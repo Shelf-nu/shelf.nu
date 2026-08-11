@@ -83,6 +83,14 @@ export async function requireMobileAuth(request: Request) {
       lastName: true,
       profilePicture: true,
       onboarded: true,
+      // Date/time format preferences (raw, nullable). Surfaced on
+      // `/api/mobile/me` so the companion renders every date/time in the user's
+      // chosen format + timezone instead of device-local. Resolved client-side
+      // via `resolveFormatPrefs` (@shelf/datetime) with a device-hint fallback.
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
     },

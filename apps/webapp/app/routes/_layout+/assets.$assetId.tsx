@@ -489,7 +489,16 @@ export default function AssetDetailsPage() {
 
   const items = [
     { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    // The activity loader requires `note:read` and 403s without it, so a role
+    // that can't read notes must not be offered the tab. Mirrors the bookings
+    // detail page.
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.note,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "activity", content: "Activity" }]
+      : []),
     { to: "bookings", content: "Bookings" },
     ...(userHasPermission({
       roles,

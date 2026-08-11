@@ -86,7 +86,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  canUserRemoveBookingAssets,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -662,6 +665,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: string | null;
       }>
     >();
+    /**
+     * Live asset status per qty-tracked asset on this booking. Feeds the
+     * per-asset half of the legacy all-at-once fallback below — the status
+     * already rides along on `BOOKING_WITH_ASSETS_INCLUDE`, so this costs no
+     * extra query.
+     */
+    const assetStatusByAsset = new Map<string, AssetStatus>();
     for (const ba of booking.bookingAssets) {
       if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
       const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
@@ -671,6 +681,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: ba.assetKitId ?? null,
       });
       bookingAssetRowsByAsset.set(ba.assetId, arr);
+      assetStatusByAsset.set(ba.assetId, ba.asset.status);
     }
 
     /** Logs grouped by assetId (each carries its own category). */
@@ -848,24 +859,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
     // checkout in the bulk-checkout dialog + scanner drawer.
     //
+    // Decided PER ASSET, not per booking: an asset ADDED after that checkout is
+    // still AVAILABLE and genuinely has units left (GitHub #2815), and an asset
+    // that already has progressive claims needs no fallback at all. Keying on
+    // the booking having zero sessions would also flip every already-out asset
+    // back to "fully remaining" the moment one later batch records a session.
+    //
     // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
     // (modules/booking/service.server.ts), which the checkout-assets route uses;
     // this loader mirrors that logic in-memory to avoid an extra query per asset.
-    const isLegacyAllAtOnceCheckout =
-      checkoutSessions.length === 0 &&
-      (booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE);
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
 
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
-      if (isLegacyAllAtOnceCheckout && totalBooked > 0) {
-        remainingToCheckOutByAsset[assetId] = 0;
-        continue;
-      }
       let totalCheckedOut = 0;
       for (const row of rows) {
         totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
+      if (
+        isActiveBooking &&
+        totalBooked > 0 &&
+        totalCheckedOut === 0 &&
+        assetStatusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
+      ) {
+        remainingToCheckOutByAsset[assetId] = 0;
+        continue;
       }
       remainingToCheckOutByAsset[assetId] = Math.max(
         0,
@@ -1396,6 +1417,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         getBookingSettingsForOrganization(organizationId),
       ]
     );
+
+    /**
+     * A finished booking is a closed record — its contents must not change.
+     *
+     * The remove intents were gated on `booking:update` permission alone: the
+     * COMPLETE/ARCHIVED block lived only in the client dropdown, so a crafted
+     * POST could still strip items from a finished booking. Every sibling
+     * path already guards this server-side (`manage-assets`, `manage-kits`,
+     * and the mobile remove endpoint).
+     *
+     * Status only — WHO may remove is already settled upstream by the row/bulk
+     * action gating, and differs from who may add (a self-service custodian
+     * may remove from their own RESERVED booking).
+     */
+    const removeIntents = [
+      "removeAsset",
+      "removeKit",
+      "bulk-remove-asset-or-kit",
+    ];
+    if (
+      removeIntents.includes(intent) &&
+      !canUserRemoveBookingAssets(basicBookingInfo)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Removing items is not allowed for the current status of the booking.",
+        additionalData: { userId, id, intent, status: basicBookingInfo.status },
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     switch (intent) {
       case "save": {

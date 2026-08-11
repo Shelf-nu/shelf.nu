@@ -92,6 +92,59 @@ const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 500;
 
 /**
+ * SQLSTATE `53200` is Postgres `out_of_memory` — raised for shared-lock-table
+ * exhaustion (which carries the "increase max_locks_per_transaction" hint) but
+ * ALSO for general backend memory exhaustion. So the bare SQLSTATE is NOT a
+ * safe retry signal: retrying a genuine OOM read would deepen the incident. We
+ * key on the `max_locks_per_transaction` HINT text — the string Postgres emits
+ * only for lock-table exhaustion — mirroring the app-layer
+ * `isDbResourceExhaustionError`. The SQLSTATE is retained only as the retry
+ * log label (see {@link withPrismaRetry}).
+ */
+const LOCK_EXHAUSTION_SQLSTATE = "53200";
+const LOCK_EXHAUSTION_MESSAGE_MARKER = "max_locks_per_transaction";
+
+/**
+ * Reports whether an error is Postgres shared-lock-table exhaustion — a
+ * RESOURCE exhaustion under load, not a connectivity failure: the statement
+ * failed while ACQUIRING its locks, before touching any row, so it is transient
+ * and idempotent to re-run. {@link isRetryablePrismaError} gates it to READS.
+ *
+ * Keys on the `max_locks_per_transaction` HINT text, NOT the bare SQLSTATE
+ * `53200` (which is general `out_of_memory` and would falsely match — then
+ * retry — a real memory-exhaustion query). The hint can ride on either the
+ * top-level Prisma message or `meta.message`, so both are checked. Duck-typed
+ * so plain mocked errors are recognized the same way.
+ *
+ * @see apps/webapp/app/utils/error.ts `isDbResourceExhaustionError` — the app
+ * layer's cause-chain-walking counterpart that maps this class to a 503.
+ * @see SHELF-WEBAPP-227
+ *
+ * @param error - The unknown value thrown by a Prisma operation.
+ * @returns `true` when `error` is the lock-table-exhaustion condition.
+ */
+export function isLockTableExhaustionError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const err = error as { message?: unknown; meta?: { message?: unknown } };
+  // The hint text identifies lock-table exhaustion specifically; a bare 53200
+  // does not (general out_of_memory raises it too).
+  if (
+    typeof err.message === "string" &&
+    err.message.includes(LOCK_EXHAUSTION_MESSAGE_MARKER)
+  ) {
+    return true;
+  }
+  // Prisma also carries the raw Postgres message (hint included) on `meta`.
+  const metaMessage = err.meta?.message;
+  return (
+    typeof metaMessage === "string" &&
+    metaMessage.includes(LOCK_EXHAUSTION_MESSAGE_MARKER)
+  );
+}
+
+/**
  * Extracts a transient Prisma error code from an unknown thrown value, reading
  * BOTH shapes Prisma uses to report one:
  *
@@ -147,6 +200,15 @@ export function isRetryablePrismaError(
   error: unknown,
   { operationIsRead }: { operationIsRead: boolean }
 ): boolean {
+  // Postgres shared-lock-table exhaustion (SQLSTATE 53200) is a transient
+  // resource overload, not one of the transient CODES above (it rides on a
+  // P2010). The statement failed acquiring its locks before mutating anything,
+  // so it's safe to re-run — but gated to reads for the same conservatism as
+  // the in-flight codes (a write path that trips it fails fast). See
+  // SHELF-WEBAPP-227.
+  if (isLockTableExhaustionError(error)) {
+    return operationIsRead;
+  }
   const code = getRetryableErrorCode(error);
   if (code === null) {
     return false;
@@ -206,8 +268,10 @@ export async function withPrismaRetry<T>(
         isRetryablePrismaError(error, { operationIsRead }) &&
         attempt <= MAX_RETRIES
       ) {
-        // Non-null: isRetryablePrismaError only returns true for a known code.
-        const code = getRetryableErrorCode(error);
+        // Retryable path only: the code is a known transient code, or (when
+        // getRetryableErrorCode returns null) the 53200 lock-exhaustion class,
+        // which rides on a P2010 rather than a retryable code.
+        const code = getRetryableErrorCode(error) ?? LOCK_EXHAUSTION_SQLSTATE;
         const delayMs = BASE_DELAY_MS * attempt;
         log(
           `[db] transient Prisma error [${code}], retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms`

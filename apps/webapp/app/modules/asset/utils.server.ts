@@ -715,6 +715,12 @@ export function validateAdvancedFilterParams(
 }
 
 export const ASSET_CSV_HEADERS = [
+  // Row matcher for the update importer (`/assets/import-update`) — the
+  // asset's cuid. The create importer accepts this header (so a re-exported
+  // file round-trips) but never reads it: createAssetsFromContentImport
+  // always generates a fresh id, so a caller-supplied id can't be used to
+  // set/connect/upsert onto another workspace's asset.
+  "id",
   "title",
   "description",
   "category",

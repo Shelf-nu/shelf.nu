@@ -174,7 +174,6 @@ const BookingPDFPreview = ({
     organization,
     assets,
     assetIdToQrCodeMap,
-    assetIdToQuantityMap,
     totalValue,
     modelRequests,
   } = pdfMeta;
@@ -356,9 +355,12 @@ const BookingPDFPreview = ({
           </thead>
           <tbody>
             {assets.map((asset, index) => (
-              <Fragment key={asset.id}>
+              // Per-slice rows: a QT asset booked standalone + via multiple
+              // kits appears once per slice, so key on the unique
+              // `bookingAssetId` (asset.id would collide across slices).
+              <Fragment key={asset.bookingAssetId}>
                 <tr
-                  key={asset.id}
+                  key={asset.bookingAssetId}
                   className={tw(
                     "align-top",
                     !asset.description && "border-b border-gray-300"
@@ -384,7 +386,8 @@ const BookingPDFPreview = ({
                     {asset?.title}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-center text-sm text-gray-600">
-                    {assetIdToQuantityMap[asset.id] ?? 1}
+                    {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
+                    {asset.quantity ?? 1}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.kit?.name}
