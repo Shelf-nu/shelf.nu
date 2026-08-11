@@ -10,6 +10,7 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
@@ -552,18 +553,15 @@ export function getAssetsWhereInput({
     // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
+      // QT-aware fragment shared with getAssets and the mobile assets
+      // endpoint — see buildAssetStatusWhere for the rationale.
       where.AND = [
         ...(Array.isArray(where.AND)
           ? where.AND
           : where.AND
           ? [where.AND]
           : []),
-        {
-          OR: [
-            { type: "INDIVIDUAL", status: "AVAILABLE" },
-            { type: "QUANTITY_TRACKED" },
-          ],
-        },
+        buildAssetStatusWhere(status),
       ];
     } else {
       where.status = status;
