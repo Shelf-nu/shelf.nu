@@ -16,6 +16,7 @@ import { api, type AuditListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { formatDue } from "@/lib/audit-format";
+import { useFormatPrefs } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -51,6 +52,7 @@ function AuditsListContent() {
   } = useOrg();
   const { colors, auditStatusBadge } = useTheme();
   const styles = useStyles();
+  const prefs = useFormatPrefs();
   const [audits, setAudits] = useState<AuditListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -273,7 +275,7 @@ function AuditsListContent() {
           : 0;
       const progressPercent = Math.round(progress * 100);
 
-      const due = formatDue(item.dueDate, isActive);
+      const due = formatDue(item.dueDate, isActive, prefs);
       const dueColor =
         due.tier === "overdue"
           ? colors.error
@@ -467,7 +469,7 @@ function AuditsListContent() {
         </TouchableOpacity>
       );
     },
-    [router, colors, auditStatusBadge, styles]
+    [router, colors, auditStatusBadge, styles, prefs]
   );
 
   if (orgLoading) {

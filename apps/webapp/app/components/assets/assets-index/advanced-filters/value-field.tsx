@@ -21,13 +21,22 @@ import {
 } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
+  DateRangePicker,
+  type DateRangeValue,
+} from "~/components/shared/date-range-picker";
+import {
+  DateTimePicker,
+  parseWireToParts,
+  partsToWire,
+} from "~/components/shared/date-time-picker";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import { useHints } from "~/utils/client-hints";
 import {
   adjustDateToUserTimezone,
   adjustDateToUTC,
@@ -2120,7 +2129,9 @@ export function DateField({
   error,
   disabled = false,
 }: DateFieldProps) {
-  const { timeZone } = useHints();
+  // Acting user's resolved PREF timezone (not the browser hint) — keeps the
+  // advanced date filters consistent with the user-level date/time system.
+  const { timeZone } = useFormatPrefs();
   const [localValue, setLocalValue] = useState<[string, string]>(["", ""]);
   const [localError, setLocalError] = useState<string | null>(null);
   // Combine local and zorm errors
@@ -2168,6 +2179,34 @@ export function DateField({
     };
   }
 
+  /**
+   * Change handler for the "between" operator's DateRangePicker. Receives the
+   * calendar `{ from, to }` Dates and mirrors `handleDateChange`'s wire flow:
+   * store the user-tz display wires locally, push the UTC-adjusted pair up to
+   * the parent filter once both ends are set, and validate ordering.
+   *
+   * Task 5 note: `adjustDateToUTC` / `adjustDateToUserTimezone` are retained
+   * (not removed) because they form the inverse pair binding the STORED
+   * `filter.value` (UTC-adjusted) to the DISPLAYED wire (user-tz). For a
+   * date-only wire the round-trip is a near-identity, but the single-date and
+   * `inDates` branches still rely on it, so removing it here would diverge
+   * their stored values. Kept identical across all three branches.
+   */
+  function handleRangeChange(range: DateRangeValue) {
+    const newValue: [string, string] = [
+      partsToWire(range.from, "", "date"),
+      partsToWire(range.to, "", "date"),
+    ];
+    setLocalValue(newValue);
+    if (newValue[0] && newValue[1]) {
+      setFilter([
+        adjustDateToUTC(newValue[0], timeZone),
+        adjustDateToUTC(newValue[1], timeZone),
+      ]);
+    }
+    validateDates(newValue);
+  }
+
   function validateDates([start, end]: [string, string]) {
     if (start && end) {
       const startDate = parseISO(start);
@@ -2208,32 +2247,28 @@ export function DateField({
   }
 
   if (filter.operator === "between") {
+    // The range picker deals purely in calendar days, so convert the user-tz
+    // display wires into naive Dates for its controlled `value`, and back to
+    // wires (then UTC-adjusted) on change via `handleRangeChange`. The
+    // hidden `${name}_start` / `${name}_end` inputs preserve the same wires
+    // the previous two DateTimePickers emitted — server logic is unchanged.
+    const rangeValue: DateRangeValue = {
+      from: parseWireToParts(localValue[0]).date,
+      to: parseWireToParts(localValue[1]).date,
+    };
     return (
-      <div className="space-y-2">
-        <div className="flex max-w-full items-center justify-normal gap-[2px]">
-          <Input
-            {...commonInputProps}
-            label="Start Date"
-            type="date"
-            value={localValue[0]}
-            onChange={handleDateChange(0)}
-            className="w-1/2"
-            name={`${name}_start`}
-          />
-          <Input
-            {...commonInputProps}
-            label="End Date"
-            type="date"
-            value={localValue[1]}
-            onChange={handleDateChange(1)}
-            className="w-1/2"
-            name={`${name}_end`}
-          />
-        </div>
-        {combinedError && localValue[0] !== "" && localValue[1] !== "" && (
-          <div className="!mt-0 text-[12px] text-red-500">{combinedError}</div>
-        )}
-      </div>
+      // Route validation through the shared picker's `error` prop so the
+      // message is aria-describedby-linked to the trigger (and shows the error
+      // border), instead of an orphaned <div> that was also hidden until both
+      // ends were filled.
+      <DateRangePicker
+        value={rangeValue}
+        onChange={handleRangeChange}
+        startName={`${name}_start`}
+        endName={`${name}_end`}
+        error={combinedError}
+        className="text-sm"
+      />
     );
   } else if (filter.operator === "inDates") {
     return (
@@ -2241,21 +2276,26 @@ export function DateField({
         setValue={(value) => setFilter(value)}
         value={typeof filter.value === "string" ? filter.value : ""}
         timeZone={timeZone}
-        commonInputProps={commonInputProps}
         error={combinedError}
         name={name}
       />
     );
   } else {
     return (
-      <Input
-        {...commonInputProps}
-        type="date"
+      <DateTimePicker
+        mode="date"
+        label="Date"
+        hideLabel
         value={localValue[0]}
-        onChange={handleDateChange(0)}
+        onChange={(next) =>
+          handleDateChange(0)({
+            target: { value: next },
+          } as ChangeEvent<HTMLInputElement>)
+        }
         error={combinedError}
-        name={name}
+        name={name ?? ""}
         disabled={disabled}
+        className="[&_input]:text-sm"
       />
     );
   }
@@ -2265,19 +2305,12 @@ function MultiDateInput({
   setValue,
   value,
   timeZone,
-  commonInputProps,
   name,
   error,
 }: {
   setValue: (value: string) => void;
   value: string;
   timeZone: string;
-  commonInputProps: {
-    inputClassName: string;
-    hideLabel: boolean;
-    label: string;
-    onKeyUp: (e: KeyboardEvent<HTMLInputElement>) => void;
-  };
   name?: string;
   error?: string;
 }) {
@@ -2334,12 +2367,21 @@ function MultiDateInput({
     <div className="space-y-1">
       {dates.map((entry, index) => (
         <div key={entry.id} className="relative flex items-center gap-2">
-          <Input
-            {...commonInputProps}
-            type="date"
+          <DateTimePicker
+            mode="date"
+            label="Date"
+            hideLabel
             value={entry.value}
-            onChange={handleDateChange(index)}
-            className="flex-1"
+            onChange={(next) =>
+              handleDateChange(index)({
+                target: { value: next },
+              } as ChangeEvent<HTMLInputElement>)
+            }
+            // Route the error through the shared picker so it renders its
+            // aria-describedby-linked error text (and error border) instead of
+            // an orphaned <div> not associated with any input.
+            error={error}
+            className="flex-1 [&_input]:text-sm"
             name={`${name}_${index}`}
           />
           {dates.length > 1 && (
@@ -2353,11 +2395,10 @@ function MultiDateInput({
           )}
         </div>
       ))}
-      {error && <div className="!mt-0 text-[12px] text-red-500">{error}</div>}
       <Button
         type="button"
         variant="block-link"
-        className="text-[14px]"
+        className="text-sm"
         size="xs"
         onClick={addDateField}
       >

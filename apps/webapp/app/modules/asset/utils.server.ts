@@ -10,9 +10,11 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
@@ -172,17 +174,22 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
+  // Custom field NAMES and VALUES are both free-form user input and render
+  // as literal text in this Markdoc note.
+  const fieldName = stripMarkdocDelimiters(customFieldName);
+  const safeNew = stripMarkdocDelimiters(newValue);
+  const safePrevious = stripMarkdocDelimiters(previousValue);
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${customFieldName}** to **${newValue}**.`;
+    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${customFieldName}** from **${previousValue}** to **${newValue}**.`;
+    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${customFieldName}** value **${previousValue}**.`;
+    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
   }
 
   return message;
@@ -546,18 +553,15 @@ export function getAssetsWhereInput({
     // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
+      // QT-aware fragment shared with getAssets and the mobile assets
+      // endpoint — see buildAssetStatusWhere for the rationale.
       where.AND = [
         ...(Array.isArray(where.AND)
           ? where.AND
           : where.AND
           ? [where.AND]
           : []),
-        {
-          OR: [
-            { type: "INDIVIDUAL", status: "AVAILABLE" },
-            { type: "QUANTITY_TRACKED" },
-          ],
-        },
+        buildAssetStatusWhere(status),
       ];
     } else {
       where.status = status;
@@ -709,6 +713,12 @@ export function validateAdvancedFilterParams(
 }
 
 export const ASSET_CSV_HEADERS = [
+  // Row matcher for the update importer (`/assets/import-update`) — the
+  // asset's cuid. The create importer accepts this header (so a re-exported
+  // file round-trips) but never reads it: createAssetsFromContentImport
+  // always generates a fresh id, so a caller-supplied id can't be used to
+  // set/connect/upsert onto another workspace's asset.
+  "id",
   "title",
   "description",
   "category",

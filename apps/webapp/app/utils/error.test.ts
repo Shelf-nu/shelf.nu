@@ -1,13 +1,25 @@
 import {
   ShelfError,
   isAssetQuantityOverAllocationError,
+  isDbResourceExhaustionError,
   isHandledClientError,
+  isIndividualAssetAlreadyPlacedError,
   isLikeShelfError,
   isPrismaTransientError,
   makeShelfError,
   notAllowedMethod,
   throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "./error";
+
+/**
+ * Realistic Prisma message for a Postgres shared-lock-table exhaustion
+ * (SQLSTATE 53200). Prisma surfaces this as a P2010 (raw query failed) whose
+ * `.message` embeds the Postgres error + hint verbatim. Mirrors the payload
+ * captured in SHELF-WEBAPP-227.
+ */
+const LOCK_EXHAUSTION_MESSAGE =
+  "\nInvalid `prisma.$queryRaw()` invocation:\n\n\nRaw query failed. Code: `53200`. Message: `ERROR: out of shared memory\nHINT: You might need to increase max_locks_per_transaction.`";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -52,6 +64,7 @@ describe(makeShelfError.name, () => {
 
       expect(error.status).toEqual(503);
       expect(error.label).toEqual("DB");
+      expect(error.shouldBeCaptured).toBe(true);
       expect(error.message).toContain("temporary database connectivity");
     });
 
@@ -114,6 +127,89 @@ describe(makeShelfError.name, () => {
       expect(error.status).toEqual(404);
       expect(error.label).toEqual("User");
       expect(error.message).toContain("does not exist");
+    });
+
+    it("preserves the wrapper's additionalData when P2024 is wrapped", () => {
+      const prismaError = Object.assign(new Error("Connection pool timeout"), {
+        code: "P2024",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+        additionalData: { organizationId: "org-1" },
+      });
+
+      const error = makeShelfError(wrappedCause, { userId: "user-1" });
+
+      expect(error.status).toEqual(503);
+      expect(error.additionalData).toMatchObject({
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+    });
+  });
+
+  describe("cause is a DB resource-exhaustion (lock table) error", () => {
+    it("maps a direct 53200 lock-exhaustion error to a friendly retryable 503", () => {
+      const cause = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+
+      const error = makeShelfError(cause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      // Kept captured on purpose (503 >= 500) so the class stays in Sentry;
+      // pin it so a regression that silences capture fails the suite.
+      expect(error.shouldBeCaptured).toBe(true);
+      expect(error.message.toLowerCase()).toContain("temporarily overloaded");
+    });
+
+    it("maps 53200 to 503 even when wrapped in a generic 500 ShelfError", () => {
+      // Mirrors the real path: the assets query catch re-wraps the raw Prisma
+      // error into a generic "Failed to fetch…" 500 before it reaches the
+      // route boundary where makeShelfError runs.
+      const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+      });
+
+      const error = makeShelfError(wrappedCause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.shouldBeCaptured).toBe(true);
+      expect(error.message).not.toContain("Failed to fetch");
+      expect(error.cause).toBe(wrappedCause);
+    });
+
+    it("preserves the wrapper's additionalData (org + filters) and layers route-level data", () => {
+      // The assets query wraps the raw error with { organizationId, paramsValues }
+      // — the load-dependent context needed to watch the lock exhaustion recede.
+      // The 503 mapping must not drop it.
+      const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+        code: "P2010",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "Assets",
+        message: "Failed to fetch paginated and filterable assets",
+        additionalData: { organizationId: "org-1", paramsValues: { page: 1 } },
+      });
+
+      const error = makeShelfError(wrappedCause, { userId: "user-1" });
+
+      expect(error.status).toEqual(503);
+      expect(error.additionalData).toMatchObject({
+        organizationId: "org-1",
+        paramsValues: { page: 1 },
+        userId: "user-1",
+      });
     });
   });
 
@@ -445,6 +541,45 @@ describe(isPrismaTransientError.name, () => {
   });
 });
 
+describe(isDbResourceExhaustionError.name, () => {
+  it("detects a direct Postgres 53200 lock-table-exhaustion error", () => {
+    const error = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+      code: "P2010",
+    });
+    expect(isDbResourceExhaustionError(error)).toBe(true);
+  });
+
+  it("detects it when wrapped inside a ShelfError cause chain", () => {
+    const prismaError = Object.assign(new Error(LOCK_EXHAUSTION_MESSAGE), {
+      code: "P2010",
+    });
+    const wrapped = new ShelfError({
+      cause: prismaError,
+      label: "Assets",
+      message: "Failed to fetch paginated and filterable assets",
+    });
+    expect(isDbResourceExhaustionError(wrapped)).toBe(true);
+  });
+
+  it("does NOT match a generic P2010 raw-query failure (e.g. a bad column)", () => {
+    // A genuinely broken raw query is also a P2010 — matching on the bare
+    // P2010 code would swallow real bugs. We match only the 53200 signature.
+    const error = Object.assign(
+      new Error(
+        '\nInvalid `prisma.$queryRaw()` invocation:\n\nRaw query failed. Code: `42703`. Message: `column "foo" does not exist`'
+      ),
+      { code: "P2010" }
+    );
+    expect(isDbResourceExhaustionError(error)).toBe(false);
+  });
+
+  it("returns false for unrelated errors and non-objects", () => {
+    expect(isDbResourceExhaustionError(new Error("boom"))).toBe(false);
+    expect(isDbResourceExhaustionError(null)).toBe(false);
+    expect(isDbResourceExhaustionError(undefined)).toBe(false);
+  });
+});
+
 describe(notAllowedMethod.name, () => {
   it("uses the default message when no options are provided", () => {
     const error = notAllowedMethod("POST");
@@ -625,6 +760,104 @@ describe(throwIfAssetQuantityOverAllocation.name, () => {
     }
     // 400 → routed to Sentry logs, kept out of the error/issue pipeline.
     expect(isHandledClientError(thrown)).toBe(true);
+  });
+});
+
+describe(isIndividualAssetAlreadyPlacedError.name, () => {
+  // why: emulate the runtime shape of the trigger violation — a
+  // `PrismaClientUnknownRequestError` is just an Error whose `message` carries
+  // the raw `RAISE EXCEPTION` text.
+  const singleLocationTriggerError = new Error(
+    "Invalid `prisma.assetLocation.createMany()` invocation: INDIVIDUAL asset abc123 already placed at a location"
+  );
+
+  it("detects the single-location trigger message", () => {
+    expect(
+      isIndividualAssetAlreadyPlacedError(singleLocationTriggerError)
+    ).toBe(true);
+  });
+
+  it("detects the trigger error nested two ShelfError layers deep", () => {
+    const inner = new ShelfError({
+      cause: singleLocationTriggerError,
+      label: "Location",
+      message:
+        "Something went wrong while adding the kits to the location. Please try again or contact support.",
+    });
+    const outer = new ShelfError({
+      cause: inner,
+      label: "Location",
+      message: "Something went wrong while updating the location kits.",
+    });
+    expect(isIndividualAssetAlreadyPlacedError(outer)).toBe(true);
+  });
+
+  it("does NOT match the quantity over-allocation trigger or unrelated errors", () => {
+    // The two pivot triggers must stay distinct so each maps to its own message.
+    expect(
+      isIndividualAssetAlreadyPlacedError(
+        new Error("AssetLocation total 2 exceeds Asset.quantity 1 for asset x")
+      )
+    ).toBe(false);
+    // The sibling single-kit trigger has different wording.
+    expect(
+      isIndividualAssetAlreadyPlacedError(
+        new Error("INDIVIDUAL asset abc123 already linked to a kit")
+      )
+    ).toBe(false);
+    expect(isIndividualAssetAlreadyPlacedError(new Error("boom"))).toBe(false);
+    expect(isIndividualAssetAlreadyPlacedError(null)).toBe(false);
+  });
+
+  it("returns false (does not stack-overflow) on a self-referential cause cycle", () => {
+    const cyclic: { message: string; cause?: unknown } = { message: "boom" };
+    cyclic.cause = cyclic;
+    expect(isIndividualAssetAlreadyPlacedError(cyclic)).toBe(false);
+  });
+});
+
+describe(throwIfIndividualAssetAlreadyPlaced.name, () => {
+  const triggerError = new Error(
+    "INDIVIDUAL asset abc123 already placed at a location"
+  );
+
+  it("throws a friendly 400, non-captured ShelfError for the trigger violation", () => {
+    let thrown: unknown;
+    try {
+      throwIfIndividualAssetAlreadyPlaced(triggerError, {
+        label: "Location",
+        additionalData: { locationId: "loc-1", kitIds: ["k1"] },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const shelfError = thrown as ShelfError;
+    expect(shelfError.status).toBe(400);
+    expect(shelfError.shouldBeCaptured).toBe(false);
+    expect(shelfError.label).toBe("Location");
+    expect(shelfError.cause).toBe(triggerError);
+    expect(shelfError.additionalData).toEqual({
+      locationId: "loc-1",
+      kitIds: ["k1"],
+    });
+    // Non-technical, actionable user message.
+    expect(shelfError.message).toContain("one location at a time");
+    // 400 → routed to Sentry logs, kept out of the error/issue pipeline.
+    expect(isHandledClientError(shelfError)).toBe(true);
+  });
+
+  it("does NOT throw (passes through) for any other error", () => {
+    expect(() =>
+      throwIfIndividualAssetAlreadyPlaced(
+        new Error("AssetLocation total 2 exceeds Asset.quantity 1 for asset x"),
+        { label: "Location" }
+      )
+    ).not.toThrow();
+    expect(() =>
+      throwIfIndividualAssetAlreadyPlaced(null, { label: "Location" })
+    ).not.toThrow();
   });
 });
 

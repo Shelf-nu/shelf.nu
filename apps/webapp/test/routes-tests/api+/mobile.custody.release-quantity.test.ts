@@ -5,8 +5,14 @@
  * N units of a QUANTITY_TRACKED asset from a team member back to the pool
  * via `releaseQuantity`. Pins the SELF_SERVICE own-custody-only guard, the
  * service error passthroughs (over-release 400, no-custody-row 404), the
- * deliberate ABSENCE of a low-stock check on release (web parity), and the
- * refreshed viewer-shaped asset in the success envelope.
+ * low-stock check on release (a release raises available and can recover an
+ * asset above its threshold, so the debounce marker must be cleared; web
+ * parity), and the refreshed viewer-shaped asset in the success envelope.
+ *
+ * Also pins the three audit-note wordings the route derives from the
+ * consumed/returned split the service reports back — the return-only line is
+ * the pre-consumable wording and must not drift, since an activity feed has to
+ * read identically whichever client performed the release.
  *
  * @see {@link file://../../../app/routes/api+/mobile+/custody.release-quantity.ts}
  */
@@ -49,7 +55,19 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 // why: external service — we mock the quantity release without hitting the
 // database (whole-module mock also keeps the heavy component import graph out)
 vitest.mock("~/modules/asset/service.server", () => ({
-  releaseQuantity: vitest.fn().mockResolvedValue({ id: "asset-1" }),
+  // The service reports back the split it actually persisted; the route words
+  // its audit note from those counts, so the mock has to carry them.
+  releaseQuantity: vitest
+    .fn()
+    .mockResolvedValue({ asset: { id: "asset-1" }, consumed: 0, returned: 3 }),
+}));
+
+// why: the per-user rate limiter is an in-process counter that survives across
+// tests in this file, and the route's "bulk" bucket allows only 10 requests a
+// minute — every case here posts as the same user, so without a no-op the
+// suite's own size would start returning 429s.
+vitest.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vitest.fn(),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -67,12 +85,13 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn(),
 }));
 
-// why: the release route must NOT run the low-stock check (release adds
-// stock back; the web release route has none either). The route doesn't
-// import this module — mocking it lets the happy-path test pin that with
-// an explicit zero-calls assertion.
+// why: the release route runs the low-stock check (a release raises available
+// and can move the asset back above its threshold, which must clear the
+// lowStockNotifiedAt debounce marker / send the recovery notice). Mocking it
+// lets the happy-path test pin that the call is made with the right args
+// without exercising the notifier's own debounce logic.
 vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
-  checkAndNotifyLowStock: vitest.fn(),
+  checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: keep pino/Sentry out of the test graph; the note-failure test asserts
@@ -183,7 +202,12 @@ describe("POST /api/mobile/custody/release-quantity", () => {
 
     (createNote as any).mockResolvedValue(undefined);
 
-    (releaseQuantity as any).mockResolvedValue({ id: "asset-1" });
+    // Default: a plain return of the 3 units the happy-path test releases.
+    (releaseQuantity as any).mockResolvedValue({
+      asset: { id: "asset-1" },
+      consumed: 0,
+      returned: 3,
+    });
 
     (getMobileAssetForViewer as any).mockResolvedValue(mockShapedAsset);
   });
@@ -222,9 +246,13 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       })
     );
 
-    // Web parity: NO low-stock check on release (release adds stock back;
-    // the web release route never calls checkAndNotifyLowStock)
-    expect(checkAndNotifyLowStock).not.toHaveBeenCalled();
+    // Release raises available → run the notifier so a recovery clears the
+    // debounce marker (and sends the "back in stock" notice). Web parity.
+    expect(checkAndNotifyLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
 
     // Refreshed asset is shaped for THIS viewer (visibility filter applied)
     expect(getMobileAssetForViewer).toHaveBeenCalledWith(
@@ -235,6 +263,93 @@ describe("POST /api/mobile/custody/release-quantity", () => {
         canSeeAllCustody: true,
       })
     );
+  });
+
+  describe("audit note wording", () => {
+    /** Read the note body the route wrote on its single createNote call. */
+    function noteContent() {
+      const [firstCall] = (createNote as any).mock.calls;
+      return firstCall[0].content as string;
+    }
+
+    it("keeps the pre-consumable wording when nothing was consumed", async () => {
+      // A returnable asset's activity trail must read exactly as it always
+      // has — this is the line existing workspaces already have on file.
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+
+      const result = await action(createActionArgs({ request }));
+
+      expect((result as unknown as Response).status).toBe(200);
+      expect(noteContent()).toContain("released **3** unit(s)");
+      expect(noteContent()).not.toContain("consumed");
+    });
+
+    it("words the note as a full consume when every released unit was used up", async () => {
+      (releaseQuantity as any).mockResolvedValue({
+        asset: { id: "asset-1" },
+        consumed: 10,
+        returned: 0,
+      });
+
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 10,
+      });
+
+      const result = await action(createActionArgs({ request }));
+
+      expect((result as unknown as Response).status).toBe(200);
+      expect(releaseQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: 10, consumed: 10 })
+      );
+      expect(noteContent()).toContain("**10** unit(s)");
+      expect(noteContent()).toContain("as consumed");
+      expect(noteContent()).toContain("Stock reduced permanently");
+    });
+
+    it("names both legs when only some of the released units were used up", async () => {
+      (releaseQuantity as any).mockResolvedValue({
+        asset: { id: "asset-1" },
+        consumed: 10,
+        returned: 30,
+      });
+
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 40,
+        consumed: 10,
+      });
+
+      const result = await action(createActionArgs({ request }));
+
+      expect((result as unknown as Response).status).toBe(200);
+      expect(noteContent()).toContain("hold on **40** unit(s)");
+      expect(noteContent()).toContain("**10** consumed");
+      expect(noteContent()).toContain("**30** returned to stock");
+    });
+
+    it("forwards an absent consumed field as undefined so the server derives the split", async () => {
+      // An app build predating the split sends no `consumed`; the service must
+      // still be free to pick the outcome from the asset row.
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+
+      await action(createActionArgs({ request }));
+
+      expect(releaseQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({ consumed: undefined })
+      );
+    });
   });
 
   it("surfaces the service's 400 when releasing more than the custodian holds", async () => {

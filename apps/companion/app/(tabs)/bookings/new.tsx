@@ -38,6 +38,7 @@ import DateTimePicker, {
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
@@ -61,22 +62,16 @@ function toLocalWire(d: Date): string {
   )}:${p(d.getMinutes())}`;
 }
 
-/** Human-readable date-time for the picker buttons. */
-function formatDisplay(d: Date): string {
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 export default function CreateBookingScreen() {
   const router = useRouter();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
+  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
+  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
+  // are device-local, so formatting them in the preferred timezone would show a
+  // different time than the one being edited and submitted (CodeRabbit, #2798).
+  const { formatDateTime } = useDateFormatter();
 
   // ── Form state ──────────────────────────────────
   const [name, setName] = useState("");
@@ -347,7 +342,9 @@ export default function CreateBookingScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               from
-                ? `Starts ${formatDisplay(from)}, tap to change`
+                ? `Starts ${formatDateTime(from, {
+                    localeOnly: true,
+                  })}, tap to change`
                 : "Choose start"
             }
           >
@@ -356,7 +353,9 @@ export default function CreateBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from ? formatDisplay(from) : "Choose start date & time..."}
+              {from
+                ? formatDateTime(from, { localeOnly: true })
+                : "Choose start date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -391,13 +390,19 @@ export default function CreateBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              to ? `Ends ${formatDisplay(to)}, tap to change` : "Choose end"
+              to
+                ? `Ends ${formatDateTime(to, {
+                    localeOnly: true,
+                  })}, tap to change`
+                : "Choose end"
             }
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDisplay(to) : "Choose end date & time..."}
+              {to
+                ? formatDateTime(to, { localeOnly: true })
+                : "Choose end date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"

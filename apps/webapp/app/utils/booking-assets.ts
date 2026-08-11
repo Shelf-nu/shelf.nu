@@ -686,3 +686,115 @@ export function resolveBookingRowQtyState(
     isQtyFullyCheckedOut,
   };
 }
+
+/**
+ * `contextStatus` (or the sidebar's equivalent `effectiveStatus`) values
+ * that mean a QT row has ALREADY drawn from — or returned to — the pool for
+ * ITS OWN units. Once true, the stock-availability badges
+ * (`InsufficientStockBadge` / `PendingReturnBadge`) have nothing useful to
+ * warn about: they only reason about units this row hasn't drawn from the
+ * pool yet, and the row's own event (checkout, or checkin/disposition) has
+ * already happened.
+ */
+const CHECKED_OUT_OR_FULFILLED_STATUSES: ReadonlySet<string> = new Set([
+  AssetStatus.CHECKED_OUT,
+  "PARTIALLY_CHECKED_IN",
+  "PARTIALLY_CHECKED_OUT_QTY",
+  "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN",
+]);
+
+/**
+ * Whether a QT row's resolved status (`contextStatus` from
+ * {@link resolveBookingRowQtyState}, or the booking-assets-sidebar's
+ * equivalent `effectiveStatus`) indicates the row has already been checked
+ * out and/or (partially) fulfilled as part of THIS booking.
+ *
+ * @param contextStatus - The row's resolved booking-context status.
+ * @returns `true` when the row is already out or already returning/returned.
+ */
+export function isQtyRowCheckedOutOrFulfilled(contextStatus: string): boolean {
+  return CHECKED_OUT_OR_FULFILLED_STATUSES.has(contextStatus);
+}
+
+/** Units free for a QUANTITY_TRACKED asset, as shipped by `buildAvailableUnitsByAsset`. */
+export type QtyStockAvailability = {
+  /** Windowed figure — drives the RED "Insufficient stock" badge. */
+  bookable: number;
+  /** Window-independent "physical-now" figure — drives the AMBER "pending return" badge. */
+  physicalNow: number;
+};
+
+/**
+ * Visual variant for the QT stock-availability badge on a single booking
+ * row, or `null` when neither applies. SINGLE source of truth shared by
+ * `list-asset-content.tsx` and `booking-assets-sidebar.tsx` so the two
+ * surfaces can never disagree (see `.claude/rules/quantity-semantics-per-surface.md`).
+ *
+ * - `"insufficient"` — RED `InsufficientStockBadge`. Hard blocker: this
+ *   row's booked quantity exceeds `availability.bookable` (the windowed
+ *   figure that already accounts for other reservations within the
+ *   booking's own window).
+ * - `"pending-return"` — AMBER `PendingReturnBadge`. Soft warning: the
+ *   booking hasn't started yet (DRAFT/RESERVED) and the row's booked
+ *   quantity FITS within `availability.bookable` (no genuine over-commit)
+ *   but currently exceeds `availability.physicalNow` — some of the needed
+ *   units are physically checked out on OTHER bookings right now and are
+ *   expected back before this booking starts.
+ *
+ * Precedence: a row that's already checked-out/fulfilled (its own event
+ * already happened) or a finished booking (COMPLETE/ARCHIVED, the signal is
+ * historical) never gets either badge, checked BEFORE the quantity
+ * comparisons. RED is checked before AMBER — a genuine over-commit is
+ * always the more actionable signal.
+ *
+ * @param args.rowQty - This row's booked quantity.
+ * @param args.availability - The asset's workspace-availability figures, or
+ *   `undefined` when the loader didn't ship the map (e.g. INDIVIDUAL assets,
+ *   or older callers that don't surface it) — short-circuits to `null`.
+ * @param args.contextStatus - The row's resolved booking-context status
+ *   (`contextStatus` / `effectiveStatus`) — feeds
+ *   {@link isQtyRowCheckedOutOrFulfilled}.
+ * @param args.bookingStatus - The parent booking's status.
+ */
+export function resolveQtyStockBadgeVariant({
+  rowQty,
+  availability,
+  contextStatus,
+  bookingStatus,
+}: {
+  rowQty: number;
+  availability: QtyStockAvailability | undefined;
+  contextStatus: string;
+  bookingStatus: string;
+}): "insufficient" | "pending-return" | null {
+  if (!availability) return null;
+
+  // Historical bookings: the stock signal is stale, nothing actionable
+  // remains.
+  if (bookingStatus === "COMPLETE" || bookingStatus === "ARCHIVED") {
+    return null;
+  }
+
+  // The row's own units have already been checked out (or are already
+  // returning/returned) — nothing left to warn about for THIS row.
+  if (isQtyRowCheckedOutOrFulfilled(contextStatus)) {
+    return null;
+  }
+
+  // Strict inequality — at-capacity is NOT a problem.
+  if (rowQty > availability.bookable) {
+    return "insufficient";
+  }
+
+  // Amber warning only makes sense before the booking has started: once
+  // it's ONGOING/OVERDUE the row's own checkout has either already
+  // happened (caught above) or is imminent, not "expected back before this
+  // booking starts".
+  const isNotStarted =
+    bookingStatus === "DRAFT" || bookingStatus === "RESERVED";
+  if (isNotStarted && rowQty > availability.physicalNow) {
+    return "pending-return";
+  }
+
+  return null;
+}

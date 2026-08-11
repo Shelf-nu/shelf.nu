@@ -150,6 +150,11 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest
         .fn()
         .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
+      // why: `bulkRemoveAssetsFromKits` resolves the acting user's timezone via
+      // resolveUserFormatPrefsById (→ db.user.findFirst) to truncate date
+      // filters in the user's tz on the select-all path. null → the resolver
+      // falls back to default prefs.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
   },
 }));
@@ -3886,5 +3891,76 @@ describe("preserveKitDrivenPlacements", () => {
     });
     expect(db.assetLocation.update).not.toHaveBeenCalled();
     expect(db.assetLocation.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () => {
+  it("rejects an unavailable kit as a handled 400, not a captured 500", async () => {
+    // why: the availability guard reads freshly-queried kit status; return an
+    // IN_CUSTODY (not AVAILABLE) kit so the unavailable-kits guard fires.
+    (db.kit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "kit-1", name: "Kit 1", status: "IN_CUSTODY", assetKits: [] },
+    ]);
+
+    let thrown: unknown;
+    try {
+      await bulkAssignKitCustody({
+        kitIds: ["kit-1"],
+        organizationId: "org-1",
+        custodianId: "tm-1",
+        custodianName: "Bob",
+        userId: "user-1",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    expect(err.message).toContain("unavailable kits");
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
+  });
+
+  it("rejects an unavailable INDIVIDUAL asset in a kit as a handled 400", async () => {
+    // why: the kit is AVAILABLE but holds an INDIVIDUAL asset that is IN_CUSTODY,
+    // so the unavailable-assets-in-kits guard fires.
+    (db.kit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        status: "AVAILABLE",
+        assetKits: [
+          {
+            asset: {
+              id: "asset-1",
+              title: "Drill",
+              status: "IN_CUSTODY",
+              type: "INDIVIDUAL",
+              quantity: null,
+            },
+          },
+        ],
+      },
+    ]);
+
+    let thrown: unknown;
+    try {
+      await bulkAssignKitCustody({
+        kitIds: ["kit-1"],
+        organizationId: "org-1",
+        custodianId: "tm-1",
+        custodianName: "Bob",
+        userId: "user-1",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    expect(err.message).toContain("unavailable assets");
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
   });
 });

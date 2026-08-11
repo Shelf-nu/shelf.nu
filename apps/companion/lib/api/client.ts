@@ -3,10 +3,18 @@ import { supabase } from "../supabase";
 /**
  * Base URL for the Shelf webapp API.
  * In development, this is your local dev server.
- * In production, this would be the deployed webapp URL.
+ * In production, this is the deployed webapp URL.
+ *
+ * why the __DEV__ split in the fallback: EXPO_PUBLIC_* vars are inlined at
+ * bundle time, so an OTA update published without the production env scope
+ * would bake the fallback into every install. With a bare localhost fallback
+ * that mistake breaks every API call in the field; falling back to the
+ * production URL instead makes the worst case "points at prod", which is
+ * what release builds want anyway.
  */
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
+  process.env.EXPO_PUBLIC_API_URL ||
+  (__DEV__ ? "http://localhost:3000" : "https://app.shelf.nu");
 if (__DEV__) console.log("[API] Base URL:", API_BASE_URL);
 
 /**

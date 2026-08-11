@@ -24,7 +24,7 @@ vi.mock("~/modules/scan/service.server", () => ({
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { createScan } from "~/modules/scan/service.server";
-import { loader } from "./qr.$qrId";
+import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 
 /**
  * Tests for GET /api/mobile/qr/:qrId:
@@ -36,7 +36,7 @@ import { loader } from "./qr.$qrId";
  *   partial / absent coordinates are silently ignored and NEVER affect the
  *   resolve response.
  *
- * @see {@link file://./qr.$qrId.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
 
 /** Shape of the `data()` result the route loader returns. */

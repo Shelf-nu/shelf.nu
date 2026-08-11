@@ -120,7 +120,8 @@ export default function Announcements() {
               <Tr key={a.id}>
                 <Td>{a.name}</Td>
                 <Td>
-                  <MarkdownViewer content={a.content} />
+                  {/* Admin-authored: preview must match what users see. */}
+                  <MarkdownViewer content={a.content} allowExternalLinks />
                 </Td>
                 <Td>{a.link}</Td>
                 <Td>{a.linkText}</Td>

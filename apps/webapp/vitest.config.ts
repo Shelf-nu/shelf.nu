@@ -12,12 +12,16 @@ export default defineConfig({
     globals: true,
     environment: "happy-dom",
     setupFiles: ["./test/setup-test-env.ts"],
-    // Include both standard test files and .test.server.ts route tests.
-    // The `.server` infix avoids React Router typegen collisions (the typegen
-    // mirrors route filenames under .react-router/types, so a plain
-    // `foo.test.ts` would produce a generated file with the same name that
-    // Vitest would otherwise try to run as a second test file).
-    include: ["**/*.{test,spec}.?(c|m)[jt]s?(x)", "**/*.test.server.[jt]s"],
+    // Route tests live in `test/routes-tests/`, NEVER under `app/routes/` —
+    // the dev server warms every file under `app/routes/` as a client module,
+    // so a co-located route test importing a `*.server` module breaks
+    // `pnpm webapp:dev`. Enforced by `local-rules/no-test-files-in-routes`.
+    // A `**/*.test.server.[jt]s` pattern used to sit alongside this one for
+    // the co-located variant. No `.test.server.*` file remains — route ones
+    // moved to `test/routes-tests/`, the single module one was renamed to
+    // `.test.ts` — so it is gone. Do NOT reintroduce the spelling: it is not
+    // matched by the pattern below, so such a file is silently never run.
+    include: ["**/*.{test,spec}.?(c|m)[jt]s?(x)"],
     includeSource: ["app/**/*.{js,ts}"],
     exclude: [
       "node_modules",

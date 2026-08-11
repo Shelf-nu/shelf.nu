@@ -32,6 +32,7 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
   primeBookingOverviewCache,
   readBookingOverviewCache,
@@ -85,7 +86,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { calculateTotalValueOfAssets } from "~/utils/bookings";
+import {
+  calculateTotalValueOfAssets,
+  canUserRemoveBookingAssets,
+} from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -94,6 +98,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
@@ -660,6 +665,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: string | null;
       }>
     >();
+    /**
+     * Live asset status per qty-tracked asset on this booking. Feeds the
+     * per-asset half of the legacy all-at-once fallback below — the status
+     * already rides along on `BOOKING_WITH_ASSETS_INCLUDE`, so this costs no
+     * extra query.
+     */
+    const assetStatusByAsset = new Map<string, AssetStatus>();
     for (const ba of booking.bookingAssets) {
       if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
       const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
@@ -669,6 +681,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: ba.assetKitId ?? null,
       });
       bookingAssetRowsByAsset.set(ba.assetId, arr);
+      assetStatusByAsset.set(ba.assetId, ba.asset.status);
     }
 
     /** Logs grouped by assetId (each carries its own category). */
@@ -846,24 +859,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
     // checkout in the bulk-checkout dialog + scanner drawer.
     //
+    // Decided PER ASSET, not per booking: an asset ADDED after that checkout is
+    // still AVAILABLE and genuinely has units left (GitHub #2815), and an asset
+    // that already has progressive claims needs no fallback at all. Keying on
+    // the booking having zero sessions would also flip every already-out asset
+    // back to "fully remaining" the moment one later batch records a session.
+    //
     // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
     // (modules/booking/service.server.ts), which the checkout-assets route uses;
     // this loader mirrors that logic in-memory to avoid an extra query per asset.
-    const isLegacyAllAtOnceCheckout =
-      checkoutSessions.length === 0 &&
-      (booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE);
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
 
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
-      if (isLegacyAllAtOnceCheckout && totalBooked > 0) {
-        remainingToCheckOutByAsset[assetId] = 0;
-        continue;
-      }
       let totalCheckedOut = 0;
       for (const row of rows) {
         totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
+      if (
+        isActiveBooking &&
+        totalBooked > 0 &&
+        totalCheckedOut === 0 &&
+        assetStatusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
+      ) {
+        remainingToCheckOutByAsset[assetId] = 0;
+        continue;
       }
       remainingToCheckOutByAsset[assetId] = Math.max(
         0,
@@ -872,93 +895,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Workspace-level "available units" per QT asset on this booking.
+     * Workspace-level "available units" per QT asset on this booking:
+     * `{ bookable, physicalNow }`. Used by the RED "Insufficient stock"
+     * badge (fires when `bookedQuantity` exceeds `.bookable`) and the AMBER
+     * "pending return" badge (fires on not-yet-started bookings when
+     * `bookedQuantity` exceeds `.physicalNow` while still fitting within
+     * `.bookable`) on the booking-overview asset row + assets sidebar.
      *
-     * For each qty-tracked asset on this booking, computes the units that
-     * are NOT currently committed elsewhere in the workspace:
-     *
-     *   available = total
-     *             − (operator custody)
-     *             − (reserved in OTHER bookings, status = RESERVED)
-     *             − (checked out in OTHER bookings, status in ONGOING/OVERDUE)
-     *
-     * Used by the new "Insufficient stock" badge on the booking-overview
-     * asset row + assets sidebar: fires when `bookedQuantity` on a row
-     * exceeds `availableUnitsByAsset[assetId]`.
-     *
-     * Subtraction notes:
-     *  - Only ASSET-level custody (`kitCustodyId == null`) counts. Kit
-     *    custody rows are internal earmarking and must not reduce global
-     *    headroom (avoids double-counting kit-driven slices, mirrors the
-     *    availableHelper audit gotcha).
-     *  - This booking is EXCLUDED via `id: { not: bookingId }` — the
-     *    badge is about pressure from OTHER bookings on the shared pool;
-     *    the current booking's own reservation is what we're comparing
-     *    against.
-     *  - `assetKits` allocations are NOT subtracted. Pre-kit-checkout,
-     *    units inside a kit are still in the asset's available pool.
-     *
-     * The groupBys are scoped to this workspace's bookings via the
-     * relation filter (`booking: { organizationId, ... }`) to prevent
-     * cross-org leakage.
+     * Delegates to the shared, windowed QT availability primitive via
+     * `buildAvailableUnitsByAsset` — see
+     * `~/modules/booking/booking-overview-availability` for the full
+     * rationale (windowed peak-concurrent reservations + no kit
+     * double-count, replacing the old GLOBAL un-windowed groupBys). That
+     * helper deliberately lives in its own server module rather than inline
+     * in this route file: this route also exports `clientLoader`, so any
+     * server-only helper EXPORTED directly from here would pull its
+     * server-only dependency chain into Vite's client bundle.
      */
-    const [globalReservedRows, globalCheckedOutRows] =
-      qtyAssetIdsInBooking.length > 0
-        ? await Promise.all([
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: "RESERVED",
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIdsInBooking },
-                booking: {
-                  organizationId,
-                  status: { in: ["ONGOING", "OVERDUE"] },
-                  id: { not: bookingId },
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], []];
-
-    /**
-     * Map of `assetId → available units in the workspace pool`. Built
-     * after both rawAssets and the two groupBys land. Keys are restricted
-     * to QT assets that appear on this booking; INDIVIDUAL assets are
-     * omitted (they have their own AvailabilityBadge paths and never get
-     * the InsufficientStockBadge).
-     */
-    const availableUnitsByAsset: Record<string, number> = {};
-    for (const asset of rawAssets) {
-      if (asset.type !== "QUANTITY_TRACKED") continue;
-      const total = asset.quantity ?? 0;
-      // Operator (asset-level) custody only — kit-level custody is
-      // internal earmarking and must not reduce global headroom.
-      const inCustody = (asset.custody ?? [])
-        .filter((c) => c.kitCustodyId == null)
-        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const reserved =
-        globalReservedRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      const checkedOut =
-        globalCheckedOutRows.find((r) => r.assetId === asset.id)?._sum
-          ?.quantity ?? 0;
-      availableUnitsByAsset[asset.id] = Math.max(
-        0,
-        total - inCustody - reserved - checkedOut
-      );
-    }
+    const availableUnitsByAsset = await buildAvailableUnitsByAsset({
+      rawAssets,
+      qtyAssetIdsInBooking,
+      organizationId,
+      booking,
+    });
 
     // Attach per-row qty disposition data onto the shaped view items so
     // the UI gets the Polish-6 / Phase 4 enrichment alongside main's
@@ -1150,11 +1109,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         checkedOutAssetIds,
         remainingToCheckOutByAsset,
         /**
-         * QT workspace-availability map (assetId → units free across the
-         * workspace, excluding this booking + kit-custody). Drives the
-         * "Insufficient stock" badge in `list-asset-content.tsx` and
-         * `booking-assets-sidebar.tsx`. Always serialised — empty `{}` when
-         * the booking has no QT assets — so consumers can rely on the key.
+         * QT workspace-availability map (assetId → `{ bookable, physicalNow,
+         * reserved }`, all excluding this booking + kit-custody). Drives the
+         * RED "Insufficient stock" and AMBER "pending return" badges in
+         * `list-asset-content.tsx` and `booking-assets-sidebar.tsx` — see
+         * `resolveQtyStockBadgeVariant` (`~/utils/booking-assets`) — and, via
+         * `qtyAvailability` in `list-asset-content.tsx`, the real windowed
+         * max (+ "reserved by other bookings" note) shown by the "Adjust
+         * booked quantity" dialog instead of the workspace total. Always
+         * serialised — empty `{}` when the booking has no QT assets — so
+         * consumers can rely on the key.
          */
         availableUnitsByAsset,
         partialCheckoutDetails,
@@ -1453,15 +1417,56 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         getBookingSettingsForOrganization(organizationId),
       ]
     );
+
+    /**
+     * A finished booking is a closed record — its contents must not change.
+     *
+     * The remove intents were gated on `booking:update` permission alone: the
+     * COMPLETE/ARCHIVED block lived only in the client dropdown, so a crafted
+     * POST could still strip items from a finished booking. Every sibling
+     * path already guards this server-side (`manage-assets`, `manage-kits`,
+     * and the mobile remove endpoint).
+     *
+     * Status only — WHO may remove is already settled upstream by the row/bulk
+     * action gating, and differs from who may add (a self-service custodian
+     * may remove from their own RESERVED booking).
+     */
+    const removeIntents = [
+      "removeAsset",
+      "removeKit",
+      "bulk-remove-asset-or-kit",
+    ];
+    if (
+      removeIntents.includes(intent) &&
+      !canUserRemoveBookingAssets(basicBookingInfo)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Removing items is not allowed for the current status of the booking.",
+        additionalData: { userId, id, intent, status: basicBookingInfo.status },
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     switch (intent) {
       case "save": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
         const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints,
+            hints: hintsWithPrefTz,
             workingHours,
             bookingSettings,
             isAdminOrOwner,
@@ -1476,13 +1481,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1515,11 +1520,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "reserve": {
         const hints = getHints(request);
+        // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
+        // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+        // browser hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (
+          await resolveUserFormatPrefsById(userId, getClientHint(request))
+        ).timeZone;
+        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
 
         const parsedData = parseData(
           formData,
           BookingFormSchema({
-            hints,
+            hints: hintsWithPrefTz,
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
@@ -1537,13 +1549,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
         const formattedTo = to
           ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: hints.timeZone,
+              zone: prefTimeZone,
             }).toJSDate()
           : undefined;
 
@@ -1917,13 +1929,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "extend-booking": {
         const hints = getClientHint(request);
 
-        // Debug: Check what's actually in the form data
+        // TIMEZONE FIX: parse the submitted wall-clock end date in the acting
+        // user's RESOLVED pref timezone (matches display), not the browser
+        // hint. Resolved lazily — only this date-parsing branch needs it.
+        const prefTimeZone = (await resolveUserFormatPrefsById(userId, hints))
+          .timeZone;
 
         const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
-            timeZone: hints.timeZone,
+            timeZone: prefTimeZone,
             bookingSettings,
             isAdminOrOwner,
           }),
@@ -1987,15 +2003,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "bulk-remove-asset-or-kit": {
-        const { assetOrKitIds } = parseData(
-          formData,
-          BulkRemoveAssetsAndKitSchema
-        );
+        const { assetOrKitIds, standaloneAssetIds: selectedStandaloneIds } =
+          parseData(formData, BulkRemoveAssetsAndKitSchema);
 
         /**
-         * From frontend, we get both assetIds and kitIds,
-         * here we are separating them and excluding assets that belong to kits
-         * */
+         * The selection arrives as one flat id list holding both assets and
+         * kits, so resolve it against each table to split it apart. Ticking a
+         * kit also injects its member rows into the selection, which is why
+         * the split alone can't tell a member apart from a directly-ticked
+         * asset — `standaloneAssetIds` carries that provenance separately.
+         */
         const assets = await db.asset.findMany({
           where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
@@ -2015,19 +2032,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           kit.assetKits.map((ak) => ak.asset.id)
         );
 
-        // Filter out assets that belong to the selected kits to avoid double-counting
-        const standaloneAssets = assets.filter(
-          (asset) => !kitAssetIds.includes(asset.id)
+        /**
+         * Assets the user ticked as their own standalone row. Intersected
+         * with the org-scoped `assets` above so a forged id in the hidden
+         * field can never reach the delete predicate.
+         *
+         * Kit membership deliberately does NOT disqualify an asset here: a
+         * qty-tracked asset can sit on the booking both standalone and via a
+         * kit, and ticking both rows must remove both. Falls back to the
+         * membership filter when the field is absent (older clients), which
+         * is the pre-existing behaviour.
+         */
+        const orgScopedAssetIds = new Set(assets.map((asset) => asset.id));
+        const standaloneAssetIds =
+          selectedStandaloneIds.length > 0
+            ? selectedStandaloneIds.filter((assetId) =>
+                orgScopedAssetIds.has(assetId)
+              )
+            : assets
+                .filter((asset) => !kitAssetIds.includes(asset.id))
+                .map((asset) => asset.id);
+
+        // Drives the removal note wording only — the ids above drive what is
+        // actually detached.
+        const standaloneAssets = assets.filter((asset) =>
+          standaloneAssetIds.includes(asset.id)
         );
 
-        // All asset IDs to be disconnected (standalone assets + kit assets)
+        // All asset IDs to be disconnected (standalone assets + kit assets).
+        // De-duped: an asset ticked standalone AND present in a ticked kit
+        // appears in both buckets, and `assetIds` drives one-note-per-asset
+        // downstream.
         const allAssetIdsToRemove = [
-          ...standaloneAssets.map((a) => a.id),
-          ...kitAssetIds,
+          ...new Set([...standaloneAssetIds, ...kitAssetIds]),
         ];
 
         const b = await removeAssets({
           booking: { id, assetIds: allAssetIdsToRemove },
+          standaloneAssetIds,
           kitIds: kits.map((k) => k.id),
           kits: kits.map((kit) => ({ id: kit.id, name: kit.name })),
           assets: standaloneAssets.map((asset) => ({
@@ -2050,9 +2092,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
+        // The selection can hold assets, kits, or both — the old hardcoded
+        // "Kit removed" toast was wrong for every selection that wasn't a
+        // lone kit, which read as "the assets weren't removed".
+        const removedCount = standaloneAssets.length + kits.length;
         sendNotification({
-          title: "Kit removed",
-          message: "Your kit has been removed from the booking",
+          title: removedCount === 1 ? "Item removed" : "Items removed",
+          message:
+            removedCount === 1
+              ? "The selected item has been removed from the booking"
+              : `${removedCount} items have been removed from the booking`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

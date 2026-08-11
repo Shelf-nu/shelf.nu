@@ -16,7 +16,7 @@ vi.mock("~/modules/api/mobile-code-resolve.server", () => ({
 
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
-import { loader } from "./get-scanned-item.$qrId";
+import { loader } from "~/routes/api+/mobile+/get-scanned-item.$qrId";
 
 /**
  * Tests for GET /api/mobile/get-scanned-item/:qrId error-payload propagation.
@@ -24,7 +24,7 @@ import { loader } from "./get-scanned-item.$qrId";
  * exact same 404 + message it always was, with `reason`/`qrId` strictly
  * additive on top.
  *
- * @see {@link file://./get-scanned-item.$qrId.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
 
 /** Shape of the `data()` result the route loader returns. */

@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import FormRow from "~/components/forms/form-row";
-import Input from "~/components/forms/input";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoBox } from "~/components/shared/info-box";
 import { Separator } from "~/components/shared/separator";
 import { Spinner } from "~/components/shared/spinner";
@@ -50,10 +50,10 @@ export function DatesFields({
         className="mobile-styling-only border-b-0 pb-[10px] pt-0"
         required
       >
-        <Input
+        <DateTimePicker
           key="start-date-input"
+          mode="datetime"
           label="Start Date"
-          type="datetime-local"
           hideLabel
           name={startDateName}
           disabled={workingHoursDisabled}
@@ -68,15 +68,18 @@ export function DatesFields({
           value={startDate}
           placeholder="Booking"
           required
-          onChange={(event) => {
+          onChange={(wire) => {
+            // `wire` is the emitted wire string in DATE_TIME_FORMAT
+            // (YYYY-MM-DDTHH:mm) — the same format the native
+            // datetime-local input previously produced.
             // Update start date state to persist user's selection
-            setStartDate(event.target.value);
+            setStartDate(wire);
 
             /**
              * When user changes the startDate and the new startDate is greater than the endDate
              * in that case, we have to update endDate to be the endDay date of startDate.
              */
-            const inputValue = event.target.value;
+            const inputValue = wire;
             if (isNewBooking && endDate && inputValue) {
               try {
                 // Safari-friendly date parsing: datetime-local format is YYYY-MM-DDTHH:mm
@@ -113,10 +116,10 @@ export function DatesFields({
         className="mobile-styling-only mb-2.5 border-b-0 p-0"
         required
       >
-        <Input
+        <DateTimePicker
           key={"end-date-input"}
+          mode="datetime"
           label="End Date"
-          type="datetime-local"
           hideLabel
           name={endDateName}
           disabled={workingHoursDisabled}
@@ -125,8 +128,10 @@ export function DatesFields({
           placeholder="Booking"
           required
           value={endDate}
-          onChange={(event) => {
-            setEndDate(event.target.value);
+          onChange={(wire) => {
+            // `wire` is DATE_TIME_FORMAT (YYYY-MM-DDTHH:mm), matching the
+            // previous native datetime-local value.
+            setEndDate(wire);
           }}
         />
 

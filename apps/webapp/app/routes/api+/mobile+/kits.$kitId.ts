@@ -17,7 +17,6 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { getAssetTotalValue } from "~/utils/asset-value";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -91,17 +90,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // companion app (kit screen still receives `kit.assets[]`).
         assetKits: {
           select: {
+            // AssetKit.quantity — units of THIS asset held by THIS kit (the
+            // correct kit-surface multiplier; NOT the asset's workspace
+            // stock). See .claude/rules/quantity-semantics-per-surface.md.
+            quantity: true,
             asset: {
               select: {
                 id: true,
                 title: true,
                 status: true,
                 valuation: true,
-                // QT-aware total value: quantity is needed so the reducer
-                // below can multiply per-unit valuation × quantity for
-                // QUANTITY_TRACKED assets. INDIVIDUAL assets are always
-                // quantity: 1, so the math collapses to the prior behaviour.
+                // Workspace stock — kept for parity with other mobile asset
+                // payloads, but NOT used for this kit's totalValue math
+                // below (that uses the pivot's `quantity` above instead).
                 quantity: true,
+                unitOfMeasure: true,
+                type: true,
                 mainImage: true,
                 thumbnailImage: true,
                 category: { select: { id: true, name: true } },
@@ -135,15 +139,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const { assetKits, ...kitData } = kit;
     const assets = assetKits.map((ak) => {
       const { assetLocations, ...rest } = ak.asset;
-      return { ...rest, location: assetLocations[0]?.location ?? null };
+      return {
+        ...rest,
+        location: assetLocations[0]?.location ?? null,
+        // Per-membership units of this asset in this kit (AssetKit.quantity).
+        kitQuantity: ak.quantity,
+      };
     });
 
-    // Total value = sum of the contained assets' valuation (a kit has no own
-    // value field), mirroring the web kit overview's summed valuation.
-    // QT-aware: multiplies valuation × quantity. Non-breaking — same response
-    // field, more accurate value for kits containing QT assets.
+    // Kit total value = Σ per-unit valuation × units-in-this-kit. Uses the kit
+    // slice quantity (AssetKit.quantity), NOT the asset's workspace stock —
+    // see .claude/rules/quantity-semantics-per-surface.md. INDIVIDUAL members
+    // have AssetKit.quantity = 1 so the math is unchanged for them.
     const totalValue = assets.reduce(
-      (sum, asset) => sum + getAssetTotalValue(asset),
+      (sum, asset) => sum + (asset.valuation ?? 0) * asset.kitQuantity,
       0
     );
 
