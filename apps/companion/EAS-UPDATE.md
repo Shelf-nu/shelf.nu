@@ -20,13 +20,15 @@ ride an OTA bundle.
 
 ## Runtime version = app version
 
-`app.json` sets `runtimeVersion: "1.2.0"`, kept equal to the app version by
-hand. An OTA update only reaches builds whose **runtime version matches**. So an
-update published while the app is `1.2.0` reaches every **OTA-capable** `1.2.0`
-build (one built with `expo-updates`; the pre-`expo-updates` 1.2.0 binaries
-currently live can't check for updates at all), and is ignored by a future
-`1.3.0` build until you publish an update for `1.3.0`. This is the safety net:
-JS that assumes new native code can never land on a build that lacks it.
+`app.json` sets `runtimeVersion: "1.3.0"`, kept equal to the app version by
+hand. An OTA update only reaches builds whose **runtime version matches**, and
+only on the **channel** it was published to (see Channels below). So an update
+published to `production` for runtime `1.3.0` reaches the **OTA-capable**
+`1.3.0` production builds (ones built with `expo-updates`; the
+pre-`expo-updates` binaries — every store build up to and including 1.2.0 —
+can't check for updates at all), and is ignored by a future `1.4.0` build until
+you publish an update for `1.4.0`. This is the safety net: JS that assumes new
+native code can never land on a build that lacks it.
 
 > **Why a hard-coded string and not `{ "policy": "appVersion" }`.** `ios/` is
 > committed, so expo-updates classifies iOS as the **generic (bare)** workflow,
@@ -156,13 +158,14 @@ rollback lands on a different runtime version and reaches nobody.
 
 ## ⚠️ Activation cost — this needs ONE build first
 
-OTA only works on builds that were **built with `expo-updates` in them**. The
-live 1.2.0 store builds predate this, so they can **not** receive OTA. The first
-build cut after this change (build 32+) is the first OTA-capable one. From that
-build onward, every JS-only fix on that app version ships free via `eas update`.
+OTA only works on builds that were **built with `expo-updates` in them**. Every
+store build up to and including 1.2.0 predates `expo-updates`, so none of them
+can receive OTA. The **1.3.0 build (build 32+) is the first OTA-capable one** —
+it is the activation build. From that build onward, every JS-only fix on that
+app version ships free via `eas update`.
 
-So: merge this → cut one more build (the last "paid" one for a while) → publish
-JS fixes over the air after that.
+So: cut the 1.3.0 build (the last "paid" one for a while) → publish JS fixes
+over the air after that.
 
 ## Code signing (required — the client verifies every bundle)
 
