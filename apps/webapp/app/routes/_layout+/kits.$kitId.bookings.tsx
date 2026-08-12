@@ -89,7 +89,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,
-          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+          extraInclude: {
+            tags: TAG_WITH_COLOR_SELECT,
+            // Same reason as the asset Bookings tab: this route renders the
+            // shared bookings row via `BookingsIndexPage`, and the
+            // unassigned-units pill reads `item.modelRequests`. Omitting it
+            // makes the pill vanish rather than read zero.
+            modelRequests: {
+              include: {
+                assetModel: { select: { id: true, name: true } },
+              },
+            },
+          },
         }),
 
         // TeamMember data for custodian

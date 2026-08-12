@@ -18,10 +18,15 @@ import { useLoaderData } from "react-router";
 import { hasCustody } from "~/modules/custody/utils";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import {
+  canAssignModelUnits,
+  countUnassignedModelUnits,
+} from "~/utils/booking-model-requests";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 import { BookingStatusBadge } from "./booking-status-badge";
+import { UnassignedModelUnitsPill } from "./unassigned-model-units-pill";
 import LineBreakText from "../layout/line-break-text";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { Badge } from "../shared/badge";
@@ -288,6 +293,14 @@ export default function ListBookingsContent({
             dispositionedByAsset={dispositionedByAsset}
             dispositionBreakdownByAsset={dispositionBreakdownByAsset}
             checkedOutByAsset={checkedOutByAsset}
+          />
+          {/* The asset count above is concrete assets only. A booking can also
+              hold model-level reservations with no physical asset behind them
+              yet, which the count cannot express — so they get their own
+              signal rather than being folded into the number. */}
+          <UnassignedModelUnitsPill
+            count={countUnassignedModelUnits(item.modelRequests)}
+            canAssign={canAssignModelUnits(item.status)}
           />
           {item.hasStockConflict ? <StockConflictPill /> : null}
         </div>

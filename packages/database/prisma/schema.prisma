@@ -1540,6 +1540,32 @@ model BookingAsset {
   assetId   String
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
+  // The model reservation this row discharged, when it came from one. `null`
+  // for assets added directly — picked, scanned onto the booking, or pulled in
+  // via a kit. That is most rows.
+  //
+  // Without it the link is narrative only: `materializeModelRequestForAsset`
+  // writes a note ("assigned X (Model A) — 2 remaining") and then the
+  // relationship is gone. An assigned asset becomes indistinguishable from one
+  // added by hand, so "which assets discharged the LED reservation?" is not
+  // answerable from data, only by reading the activity feed.
+  //
+  // Deliberately a plain column without a Prisma `@relation` accessor, for
+  // exactly the reason spelled out on `assetKitId` below — adding one more
+  // relation to this model pushed the dynamic extended client's deep generic
+  // past TS's recursion limit (TS2321), first in `organization/service.server`
+  // and then in `asset/service.server`. Services read it directly:
+  //   db.bookingAsset.findMany({ where: { bookingModelRequestId } })
+  //   db.bookingAsset.create({ data: { ..., bookingModelRequestId } })
+  //
+  // `SET NULL` cascade (DB-enforced, not Prisma) means a vanished reservation
+  // costs the row its provenance, never its place in the booking — the asset
+  // stays physically committed. In practice this rarely fires:
+  // `removeBookingModelRequest` refuses to delete a request with
+  // `fulfilledQuantity > 0`, so the realistic path is the booking cascade,
+  // which removes both rows together.
+  bookingModelRequestId String?
+
   // Discriminator for "this booked slice came from a kit" vs "this booked
   // slice is standalone from the asset's free pool". Mirror of
   // `Custody.kitCustodyId` and `AssetLocation.assetKitId`. `null` =
