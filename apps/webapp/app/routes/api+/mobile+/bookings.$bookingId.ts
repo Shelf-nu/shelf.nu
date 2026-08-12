@@ -239,6 +239,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const assets = Array.from(byAssetId.values()).map((row) => {
       const { assetKits, ...rest } = row.first.asset;
+      // why: no `sourceKitId` fallback for detached kit residue here. This
+      // response collapses per asset rather than grouping by kit, and the
+      // unanimous rule below deliberately reports `null` rather than guessing
+      // a source. Resolving the snapshot kit would re-introduce exactly the
+      // arbitrary attribution that rule exists to remove.
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't
       // mis-attribute the slice to one of multiple sources.
