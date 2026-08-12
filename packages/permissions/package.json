@@ -2,6 +2,7 @@
   "name": "@shelf/permissions",
   "version": "0.0.0",
   "private": true,
+  "description": "Pure, dependency-free RBAC matrix and permission resolver shared by the webapp and the companion app so their authorization rules never drift.",
   "type": "module",
   "exports": {
     ".": {

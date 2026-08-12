@@ -10,8 +10,11 @@
  *
  * Consumed by:
  * - webapp server validator (~/utils/permissions/permission.validator.server.ts)
+ * - webapp client UI gating (~/utils/permissions/permission.validator.client.ts)
  * - webapp permission.data shim (~/utils/permissions/permission.data.ts)
  * - companion UI gating (apps/companion/lib/permissions.ts)
+ *
+ * There is no fourth copy: every RBAC decision in either app resolves here.
  *
  * Deliberately dependency-free (no Prisma, no Node APIs) so Metro can bundle
  * it for React Native: OrganizationRole re-declares the role names as a
@@ -34,6 +37,11 @@ export const ORGANIZATION_ROLES = [
 /** A single organization role name. */
 export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 
+/**
+ * Every action a role can be granted on an entity. String values are the
+ * stable wire/lookup keys — renaming one silently changes matrix lookups, so
+ * change the member name and the value together or not at all.
+ */
 export enum PermissionAction {
   create = "create",
   read = "read",
@@ -51,6 +59,11 @@ export enum PermissionAction {
   manageKits = "manage-kits",
   changeRole = "change-role",
 }
+/**
+ * Every resource a permission can be checked against. Each role's matrix
+ * entry must list ALL of these (the `Record<PermissionEntity, …>` below makes
+ * that a compile error rather than a runtime `undefined` lookup).
+ */
 export enum PermissionEntity {
   asset = "asset",
   assetIndexSettings = "assetIndexSettings",
@@ -84,6 +97,16 @@ export enum PermissionEntity {
   commandPaletteSearch = "command-palette-search",
 }
 
+/**
+ * The raw role → entity → actions matrix.
+ *
+ * DO NOT read this directly to decide whether a user may do something — it is
+ * only half of Shelf's effective authorization. ADMIN and OWNER are allowed
+ * everything regardless of what their entries say (e.g. no role's entry lists
+ * `qr:update`, yet both hold it), and that short-circuit lives in
+ * {@link roleHasPermission}. Reading the map alone gives the wrong answer for
+ * two of the four roles. Call the resolver instead.
+ */
 export const Role2PermissionMap: {
   [K in OrganizationRole]?: Record<PermissionEntity, PermissionAction[]>;
 } = {
@@ -500,7 +523,9 @@ export const Role2PermissionMap: {
  * @param roles - The user's role names for the organization. Unknown or
  *   empty values safely resolve to `false` (deny).
  * @param entity - The permission entity being checked.
- * @param action - The action being checked on that entity.
+ * @param action - The action being checked on that entity. An array means
+ *   ANY-match: `true` when a held role grants at least one of them. An empty
+ *   array grants nothing (except to ADMIN/OWNER, who short-circuit first).
  * @returns `true` when any held role grants the action on the entity.
  * @throws Never — pure function; malformed input denies instead of throwing.
  */
@@ -511,13 +536,22 @@ export function roleHasPermission({
 }: {
   roles: readonly string[] | undefined;
   entity: PermissionEntity | `${PermissionEntity}`;
-  action: PermissionAction | `${PermissionAction}`;
+  action:
+    | PermissionAction
+    | `${PermissionAction}`
+    | readonly (PermissionAction | `${PermissionAction}`)[];
 }): boolean {
   if (!roles?.length) return false;
 
   // Owner and admin can do anything (mirrors the webapp's historical
   // hasPermission short-circuit — part of effective behavior, not the map).
   if (roles.includes("ADMIN") || roles.includes("OWNER")) return true;
+
+  // why: `typeof === "string"` (not Array.isArray) discriminates the single
+  // action from the array — PermissionAction is a STRING enum, so its members
+  // are strings at runtime, and this narrows the readonly array cleanly.
+  const actionsToCheck: readonly string[] =
+    typeof action === "string" ? [action] : action;
 
   return roles.some((role) => {
     // why: index by plain string — runtime keys are the literal role names;
@@ -528,6 +562,8 @@ export function roleHasPermission({
       >
     )[role];
     if (!entityPermMap) return false;
-    return entityPermMap[entity]?.includes(action as PermissionAction) ?? false;
+    const granted = entityPermMap[entity];
+    if (!granted) return false;
+    return granted.some((permission) => actionsToCheck.includes(permission));
   });
 }
