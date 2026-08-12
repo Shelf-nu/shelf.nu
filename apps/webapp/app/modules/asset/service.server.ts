@@ -73,7 +73,9 @@ import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
+  CUSTODY_FILTER_REFUSED,
   getTeamMemberForCustodianFilter,
+  narrowCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
@@ -4131,6 +4133,36 @@ export async function getPaginatedAndFilterableAssets({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  /**
+   * `?teamMember=` is raw request input. Redacting the custodian from the
+   * response is not enough on its own — filtering by a colleague's id and
+   * reading which rows come back still reveals what they hold. Narrow the ids
+   * to the caller's own before they reach any custody clause.
+   */
+  const allowedTeamMemberIds = await narrowCustodianFilterIds({
+    teamMemberIds,
+    canSeeAllCustody,
+    userId: userId ?? "",
+    organizationId,
+  });
+
+  /**
+   * When narrowing removes every requested id, the filter must match NOTHING
+   * — not be dropped. An empty array cannot carry that meaning here, because
+   * `getParamsValues` already returns `[]` for "no filter requested" and the
+   * where-builder guards on `.length`. So an id that cannot exist is used to
+   * force an empty result.
+   *
+   * Dropping the filter instead would show the caller every asset while the
+   * UI still displayed the colleague's chip — reading as though the filter had
+   * worked, and leaving them unable to tell a real result from a refused one.
+   */
+  const requestedTeamMemberIds = teamMemberIds ?? [];
+  const scopedTeamMemberIds =
+    requestedTeamMemberIds.length > 0 && allowedTeamMemberIds.length === 0
+      ? [CUSTODY_FILTER_REFUSED]
+      : allowedTeamMemberIds;
+
   try {
     /**
      * These three queries are independent (no data flows between them),
@@ -4159,7 +4191,9 @@ export async function getPaginatedAndFilterableAssets({
       }),
       getTeamMemberForCustodianFilter({
         organizationId,
-        selectedTeamMembers: teamMemberIds,
+        // Narrowed too: the seed renders the filter's current selection, and an
+        // unscoped id here would fetch that person's row back.
+        selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
         // A read FILTER, so the resolved custody rule governs — NOT the role.
         // `isSelfService` was false for BASE, which left this seed unscoped
@@ -4183,7 +4217,7 @@ export async function getPaginatedAndFilterableAssets({
         hideUnavailable,
         unhideAssetsBookigIds,
         locationIds,
-        teamMemberIds,
+        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
         availableToBookOnly: isSelfService,
