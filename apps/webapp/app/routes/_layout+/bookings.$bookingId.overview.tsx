@@ -646,6 +646,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           }
         : null;
 
+      /**
+       * Row-level marker for the detached-residue case above, so the UI can
+       * label a slice that renders inside a kit group but is no longer a
+       * member of it. Derived HERE (not in the component) because
+       * `clientLoader` re-runs `shapeBookingAssets` over the cached
+       * `rawAssets`, which carry only the projected fields — neither
+       * `assetKitId` nor `sourceKitId` survives that trip.
+       *
+       * Suppressed when the asset has since been re-added to the same kit:
+       * membership then exists again (under a NEW `AssetKit` id the old slice
+       * doesn't point at), so calling the row "removed" would be a lie.
+       * `ba.asset.assetKits` is the pivot-included membership list, which
+       * carries `kitId` (same source the kit-id collection above walks).
+       */
+      const isRemovedFromKit =
+        Boolean(snapshotKit) &&
+        !ba.asset.assetKits.some((ak) => ak.kitId === ba.sourceKitId);
+
       return {
         ...base,
         kitId: matchedAssetKit?.kitId ?? snapshotKit?.id ?? null,
@@ -653,6 +671,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         location: getPrimaryLocation(base) ?? null,
         bookingAssetId: ba.id,
         bookedQuantity: ba.quantity ?? 1,
+        isRemovedFromKit,
       };
     });
 
