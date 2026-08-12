@@ -365,12 +365,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const allBookingKitIds = [
       ...new Set(
         booking.bookingAssets
-          .map((ba) => {
-            if (!ba.assetKitId) return null;
-            return (
-              ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kitId ??
-              null
-            );
+          .flatMap((ba) => {
+            // Live membership: resolve the slice's `assetKitId` to its kit.
+            const liveKitId = ba.assetKitId
+              ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)
+                  ?.kitId ?? null
+              : null;
+            // Detached kit residue: once the asset leaves the kit its
+            // `AssetKit` row is gone and the FK above was `SET NULL`'d, so the
+            // two-hop join resolves nothing. `sourceKitId` is the durable
+            // provenance, so include it too and the single (already
+            // org-scoped) `db.kit.findMany` below covers live AND snapshot
+            // kits with no extra query. The two agree while the membership
+            // lives, so the Set dedupes them.
+            return [liveKitId, ba.sourceKitId];
           })
           .filter((id): id is string => id !== null)
       ),
@@ -564,10 +572,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // Index the enriched assets for lookup during per-slice projection below
-    // (`shapeBookingAssets` consumes `rawKits` directly, so we don't index it
-    // here — main's helper builds its own kits map internally).
+    // Index the enriched assets for lookup during per-slice projection below.
     const assetDetailsMap = new Map(rawAssets.map((a) => [a.id, a]));
+
+    /**
+     * Kits indexed by id, used ONLY by the detached-residue fallback in the
+     * per-slice projection below. `shapeBookingAssets` consumes `rawKits`
+     * directly and builds its own map internally, so this is not a duplicate
+     * of the render-side lookup.
+     */
+    const kitsById = new Map(rawKits.map((kit) => [kit.id, kit]));
 
     /**
      * Build the view-asset array `shapeBookingAssets` consumes: one entry
@@ -590,13 +604,74 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             (ak) => ak.id === ba.assetKitId
           ) ?? null
         : null;
+
+      /**
+       * Detached kit residue. When an asset leaves a kit, its `AssetKit` row
+       * disappears and `BookingAsset.assetKitId` is `SET NULL`'d, so the
+       * two-hop join above resolves nothing and the slice would render as a
+       * loose standalone asset — retroactively rewriting what a finished job
+       * contained. `sourceKitId` is the durable provenance, so we fall back to
+       * it and keep the row grouped under the kit it was booked as part of.
+       *
+       * Planning-status bookings now delete such slices outright, so a row
+       * reaching this branch is by construction a snapshot of a non-planning
+       * booking — no status gate is needed here.
+       *
+       * Normalised to the exact shape `matchedAssetKit.kit` has (the two
+       * queries select different depths) so every downstream consumer —
+       * grouping, sorting, in-memory search, the serialised client payload —
+       * keeps seeing one kit type. `kitsById` comes from the org-scoped kit
+       * query, which also contains the cross-org guard: `sourceKitId`'s FK
+       * accepts a `Kit` in any organization, so an unresolvable id simply
+       * leaves the row standalone.
+       */
+      const rawSnapshotKit =
+        !matchedAssetKit && ba.sourceKitId
+          ? kitsById.get(ba.sourceKitId) ?? null
+          : null;
+      const snapshotKit = rawSnapshotKit
+        ? {
+            id: rawSnapshotKit.id,
+            name: rawSnapshotKit.name,
+            image: rawSnapshotKit.image,
+            location: rawSnapshotKit.location
+              ? {
+                  id: rawSnapshotKit.location.id,
+                  name: rawSnapshotKit.location.name,
+                }
+              : null,
+            category: rawSnapshotKit.category
+              ? { name: rawSnapshotKit.category.name }
+              : null,
+          }
+        : null;
+
+      /**
+       * Row-level marker for the detached-residue case above, so the UI can
+       * label a slice that renders inside a kit group but is no longer a
+       * member of it. Derived HERE (not in the component) because
+       * `clientLoader` re-runs `shapeBookingAssets` over the cached
+       * `rawAssets`, which carry only the projected fields — neither
+       * `assetKitId` nor `sourceKitId` survives that trip.
+       *
+       * Suppressed when the asset has since been re-added to the same kit:
+       * membership then exists again (under a NEW `AssetKit` id the old slice
+       * doesn't point at), so calling the row "removed" would be a lie.
+       * `ba.asset.assetKits` is the pivot-included membership list, which
+       * carries `kitId` (same source the kit-id collection above walks).
+       */
+      const isRemovedFromKit =
+        Boolean(snapshotKit) &&
+        !ba.asset.assetKits.some((ak) => ak.kitId === ba.sourceKitId);
+
       return {
         ...base,
-        kitId: matchedAssetKit?.kitId ?? null,
-        kit: matchedAssetKit?.kit ?? null,
+        kitId: matchedAssetKit?.kitId ?? snapshotKit?.id ?? null,
+        kit: matchedAssetKit?.kit ?? snapshotKit,
         location: getPrimaryLocation(base) ?? null,
         bookingAssetId: ba.id,
         bookedQuantity: ba.quantity ?? 1,
+        isRemovedFromKit,
       };
     });
 

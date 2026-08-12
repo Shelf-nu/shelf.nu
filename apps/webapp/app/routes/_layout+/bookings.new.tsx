@@ -16,6 +16,7 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   buildKitSlicesForBooking,
   createBooking,
@@ -278,11 +279,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // - everything else → `standaloneAssetIds` (loose rows, `assetKitId` NULL)
     // When no kit is involved, `standaloneAssetIds` is just the form's
     // `assetIds` and `kitSlices` stays empty (behavior unchanged).
-    let kitSlices: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity: number;
-    }> = [];
+    let kitSlices: KitSliceSpec[] = [];
     let standaloneAssetIds = assetIds?.length ? assetIds : [];
 
     if (kitIds.length > 0) {

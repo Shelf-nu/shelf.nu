@@ -86,7 +86,11 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
-import { createSystemBookingNote } from "../booking-note/service.server";
+import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
+import {
+  createSystemBookingNote,
+  createSystemBookingNotes,
+} from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
@@ -263,6 +267,534 @@ export async function fetchAssetKitDetachmentImpact(
 }
 
 /**
+ * One `BookingAsset` row deleted by
+ * {@link removeKitSlicesFromPlanningBookings}, snapshotted pre-delete so
+ * callers can report exactly what disappeared.
+ */
+export type RemovedPlanningBookingSlice = {
+  bookingAssetId: string;
+  bookingId: string;
+  bookingName: string;
+  organizationId: string;
+  assetId: string;
+  assetTitle: string;
+  assetType: AssetType;
+  unitOfMeasure: string | null;
+  quantity: number;
+  kitId: string;
+  kitName: string;
+};
+
+/**
+ * Deletes the kit-driven `BookingAsset` rows that belong to bookings still in a
+ * planning status, for the `AssetKit` rows about to be deleted.
+ *
+ * Without this the DB-level `ON DELETE SET NULL` cascade demotes those rows to
+ * standalone slices, so a draft booking silently keeps an asset its kit no
+ * longer contains. For a booking where nothing has physically left the
+ * warehouse the booking should track the kit, so the row is removed outright.
+ *
+ * Deliberately scoped to {@link PLANNING_BOOKING_STATUSES}: an ONGOING/OVERDUE
+ * slice is physically checked out (deleting it would strand custody and
+ * checkout attribution) and a COMPLETE/ARCHIVED/CANCELLED slice is history.
+ * Those keep today's cascade and are rendered under their original kit via
+ * `BookingAsset.sourceKitId`.
+ *
+ * Only the KIT-DRIVEN row dies. A booking can hold the same asset both as a kit
+ * slice and as a deliberately hand-added standalone row (the two partial unique
+ * indexes allow exactly that), so the read keys on `assetKitId` — never on
+ * `assetId` — and the delete names the ids it read back.
+ *
+ * Safe to delete: only `ConsumptionLog.bookingAssetId` (a real FK, ON DELETE
+ * SET NULL, so history survives) and `PartialBookingCheckout.bookingAssetIds`
+ * (a text array, no FK) reference these rows. Both are written only by
+ * check-in/checkout paths, which move the booking to ONGOING/OVERDUE — neither
+ * can exist for a booking still in a planning status.
+ *
+ * Emits the audit trail for what it destroyed, inside the caller's transaction:
+ * one `BOOKING_ASSETS_REMOVED` event per affected `(booking, asset)` and one
+ * booking system note per `(booking, kit)` pair. Also re-opens any
+ * `BookingModelRequest` the deleted rows were fulfilling.
+ *
+ * Both of those aggregate PER ASSET, not per row, to stay symmetric with the
+ * rest of the codebase: `removeAssets` emits one event per asset with the
+ * summed quantity, and `materializeModelRequestForAsset` only ever increments
+ * `fulfilledQuantity` by 1 per asset. A QUANTITY_TRACKED asset can hold a slice
+ * in several kits on one booking, so counting rows would emit duplicate events
+ * and decrement a request by more than was ever added to it.
+ *
+ * Call BEFORE {@link fetchAssetKitDetachmentImpact} and
+ * {@link mergeStandaloneCollisionsForKitDetachment}, so neither reports on nor
+ * merges a row that is about to disappear.
+ *
+ * Org-scoped in the queries themselves, not by caller discipline: this DELETES
+ * rows, so a stray `AssetKit` id from another org would destroy another
+ * tenant's booking data. `organizationId` is a required param so the compiler
+ * forces every call site to supply it, matching its read-only sibling
+ * {@link getBookingImpactForAssetKits} (see
+ * `.claude/rules/org-scope-user-supplied-ids.md`).
+ *
+ * @param tx Active transaction — must be the one deleting the `AssetKit` rows
+ * @param assetKitIds `AssetKit` rows about to be deleted
+ * @param options.actorUserId Acting user, for the event actor + note attribution
+ * @param options.organizationId Acting org — rows outside it are never touched
+ * @param options.reason What removed the membership — picks the note wording.
+ *   `"kit-deleted"` for the kit-deletion cascade (the asset never left the kit,
+ *   the kit ceased to exist); `"membership-removed"` otherwise.
+ * @returns One entry per deleted row, for callers that need to report further.
+ */
+export async function removeKitSlicesFromPlanningBookings(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  assetKitIds: string[],
+  {
+    actorUserId,
+    organizationId,
+    reason = "membership-removed",
+  }: {
+    actorUserId: string;
+    organizationId: string;
+    reason?: "membership-removed" | "kit-deleted";
+  }
+): Promise<RemovedPlanningBookingSlice[]> {
+  if (assetKitIds.length === 0) return [];
+
+  // `BookingAsset.assetKitId` is a plain FK column with no back-relation (see
+  // the schema comment), so the kit's name comes from a second query + an
+  // in-memory join — same shape as `fetchAssetKitDetachmentImpact`.
+  const [rows, assetKitRows] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: {
+        assetKitId: { in: assetKitIds },
+        // Both clauses on the booking: `organizationId` is the tenancy guard
+        // (`BookingAsset` has no org column of its own), `status` the scope.
+        booking: {
+          organizationId,
+          status: { in: PLANNING_BOOKING_STATUSES },
+        },
+      },
+      // Snapshot before the delete — quantity and titles are unrecoverable
+      // afterwards, and the notes/events below need both.
+      select: {
+        id: true,
+        bookingId: true,
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        booking: {
+          select: { id: true, name: true, organizationId: true, status: true },
+        },
+        asset: {
+          select: {
+            id: true,
+            title: true,
+            type: true,
+            unitOfMeasure: true,
+            // Removing a materialised row re-opens its model request.
+            assetModelId: true,
+          },
+        },
+      },
+    }),
+    tx.assetKit.findMany({
+      where: { id: { in: assetKitIds }, organizationId },
+      select: { id: true, kitId: true, kit: { select: { name: true } } },
+    }),
+  ]);
+  if (rows.length === 0) return [];
+
+  const akById = new Map<
+    string,
+    { id: string; kitId: string; kit: { name: string } }
+  >(
+    assetKitRows.map(
+      (ak: { id: string; kitId: string; kit: { name: string } }) => [ak.id, ak]
+    )
+  );
+
+  const removed: RemovedPlanningBookingSlice[] = rows.map(
+    (row: {
+      id: string;
+      bookingId: string;
+      assetId: string;
+      quantity: number;
+      assetKitId: string;
+      booking: { id: string; name: string; organizationId: string };
+      asset: {
+        id: string;
+        title: string;
+        type: AssetType;
+        unitOfMeasure: string | null;
+        assetModelId: string | null;
+      };
+    }) => {
+      const ak = akById.get(row.assetKitId);
+      return {
+        bookingAssetId: row.id,
+        bookingId: row.bookingId,
+        bookingName: row.booking.name,
+        organizationId: row.booking.organizationId,
+        assetId: row.asset.id,
+        assetTitle: row.asset.title,
+        assetType: row.asset.type,
+        unitOfMeasure: row.asset.unitOfMeasure,
+        quantity: row.quantity,
+        kitId: ak?.kitId ?? "",
+        kitName: ak?.kit?.name ?? "",
+      };
+    }
+  );
+
+  // Keyed on the exact ids read above, so a standalone row for the same
+  // (booking, asset) pair is untouched.
+  await tx.bookingAsset.deleteMany({
+    where: { id: { in: removed.map((r) => r.bookingAssetId) } },
+  });
+
+  // Collapse to one entry per (booking, asset). A QUANTITY_TRACKED asset can
+  // hold a slice in several kits on the same booking, and BOTH consumers below
+  // are per-asset: `removeAssets` emits one event per asset carrying the summed
+  // quantity, and `materializeModelRequestForAsset` only ever incremented
+  // `fulfilledQuantity` by 1 for that asset. Counting rows here would duplicate
+  // the event and decrement a request by more than was ever added to it.
+  type PerAsset = {
+    bookingId: string;
+    organizationId: string;
+    assetId: string;
+    assetType: AssetType;
+    unitOfMeasure: string | null;
+    assetModelId: string | null;
+    /** Sum of every deleted slice's booked units for this (booking, asset). */
+    quantity: number;
+    /** Distinct kits the deleted slices came from — one means we can name it. */
+    kitIds: Set<string>;
+  };
+  const perAsset = new Map<string, PerAsset>();
+  for (const row of rows as Array<{
+    bookingId: string;
+    quantity: number;
+    assetKitId: string;
+    booking: { organizationId: string };
+    asset: {
+      id: string;
+      type: AssetType;
+      unitOfMeasure: string | null;
+      assetModelId: string | null;
+    };
+  }>) {
+    const key = `${row.bookingId}::${row.asset.id}`;
+    const kitId = akById.get(row.assetKitId)?.kitId;
+    const existing = perAsset.get(key);
+    if (existing) {
+      existing.quantity += row.quantity;
+      if (kitId) existing.kitIds.add(kitId);
+      continue;
+    }
+    perAsset.set(key, {
+      bookingId: row.bookingId,
+      organizationId: row.booking.organizationId,
+      assetId: row.asset.id,
+      assetType: row.asset.type,
+      unitOfMeasure: row.asset.unitOfMeasure,
+      assetModelId: row.asset.assetModelId,
+      quantity: row.quantity,
+      kitIds: new Set(kitId ? [kitId] : []),
+    });
+  }
+
+  // Re-open any `BookingModelRequest` these assets were fulfilling. Same
+  // bookkeeping as `removeAssets`: one unit per ASSET that went away, floored at
+  // 0, and the completion stamp cleared once the request has outstanding units
+  // again. Keyed per (booking, model) because one call can span bookings.
+  const removalsByBookingModel = new Map<
+    string,
+    { bookingId: string; assetModelId: string; count: number }
+  >();
+  for (const entry of perAsset.values()) {
+    if (!entry.assetModelId) continue;
+    const key = `${entry.bookingId}::${entry.assetModelId}`;
+    const existing = removalsByBookingModel.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      removalsByBookingModel.set(key, {
+        bookingId: entry.bookingId,
+        assetModelId: entry.assetModelId,
+        count: 1,
+      });
+    }
+  }
+  for (const {
+    bookingId,
+    assetModelId,
+    count,
+  } of removalsByBookingModel.values()) {
+    const request = await tx.bookingModelRequest.findUnique({
+      where: { bookingId_assetModelId: { bookingId, assetModelId } },
+      select: { quantity: true, fulfilledQuantity: true },
+    });
+    if (!request || request.fulfilledQuantity === 0) continue;
+
+    const nextFulfilled = Math.max(0, request.fulfilledQuantity - count);
+    await tx.bookingModelRequest.update({
+      where: { bookingId_assetModelId: { bookingId, assetModelId } },
+      data: {
+        fulfilledQuantity: nextFulfilled,
+        ...(nextFulfilled < request.quantity ? { fulfilledAt: null } : {}),
+      },
+    });
+  }
+
+  // One event per (booking, asset) that lost booked units — the report would
+  // otherwise lose the removal entirely when it happens via kit membership
+  // instead of the booking UI. Inside the tx so it rolls back with the delete.
+  await recordEvents(
+    [...perAsset.values()].map((entry) => {
+      // Only name a kit when the deleted slices all came from one — an asset
+      // detached from two kits at once has no single source to point at.
+      const [onlyKitId] = entry.kitIds;
+      return {
+        organizationId: entry.organizationId,
+        actorUserId,
+        action: "BOOKING_ASSETS_REMOVED" as const,
+        entityType: "BOOKING" as const,
+        entityId: entry.bookingId,
+        bookingId: entry.bookingId,
+        assetId: entry.assetId,
+        ...(entry.kitIds.size === 1 && onlyKitId ? { kitId: onlyKitId } : {}),
+        meta: {
+          // Distinguishes this from an operator removing the asset by hand.
+          viaKitRemoval: true,
+          ...assetQtyMeta(
+            { type: entry.assetType, unitOfMeasure: entry.unitOfMeasure },
+            entry.quantity
+          ),
+        },
+      };
+    }),
+    tx
+  );
+
+  // Actor for the note attribution, read on the CALLER'S transaction client. It
+  // must not go through `getUserByID`, which is hardcoded to the global `db`
+  // (see `user/service.server.ts`) — that would take a second pooled connection
+  // while this interactive tx holds one, and add a round-trip to a tx budget
+  // that has already produced P2028 on large bulk operations.
+  const actor: { firstName: string | null; lastName: string | null } | null =
+    await tx.user.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
+      where: { id: actorUserId },
+      select: { firstName: true, lastName: true },
+    });
+  const actorLink = wrapUserLinkForNote({
+    id: actorUserId,
+    firstName: actor?.firstName,
+    lastName: actor?.lastName,
+  });
+
+  // One note per (booking, kit) pair — several assets leaving the same kit in
+  // one action collapse into a single line rather than spamming the feed.
+  type Group = {
+    bookingId: string;
+    organizationId: string;
+    kitName: string;
+    assetTitles: string[];
+  };
+  const groups = new Map<string, Group>();
+  for (const row of removed) {
+    const key = `${row.bookingId}::${row.kitId}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.assetTitles.push(row.assetTitle);
+    } else {
+      groups.set(key, {
+        bookingId: row.bookingId,
+        organizationId: row.organizationId,
+        kitName: row.kitName,
+        assetTitles: [row.assetTitle],
+      });
+    }
+  }
+
+  // `createSystemBookingNotes` verifies every booking belongs to the org it is
+  // handed, so notes are batched per organization. Always a single batch now
+  // that the read filters on `organizationId`, but the grouping is kept so the
+  // helper stays correct if the read ever widens.
+  const notesByOrg = new Map<
+    string,
+    Array<{ bookingId: string; content: string }>
+  >();
+  for (const group of groups.values()) {
+    // Asset titles and the kit name are user-supplied and render as literal
+    // text in this Markdoc note.
+    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
+    const subjects =
+      safeTitles.length === 1
+        ? `**${safeTitles[0]}**`
+        : `**${safeTitles.length} assets** (${safeTitles
+            .map((t) => `*${t}*`)
+            .join(", ")})`;
+    // `kit-deleted` names the subjects after the clause, so it takes the bare
+    // verb; the membership wording already named them and needs the pronoun.
+    const verb = safeTitles.length === 1 ? "was" : "were";
+    const pronoun = safeTitles.length === 1 ? "it" : "they";
+    const safeKitName = stripMarkdocDelimiters(group.kitName);
+    // The two paths differ in what actually happened: on `kit-deleted` the
+    // asset never left the kit — the kit stopped existing. Saying "removed X
+    // from kit Y" there would describe a membership edit that never occurred.
+    const cause =
+      reason === "kit-deleted"
+        ? `${actorLink} deleted kit **${safeKitName}**, so ${subjects} ${verb} removed from this booking`
+        : `${actorLink} removed ${subjects} from kit **${safeKitName}**, so ${pronoun} ${verb} also removed from this booking`;
+    const content = `${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`;
+    const bucket = notesByOrg.get(group.organizationId);
+    if (bucket) {
+      bucket.push({ bookingId: group.bookingId, content });
+    } else {
+      notesByOrg.set(group.organizationId, [
+        { bookingId: group.bookingId, content },
+      ]);
+    }
+  }
+  for (const [organizationId, notes] of notesByOrg) {
+    await createSystemBookingNotes({ notes, organizationId }, tx);
+  }
+
+  return removed;
+}
+
+/**
+ * Booking statuses whose impact is worth naming before a kit removal is
+ * confirmed — the two the operator can still act on.
+ *
+ * `RESERVED`: the slice is DELETED (see {@link removeKitSlicesFromPlanningBookings}).
+ * `ONGOING` / `OVERDUE`: the slice is KEPT and relabelled "removed from kit".
+ *
+ * `DRAFT` is deliberately out even though its slice is deleted too — nobody has
+ * committed to a draft, so the warning would be noise. `COMPLETE` / `ARCHIVED` /
+ * `CANCELLED` are out because they are historical: the operator can take no
+ * action about them, and a popular kit can carry dozens, which would bury the
+ * two actionable groups.
+ */
+const KIT_REMOVAL_NOTICE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/** A booking named in the removal notice. */
+type BookingForRemovalImpact = { id: string; name: string };
+
+/**
+ * Per-membership removal impact, split by what actually happens to the slice.
+ *
+ * @property reserved - RESERVED bookings that LOSE the slice on removal.
+ * @property checkedOut - ONGOING/OVERDUE bookings that KEEP the slice, relabelled.
+ */
+export type AssetKitBookingImpact = {
+  reserved: BookingForRemovalImpact[];
+  checkedOut: BookingForRemovalImpact[];
+};
+
+/**
+ * Which bookings a removal from a kit would visibly affect, grouped by outcome.
+ *
+ * Removing an asset from a kit does two different things depending on the
+ * booking's status. On a planning booking the kit-driven `BookingAsset` row is
+ * DELETED (see {@link removeKitSlicesFromPlanningBookings}) — for a DRAFT that
+ * is unremarkable, but a RESERVED booking has committed dates and a custodian.
+ * On an ONGOING/OVERDUE booking the row is KEPT, still grouped under its
+ * original kit and flagged as removed from it, because those units are
+ * physically out and the booking must still record what went out.
+ *
+ * Both outcomes get named before the user confirms, in their own group — see
+ * `~/components/kits/booking-removal-notice`.
+ *
+ * Read-only and purely advisory: it takes no `tx` and nothing branches on the
+ * result server-side. The removal itself is never blocked — kit maintenance
+ * would be impossible whenever anything is reserved or out.
+ * (`moveAssetKitUnits` blocks, deliberately, for a different operation.)
+ *
+ * Org-scoped in the query itself, not by caller discipline: this renders BOOKING
+ * NAMES back to the user, so a stray `AssetKit` id from another org would leak
+ * them. `organizationId` is a required param so the compiler forces every call
+ * site to supply it (see `.claude/rules/org-scope-user-supplied-ids.md`).
+ *
+ * @param assetKitIds `AssetKit` rows the UI offers to remove
+ * @param organizationId Acting org — bookings outside it are never returned
+ * @returns `assetKitId -> { reserved, checkedOut }`, each deduped by booking id.
+ *   An absent key means that membership has no impact worth naming.
+ */
+export async function getBookingImpactForAssetKits({
+  assetKitIds,
+  organizationId,
+}: {
+  assetKitIds: string[];
+  organizationId: string;
+}): Promise<Record<string, AssetKitBookingImpact>> {
+  if (assetKitIds.length === 0) return {};
+
+  const rows = await db.bookingAsset.findMany({
+    where: {
+      assetKitId: { in: assetKitIds },
+      // Both clauses on the booking: `organizationId` is the tenancy guard,
+      // `status` the advisory scope.
+      booking: {
+        status: { in: KIT_REMOVAL_NOTICE_BOOKING_STATUSES },
+        organizationId,
+      },
+    },
+    select: {
+      assetKitId: true,
+      // `status` picks the bucket — the two outcomes read differently, so the
+      // notice can't collapse them into one list.
+      booking: { select: { id: true, name: true, status: true } },
+    },
+  });
+
+  const impact: Record<string, AssetKitBookingImpact> = {};
+  for (const row of rows) {
+    // Rows are keyed on `assetKitId` — a null one is a standalone slice the
+    // membership doesn't own, and removal never touches it.
+    if (!row.assetKitId || !row.booking) continue;
+
+    // Bucket by outcome. Anything outside the two groups is dropped rather
+    // than defaulted into one of them: the copy makes a promise about what
+    // happens to the booking, and a status this function doesn't model would
+    // make the wrong promise.
+    let bucket: BookingForRemovalImpact[];
+    const groups = (impact[row.assetKitId] ??= {
+      reserved: [],
+      checkedOut: [],
+    });
+    if (row.booking.status === BookingStatus.RESERVED) {
+      bucket = groups.reserved;
+    } else if (
+      row.booking.status === BookingStatus.ONGOING ||
+      row.booking.status === BookingStatus.OVERDUE
+    ) {
+      bucket = groups.checkedOut;
+    } else {
+      continue;
+    }
+
+    // Dedupe per bucket: the notice counts bookings, not rows, so a membership
+    // holding several slices of one booking must still read "1 booking".
+    if (bucket.some((booking) => booking.id === row.booking.id)) continue;
+    bucket.push({ id: row.booking.id, name: row.booking.name });
+  }
+
+  // A membership whose only rows were dropped above would otherwise ship an
+  // empty pair of groups and be counted as "impacted" by call sites.
+  for (const [assetKitId, groups] of Object.entries(impact)) {
+    if (groups.reserved.length === 0 && groups.checkedOut.length === 0) {
+      delete impact[assetKitId];
+    }
+  }
+  return impact;
+}
+
+/**
  * Companion to {@link fetchAssetKitDetachmentImpact}. Writes a system
  * note on each affected booking explaining that the kit's booked slice
  * has been converted to a standalone reservation. The kit-driven
@@ -294,10 +826,17 @@ export async function fetchAssetKitDetachmentImpact(
  * since it needs the kit-driven rows to still exist to capture their
  * booking + asset names.
  *
- * INDIVIDUAL assets can't collide (the trigger
- * `enforce_individual_asset_single_kit` already prevents an INDIVIDUAL
- * asset from being in multiple slices), but for safety the merge handles
- * them the same way QUANTITY_TRACKED ones are handled.
+ * INDIVIDUAL assets shouldn't collide, but that guarantee is SERVICE-layer,
+ * not a database one: the INDIVIDUAL-overlap guards in `createBooking` and
+ * `updateBookingAssets` (`~/modules/booking/service.server`) drop an
+ * INDIVIDUAL asset from the standalone bucket when the same call also books
+ * it via a kit slice, so it never ends up with both rows. QUANTITY_TRACKED is
+ * deliberately exempt there — a free-pool slice may legitimately coexist with
+ * kit slices. (The `enforce_individual_asset_single_kit` trigger is NOT the
+ * enforcement point: it caps `AssetKit` membership rows per INDIVIDUAL asset
+ * and says nothing about `BookingAsset` rows.) Since nothing at the DB level
+ * stops the collision, the merge below handles INDIVIDUAL rows the same way
+ * QUANTITY_TRACKED ones are handled.
  */
 export async function mergeStandaloneCollisionsForKitDetachment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -337,14 +876,36 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     standaloneMatches.map((s) => [`${s.bookingId}::${s.assetId}`, s])
   );
 
+  // Sum EVERY kit-driven row that merges into the same standalone row before
+  // writing. A QUANTITY_TRACKED asset can sit in several kits on one booking
+  // (`BookingAsset_kit_unique` is per-AssetKit), so a bulk kit deletion can
+  // collapse two kit rows into one standalone row. Writing
+  // `standalone.quantity + kdr.quantity` per row from the unchanged snapshot
+  // would let the second write overwrite the first, silently losing the first
+  // slice's units.
+  const mergedQtyByStandaloneId = new Map<string, number>();
+  const kitDrivenIdsToDelete: string[] = [];
   for (const kdr of kitDrivenRows) {
     const standalone = standaloneByPair.get(`${kdr.bookingId}::${kdr.assetId}`);
     if (!standalone) continue;
+    mergedQtyByStandaloneId.set(
+      standalone.id,
+      (mergedQtyByStandaloneId.get(standalone.id) ?? standalone.quantity) +
+        kdr.quantity
+    );
+    kitDrivenIdsToDelete.push(kdr.id);
+  }
+
+  for (const [standaloneId, quantity] of mergedQtyByStandaloneId) {
     await tx.bookingAsset.update({
-      where: { id: standalone.id },
-      data: { quantity: standalone.quantity + kdr.quantity },
+      where: { id: standaloneId },
+      data: { quantity },
     });
-    await tx.bookingAsset.delete({ where: { id: kdr.id } });
+  }
+  if (kitDrivenIdsToDelete.length > 0) {
+    await tx.bookingAsset.deleteMany({
+      where: { id: { in: kitDrivenIdsToDelete } },
+    });
   }
 }
 
@@ -1639,10 +2200,23 @@ async function performKitDeletion({
       where: { kitId: { in: kitIdsToDelete }, organizationId },
       select: { id: true },
     });
-    await preserveKitDrivenPlacements(
-      tx,
-      aksToDelete.map((ak: { id: string }) => ak.id)
-    );
+    const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
+
+    // A booking that hasn't started tracks the kit's contents, so deleting the
+    // kit takes its slices with it rather than leaving loose assets behind.
+    // Runs before the merge so that only surviving rows are merged.
+    await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
+      actorUserId: userId,
+      organizationId,
+      // The asset never left the kit here — the kit stopped existing.
+      reason: "kit-deleted",
+    });
+    // The merge was missing here: an asset held BOTH standalone and via the kit
+    // on the same booking made the `SET NULL` cascade trip
+    // `BookingAsset_manual_unique`, rolling back the whole kit deletion with a
+    // P2002. Same guard the membership-removal paths already run.
+    await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+    await preserveKitDrivenPlacements(tx, aksToDeleteIds);
 
     await tx.kit.deleteMany({
       where: { id: { in: kitIdsToDelete }, organizationId },
@@ -4428,6 +5002,13 @@ export async function updateKitAssets({
           select: { id: true },
         });
         const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
+        // Runs FIRST: rows on a booking that hasn't started are deleted
+        // outright, so neither the impact snapshot nor the collision merge
+        // below sees a row that is about to disappear.
+        await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
+          actorUserId: userId,
+          organizationId,
+        });
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
@@ -4462,18 +5043,27 @@ export async function updateKitAssets({
         // Same pre-fetch as above so cross-kit-move INDIVIDUALS get the
         // detachment notes for any active booking that held the asset
         // via the OTHER kit. (Edge case but worth covering.)
+        // Org-scoped on both the read and the delete below. `movedFromOtherKitIds`
+        // is already org-derived, so this narrows nothing today — but the read
+        // that feeds the notes/events is org-filtered, and an unfiltered delete
+        // beside it could remove a row the audit trail never mentions.
         const aksToDelete = await tx.assetKit.findMany({
-          where: { assetId: { in: movedFromOtherKitIds } },
+          where: { assetId: { in: movedFromOtherKitIds }, organizationId },
           select: { id: true },
         });
         const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
+        // Same ordering rationale as the disconnect branch above.
+        await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
+          actorUserId: userId,
+          organizationId,
+        });
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
         await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
         await preserveKitDrivenPlacements(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
-          where: { assetId: { in: movedFromOtherKitIds } },
+          where: { assetId: { in: movedFromOtherKitIds }, organizationId },
         });
       }
 
@@ -5154,6 +5744,11 @@ export async function updateKitAssets({
                     assetId: a.id,
                     quantity: ak?.quantity ?? 1,
                     assetKitId: ak?.id ?? null,
+                    // Mirror the assetKitId branch exactly: a row that falls
+                    // back to standalone has no kit provenance either. Writing
+                    // one without the other breaks the
+                    // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
+                    sourceKitId: ak ? kit.id : null,
                   };
                 }),
                 skipDuplicates: true,
@@ -5436,20 +6031,29 @@ export async function bulkRemoveAssetsFromKits({
         },
         select: { id: true },
       });
+      const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
+
+      // Runs FIRST: slices on bookings that haven't started are deleted rather
+      // than demoted, so neither the impact snapshot nor the collision merge
+      // below sees a row that is about to disappear.
+      await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
+        actorUserId: userId,
+        organizationId,
+      });
       bulkDetachmentImpact = bulkDetachmentImpact.concat(
-        await fetchAssetKitDetachmentImpact(
-          tx,
-          aksToDelete.map((ak: { id: string }) => ak.id)
-        )
+        await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
       );
 
       // Detach all from the kit regardless of remaining custody.
       // "detach from kit" means deleting the pivot rows for these
       // assets within this organization.
-      await preserveKitDrivenPlacements(
-        tx,
-        aksToDelete.map((ak: { id: string }) => ak.id)
-      );
+      //
+      // The merge was missing here: an asset held BOTH standalone and via the
+      // kit on the same booking made the `SET NULL` cascade trip
+      // `BookingAsset_manual_unique`, rolling back the whole bulk op with a
+      // P2002. Same guard the singular paths already run.
+      await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+      await preserveKitDrivenPlacements(tx, aksToDeleteIds);
       await tx.assetKit.deleteMany({
         where: {
           assetId: { in: allRemovedAssetIds },
@@ -5842,6 +6446,9 @@ export async function moveAssetKitUnits(
       }
 
       // 8. Decrement (or delete-on-zero) the source AssetKit row.
+      // No `removeKitSlicesFromPlanningBookings` call here: step 6 above
+      // already hard-blocks the move when ANY DRAFT/RESERVED/ONGOING/OVERDUE
+      // booking holds this slice, so no planning row can reach this delete.
       const newSourceQty = source.quantity - quantity;
       const sourceRowDeleted = newSourceQty === 0;
       if (sourceRowDeleted) {

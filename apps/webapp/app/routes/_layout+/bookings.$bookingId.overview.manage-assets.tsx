@@ -163,6 +163,18 @@ export type AssetWithBooking = Asset & {
    * booking). Only meaningful for QUANTITY_TRACKED assets.
    */
   checkedOutQuantity?: number | null;
+  /**
+   * True when this row is detached kit residue: the booking slice was created
+   * as part of a kit (`BookingAsset.sourceKitId`) but its membership row is
+   * gone (`assetKitId IS NULL`, `ON DELETE SET NULL`). The row still renders
+   * grouped under its original kit — this flag lets the row explain WHY, since
+   * it would otherwise be indistinguishable from a live kit member.
+   *
+   * Resolved by the booking-overview loader (planning-status bookings delete
+   * such slices outright, so only ONGOING/OVERDUE/COMPLETE/ARCHIVED/CANCELLED
+   * bookings ever see it). Absent on surfaces that don't project it.
+   */
+  isRemovedFromKit?: boolean | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

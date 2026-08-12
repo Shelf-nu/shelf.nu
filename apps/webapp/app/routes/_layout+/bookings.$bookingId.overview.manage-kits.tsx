@@ -60,6 +60,7 @@ import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -461,17 +462,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `assetId`). This is what fixes the multi-kit-per-asset drop: a
     // qty-tracked asset in two kits added to one booking now yields two
     // kit-driven `BookingAsset` rows.
-    const kitSlices: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity: number;
-    }> = [];
+    const kitSlices: KitSliceSpec[] = [];
     for (const kit of selectedKits) {
       for (const ak of kit.assetKits) {
         if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
         kitSlices.push({
           assetId: ak.asset.id,
           assetKitId: ak.id,
+          // Durable provenance — persisted to `BookingAsset.sourceKitId`, which
+          // outlives the `AssetKit` row `assetKitId` points at.
+          kitId: kit.id,
           quantity: ak.quantity,
         });
       }

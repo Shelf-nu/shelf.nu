@@ -837,4 +837,83 @@ describe("ListAssetContent", () => {
       );
     });
   });
+
+  // Detached kit residue. Removing an asset from a kit nulls
+  // `BookingAsset.assetKitId` (ON DELETE SET NULL) but a non-planning booking
+  // KEEPS the slice, which then renders grouped under its original kit via
+  // `sourceKitId`. The loader flags those rows with `isRemovedFromKit` so the
+  // row can say so — otherwise it is indistinguishable from a live member.
+  describe("removed-from-kit badge", () => {
+    const finishedBooking = {
+      booking: {
+        id: "booking-complete",
+        status: "COMPLETE",
+        bookingAssets: [{ assetId: "asset-1" }],
+        custodianUser: null,
+      },
+    };
+
+    function renderRow(item: AssetWithBooking) {
+      return render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={item}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    }
+
+    it("labels a detached slice and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // Membership is gone (`assetKits: []`) but the loader resolved the
+        // snapshot kit off `sourceKitId` and flagged the row.
+        assetKits: [],
+        isRemovedFromKit: true,
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Removed from kit");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/removed from the kit/i);
+      expect(tooltip.textContent).toMatch(/record of what was booked/i);
+    });
+
+    it("does NOT label a live kit member", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [{ kitId: "kit-1", kit: { id: "kit-1", name: "Kit One" } }],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+
+    it("does NOT label a genuinely standalone asset", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+  });
 });

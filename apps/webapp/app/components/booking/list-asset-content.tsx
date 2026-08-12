@@ -27,6 +27,7 @@ import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
+import { RemovedFromKitBadge } from "./removed-from-kit-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -353,6 +354,13 @@ export default function ListAssetContent({
                 <ConsumptionTypeBadge
                   consumptionType={item.consumptionType ?? null}
                 />
+                {/* Detached kit residue: the row renders grouped under its
+                    original kit (via `sourceKitId`) but the asset has since
+                    left that kit. Lives on this always-visible metadata line
+                    rather than the availability column, which is suppressed
+                    once the booking is finished — exactly where these rows are
+                    most common. Flag is resolved in the overview loader. */}
+                {item.isRemovedFromKit ? <RemovedFromKitBadge /> : null}
               </div>
             </div>
           </div>
