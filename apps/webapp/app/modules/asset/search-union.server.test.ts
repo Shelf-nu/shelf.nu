@@ -45,6 +45,17 @@ describe("buildAssetSearchUnion", () => {
     expect(text).toContain("UNION");
   });
 
+  it("org-scopes the asset directly in every branch (no cross-org pivot leak)", () => {
+    const text = sqlText(
+      buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
+    );
+    // The 3 pivot-based branches join back to Asset and pin a."organizationId",
+    // so the helper is safe to run standalone (not only under an outer org filter).
+    expect(text).toContain('JOIN public."Asset" a ON a."id" = al."assetId"'); // Location
+    expect(text).toContain('JOIN public."Asset" a ON a."id" = att."A"'); // Tag
+    expect(text).toContain('JOIN public."Asset" a ON a."id" = cu."assetId"'); // Custody
+  });
+
   it("uses @map DB column names, not Prisma field names", () => {
     const text = sqlText(
       buildAssetSearchUnion({ organizationId: orgId, terms: ["x"] })

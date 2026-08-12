@@ -55,6 +55,11 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
   );
 
   // Each branch selects the matching asset id, org-scoped via a literal param.
+  // Defense-in-depth: the pivot-based branches (Location/Tag/Custody, like
+  // Qr/Barcode/custom-field) JOIN back to Asset and pin a."organizationId" too,
+  // so the helper never emits a cross-org asset id even if a pivot row somehow
+  // crossed orgs — safe to use standalone, not only under a caller's outer org
+  // filter (see .claude/rules/org-scope-user-supplied-ids.md).
   return Prisma.sql`
     SELECT a."id" FROM public."Asset" a
       WHERE a."organizationId" = ${organizationId} AND a."title" ILIKE ${like}
@@ -73,16 +78,24 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
     UNION
     SELECT al."assetId" FROM public."Location" l
       JOIN public."AssetLocation" al ON al."locationId" = l."id"
-      WHERE l."organizationId" = ${organizationId} AND l."name" ILIKE ${like}
+      JOIN public."Asset" a ON a."id" = al."assetId"
+      WHERE l."organizationId" = ${organizationId}
+        AND a."organizationId" = ${organizationId}
+        AND l."name" ILIKE ${like}
     UNION
     SELECT att."A" FROM public."Tag" t
       JOIN public."_AssetToTag" att ON att."B" = t."id"
-      WHERE t."organizationId" = ${organizationId} AND t."name" ILIKE ${like}
+      JOIN public."Asset" a ON a."id" = att."A"
+      WHERE t."organizationId" = ${organizationId}
+        AND a."organizationId" = ${organizationId}
+        AND t."name" ILIKE ${like}
     UNION
     SELECT cu."assetId" FROM public."TeamMember" tm
       LEFT JOIN public."User" u ON u."id" = tm."userId"
       JOIN public."Custody" cu ON cu."teamMemberId" = tm."id"
+      JOIN public."Asset" a ON a."id" = cu."assetId"
       WHERE tm."organizationId" = ${organizationId}
+        AND a."organizationId" = ${organizationId}
         AND (tm."name" ILIKE ${like} OR u."firstName" ILIKE ${like} OR u."lastName" ILIKE ${like})
     UNION
     SELECT q."assetId" FROM public."Qr" q
