@@ -4902,8 +4902,12 @@ export async function updateKitAssets({
         // Same pre-fetch as above so cross-kit-move INDIVIDUALS get the
         // detachment notes for any active booking that held the asset
         // via the OTHER kit. (Edge case but worth covering.)
+        // Org-scoped on both the read and the delete below. `movedFromOtherKitIds`
+        // is already org-derived, so this narrows nothing today — but the read
+        // that feeds the notes/events is org-filtered, and an unfiltered delete
+        // beside it could remove a row the audit trail never mentions.
         const aksToDelete = await tx.assetKit.findMany({
-          where: { assetId: { in: movedFromOtherKitIds } },
+          where: { assetId: { in: movedFromOtherKitIds }, organizationId },
           select: { id: true },
         });
         const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
@@ -4918,7 +4922,7 @@ export async function updateKitAssets({
         await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
         await preserveKitDrivenPlacements(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
-          where: { assetId: { in: movedFromOtherKitIds } },
+          where: { assetId: { in: movedFromOtherKitIds }, organizationId },
         });
       }
 
