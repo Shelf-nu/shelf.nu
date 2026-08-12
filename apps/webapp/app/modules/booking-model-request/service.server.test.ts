@@ -1133,6 +1133,10 @@ describe("fulfilModelRequestsForAssets — note volume", () => {
       fulfilledAt: null as Date | null,
       assetModel: { name: "Dell Latitude 5550" },
     };
+    // why: every simulated claim must read and mutate the SAME row, so the
+    // loop's next read sees the previous increment — that is what a committed
+    // row does, and returning a fresh object each call would hide a lost
+    // update instead of exposing it.
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockImplementation(() =>
       Promise.resolve(row)
@@ -1166,6 +1170,28 @@ describe("fulfilModelRequestsForAssets — note volume", () => {
     const content = vitest.mocked(db.bookingNote.create).mock.calls[0][0].data
       .content as string;
     expect(content).toContain("0 × Dell Latitude 5550 remaining");
+  });
+
+  it("states a count instead of embedding ids once the batch is large", async () => {
+    expect.assertions(2);
+    stageRequest(40);
+
+    await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: assetsOfModel(40),
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    const content = vitest.mocked(db.bookingNote.create).mock.calls[0][0].data
+      .content as string;
+
+    // `assets_list` copies every id into the query string of GET /api/assets,
+    // so an unbounded batch of 25-char CUIDs exceeds Node's request-target
+    // limit and the activity entry answers 431 instead of opening.
+    expect(content).not.toContain("assets_list");
+    expect(content).toContain("**40 assets**");
   });
 
   it("keeps the single-asset wording byte-identical to the per-asset note", async () => {

@@ -1100,7 +1100,29 @@ export async function fulfilModelRequestsForAssets({
     const actor = userId ? await loadActor(userId) : null;
 
     for (const claim of claimsByRequest.values()) {
-      const assetsFragment = wrapAssetsWithDataForNote(claim.assets, "assigned");
+      /**
+       * Beyond this many assets the note states a COUNT instead of embedding
+       * every id.
+       *
+       * `{% assets_list ids="…" %}` renders through `AssetsListComponent`,
+       * which copies the whole comma-separated list into the query string of
+       * `GET /api/assets`. CUIDs are 25 characters, so a large enough batch
+       * exceeds Node's request-target limit and clicking the activity entry
+       * returns 431 instead of opening the list. A select-all bulk add can
+       * reach that; the per-asset notes this replaced never could, because
+       * each one carried a single id.
+       *
+       * Nothing is actually lost by dropping the ids past the cap: WHICH
+       * assets discharged the reservation is answerable from data now, via
+       * `BookingAsset.bookingModelRequestId`. The note is a human summary, and
+       * a popover listing 40 assets was never the useful part of it.
+       */
+      const MAX_ASSETS_IN_NOTE_LINK = 20;
+
+      const assetsFragment =
+        claim.assets.length > MAX_ASSETS_IN_NOTE_LINK
+          ? `**${claim.assets.length} assets**`
+          : wrapAssetsWithDataForNote(claim.assets, "assigned");
       // Model name is literal text, so delimiters must be stripped or a name
       // containing `{% … %}` renders as a live Markdoc tag.
       const modelName = stripMarkdocDelimiters(claim.modelName);
