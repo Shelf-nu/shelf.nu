@@ -7281,12 +7281,36 @@ export async function relinkAssetQrCode({
   ]);
 }
 
+/**
+ * Payload for the two user Assets tabs (`/me/assets` and a team member's
+ * profile), which list the assets a given user holds.
+ *
+ * Takes TWO identities on purpose, because they are not the same person on
+ * every route: `/me/assets` views itself, while the profile tab views someone
+ * else. The helper injects `teamMember=<subject>` into the filter string, and
+ * that filter is narrowed against the CALLER's own custody — so collapsing the
+ * two is wrong in both directions. Omitting the viewer refuses the injected
+ * filter and renders an empty tab; passing the SUBJECT as the viewer would make
+ * the narrowing treat the requested custodian as the principal, letting any
+ * caller list any user's custody.
+ *
+ * @param args.userId - SUBJECT: whose assets to list.
+ * @param args.viewerId - CALLER: the principal the custody narrowing measures
+ *   against.
+ * @param args.canSeeAllCustody - Resolved by `requirePermission` on the calling
+ *   route. Required rather than assumed, so the profile tab (ADMIN/OWNER only,
+ *   who resolve `true`) still lists the subject's assets.
+ */
 export async function getUserAssetsTabLoaderData({
   userId,
+  viewerId,
+  canSeeAllCustody,
   request,
   organizationId,
 }: {
   userId: User["id"];
+  viewerId: User["id"];
+  canSeeAllCustody: boolean;
   request: Request;
   organizationId: Organization["id"];
 }) {
@@ -7317,9 +7341,12 @@ export async function getUserAssetsTabLoaderData({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      // Ignores the custodian-filter seed — scope it rather than fetch a
-      // roster this caller never returns.
-      canSeeAllCustody: false,
+      // This route injects its OWN `teamMember` filter above, so these two must
+      // be the caller's real values. Hardcoding `false` with no `userId` (the
+      // original shape) narrowed the injected filter against an empty
+      // principal, refused it, and rendered both tabs empty for every role.
+      canSeeAllCustody,
+      userId: viewerId,
       filters: filtersSearchParams.toString(),
     });
 
