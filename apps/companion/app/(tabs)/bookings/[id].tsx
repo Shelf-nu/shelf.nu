@@ -828,17 +828,38 @@ export default function BookingDetailScreen() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            {item.type === "QUANTITY_TRACKED" && (
-              <QuantityBadge
-                value={item.quantity}
-                unitOfMeasure={item.unitOfMeasure}
-                label="booked"
-              />
-            )}
-            {item.kit && (
-              <Text style={styles.assetKit} numberOfLines={1}>
-                Kit: {item.kit.name}
-              </Text>
+            {item.type === "QUANTITY_TRACKED" &&
+            item.slices &&
+            item.slices.length > 1 ? (
+              <View style={styles.sliceList}>
+                {item.slices.map((slice) => (
+                  <View key={slice.bookingAssetId} style={styles.sliceRow}>
+                    <QuantityBadge
+                      value={slice.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    <Text style={styles.assetKit} numberOfLines={1}>
+                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
+                {item.type === "QUANTITY_TRACKED" && (
+                  <QuantityBadge
+                    value={item.quantity}
+                    unitOfMeasure={item.unitOfMeasure}
+                    label="booked"
+                  />
+                )}
+                {item.kit && (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    Kit: {item.kit.name}
+                  </Text>
+                )}
+              </>
             )}
             {item.category && (
               <Text style={styles.assetCategory} numberOfLines={1}>
@@ -2191,6 +2212,14 @@ const useStyles = createStyles((colors, shadows) => ({
   assetKit: {
     fontSize: fontSize.xs,
     color: colors.checkedOut,
+  },
+  sliceList: {
+    gap: 2,
+  },
+  sliceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   assetCategory: {
     fontSize: fontSize.xs,

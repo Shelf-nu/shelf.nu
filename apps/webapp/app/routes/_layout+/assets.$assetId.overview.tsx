@@ -92,6 +92,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
+  buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
@@ -752,6 +753,17 @@ export default function AssetOverview() {
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
 
+  /**
+   * The model's cover image, if the linked model has one. Used only to decide
+   * whether to explain that the displayed image is inherited — the image
+   * itself is resolved inside `AssetImage`.
+   *
+   * Read directly off the loader type, NOT through a cast: an `as {...}` here
+   * previously masked the fact that the select wasn't returning these columns
+   * at all, which is exactly the compile-time guard this feature relies on.
+   */
+  const assetModelImage = asset.assetModel?.image;
+
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
       ? asset?.bookingAssets[0]?.booking
@@ -762,18 +774,15 @@ export default function AssetOverview() {
    * Each entry pairs the field definition with its stored value (or null
    * if not set). This keeps fields in a stable position regardless of
    * whether they have values — no jumping when a user adds or clears data.
+   *
+   * The asset's own values are the primary source: `allCustomFieldDefs` is
+   * loaded ONLY for users who can update the asset, so building the list from
+   * it alone hid every custom field from BASE and SELF_SERVICE users.
    */
-  const customFieldsValueMap = new Map(
-    (asset?.customFields ?? [])
-      .filter((f) => f.value)
-      .map((f) => [f.customField.id, f])
-  );
-  const allCustomFields = (allCustomFieldDefs ?? [])
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((def) => ({
-      def,
-      storedValue: customFieldsValueMap.get(def.id) ?? null,
-    }));
+  const allCustomFields = buildAssetOverviewCustomFields({
+    storedValues: asset?.customFields ?? [],
+    editableDefinitions: allCustomFieldDefs ?? [],
+  });
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1157,6 +1166,18 @@ export default function AssetOverview() {
                     ) : (
                       <span>{asset.assetModel.name}</span>
                     )}
+                    {/*
+                      Explains why this asset looks identical to every other
+                      one of its model. Shown only when the image actually
+                      comes from the model — an asset with its own upload
+                      overrides it, and saying otherwise would be wrong.
+                    */}
+                    <When truthy={!asset.mainImage && !!assetModelImage}>
+                      <div className="mt-1 text-[12px] text-gray-500">
+                        Image shown for this asset comes from its model. Upload
+                        an image on the asset to override it.
+                      </div>
+                    </When>
                   </div>
                 </li>
               ) : null}
@@ -1242,8 +1263,15 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
-                  {allCustomFields.map(({ def, storedValue }) => {
+                  {allCustomFields.map(({ def, storedValue, isEditable }) => {
                     const hasValue = !!storedValue;
+                    /**
+                     * A field the action would refuse to write (its definition
+                     * is outside the asset's category scope) stays visible but
+                     * read-only — offering an editor there would dead-end on a
+                     * 400.
+                     */
+                    const canEditField = canEditAsset && isEditable;
                     const fieldValue = hasValue
                       ? (storedValue.value as unknown as ShelfAssetCustomFieldValueType["value"])
                       : null;
@@ -1255,8 +1283,8 @@ export default function AssetOverview() {
                       ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
-                    /* Hide "Not set" rows from view-only users */
-                    if (!hasValue && !canEditAsset) return null;
+                    /* Hide "Not set" rows from users who can't fill them in */
+                    if (!hasValue && !canEditField) return null;
 
                     return (
                       <InlineEditableField
@@ -1264,7 +1292,7 @@ export default function AssetOverview() {
                         fieldName={`customField-${def.id}`}
                         formFieldName="customField"
                         label={def.name}
-                        canEdit={canEditAsset}
+                        canEdit={canEditField}
                         extraHiddenInputs={{
                           customFieldId: def.id,
                         }}

@@ -1,8 +1,13 @@
-import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
+import type {
+  InviteStatuses,
+  Prisma,
+  Organization,
+  OrganizationRoles,
+} from "@prisma/client";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { getNrmIndexWhere } from "~/modules/team-member/nrm-scope";
 import {
   organizationRolesMap,
   type UserFriendlyRoles,
@@ -155,25 +160,10 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
     /**
-     * 1. Don't have any invites(userId:null)
-     * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+     * The NRM population is defined once in `getNrmIndexWhere` so the export
+     * and bulk-delete select-all paths cannot drift from what this index shows.
      */
-    const where: Prisma.TeamMemberWhereInput = {
-      deletedAt: null,
-      organizationId,
-      userId: null,
-      receivedInvites: {
-        none: { status: InviteStatuses.PENDING },
-      },
-    };
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { user: { firstName: { contains: search, mode: "insensitive" } } },
-        { user: { lastName: { contains: search, mode: "insensitive" } } },
-      ];
-    }
+    const where = getNrmIndexWhere({ organizationId, search });
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
       db.teamMember.findMany({

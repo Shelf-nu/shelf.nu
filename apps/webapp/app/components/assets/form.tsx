@@ -445,6 +445,15 @@ export const AssetForm = ({
   const [hasPickedAssetModel, setHasPickedAssetModel] = useState<boolean>(
     Boolean(assetModelId)
   );
+  /**
+   * The model currently chosen in the form. Mirrors the DynamicSelect rather
+   * than reading the `assetModelId` prop, so the inherited-image preview
+   * updates the moment the user picks a different model on the create form —
+   * before anything is saved.
+   */
+  const [selectedAssetModelId, setSelectedAssetModelId] = useState<
+    string | undefined
+  >(assetModelId ?? undefined);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -483,8 +492,59 @@ export const AssetForm = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{ id: string; defaultCategoryId?: string | null }>;
+    assetModels?: Array<{
+      id: string;
+      name?: string;
+      defaultCategoryId?: string | null;
+      image?: string | null;
+      thumbnailImage?: string | null;
+    }>;
   }>()?.assetModels;
+
+  /** The chosen model's row, used for the inherited-image preview + copy. */
+  const selectedAssetModel = selectedAssetModelId
+    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
+    : undefined;
+
+  /**
+   * Intent to drop this asset's own image so it falls back down the cascade —
+   * to its model's cover image, or to the placeholder. Submitted as a hidden
+   * field and applied by the edit action.
+   *
+   * Without this the override is one-way: there is no other way to remove an
+   * asset image, so an asset that once had its own could never show its
+   * model's again.
+   */
+  const [clearMainImage, setClearMainImage] = useState(false);
+
+  /**
+   * True when the asset currently stores an image of its own.
+   *
+   * Decided by `mainImage` ALONE, mirroring the resolver. Requiring a
+   * thumbnail or an expiration here would misclassify every asset that has an
+   * image but no thumbnail yet — CSV imports, duplicated assets and legacy
+   * rows all land in that state, and thumbnails are generated lazily. Such an
+   * asset would be told it "inherits" its model's image and would lose access
+   * to the Remove control.
+   *
+   * @see {@link file://./../../modules/asset/image-resolution.ts}
+   */
+  const hasOwnImage = Boolean(id && mainImage);
+
+  /** Whether the preview should show the asset's own image. */
+  const showOwnImagePreview = hasOwnImage && !clearMainImage;
+
+  /**
+   * The model's cover image in the shape `AssetImage` expects. This is what
+   * makes "pick a model → see its picture" work with no copying: the create
+   * request simply omits an image and the cascade resolves it at render time.
+   */
+  const inheritableAssetModelImage = selectedAssetModel?.image
+    ? {
+        image: selectedAssetModel.image,
+        thumbnailImage: selectedAssetModel.thumbnailImage ?? null,
+      }
+    : null;
 
   /**
    * When a model is selected, apply its default category by updating
@@ -500,6 +560,7 @@ export const AssetForm = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
+    setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
 
     if (!modelId) {
@@ -900,19 +961,104 @@ export const AssetForm = ({
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
           <div className="flex items-center gap-2">
-            {id && thumbnailImage && mainImageExpiration ? (
+            {/*
+              One preview for both tiers of the cascade. `clearMainImage` makes
+              the row behave as though the asset's own image were already gone,
+              so the user sees exactly what saving will produce — the model's
+              picture, or the placeholder.
+            */}
+            {id && showOwnImagePreview ? (
               <AssetImage
-                className="size-16"
+                className="size-16 shrink-0 rounded border object-cover"
                 asset={{
                   id,
-                  thumbnailImage: thumbnailImage,
-                  mainImage: mainImage,
-                  mainImageExpiration: new Date(mainImageExpiration),
+                  // Null-safe: an asset can own an image without a thumbnail
+                  // (lazy generation) or without an expiration.
+                  thumbnailImage: thumbnailImage ?? null,
+                  mainImage: mainImage ?? null,
+                  mainImageExpiration: mainImageExpiration
+                    ? new Date(mainImageExpiration)
+                    : null,
+                  assetModel: inheritableAssetModelImage,
                 }}
                 alt={`${title} main image`}
               />
+            ) : inheritableAssetModelImage ? (
+              <AssetImage
+                className="size-16 shrink-0 rounded border object-cover"
+                asset={{
+                  id: id ?? "new-asset",
+                  mainImage: null,
+                  thumbnailImage: null,
+                  mainImageExpiration: null,
+                  assetModel: inheritableAssetModelImage,
+                }}
+                alt={`Image from asset model ${
+                  selectedAssetModel?.name ?? "selected model"
+                }`}
+              />
             ) : null}
             <div>
+              <When truthy={Boolean(inheritableAssetModelImage)}>
+                <p className="mb-1 text-sm text-gray-600">
+                  {showOwnImagePreview ? (
+                    <>
+                      This asset uses its own image.{" "}
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="!p-0 text-sm"
+                        onClick={() => setClearMainImage(true)}
+                      >
+                        Use the model's image instead
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      Using the image from{" "}
+                      <span className="font-medium text-gray-700">
+                        {selectedAssetModel?.name ?? "the selected model"}
+                      </span>
+                      . Upload one below to override it for this asset.
+                      <When truthy={clearMainImage}>
+                        {" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="!p-0 text-sm"
+                          onClick={() => setClearMainImage(false)}
+                        >
+                          Undo
+                        </Button>
+                      </When>
+                    </>
+                  )}
+                </p>
+              </When>
+              {/*
+                Signals the intent to drop the asset's own image so it falls
+                back down the cascade. Read by the edit action; a create has no
+                image to clear, so it is inert there.
+              */}
+              <input
+                type="hidden"
+                name="clearMainImage"
+                value={clearMainImage ? "true" : "false"}
+              />
+              <When
+                truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
+              >
+                <p className="mb-1 text-sm text-gray-600">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="!p-0 text-sm"
+                    onClick={() => setClearMainImage(!clearMainImage)}
+                  >
+                    {clearMainImage ? "Undo remove image" : "Remove image"}
+                  </Button>
+                </p>
+              </When>
               <p className="hidden lg:block">
                 <HoverCard openDelay={50} closeDelay={50}>
                   <HoverCardTrigger className={tw("inline-flex w-full  ")}>

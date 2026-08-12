@@ -1,4 +1,5 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "./image-select";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {
@@ -123,7 +124,22 @@ export const getAssetOverviewFields = (
         },
       },
     },
-    assetModel: { select: { id: true, name: true } },
+    /**
+     * `id`/`name` drive the Asset Model property row; the image columns drive
+     * the inherited-image notice beside it.
+     *
+     * Merged into ONE key on purpose. A `...ASSET_MODEL_IMAGE_SELECT` spread
+     * higher in this same object literal was silently shadowed by this key —
+     * later keys win — so Prisma returned no image and the notice could never
+     * render. Keep both concerns here rather than reintroducing the spread.
+     */
+    assetModel: {
+      select: {
+        id: true,
+        name: true,
+        ...ASSET_MODEL_IMAGE_SELECT.assetModel.select,
+      },
+    },
     // A QUANTITY_TRACKED asset can sit in multiple kits at distinct slices.
     // Pull `quantity` so the asset-overview sidebar can list each kit with
     // its allocation and so the loader can derive a true "available" pool
@@ -204,6 +220,10 @@ export const assetIndexFields = ({
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
       select: {
@@ -327,6 +347,10 @@ export const advancedAssetIndexFields = () => {
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: {
       select: {
         quantity: true,
