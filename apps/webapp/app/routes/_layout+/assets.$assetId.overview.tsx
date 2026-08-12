@@ -753,6 +753,17 @@ export default function AssetOverview() {
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
 
+  /**
+   * The model's cover image, if the linked model has one. Used only to decide
+   * whether to explain that the displayed image is inherited — the image
+   * itself is resolved inside `AssetImage`.
+   *
+   * Read directly off the loader type, NOT through a cast: an `as {...}` here
+   * previously masked the fact that the select wasn't returning these columns
+   * at all, which is exactly the compile-time guard this feature relies on.
+   */
+  const assetModelImage = asset.assetModel?.image;
+
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
       ? asset?.bookingAssets[0]?.booking
@@ -1155,6 +1166,18 @@ export default function AssetOverview() {
                     ) : (
                       <span>{asset.assetModel.name}</span>
                     )}
+                    {/*
+                      Explains why this asset looks identical to every other
+                      one of its model. Shown only when the image actually
+                      comes from the model — an asset with its own upload
+                      overrides it, and saying otherwise would be wrong.
+                    */}
+                    <When truthy={!asset.mainImage && !!assetModelImage}>
+                      <div className="mt-1 text-[12px] text-gray-500">
+                        Image shown for this asset comes from its model. Upload
+                        an image on the asset to override it.
+                      </div>
+                    </When>
                   </div>
                 </li>
               ) : null}

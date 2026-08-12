@@ -7,8 +7,8 @@
  * hard-filters —
  *  - unactionable client noise (DataCloneError, bare gateway-status blips) is
  *    dropped, while
- *  - expected error-boundary terminal states (403/404) are dropped but every
- *    other boundary status (incl. 5xx) still passes through.
+ *  - expected error-boundary terminal states (403/404/429) are dropped but
+ *    every other boundary status (incl. 5xx) still passes through.
  *
  * @see {@link file://./sentry-filters.ts}
  */
@@ -48,13 +48,17 @@ function makeEvent(opts: {
 }
 
 describe("isExpectedErrorBoundaryStatus", () => {
-  it("is true only for 403 and 404", () => {
+  it("is true only for 403, 404, and 429", () => {
     expect(isExpectedErrorBoundaryStatus(403)).toBe(true);
     expect(isExpectedErrorBoundaryStatus(404)).toBe(true);
+    // 429 (rate limited) is transient by design, not a bug to triage — see
+    // SHELF-WEBAPP-21S/221 (appLoaderRateLimit tripped by revalidations,
+    // surfaced through the generic "unexpected error" boundary).
+    expect(isExpectedErrorBoundaryStatus(429)).toBe(true);
   });
 
   it("is false for other 4xx, all 5xx, and undefined/NaN", () => {
-    for (const status of [400, 409, 422, 429, 500, 502]) {
+    for (const status of [400, 409, 422, 500, 502]) {
       expect(isExpectedErrorBoundaryStatus(status)).toBe(false);
     }
     expect(isExpectedErrorBoundaryStatus(undefined)).toBe(false);
@@ -125,6 +129,14 @@ describe("handleClientBeforeSend — error-boundary allowlist", () => {
     const event = makeEvent({
       value: "Asset not found",
       tags: { source: "error-boundary", status: "404" },
+    });
+    expect(handleClientBeforeSend(event)).toBeNull();
+  });
+
+  it("drops an expected 429 (rate limited) boundary event", () => {
+    const event = makeEvent({
+      value: "Too many requests. Please try again later.",
+      tags: { source: "error-boundary", status: "429" },
     });
     expect(handleClientBeforeSend(event)).toBeNull();
   });

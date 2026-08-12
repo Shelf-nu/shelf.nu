@@ -486,6 +486,10 @@ export default function GiveKitCustody() {
               name: "teamMember",
               queryKey: "name",
               deletedAt: null,
+              // ASSET custody: SELF_SERVICE may only take custody itself and
+              // BASE never. Stated explicitly so the behaviour survives a
+              // change to the endpoint's fallback.
+              custodyPurpose: "custody-assignment",
             }}
             fieldName="custodian"
             contentLabel="Team members"

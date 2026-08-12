@@ -2,6 +2,10 @@ import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { formatBookingDuration } from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import {
+  canAssignModelUnits,
+  countUnassignedModelUnits,
+} from "~/utils/booking-model-requests";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { BookingAssetsColumn } from "./booking-assets-column";
 import { BookingStatistics } from "./booking-statistics";
@@ -61,6 +65,10 @@ export function BookingPageContent() {
             totalAssets={totalAssets}
             kitsCount={totalKits}
             assetsCount={assetsCount}
+            unassignedModelUnits={countUnassignedModelUnits(
+              booking.modelRequests
+            )}
+            canAssignModelUnits={canAssignModelUnits(booking.status)}
             totalValue={totalValue}
             lifecycleProgress={lifecycleProgress}
             allCategories={allCategories}

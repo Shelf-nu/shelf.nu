@@ -10,6 +10,10 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
+import {
+  CUSTOM_FIELD_SEARCH_PATHS,
+  splitAssetSearchTerms,
+} from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -19,15 +23,6 @@ import type { Column } from "../asset-index-settings/helpers";
  * assets are not incorrectly shown as "in custody".
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
-
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
 
 /**
  * Generates the SQL WHERE clause for asset filtering
@@ -72,11 +67,10 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search
-      .trim()
-      .split(",")
-      .map((term) => term.trim())
-      .filter(Boolean);
+    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
+    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
+    // cannot fan into unbounded OR groups in the generated SQL.
+    const words = splitAssetSearchTerms(search);
 
     if (words.length > 0) {
       // Create OR conditions for each search term, searching across multiple fields
@@ -143,6 +137,11 @@ export function generateWhereClause(
         searchConditions,
         " OR "
       )})`;
+    } else {
+      // Typed input yielding zero terms (whitespace / bare commas) matches
+      // nothing — mirrors getAssets' fail-closed guard so the same search
+      // box behaves identically in simple and advanced mode.
+      whereClause = Prisma.sql`${whereClause} AND FALSE`;
     }
   }
 
@@ -2158,6 +2157,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",
+      -- Cover image of the asset's model. Rendered by any asset that has no
+      -- image of its own (see resolveAssetImage). The am alias is already
+      -- joined for the name above, and the query groups by am.id, so
+      -- Postgres's functional dependency on the primary key permits these
+      -- without adding them to GROUP BY. AssetModel declares no @map, so the
+      -- column names here match the Prisma field names.
+      am.image AS "assetModelImage",
+      am."thumbnailImage" AS "assetModelThumbnailImage",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -2470,6 +2477,15 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'categoryId', aq."assetCategoryId",
           'assetModelId', aq."assetModelId",
           'assetModelName', aq."assetModelName",
+          -- Shaped as the nested relation the Prisma selects return, so
+          -- resolveAssetImage takes the same input on both index modes.
+          'assetModel', CASE
+            WHEN aq."assetModelId" IS NULL THEN NULL
+            ELSE jsonb_build_object(
+              'image', aq."assetModelImage",
+              'thumbnailImage', aq."assetModelThumbnailImage"
+            )
+          END,
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
           'type', aq."assetType",
