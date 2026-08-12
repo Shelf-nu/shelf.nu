@@ -1038,11 +1038,12 @@ describe("manage-kits loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
-    // The picker never renders a custodian column, so nothing prints "private"
-    // here — the identity simply rides along in the route payload. `email` is
-    // the field that makes this matter: KITS_INCLUDE_FIELDS selects the full
-    // `custody.custodian.user`, and BASE/SELF_SERVICE both hold `booking:update`
-    // and can open this picker on their own DRAFT booking.
+    // why: this fixture stands in for what KITS_INCLUDE_FIELDS actually selects
+    // — the full `custody.custodian.user`, `email` included — so the assertion
+    // measures redaction rather than the shape of a real query. The picker
+    // renders no custodian column, so nothing prints "private": the identity
+    // simply rides along in the route payload, and BASE/SELF_SERVICE both hold
+    // `booking:update` and can open this picker on their own DRAFT booking.
     vi.mocked(kitService.getPaginatedAndFilterableKits).mockResolvedValue({
       ...mockPaginatedKits,
       kits: [
@@ -1065,6 +1066,8 @@ describe("manage-kits loader — Models tab payload", () => {
       ],
     } as any);
 
+    // why: the Models tab is unrelated to custody redaction; this is the
+    // minimal payload that lets the loader finish without it.
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],

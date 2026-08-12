@@ -1183,11 +1183,12 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
-    // `assetIndexFields()` selects the full `custody.custodian.user` including
-    // `email`. This picker is reachable with `booking: update`, which BASE and
-    // SELF_SERVICE both hold on their own DRAFT booking, and it renders no
-    // custodian column — so the identity was pure over-fetch sitting in
-    // `.data` with nothing on screen to hint at it.
+    // why: this fixture mirrors what `assetIndexFields()` actually selects —
+    // the full `custody.custodian.user` including `email` — so the assertion
+    // measures redaction rather than the shape of a real query. The picker is
+    // reachable with `booking: update`, which BASE and SELF_SERVICE both hold
+    // on their own DRAFT booking, and renders no custodian column, so the
+    // identity was pure over-fetch with nothing on screen to hint at it.
     vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
       ...mockPaginatedAssets,
       assets: [
