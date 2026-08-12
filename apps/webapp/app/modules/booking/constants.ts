@@ -1,4 +1,5 @@
 import { BookingStatus, type Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /**
@@ -229,6 +230,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // second round-trip for images.
           mainImage: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           // Tag names — searchable in-memory by filterBookingAssets (assets only).
           tags: { select: { name: true } },
           category: {

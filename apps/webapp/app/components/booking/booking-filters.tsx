@@ -71,6 +71,10 @@ export default function BookingFilters({
             name: "teamMember",
             queryKey: "name",
             deletedAt: null,
+            // A read FILTER, so the workspace custody override governs. Without
+            // this the endpoint applies its stricter assignment default and the
+            // list shrinks the moment the user types.
+            custodyPurpose: "custody-filter",
           }}
           renderItem={(item) => resolveTeamMemberName(item, true)}
           label="Filter by custodian"

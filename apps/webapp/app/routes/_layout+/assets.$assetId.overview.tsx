@@ -83,8 +83,7 @@ import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
+import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
@@ -93,6 +92,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
+  buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
@@ -159,6 +159,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { locale, timeZone } = getClientHint(request);
 
+    /**
+     * The caller's roles in the active org. Derived once here and reused by
+     * every server-side `hasPermission` check in this loader (scan gating
+     * below, edit gating further down) — passing `roles` explicitly avoids
+     * the validator's DB fallback lookup on each call.
+     */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
     const asset = await getAsset({
       id,
       organizationId,
@@ -169,14 +179,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan
+     * And using the ID of tha qr code, we find the latest scan.
+     *
+     * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
+     * returns null without it. The parsed scan carries the scanner's name and
+     * email, GPS coordinates and user-agent; the component renders
+     * `<ScanDetails>` behind the same check, but a client-side check only
+     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
+     * receiving all of it in the page payload.
      */
-    const lastScan = asset.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-          userId,
-        })
-      : null;
+    const lastScan = await getLastScanForViewer({
+      qrId: asset.qrCodes[0]?.id,
+      userId,
+      organizationId,
+      roles,
+    });
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -189,13 +206,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * skip the heavy categories/locations/custom-field-defs queries for
      * users who are view-only. Uses the server-side `hasPermission` because
      * the client-side `userHasPermission` validator file has the `.client.`
-     * suffix and is stripped from the SSR bundle. Passing `roles` explicitly
-     * avoids the validator's DB fallback lookup.
+     * suffix and is stripped from the SSR bundle. `roles` is derived once at
+     * the top of the loader.
      */
-    const roles = userOrganizations.find(
-      (o) => o.organization.id === organizationId
-    )?.roles;
-
     const canEditAsset = await hasPermission({
       userId,
       organizationId,
@@ -740,6 +753,17 @@ export default function AssetOverview() {
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
 
+  /**
+   * The model's cover image, if the linked model has one. Used only to decide
+   * whether to explain that the displayed image is inherited — the image
+   * itself is resolved inside `AssetImage`.
+   *
+   * Read directly off the loader type, NOT through a cast: an `as {...}` here
+   * previously masked the fact that the select wasn't returning these columns
+   * at all, which is exactly the compile-time guard this feature relies on.
+   */
+  const assetModelImage = asset.assetModel?.image;
+
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
       ? asset?.bookingAssets[0]?.booking
@@ -750,18 +774,15 @@ export default function AssetOverview() {
    * Each entry pairs the field definition with its stored value (or null
    * if not set). This keeps fields in a stable position regardless of
    * whether they have values — no jumping when a user adds or clears data.
+   *
+   * The asset's own values are the primary source: `allCustomFieldDefs` is
+   * loaded ONLY for users who can update the asset, so building the list from
+   * it alone hid every custom field from BASE and SELF_SERVICE users.
    */
-  const customFieldsValueMap = new Map(
-    (asset?.customFields ?? [])
-      .filter((f) => f.value)
-      .map((f) => [f.customField.id, f])
-  );
-  const allCustomFields = (allCustomFieldDefs ?? [])
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((def) => ({
-      def,
-      storedValue: customFieldsValueMap.get(def.id) ?? null,
-    }));
+  const allCustomFields = buildAssetOverviewCustomFields({
+    storedValues: asset?.customFields ?? [],
+    editableDefinitions: allCustomFieldDefs ?? [],
+  });
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1145,6 +1166,18 @@ export default function AssetOverview() {
                     ) : (
                       <span>{asset.assetModel.name}</span>
                     )}
+                    {/*
+                      Explains why this asset looks identical to every other
+                      one of its model. Shown only when the image actually
+                      comes from the model — an asset with its own upload
+                      overrides it, and saying otherwise would be wrong.
+                    */}
+                    <When truthy={!asset.mainImage && !!assetModelImage}>
+                      <div className="mt-1 text-[12px] text-gray-500">
+                        Image shown for this asset comes from its model. Upload
+                        an image on the asset to override it.
+                      </div>
+                    </When>
                   </div>
                 </li>
               ) : null}
@@ -1230,8 +1263,15 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
-                  {allCustomFields.map(({ def, storedValue }) => {
+                  {allCustomFields.map(({ def, storedValue, isEditable }) => {
                     const hasValue = !!storedValue;
+                    /**
+                     * A field the action would refuse to write (its definition
+                     * is outside the asset's category scope) stays visible but
+                     * read-only — offering an editor there would dead-end on a
+                     * 400.
+                     */
+                    const canEditField = canEditAsset && isEditable;
                     const fieldValue = hasValue
                       ? (storedValue.value as unknown as ShelfAssetCustomFieldValueType["value"])
                       : null;
@@ -1243,8 +1283,8 @@ export default function AssetOverview() {
                       ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
-                    /* Hide "Not set" rows from view-only users */
-                    if (!hasValue && !canEditAsset) return null;
+                    /* Hide "Not set" rows from users who can't fill them in */
+                    if (!hasValue && !canEditField) return null;
 
                     return (
                       <InlineEditableField
@@ -1252,7 +1292,7 @@ export default function AssetOverview() {
                         fieldName={`customField-${def.id}`}
                         formFieldName="customField"
                         label={def.name}
-                        canEdit={canEditAsset}
+                        canEdit={canEditField}
                         extraHiddenInputs={{
                           customFieldId: def.id,
                         }}
@@ -1767,6 +1807,7 @@ export default function AssetOverview() {
               custody={asset.custody}
               assetId={asset.id}
               unitOfMeasure={asset.unitOfMeasure}
+              consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
               isSelfService={isSelfService}
               currentUserId={userId}

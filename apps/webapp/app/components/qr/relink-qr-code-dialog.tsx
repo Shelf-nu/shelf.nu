@@ -117,8 +117,42 @@ export function RelinkQrCodeDialog({
       >
         <When truthy={currentState === "initial"}>
           <>
+            {/*
+             * The scanner PREFERS 450px (the explicit height doubles as the
+             * flex basis) but `shrink` lets it compress down to 200px when a
+             * short viewport leaves less room, so the code confirmation and
+             * the Link/Rescan actions below stay on screen instead of being
+             * pushed under the fold. `min-h-[200px]` deliberately overrides
+             * CodeScanner's own `min-h-[400px]` floor for this dialog only.
+             *
+             * why an explicit `!h-[450px]` and not `!h-auto basis-[450px]`:
+             * ScannerMode paints its dark area with `h-full`, and a
+             * percentage height only resolves against a DEFINITE parent.
+             * Chromium treats a flex item sized by a fixed flex-basis as
+             * definite, but WebKit/Safari does not — there the item stayed
+             * 450px tall while the dark UI collapsed to ~150px of content
+             * with a dead white void below it, at EVERY window size (the
+             * regression DonKoko screenshotted). An explicit height is
+             * definite in every engine, and when flex shrinks the item the
+             * used height stays definite, so `h-full` children keep filling.
+             *
+             * The removed `[&_.info-overlay]:h-[450px]` and
+             * `scannerModeClassName="h-[450px]"` were only there to match the
+             * fixed 450px: InfoOverlay is already `absolute inset-0` and
+             * ScannerMode is already `h-full`, so both track the height on
+             * their own.
+             *
+             * overlayPosition="centered" is REQUIRED once the scanner can
+             * shrink. The default is "fullscreen", which pins the paused
+             * "Code detected" overlay at `top-[75px]` with a fixed height; at a
+             * ~200px scanner that overflowed the `overflow-hidden` container by
+             * ~190px and cropped 60% of the confirmation card. The centered
+             * variant caps itself at `max-h-[90%] md:max-h-[95%]` of the
+             * scanner and scrolls, so it fits at any height.
+             */}
             <CodeScanner
-              className="!h-[450px] [&_.info-overlay]:h-[450px]"
+              className="!h-[450px] !min-h-[200px] shrink"
+              overlayPosition="centered"
               overlayClassName="md:h-[320px] max-w-xs"
               isLoading={false}
               onCodeDetectionSuccess={handleQrDetectionSuccess}
@@ -126,12 +160,13 @@ export function RelinkQrCodeDialog({
               hideBackButtonText
               paused={!!newQrId}
               setPaused={() => {}}
-              scannerModeClassName="h-[450px]"
               scannerModeCallback={() => {}}
               savedCameraId={savedCameraId}
             />
 
-            <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">
+            {/* shrink-0: the scanner above is the only element allowed to give
+                up height when the viewport is short. */}
+            <div className="flex shrink-0 items-center justify-center gap-4 p-4">
               <div className="flex-1 truncate text-right">
                 <p className="uppercase text-gray-500">Current code</p>
                 <p
@@ -161,7 +196,10 @@ export function RelinkQrCodeDialog({
               </p>
             </When>
 
-            <div className="flex items-center gap-4 p-4">
+            {/* Sticky so the primary action stays reachable when a short
+                viewport forces the dialog body to scroll (the 450px scanner
+                above can otherwise push this footer off-screen). */}
+            <div className="sticky bottom-0 z-10 flex shrink-0 items-center gap-4 border-t border-gray-200 bg-white p-4">
               <Button
                 type="button"
                 className="flex-1"

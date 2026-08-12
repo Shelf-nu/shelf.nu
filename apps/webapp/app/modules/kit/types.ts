@@ -1,6 +1,7 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 
 export type UpdateKitPayload = Partial<
   Pick<
@@ -89,6 +90,8 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImage: true,
   thumbnailImage: true,
   mainImageExpiration: true,
+  // Model cover image for member assets with no image of their own
+  ...ASSET_MODEL_IMAGE_SELECT,
   status: true,
   availableToBook: true,
   type: true,

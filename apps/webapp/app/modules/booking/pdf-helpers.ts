@@ -8,6 +8,7 @@ import type {
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -15,11 +16,11 @@ import { ShelfError } from "~/utils/error";
 import type { PdfSnapshotKit } from "./helpers";
 import {
   buildPdfAssetRows,
+  buildPdfBookingAssetSlices,
   filterBookingAssets,
   groupAndSortAssetsByKit,
 } from "./helpers";
 import { getBooking } from "./service.server";
-import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
@@ -70,6 +71,9 @@ export interface PdfDbResult {
     quantity: number;
     /** Unique `BookingAsset.id` — the rendered row's React key. */
     bookingAssetId: string;
+    /** Cover image of the asset's model, rendered in the PDF when the asset
+     * has no image of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
   })[];
   totalValue: string;
   organization: Pick<
@@ -130,36 +134,7 @@ export async function fetchAllPdfRelatedData(
     // (used later as the row key); the asset ids are deduped only for the
     // efficiency of the `rawAssets` fetch below, not for the render list.
     const visibleBookingAssets = filterBookingAssets(
-      (booking?.bookingAssets ?? []).map((ba) => {
-        // The slice's LIVE kit membership, when the asset is still in the kit.
-        const liveKit =
-          ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null;
-        return {
-          ...ba.asset,
-          // A real `Kit.id` — NOT `assetKitId`, which identifies a MEMBERSHIP
-          // row and is therefore unique per (asset, kit) pair. The search
-          // helper's "a matched asset surfaces its whole kit" re-expansion
-          // groups on this field, so a membership id would only ever
-          // re-expand the matched asset's own slices. `sourceKitId` keeps the
-          // grouping intact for a slice whose membership is gone.
-          kitId: liveKit?.id ?? ba.sourceKitId ?? null,
-          // why: out of this rule — resolved from the live membership only.
-          // Snapshot kits are fetched in the query below, which necessarily
-          // runs AFTER this filter (it is keyed on the search-visible ids). A
-          // detached-residue row is still surfaced by a kit-name search
-          // whenever any sibling row of the same kit matches directly, since
-          // re-expansion groups on the shared `kitId` above.
-          kit: liveKit,
-          location: getPrimaryLocation(ba.asset),
-          // Slice-level fields carried through search filtering so each slice
-          // renders as its own PDF row with the correct quantity/key.
-          // `assetKitId` resolves the live kit, `sourceKitId` the snapshot one.
-          assetKitId: ba.assetKitId,
-          sourceKitId: ba.sourceKitId,
-          quantity: ba.quantity,
-          bookingAssetId: ba.id,
-        };
-      }),
+      buildPdfBookingAssetSlices(booking?.bookingAssets ?? []),
       sortParams?.search
     );
     const visibleAssetIds = [...new Set(visibleBookingAssets.map((a) => a.id))];
@@ -187,6 +162,9 @@ export async function fetchAllPdfRelatedData(
           organizationId,
         },
         include: {
+          // Model cover image for assets with no image of their own — the
+          // exported PDF renders the same cascade as every web surface.
+          ...ASSET_MODEL_IMAGE_SELECT,
           category: {
             select: {
               name: true,
@@ -323,19 +301,18 @@ export async function fetchAllPdfRelatedData(
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
-        // Sum per-slice from the `BookingAsset` pivot, scoped to the
-        // search-visible asset ids. Each slice contributes its own
-        // `ba.quantity` (booked units) × per-unit `valuation`, so a QT
-        // asset stocked at 100 with 5 booked contributes value-for-5,
-        // not value-for-100. Multi-slice (standalone + kit) sums each
-        // slice independently — the deduped `sortedAssets` is the
-        // rendered ROW list, not the value-summation list.
-        assets: booking.bookingAssets
-          .filter((ba) => visibleAssetIds.includes(ba.assetId))
-          .map((ba) => ({
-            valuation: ba.asset.valuation,
-            bookedQuantity: ba.quantity,
-          })),
+        // Sum per-slice over EXACTLY the search-visible slices — the same
+        // `visibleBookingAssets` list `buildPdfAssetRows` renders above — so
+        // the total can never diverge from the exported rows. Scoping by asset
+        // id instead folds in an asset's OTHER, non-visible slices: e.g. a QT
+        // item shown only via a re-expanded kit slice would wrongly add its
+        // hidden standalone slice's value (#2811 review). Each slice
+        // contributes its own booked `quantity` × per-unit `valuation`, so a QT
+        // asset stocked at 100 with 5 booked contributes value-for-5, not 100.
+        assets: visibleBookingAssets.map((slice) => ({
+          valuation: slice.valuation,
+          bookedQuantity: slice.quantity,
+        })),
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),

@@ -60,13 +60,31 @@ const mockAssets = [
     id: "asset-1",
     title: "Laptop Dell",
     mainImage: "https://example.com/laptop.jpg",
+    thumbnailImage: null,
+    assetModel: null,
   },
   {
     id: "asset-2",
     title: "Mouse Logitech",
     mainImage: "https://example.com/mouse.jpg",
+    thumbnailImage: null,
+    assetModel: null,
   },
 ];
+
+/**
+ * The shape `/api/assets` returns: `serializeAssetImage` drops the nested
+ * `assetModel` and emits the resolved image fields plus `imageSource`. These
+ * mocks have their own `mainImage` and no thumbnail, so the thumbnail falls
+ * back to the full-size URL within the "asset" tier.
+ */
+const serializedMockAssets = mockAssets.map(
+  ({ assetModel: _assetModel, ...asset }) => ({
+    ...asset,
+    thumbnailImage: asset.mainImage,
+    imageSource: "asset",
+  })
+);
 
 describe("/api/assets", () => {
   beforeEach(() => {
@@ -108,6 +126,10 @@ describe("/api/assets", () => {
           id: true,
           title: true,
           mainImage: true,
+          thumbnailImage: true,
+          // The model's cover image is selected so the loader can resolve the
+          // image cascade server-side (see `serializeAssetImage`).
+          assetModel: { select: { image: true, thumbnailImage: true } },
         },
         orderBy: {
           title: "asc",
@@ -119,7 +141,7 @@ describe("/api/assets", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        assets: mockAssets,
+        assets: serializedMockAssets,
       });
     });
 
@@ -191,6 +213,10 @@ describe("/api/assets", () => {
           id: true,
           title: true,
           mainImage: true,
+          thumbnailImage: true,
+          // The model's cover image is selected so the loader can resolve the
+          // image cascade server-side (see `serializeAssetImage`).
+          assetModel: { select: { image: true, thumbnailImage: true } },
         },
         orderBy: {
           title: "asc",
@@ -223,6 +249,10 @@ describe("/api/assets", () => {
           id: true,
           title: true,
           mainImage: true,
+          thumbnailImage: true,
+          // The model's cover image is selected so the loader can resolve the
+          // image cascade server-side (see `serializeAssetImage`).
+          assetModel: { select: { image: true, thumbnailImage: true } },
         },
         orderBy: {
           title: "asc",
@@ -234,7 +264,7 @@ describe("/api/assets", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        assets: singleAsset,
+        assets: [serializedMockAssets[0]],
       });
     });
 
@@ -260,6 +290,10 @@ describe("/api/assets", () => {
           id: true,
           title: true,
           mainImage: true,
+          thumbnailImage: true,
+          // The model's cover image is selected so the loader can resolve the
+          // image cascade server-side (see `serializeAssetImage`).
+          assetModel: { select: { image: true, thumbnailImage: true } },
         },
         orderBy: {
           title: "asc",
@@ -380,6 +414,10 @@ describe("/api/assets", () => {
             id: true,
             title: true,
             mainImage: true,
+            thumbnailImage: true,
+            // The model's cover image is selected so the loader can resolve
+            // the image cascade server-side (see `serializeAssetImage`).
+            assetModel: { select: { image: true, thumbnailImage: true } },
           },
         })
       );

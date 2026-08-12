@@ -6,6 +6,8 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -121,6 +123,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           title: true,
           status: true,
           mainImage: true,
+          thumbnailImage: true,
+          // Model cover image; `serializeAssetImage` below resolves the cascade
+          ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
           createdAt: true,
         },
@@ -246,14 +251,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
         myCustody: myCustodyCount,
       },
       assetsByStatus: statusCounts,
-      newestAssets: newestAssets.map((a) => ({
-        id: a.id,
-        title: a.title,
-        status: a.status,
-        mainImage: a.mainImage,
-        category: a.category,
-        createdAt: a.createdAt.toISOString(),
-      })),
+      newestAssets: newestAssets.map((a) => {
+        // Hand-written projection, so typecheck can't catch a dropped field —
+        // resolve the model-image cascade explicitly here, or an asset that
+        // inherits its image shows blank on the companion's dashboard.
+        const { image, ...rest } = {
+          ...a,
+          image: resolveAssetImage({
+            mainImage: a.mainImage,
+            thumbnailImage: a.thumbnailImage,
+            assetModel: a.assetModel,
+          }),
+        };
+        return {
+          id: rest.id,
+          title: rest.title,
+          status: rest.status,
+          mainImage: image.source === "placeholder" ? null : image.fullUrl,
+          thumbnailImage:
+            image.source === "placeholder" ? null : image.thumbnailUrl,
+          imageSource: image.source,
+          category: rest.category,
+          createdAt: rest.createdAt.toISOString(),
+        };
+      }),
       upcomingBookings: upcomingBookingsResult.bookings.map(formatBooking),
       activeBookings: activeBookingsResult.bookings.map(formatBooking),
       overdueBookings: overdueBookingsResult.bookings.map(formatBooking),

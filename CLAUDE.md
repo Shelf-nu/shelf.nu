@@ -509,6 +509,7 @@ Always run `pnpm webapp:validate` before committing - this runs:
 #### Organizing Mocks and Factories
 
 - **Test files**: Co-located with source files (e.g., `apps/webapp/app/modules/user/service.server.test.ts`)
+- **Route tests**: `apps/webapp/test/routes-tests/`, mirroring the route path — **never** inside `app/routes/`. Vite's dev-server warmup treats every file under `app/routes/` as a client module, so a co-located route test importing a `*.server` module breaks `pnpm webapp:dev` while `validate` and CI stay green. Import the route via `~/routes/...`, not a relative path. Enforced by the `local-rules/no-test-files-in-routes` ESLint rule (blocks the pre-commit hook).
 - **Shared mocks**: Place in `apps/webapp/test/mocks/` directory, organized by domain (remix.tsx, database.ts)
 - **Factories**: Place in `apps/webapp/test/factories/` directory for generating test data
 - **MSW handlers**: Keep in `apps/webapp/mocks/` directory for API mocking

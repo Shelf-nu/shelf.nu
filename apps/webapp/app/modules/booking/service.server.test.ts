@@ -10190,3 +10190,42 @@ describe("getMinimalBookings", () => {
     expect(arg.where.custodianUserId).toBe("user-1");
   });
 });
+
+describe("cancelBooking — handled validation (SHELF-WEBAPP-222)", () => {
+  it("rejects a non-cancellable booking as a handled 400, not a captured 500", async () => {
+    // why: the guard loads the booking fresh; return a COMPLETE booking (not in
+    // the allowed-to-cancel set) so cancelBooking hits the status guard.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.COMPLETE,
+      bookingAssets: [],
+    });
+
+    let thrown: unknown;
+    try {
+      await cancelBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: { timeZone: "UTC", locale: "en-US" } as never,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    expect(err.message).toContain("cannot be cancelled");
+    // The outer catch re-wraps, but ShelfError inherits status/shouldBeCaptured
+    // from the cause, so the handled-client classification survives.
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
+    // ...and additionalData is forwarded through the wrapper (not inherited by
+    // ShelfError automatically), so the debug context survives.
+    expect(err.additionalData).toMatchObject({
+      bookingId: "booking-1",
+      status: BookingStatus.COMPLETE,
+    });
+  });
+});

@@ -11,6 +11,7 @@
  * (inline `db` mock with `$transaction` routing the callback through the same
  * mock, plus per-method `mockResolvedValue` overrides per test).
  */
+import { AssetStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -26,15 +27,14 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
     computeAvailableQuantityMock(...args),
 }));
 
-// why: computeCheckedOutBreakdownForAsset lives in the very large booking
-// service module and has its own dedicated test coverage there (Wave-B partial
-// checkout attribution + the #2790 ③ standalone/kit split). Stubbing it keeps
-// this test file focused on how getAssetAvailability *uses* the checked-out
-// breakdown (`total` for display, `standalone` for `physicalAvailable`), not
-// how it's derived. It returns `{ total, standalone }` — the split the
-// availability primitive consumes.
+// why: computeCheckedOutBreakdownForAsset has its own dedicated test coverage
+// (Wave-B partial checkout attribution + the #2790 ③ standalone/kit split).
+// Stubbing it keeps this test file focused on how getAssetAvailability *uses*
+// the checked-out breakdown (`total` for display, `standalone` for
+// `physicalAvailable`), not how it's derived. It returns `{ total, standalone }`
+// — the split the availability primitive consumes.
 const computeCheckedOutBreakdownForAssetMock = vitest.fn();
-vitest.mock("~/modules/booking/service.server", () => ({
+vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: (...args: unknown[]) =>
     computeCheckedOutBreakdownForAssetMock(...args),
 }));
@@ -1033,6 +1033,11 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         bookingId: "legacy",
         quantity: 5,
+        // The legacy branch is gated on the asset being flagged off the shelf,
+        // which is what an all-at-once checkout does to every asset it
+        // processed. Without it this row is treated as "added later" and
+        // contributes 0 (GitHub #2815).
+        asset: { status: AssetStatus.CHECKED_OUT },
         booking: {
           from: new Date("2026-01-01"),
           to: new Date("2026-01-05"),
@@ -1042,6 +1047,7 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         bookingId: "partial",
         quantity: 8,
+        asset: { status: AssetStatus.CHECKED_OUT },
         booking: {
           from: new Date("2026-01-01"),
           to: new Date("2026-01-05"),
@@ -1159,6 +1165,12 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         bookingId: "od1",
         quantity: 4,
+        // This OVERDUE booking was checked out all-at-once (no session rows),
+        // which flips the asset itself to CHECKED_OUT — the flag the legacy
+        // branch is gated on. The singular side is stubbed to report the same
+        // 4 units, so omitting it would break batch/singular parity for a
+        // reason unrelated to the windowing this test is about.
+        asset: { status: AssetStatus.CHECKED_OUT },
         booking: {
           from: new Date("2026-07-01T00:00:00Z"),
           to: new Date("2026-07-10T00:00:00Z"),

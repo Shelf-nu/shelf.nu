@@ -10,6 +10,12 @@ import { Button } from "../shared/button";
 
 export const BulkDeleteNRMSchema = z.object({
   nrmIds: z.array(z.string()).min(1),
+  /**
+   * The index's search params at submit time, emitted by
+   * `BulkUpdateDialogContent`. Needed so a select-all delete stays scoped to
+   * the rows matching the active search rather than every NRM in the org.
+   */
+  currentSearchParams: z.string().optional(),
 });
 
 export default function BulkDeleteDialog() {

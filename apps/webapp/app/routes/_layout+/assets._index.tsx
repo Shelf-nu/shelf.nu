@@ -74,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         role,
         canUseBarcodes,
+        canSeeAllCustody,
       },
       user,
     ] = await Promise.all([
@@ -140,6 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
+          canSeeAllCustody,
         })
       : await advancedModeLoader({
           request,
@@ -150,6 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
+          canSeeAllCustody,
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

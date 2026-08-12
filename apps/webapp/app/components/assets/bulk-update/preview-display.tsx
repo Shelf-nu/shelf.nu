@@ -12,7 +12,10 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import type { UpdatePreview } from "~/utils/import-update.server";
-import { PREVIEW_DISPLAY_LIMIT } from "./helpers";
+import {
+  formatUnrecognizedColumnLabel,
+  PREVIEW_DISPLAY_LIMIT,
+} from "./helpers";
 import { SummaryPill } from "./shared";
 import { SpreadsheetPreview } from "./spreadsheet-preview";
 import Input from "../../forms/input";
@@ -64,7 +67,17 @@ export function PreviewDisplay({
   onReset: () => void;
 }) {
   const totalChanges = preview.totalFieldChanges;
-  const totalAssets = preview.assetsToUpdate.length;
+  /**
+   * Assets that have at least one change the apply layer will actually write.
+   * An asset whose every change is warning-marked (e.g. a multi-location
+   * asset whose only diff is `location`) is skipped entirely at apply time,
+   * so counting it as "to update" — or offering an Apply button for it —
+   * promises a write that never happens.
+   */
+  const assetsWithApplicableChanges = preview.assetsToUpdate.filter((asset) =>
+    asset.changes.some((c) => !c.warning)
+  );
+  const totalAssets = assetsWithApplicableChanges.length;
   const hasNewEntities =
     preview.newEntities.categories.length > 0 ||
     preview.newEntities.locations.length > 0 ||
@@ -101,11 +114,7 @@ export function PreviewDisplay({
       <div className="mb-4 rounded-md border bg-gray-50 p-4">
         <h4 className="mb-3 text-base font-semibold">Analysis Summary</h4>
         <div className="flex flex-wrap gap-3">
-          <SummaryPill
-            count={preview.assetsToUpdate.length}
-            label="to update"
-            color="blue"
-          />
+          <SummaryPill count={totalAssets} label="to update" color="blue" />
           <SummaryPill
             count={preview.skippedAssets.length}
             label="unchanged"
@@ -171,7 +180,12 @@ export function PreviewDisplay({
         </div>
       )}
 
-      {/* Unrecognized columns — the user added columns that don't exist */}
+      {/* Unrecognized columns — headers that don't match any Shelf field or
+          custom field in this workspace. Genuinely-unknown-only by
+          construction (see analyzeUpdateHeaders): a recognized-but-not-
+          updatable field like Status or Kit lands in `ignoredColumns`
+          below instead, so the custom-field suggestion here never fires
+          for a core field like Title or Category. */}
       {preview.unrecognizedColumns.length > 0 && (
         <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4">
           <p className="mb-1 font-medium text-blue-800">
@@ -179,24 +193,29 @@ export function PreviewDisplay({
             {preview.unrecognizedColumns.length === 1
               ? "a column"
               : `${preview.unrecognizedColumns.length} columns`}{" "}
-            we don't recognize
+            that don't match a field in your workspace
           </p>
           <div className="mb-2 flex flex-wrap gap-1.5">
             {preview.unrecognizedColumns.map((col) => (
+              // `col` (the raw header) is the key — stable/unique even
+              // though the DISPLAYED label is parsed down to just the
+              // field name for a `cf:<Name>,type:<TYPE>` header (see
+              // formatUnrecognizedColumnLabel).
               <span
                 key={col}
                 className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700"
               >
-                {col}
+                {formatUnrecognizedColumnLabel(col)}
               </span>
             ))}
           </div>
           <p className="text-sm text-blue-700">
-            To import data for these columns, first create them as{" "}
+            Double-check these for typos against your column headers. If they're
+            meant to hold custom data, create matching{" "}
             <Button variant="link" to="/settings/custom-fields" target="_blank">
               Custom Fields
             </Button>{" "}
-            in your workspace, then come back and re-analyze.
+            first, then come back and re-analyze.
           </p>
           <Button
             type="button"
@@ -210,18 +229,29 @@ export function PreviewDisplay({
         </div>
       )}
 
-      {/* Known but unsupported columns */}
+      {/* Known but unsupported columns — a mixed bucket by construction (see
+          analyzeUpdateHeaders): recognized-but-read-only core fields
+          (Status, Kit, Custody, …), fields not supported for bulk update at
+          all (Tracking method, QR ID, barcodes, long-text custom fields),
+          and a duplicate identifier column (e.g. "ID" when "Asset ID" is
+          also present). Framed as "recognized but not written" rather than
+          an error — the file is fine, these columns just aren't touched by
+          this tool for varying reasons. */}
       {preview.ignoredColumns.length > 0 && (
         <details className="mb-4">
           <summary className="cursor-pointer text-sm text-gray-500">
-            Your file has {preview.ignoredColumns.length} column
-            {preview.ignoredColumns.length !== 1 ? "s" : ""} that can't be
-            bulk-updated (click to see which)
+            Your file also has {preview.ignoredColumns.length} column
+            {preview.ignoredColumns.length !== 1 ? "s" : ""} Shelf recognizes
+            but doesn't update through bulk import (click to see which)
           </summary>
           <p className="mt-1 text-xs text-gray-500">
-            {preview.ignoredColumns.join(", ")} — these columns are present in
-            your file but are read-only in this tool. Any edits you made to them
-            won't be applied.
+            {preview.ignoredColumns.join(", ")} — Shelf recognizes each of
+            these, but doesn't write to them here: some (e.g. Status, Kit,
+            Custody) have their own dedicated workflows elsewhere in Shelf, some
+            (e.g. Tracking method, QR ID, barcodes, or long-text custom fields)
+            aren't supported for bulk update yet, and a duplicate identifier
+            column is simply unused. Any edits you made to them in this file are
+            kept in the file but won't be applied.
           </p>
         </details>
       )}
@@ -357,9 +387,11 @@ export function PreviewDisplay({
         </details>
       )}
 
-      {/* Apply confirmation */}
-      {preview.assetsToUpdate.length > 0 && (
-        <div className="mt-2 flex items-center gap-3">
+      {/* Apply confirmation. The Apply button is hidden when every proposed
+          change is warning-marked (the apply layer would write nothing), but
+          "Start over" stays reachable in that case. */}
+      <div className="mt-2 flex items-center gap-3">
+        {totalAssets > 0 && (
           <AlertDialog
             onOpenChange={(open) => {
               if (!open) {
@@ -456,16 +488,17 @@ export function PreviewDisplay({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <Button type="button" variant="secondary" onClick={onReset}>
-            Start over
-          </Button>
-        </div>
-      )}
+        )}
+        <Button type="button" variant="secondary" onClick={onReset}>
+          Start over
+        </Button>
+      </div>
 
-      {preview.assetsToUpdate.length === 0 && (
+      {totalAssets === 0 && (
         <p className="mt-4 text-gray-500">
-          No changes detected. All assets are already up to date, or all rows
-          failed validation.
+          {preview.assetsToUpdate.length > 0
+            ? "Nothing to apply — every proposed change needs fixing first. Correct the flagged values in your CSV and re-upload."
+            : "No changes detected. All assets are already up to date, or all rows failed validation."}
         </p>
       )}
     </div>

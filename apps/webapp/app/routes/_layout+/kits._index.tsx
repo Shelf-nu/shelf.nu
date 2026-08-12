@@ -100,6 +100,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/kits?${cookieParams.toString()}`);
     }
 
+    /**
+     * Custody scope for the custodian picker, shared by its rows AND its count
+     * so the two cannot disagree — the same rule `custody-filter` resolves on
+     * the search endpoint.
+     */
+    const custodianFilterWhere = {
+      deletedAt: null,
+      organizationId,
+      userId: !canSeeAllCustody ? userId : undefined,
+    };
+
     let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
@@ -186,11 +197,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       db.teamMember
         .findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-            userId: !canSeeAllCustody ? userId : undefined,
-          },
+          where: custodianFilterWhere,
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -204,7 +211,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             label: "Assets",
           });
         }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      // Same `where` as the rows above: counting unscoped while the rows are
+      // scoped puts the workspace's team-member total in a restricted user's
+      // loader payload, and makes the picker's "showing N out of M" disagree
+      // with what the search endpoint returns.
+      db.teamMember.count({ where: custodianFilterWhere }),
       getLocationsForCreateAndEdit({
         organizationId,
         request,
@@ -321,15 +332,27 @@ export default function KitsIndexPage() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"
               initialDataKey="teamMembers"
-              transformItem={(item) => ({
-                ...item,
-                id: item.metadata?.userId ? item.metadata.userId : item.id,
-              })}
+              /*
+               * No `transformItem`: the value this filter submits must stay the
+               * TeamMember id, because `getPaginatedAndFilterableKits` applies it
+               * as `custody: { custodianId }` — a TeamMember FK. Rewriting it to
+               * `metadata.userId` only took effect once the user typed (the
+               * loader's records carry no `metadata`, the search endpoint's do),
+               * so picking from the list filtered correctly while searching first
+               * returned nothing. Matches the assets advanced filter, which
+               * passes the item through unchanged.
+               */
               renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           )}

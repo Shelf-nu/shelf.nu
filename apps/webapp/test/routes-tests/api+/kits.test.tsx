@@ -68,6 +68,8 @@ const mockKits = [
           title: "Canon Camera",
           mainImage: "camera.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Cameras",
           },
@@ -79,6 +81,8 @@ const mockKits = [
           title: "Tripod",
           mainImage: "tripod.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Accessories",
           },
@@ -101,6 +105,8 @@ const mockKits = [
           title: "Video Camera",
           mainImage: "video-camera.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Cameras",
           },
@@ -112,6 +118,27 @@ const mockKits = [
     },
   },
 ];
+
+/**
+ * The shape `/api/kits` returns: each member asset goes through
+ * `serializeAssetImage`, which drops the nested `assetModel` and emits the
+ * resolved image fields plus `imageSource`. These mocks each carry their own
+ * `mainImage` and no thumbnail, so the thumbnail falls back to the full-size
+ * URL within the "asset" tier.
+ */
+const serializedMockKits = mockKits.map((kit) => ({
+  ...kit,
+  assetKits: kit.assetKits.map(({ asset }) => {
+    const { assetModel: _assetModel, ...rest } = asset;
+    return {
+      asset: {
+        ...rest,
+        thumbnailImage: rest.mainImage,
+        imageSource: "asset",
+      },
+    };
+  }),
+}));
 
 describe("/api/kits", () => {
   beforeEach(() => {
@@ -162,6 +189,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -188,7 +219,7 @@ describe("/api/kits", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        kits: mockKits,
+        kits: serializedMockKits,
       });
     });
 
@@ -269,6 +300,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -325,6 +360,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -351,7 +390,7 @@ describe("/api/kits", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        kits: singleKit,
+        kits: [serializedMockKits[0]],
       });
     });
 
@@ -386,6 +425,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,

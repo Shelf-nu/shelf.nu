@@ -2,6 +2,7 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
   buildPdfAssetRows,
+  buildPdfBookingAssetSlices,
   countRemainingCheckoutAssets,
   filterBookingAssets,
   groupAndSortAssetsByKit,
@@ -692,9 +693,10 @@ describe("buildPdfAssetRows", () => {
     });
     const rawAssetsById = new Map([["boards", boards]]);
 
-    // `assetKitId` is the slice's `BookingAsset.assetKitId` (an AssetKit.id);
-    // `sourceKitId` is the real `Kit.id` and agrees with it while the
-    // membership lives.
+    // Each slice carries its `BookingAsset.assetKitId` (an AssetKit.id);
+    // buildPdfAssetRows matches it against the asset's `assetKits[].id`, and the
+    // OUTPUT row's `kitId` is the resolved Kit.id. `sourceKitId` holds that same
+    // `Kit.id` durably, and agrees with the membership while it lives.
     const slices: PdfBookingAssetSlice[] = [
       {
         id: "boards",
@@ -940,5 +942,148 @@ describe("buildPdfAssetRows", () => {
 
   it("returns an empty array for no slices", () => {
     expect(buildPdfAssetRows([], new Map<string, RawPdfAsset>())).toEqual([]);
+  });
+});
+
+describe("buildPdfBookingAssetSlices", () => {
+  /** Minimal `BookingAsset`-with-`asset` row the projection reads. */
+  const bookingAssetRow = (over: {
+    id: string;
+    quantity?: number;
+    assetKitId?: string | null;
+    sourceKitId?: string | null;
+    asset: {
+      id: string;
+      title: string;
+      assetKits?: Array<{
+        id: string;
+        kit: {
+          id: string;
+          name: string;
+          location: { name: string } | null;
+        } | null;
+      }>;
+      assetLocations?: Array<{ location: { name: string } | null }>;
+    };
+  }) => ({
+    id: over.id,
+    quantity: over.quantity ?? 1,
+    assetKitId: over.assetKitId ?? null,
+    // Defaults to null so these cases exercise the LIVE membership path; the
+    // `sourceKitId` fallback only engages once the membership is gone.
+    sourceKitId: over.sourceKitId ?? null,
+    asset: { assetKits: [], assetLocations: [], ...over.asset },
+  });
+
+  it("sets kitId to the shared Kit.id, NOT the per-membership AssetKit.id (#2790)", () => {
+    // The bug: `kitId` held the `AssetKit.id` (unique per asset-in-kit), so
+    // `filterBookingAssets`' kit re-expansion never surfaced siblings on search.
+    // It must be the shared `Kit.id`; the `AssetKit.id` is kept as `assetKitId`.
+    const slices = buildPdfBookingAssetSlices([
+      bookingAssetRow({
+        id: "ba-1",
+        assetKitId: "ak-cable-in-b1",
+        asset: {
+          id: "cable",
+          title: "Cable",
+          assetKits: [
+            {
+              id: "ak-cable-in-b1",
+              kit: { id: "kit-b1", name: "b1", location: null },
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(slices[0].kitId).toBe("kit-b1"); // Kit.id — not "ak-cable-in-b1"
+    expect(slices[0].assetKitId).toBe("ak-cable-in-b1");
+    expect(slices[0].kit).toEqual({ id: "kit-b1", name: "b1", location: null });
+  });
+
+  it("leaves kitId, assetKitId and kit null for a standalone slice", () => {
+    const slices = buildPdfBookingAssetSlices([
+      bookingAssetRow({
+        id: "ba-std",
+        assetKitId: null,
+        asset: { id: "cable", title: "Cable" },
+      }),
+    ]);
+    expect(slices[0].kitId).toBeNull();
+    expect(slices[0].assetKitId).toBeNull();
+    expect(slices[0].kit).toBeNull();
+  });
+
+  it("gives a QT asset booked via two kits two slices: same asset id, different kits", () => {
+    const assetKits = [
+      { id: "ak-b1", kit: { id: "kit-b1", name: "b1", location: null } },
+      { id: "ak-b2", kit: { id: "kit-b2", name: "b2", location: null } },
+    ];
+    const slices = buildPdfBookingAssetSlices([
+      bookingAssetRow({
+        id: "ba-b1",
+        quantity: 3,
+        assetKitId: "ak-b1",
+        asset: { id: "boards", title: "Boards", assetKits },
+      }),
+      bookingAssetRow({
+        id: "ba-b2",
+        quantity: 3,
+        assetKitId: "ak-b2",
+        asset: { id: "boards", title: "Boards", assetKits },
+      }),
+    ]);
+
+    expect(
+      slices.map((s) => ({ kitId: s.kitId, assetKitId: s.assetKitId }))
+    ).toEqual([
+      { kitId: "kit-b1", assetKitId: "ak-b1" },
+      { kitId: "kit-b2", assetKitId: "ak-b2" },
+    ]);
+  });
+
+  it("resolves the primary location from the asset's AssetLocation pivot", () => {
+    const slices = buildPdfBookingAssetSlices([
+      bookingAssetRow({
+        id: "ba-1",
+        asset: {
+          id: "cable",
+          title: "Cable",
+          assetLocations: [{ location: { name: "Shelf A" } }],
+        },
+      }),
+    ]);
+    expect(slices[0].location).toEqual({ name: "Shelf A" });
+  });
+
+  it("feeds filterBookingAssets so a kit-member search re-expands the whole kit (fixed behavior)", () => {
+    // Two assets in kit b1 + one unrelated standalone. Searching one kit member
+    // by title must surface BOTH kit members (re-expansion by the shared Kit.id)
+    // and not the unrelated asset. Before the fix (kitId = AssetKit.id) only the
+    // directly-matched member came back.
+    const inKitB1 = (id: string, title: string, ak: string) =>
+      bookingAssetRow({
+        id: `ba-${id}`,
+        assetKitId: ak,
+        asset: {
+          id,
+          title,
+          assetKits: [
+            { id: ak, kit: { id: "kit-b1", name: "b1", location: null } },
+          ],
+        },
+      });
+
+    const slices = buildPdfBookingAssetSlices([
+      inKitB1("cam", "Camera body", "ak-cam-b1"),
+      inKitB1("tripod", "Tripod", "ak-tripod-b1"),
+      bookingAssetRow({
+        id: "ba-solo",
+        asset: { id: "solo", title: "Unrelated" },
+      }),
+    ]);
+
+    const filtered = filterBookingAssets(slices, "Camera");
+    expect(filtered.map((s) => s.id).sort()).toEqual(["cam", "tripod"]);
   });
 });

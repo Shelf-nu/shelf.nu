@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { formatUnitCount } from "./format.js";
+import { formatUnitCount } from "./format";
 
 test("formatUnitCount: uses the supplied unit of measure", () => {
   assert.equal(formatUnitCount(10, "boxes"), "10 boxes");
