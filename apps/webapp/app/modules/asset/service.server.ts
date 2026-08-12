@@ -142,6 +142,7 @@ import {
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import type {
   MoveAssetLocationUnitsArgs,
@@ -5955,12 +5956,24 @@ export async function bulkCheckOutAssets({
         })),
       });
 
-      /** Updating status of assets to IN_CUSTODY */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
-      });
+      /**
+       * Updating status of assets to IN_CUSTODY.
+       *
+       * Routed through the shared guard so it cannot disturb `CHECKED_OUT`.
+       * The `assetsNotAvailable` pre-check above already rejects checked-out
+       * assets, but that read happens OUTSIDE this transaction — a checkout
+       * committing in between would be silently overwritten. Guarding the
+       * write closes that window and keeps every custody-driven status write
+       * uniform.
+       *
+       * @see {@link file://./custody-status.server.ts}
+       */
+      await setCustodyDrivenAssetStatus(
+        tx,
+        assets.map((asset) => asset.id),
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
 
       /** Creating notes for the assets */
       const actor = wrapUserLinkForNote({

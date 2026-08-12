@@ -3,6 +3,7 @@ import { AssetStatus, OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
+import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-status.server";
 
 /**
  * Releases all custody for an asset, setting its status to AVAILABLE.
@@ -70,14 +71,32 @@ export async function releaseCustody({
     // at once — Phase 2 changed `Asset.custody` from `Custody?` to
     // `Custody[]`, so `delete: true` no longer compiles.
     return await db.$transaction(async (tx) => {
-      const asset = await tx.asset.update({
+      /**
+       * Split into delete → guarded status write → re-read.
+       *
+       * A single `asset.update` with a nested `custody: { deleteMany: {} }`
+       * cannot express "set AVAILABLE unless CHECKED_OUT" — `update` has no
+       * conditional `where` beyond identity. Releasing the last custody row on
+       * an asset still out on a booking therefore advertised a physically
+       * absent asset as free, which is the more dangerous half of the
+       * precedence this PR restores. Assets already in that state predate the
+       * fix, so the assign-side 400 does not cover them.
+       *
+       * @see {@link file://./../asset/custody-status.server.ts}
+       */
+      await tx.custody.deleteMany({ where: { assetId } });
+
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        [assetId],
+        organizationId
+      );
+
+      // Re-read so callers keep the shape they build the activity note from.
+      // `findUniqueOrThrow` rather than the update's return value: the status
+      // write above is conditional, so only the row itself is authoritative.
+      const asset = await tx.asset.findUniqueOrThrow({
         where: { id: assetId, organizationId },
-        data: {
-          status: AssetStatus.AVAILABLE,
-          custody: {
-            deleteMany: {},
-          },
-        },
         include: {
           user: {
             select: {
