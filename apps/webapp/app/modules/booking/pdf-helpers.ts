@@ -71,6 +71,14 @@ export interface PdfDbResult {
     quantity: number;
     /** Unique `BookingAsset.id` — the rendered row's React key. */
     bookingAssetId: string;
+    /**
+     * `true` when this slice renders under a kit it is no longer a member of
+     * (detached residue kept by a non-planning booking). Resolved in
+     * {@link buildPdfAssetRows}; the renderer prints a short note in the Kit
+     * cell, the print-medium equivalent of the web overview's
+     * "Removed from kit" badge.
+     */
+    isRemovedFromKit: boolean;
     /** Cover image of the asset's model, rendered in the PDF when the asset
      * has no image of its own. See `~/modules/asset/image-resolution`. */
     assetModel: { image: string | null; thumbnailImage: string | null } | null;

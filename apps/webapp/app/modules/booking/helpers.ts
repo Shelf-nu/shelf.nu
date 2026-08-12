@@ -730,6 +730,15 @@ type PdfSliceOverrides = {
   quantity: number;
   /** Unique React key for the rendered row. */
   bookingAssetId: string;
+  /**
+   * Detached kit residue: the slice renders under a kit resolved from the
+   * durable `sourceKitId`, but the asset is no longer a member of that kit.
+   * Mirrors the booking overview's `isRemovedFromKit` (see the loader in
+   * `bookings.$bookingId.overview.tsx`) so the printed PDF marks exactly the
+   * rows the web UI badges — a printed checklist otherwise shows a removed
+   * asset as an indistinguishable live kit member.
+   */
+  isRemovedFromKit: boolean;
 };
 
 /**
@@ -753,7 +762,10 @@ type PdfSliceOverrides = {
  * When that membership is gone (the asset was removed from the kit, which
  * `SET NULL`s `assetKitId`), the slice falls back to its durable
  * `sourceKitId` via `snapshotKitsById`. Without it a finished booking's PDF
- * would retroactively re-describe the job as containing loose assets.
+ * would retroactively re-describe the job as containing loose assets. Such a
+ * row is flagged `isRemovedFromKit` so the renderer can print that it is no
+ * longer a member of the kit it groups under — unless the asset has since been
+ * re-added to that kit, in which case it is a live member again.
  *
  * @param visibleSlices - The search-visible, per-slice `BookingAsset` list
  *   (each already reduced to {@link PdfBookingAssetSlice}).
@@ -762,7 +774,8 @@ type PdfSliceOverrides = {
  *   resolve slices whose live membership is gone. Omit when no slice can be
  *   detached residue.
  * @returns One row per slice: the full asset data plus the slice's resolved
- *   kit, primary location, booked quantity and unique key.
+ *   kit, primary location, booked quantity, unique key and the
+ *   `isRemovedFromKit` residue marker.
  */
 export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
   visibleSlices: PdfBookingAssetSlice[],
@@ -786,11 +799,25 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
     const liveKit = slice.assetKitId
       ? raw.assetKits.find((ak) => ak.id === slice.assetKitId)?.kit ?? null
       : null;
-    const sliceKit =
-      liveKit ??
-      (slice.sourceKitId
+    const snapshotKit =
+      !liveKit && slice.sourceKitId
         ? snapshotKitsById.get(slice.sourceKitId) ?? null
-        : null);
+        : null;
+    const sliceKit = liveKit ?? snapshotKit;
+
+    /**
+     * Detached kit residue marker, an exact mirror of the booking overview
+     * loader's `isRemovedFromKit`: the row groups under a SNAPSHOT kit AND the
+     * asset is not currently a member of that same kit.
+     *
+     * The membership re-check is load-bearing. Re-adding the asset to the kit
+     * creates a NEW `AssetKit` row that the already-nulled slice never points
+     * at, so the slice still resolves through `sourceKitId` — without this
+     * condition a genuine current member would be printed as removed.
+     */
+    const isRemovedFromKit =
+      Boolean(snapshotKit) &&
+      !raw.assetKits.some((ak) => ak.kit?.id === slice.sourceKitId);
 
     rows.push({
       ...raw,
@@ -803,6 +830,7 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
       location: getPrimaryLocation<{ name: string }>(raw),
       quantity: slice.quantity,
       bookingAssetId: slice.bookingAssetId,
+      isRemovedFromKit,
     });
   }
 

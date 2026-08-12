@@ -756,10 +756,17 @@ export async function getReservedBookingImpactForAssetKits({
  * since it needs the kit-driven rows to still exist to capture their
  * booking + asset names.
  *
- * INDIVIDUAL assets can't collide (the trigger
- * `enforce_individual_asset_single_kit` already prevents an INDIVIDUAL
- * asset from being in multiple slices), but for safety the merge handles
- * them the same way QUANTITY_TRACKED ones are handled.
+ * INDIVIDUAL assets shouldn't collide, but that guarantee is SERVICE-layer,
+ * not a database one: the INDIVIDUAL-overlap guards in `createBooking` and
+ * `updateBookingAssets` (`~/modules/booking/service.server`) drop an
+ * INDIVIDUAL asset from the standalone bucket when the same call also books
+ * it via a kit slice, so it never ends up with both rows. QUANTITY_TRACKED is
+ * deliberately exempt there — a free-pool slice may legitimately coexist with
+ * kit slices. (The `enforce_individual_asset_single_kit` trigger is NOT the
+ * enforcement point: it caps `AssetKit` membership rows per INDIVIDUAL asset
+ * and says nothing about `BookingAsset` rows.) Since nothing at the DB level
+ * stops the collision, the merge below handles INDIVIDUAL rows the same way
+ * QUANTITY_TRACKED ones are handled.
  */
 export async function mergeStandaloneCollisionsForKitDetachment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

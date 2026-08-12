@@ -940,6 +940,118 @@ describe("buildPdfAssetRows", () => {
     });
   });
 
+  describe("isRemovedFromKit (printed residue marker)", () => {
+    /** The snapshot map every case below resolves `kit-camera` through. */
+    const cameraSnapshot = new Map([
+      ["kit-camera", { id: "kit-camera", name: "Camera Kit", location: null }],
+    ]);
+
+    it("flags a slice whose asset has genuinely left the kit", () => {
+      // Membership gone (`assetKits` empty, `assetKitId` SET NULL'd) but the
+      // slice still renders under `kit-camera` via `sourceKitId` — the printed
+      // row must say so, or it reads as a live kit member.
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: null,
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", rawAsset({ id: "tripod", title: "Tripod" })]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0]).toMatchObject({
+        kitId: "kit-camera",
+        isRemovedFromKit: true,
+      });
+    });
+
+    it("does not flag a live kit member", () => {
+      const tripod = rawAsset({
+        id: "tripod",
+        assetKits: [
+          {
+            id: "ak-camera",
+            kit: { id: "kit-camera", name: "Camera Kit", location: null },
+          },
+        ],
+      });
+
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: "ak-camera",
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", tripod]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0].isRemovedFromKit).toBe(false);
+    });
+
+    it("does not flag a standalone slice", () => {
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "laptop",
+            assetKitId: null,
+            sourceKitId: null,
+            quantity: 1,
+            bookingAssetId: "ba-laptop",
+          },
+        ],
+        new Map([["laptop", rawAsset({ id: "laptop", title: "Laptop" })]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0].isRemovedFromKit).toBe(false);
+    });
+
+    it("does not flag an asset that was re-added to the same kit", () => {
+      // Re-adding creates a NEW `AssetKit` row the nulled slice never points
+      // at, so the row still resolves through the snapshot — but the asset IS
+      // a current member again, so calling it removed would be a lie.
+      const tripod = rawAsset({
+        id: "tripod",
+        assetKits: [
+          {
+            id: "ak-camera-new",
+            kit: { id: "kit-camera", name: "Camera Kit", location: null },
+          },
+        ],
+      });
+
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: null,
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", tripod]]),
+        cameraSnapshot
+      );
+
+      // Still grouped under the kit, just not marked as removed.
+      expect(rows[0]).toMatchObject({
+        kitId: "kit-camera",
+        isRemovedFromKit: false,
+      });
+    });
+  });
+
   it("returns an empty array for no slices", () => {
     expect(buildPdfAssetRows([], new Map<string, RawPdfAsset>())).toEqual([]);
   });

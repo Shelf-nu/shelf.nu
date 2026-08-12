@@ -391,6 +391,19 @@ const BookingPDFPreview = ({
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.kit?.name}
+                    {/* Print-medium equivalent of the overview's
+                        "Removed from kit" badge — a tooltip can't exist on
+                        paper, so the explanation is printed inline. Without
+                        it a detached row is indistinguishable from a live kit
+                        member, and the kit's printed rows out-number the kit's
+                        actual contents with nothing explaining the gap.
+                        Status-neutral wording: CANCELLED bookings keep these
+                        rows too and may never have gone out. */}
+                    <When truthy={!!asset.isRemovedFromKit}>
+                      <span className="mt-1 block text-xs text-gray-500">
+                        Removed from kit — kept as a record of what was booked
+                      </span>
+                    </When>
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.category?.name}
