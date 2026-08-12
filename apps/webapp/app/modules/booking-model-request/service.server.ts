@@ -39,7 +39,10 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapAssetsWithDataForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -784,15 +787,6 @@ type MaterializeArgs = {
   asset: Pick<Asset, "id" | "title" | "assetModelId" | "type">;
   organizationId: string;
   /**
-   * Actor for the activity note. Optional because not every add-assets path
-   * threads one through (`api/assets.add-to-booking` writes its own
-   * user-attributed note instead, so passing a user here would duplicate it).
-   * Fulfilment itself must not depend on attribution — a reservation that
-   * silently survived because the caller had no `userId` would hard-block
-   * check-out. Without an actor the note is written in the system voice.
-   */
-  userId?: string;
-  /**
    * Interactive Prisma transaction client. Required — this function
    * must run in the same tx as the caller's `BookingAsset.create`
    * (typically `addScannedAssetsToBooking`) so a failure anywhere in
@@ -828,7 +822,6 @@ type MaterializeArgs = {
 export async function materializeModelRequestForAsset({
   bookingId,
   asset,
-  userId,
   tx,
 }: MaterializeArgs): Promise<
   | { matched: true; requestId: string; remaining: number; modelName: string }
@@ -933,23 +926,12 @@ export async function materializeModelRequestForAsset({
       claimed[0].quantity - claimed[0].fulfilledQuantity
     );
 
-    // Activity note — IN the tx so the note rolls back with the
-    // materialization if anything later in the pipeline fails.
-    const actor = userId ? await loadActor(userId) : null;
-    const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
-    const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
-    // Same sentence either way; only the subject changes, so the feed reads
-    // consistently whether or not the caller threaded an actor through.
-    const content = actor
-      ? `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
-      : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
-    await tx.bookingNote.create({
-      data: {
-        type: "UPDATE",
-        content,
-        booking: { connect: { id: bookingId } },
-      },
-    });
+    // NOTE: no activity note here on purpose. The caller
+    // ({@link fulfilModelRequestsForAssets}) writes ONE aggregated note per
+    // model once the batch is done. Writing per asset is fine at the scanner's
+    // one-at-a-time pace but turns a 20-asset pick into 20 near-identical
+    // lines ("19 remaining", "18 remaining", ...), all INSERTed inside the
+    // caller's interactive transaction.
 
     return {
       matched: true,
@@ -1039,6 +1021,19 @@ export async function fulfilModelRequestsForAssets({
   const fulfilledRequestIdByAssetId = new Map<string, string>();
 
   /**
+   * What each reservation absorbed on this call, so the note is written once
+   * per model instead of once per asset.
+   */
+  const claimsByRequest = new Map<
+    string,
+    {
+      modelName: string;
+      assets: Array<{ id: string; title: string }>;
+      remaining: number;
+    }
+  >();
+
+  /**
    * Short-circuit the overwhelmingly common case: the booking has no
    * outstanding reservations, so no asset can discharge one.
    *
@@ -1067,12 +1062,59 @@ export async function fulfilModelRequestsForAssets({
       bookingId,
       asset,
       organizationId,
-      userId,
       tx,
     });
 
-    if (result.matched) {
-      fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
+    if (!result.matched) continue;
+
+    fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
+
+    const claim = claimsByRequest.get(result.requestId);
+    if (claim) {
+      claim.assets.push({ id: asset.id, title: asset.title });
+      claim.remaining = result.remaining;
+    } else {
+      claimsByRequest.set(result.requestId, {
+        modelName: result.modelName,
+        assets: [{ id: asset.id, title: asset.title }],
+        remaining: result.remaining,
+      });
+    }
+  }
+
+  /**
+   * ONE note per model, written after the batch.
+   *
+   * For a single asset this is byte-identical to the per-asset note it
+   * replaces: `wrapAssetsWithDataForNote` emits the same `{% link %}` tag at
+   * count 1 that `wrapLinkForNote` did, so the scanner's one-at-a-time feed
+   * reads exactly as before. For several it collapses to the repo's standard
+   * `{% assets_list %}` popover, so a 20-asset pick is one line naming all
+   * twenty rather than twenty lines counting down.
+   *
+   * `remaining` is the value after the LAST claim, which is the only figure a
+   * reader cares about. `loadActor` also moves here: it was one user lookup
+   * PER ASSET inside the caller's transaction.
+   */
+  if (claimsByRequest.size > 0) {
+    const actor = userId ? await loadActor(userId) : null;
+
+    for (const claim of claimsByRequest.values()) {
+      const assetsFragment = wrapAssetsWithDataForNote(claim.assets, "assigned");
+      // Model name is literal text, so delimiters must be stripped or a name
+      // containing `{% … %}` renders as a live Markdoc tag.
+      const modelName = stripMarkdocDelimiters(claim.modelName);
+      const content = actor
+        ? `${actor} assigned ${assetsFragment} (${modelName}) to this booking — ${claim.remaining} × ${modelName} remaining.`
+        : `${assetsFragment} (${modelName}) was assigned to this booking — ${claim.remaining} × ${modelName} remaining.`;
+
+      await tx.bookingNote.create({
+        data: {
+          type: "UPDATE",
+          content,
+          booking: { connect: { id: bookingId } },
+        },
+      });
     }
   }
 

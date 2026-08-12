@@ -527,7 +527,6 @@ describe("materializeModelRequestForAsset", () => {
         type: AssetType.INDIVIDUAL,
       },
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -572,7 +571,6 @@ describe("materializeModelRequestForAsset", () => {
         type: AssetType.INDIVIDUAL,
       },
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -609,7 +607,6 @@ describe("materializeModelRequestForAsset", () => {
         type: AssetType.INDIVIDUAL,
       },
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -631,7 +628,6 @@ describe("materializeModelRequestForAsset", () => {
         type: AssetType.INDIVIDUAL,
       },
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -899,7 +895,6 @@ describe("fulfilModelRequestsForAssets", () => {
       bookingId: BOOKING_ID,
       assets: [asset("asset-1")],
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -915,7 +910,6 @@ describe("fulfilModelRequestsForAssets", () => {
       bookingId: BOOKING_ID,
       assets: [asset("asset-1"), asset("asset-2", null)],
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -949,7 +943,6 @@ describe("fulfilModelRequestsForAssets", () => {
       bookingId: BOOKING_ID,
       assets: [asset("a1"), asset("a2"), asset("a3")],
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -981,7 +974,6 @@ describe("fulfilModelRequestsForAssets", () => {
       bookingId: BOOKING_ID,
       assets: [asset("a1"), asset("a2"), asset("a3")],
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -1067,7 +1059,6 @@ describe("materializeModelRequestForAsset — concurrent claims", () => {
       bookingId: BOOKING_ID,
       asset,
       organizationId: ORG_ID,
-      userId: USER_ID,
       tx,
     });
 
@@ -1102,7 +1093,6 @@ describe("materializeModelRequestForAsset — concurrent claims", () => {
         bookingId: BOOKING_ID,
         asset: { ...asset, id },
         organizationId: ORG_ID,
-        userId: USER_ID,
         tx,
       });
     }
@@ -1112,5 +1102,107 @@ describe("materializeModelRequestForAsset — concurrent claims", () => {
     // (`2 < 2` is false) while the checkout guard blocks on it, and
     // `removeBookingModelRequest` refuses to delete it. Nothing to click.
     expect(row.fulfilledAt).not.toBeNull();
+  });
+});
+
+/**
+ * Note volume on bulk fulfilment.
+ *
+ * The countdown wording was designed for the scanner, which discharges one unit
+ * at a time. Routing "Manage assets" through the same helper made bulk
+ * fulfilment reachable — tick 20 matching assets, save once — and the per-asset
+ * note turned that into 20 near-identical lines counting down, all INSERTed
+ * inside the caller's interactive transaction.
+ */
+describe("fulfilModelRequestsForAssets — note volume", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tx = db as any;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    installClaimSimulator();
+  });
+
+  const stageRequest = (quantity: number) => {
+    const row = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity,
+      fulfilledQuantity: 0,
+      fulfilledAt: null as Date | null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(() =>
+      Promise.resolve(row)
+    );
+    return row;
+  };
+
+  const assetsOfModel = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `asset-${i + 1}`,
+      title: `Laptop #${i + 1}`,
+      assetModelId: MODEL_ID,
+      type: AssetType.INDIVIDUAL,
+    }));
+
+  it("writes ONE note for a batch, not one per asset", async () => {
+    expect.assertions(2);
+    stageRequest(20);
+
+    await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: assetsOfModel(20),
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    expect(db.bookingNote.create).toHaveBeenCalledTimes(1);
+
+    // States the FINAL remainder, not a mid-batch countdown.
+    const content = vitest.mocked(db.bookingNote.create).mock.calls[0][0].data
+      .content as string;
+    expect(content).toContain("0 × Dell Latitude 5550 remaining");
+  });
+
+  it("keeps the single-asset wording byte-identical to the per-asset note", async () => {
+    expect.assertions(1);
+    stageRequest(3);
+
+    await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: assetsOfModel(1),
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // `wrapAssetsWithDataForNote` emits the same `{% link %}` tag at count 1
+    // that `wrapLinkForNote` produced, so the scanner feed is unchanged.
+    const content = vitest.mocked(db.bookingNote.create).mock.calls[0][0].data
+      .content as string;
+    expect(content).toContain(
+      '{% link to="/assets/asset-1" text="Laptop #1" /%}'
+    );
+  });
+
+  it("writes no note when nothing was claimed", async () => {
+    expect.assertions(1);
+    // why: findUnique default is null — no reservation exists for this model.
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue(null);
+
+    await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: assetsOfModel(5),
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    expect(db.bookingNote.create).not.toHaveBeenCalled();
   });
 });
