@@ -46,6 +46,7 @@ import {
   bookingWriteScopeClause,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -2123,14 +2124,42 @@ async function checkoutBookingWritesWithinTx(
    * `remaining > 0`, but a tampered payload would still hit this
    * guard inside the shared transaction and roll everything back.
    */
-  const outstandingRequests = await tx.bookingModelRequest.findMany({
-    // `fulfilledAt IS NULL` is the canonical "outstanding" filter —
-    // replaces the pre-audit-trail `quantity > 0` check. Rows where
-    // every unit has been materialised into a `BookingAsset` carry a
-    // timestamp and must not block checkout.
-    where: { bookingId, fulfilledAt: null },
-    include: { assetModel: { select: { name: true } } },
-  });
+  /**
+   * ONE definition of "outstanding", shared with every surface that renders it.
+   *
+   * This guard used to filter on `fulfilledAt: null` in SQL while the overview,
+   * drawer, PDF, statistics panel and index pill all used
+   * `getOutstandingModelRequests`, which additionally requires
+   * `fulfilledQuantity < quantity`. Two predicates meant a row could fall in
+   * the gap: fully delivered by unit count but with no completion timestamp, so
+   * invisible everywhere in the UI while still hard-blocking check-out — with
+   * no row on screen to edit and `removeBookingModelRequest` refusing to delete
+   * it. An unrecoverable booking.
+   *
+   * Reading through the same helper closes the class rather than this instance
+   * of it: units delivered is the truth, `fulfilledAt` is a timestamp. Fetching
+   * the booking's requests and filtering in JS keeps the two in lockstep by
+   * construction — Prisma cannot compare two columns in a `where`, so a SQL
+   * predicate here could only ever be an approximation of the helper.
+   *
+   * @see {@link file://./../../utils/booking-model-requests.ts}
+   */
+  // Shape pinned explicitly — `tx` is typed `any` (the extended Prisma client's
+  // tx type is incompatible with `Prisma.TransactionClient`), so without this
+  // the helper's generic widens and `assetModel` is lost.
+  type GuardModelRequest = {
+    quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: Date | null;
+    assetModel: { name: string };
+  };
+  const allRequests: GuardModelRequest[] =
+    await tx.bookingModelRequest.findMany({
+      where: { bookingId },
+      include: { assetModel: { select: { name: true } } },
+    });
+  const outstandingRequests =
+    getOutstandingModelRequests<GuardModelRequest>(allRequests);
 
   if (outstandingRequests.length > 0) {
     // `tx` is typed `any` so the result shape is lost; annotate the callback.
@@ -2144,12 +2173,10 @@ async function checkoutBookingWritesWithinTx(
     // `quantity - fulfilledQuantity` here would report a mid-tx view
     // that doesn't match post-rollback reality.
     const outstanding: Array<{ assetModelName: string; remaining: number }> =
-      outstandingRequests.map(
-        (req: { assetModel: { name: string }; quantity: number }) => ({
-          assetModelName: req.assetModel.name,
-          remaining: req.quantity,
-        })
-      );
+      outstandingRequests.map((req) => ({
+        assetModelName: req.assetModel.name,
+        remaining: req.quantity,
+      }));
 
     const summary = outstanding
       .map((row) => `${row.remaining} × ${row.assetModelName}`)
@@ -8279,19 +8306,33 @@ export async function updateBookingAssets({
        * @see {@link file://./../booking-model-request/service.server.ts} —
        *   `fulfilModelRequestsForAssets`, which the survivors are handed to.
        */
-      const preExistingStandaloneAssetIds = new Set<string>(
+      const preExistingRows: Array<{
+        assetId: string;
+        assetKitId: string | null;
+      }> =
         addedAssetIds.length > 0
-          ? (
-              await tx.bookingAsset.findMany({
-                where: {
-                  bookingId: id,
-                  assetId: { in: addedAssetIds },
-                  assetKitId: null,
-                },
-                select: { assetId: true },
-              })
-            ).map((row: { assetId: string }) => row.assetId)
-          : []
+          ? await tx.bookingAsset.findMany({
+              where: { bookingId: id, assetId: { in: addedAssetIds } },
+              select: { assetId: true, assetKitId: true },
+            })
+          : [];
+
+      const preExistingStandaloneAssetIds = new Set<string>(
+        preExistingRows
+          .filter((row) => row.assetKitId === null)
+          .map((row) => row.assetId)
+      );
+
+      /**
+       * `AssetKit` ids already represented on this booking. Used only to tell a
+       * genuinely new kit slice from a re-submitted one, since the kit insert
+       * below is `ON CONFLICT DO NOTHING` and therefore creates nothing the
+       * second time.
+       */
+      const preExistingAssetKitIds = new Set<string>(
+        preExistingRows
+          .map((row) => row.assetKitId)
+          .filter((assetKitId): assetKitId is string => assetKitId !== null)
       );
 
       /**
@@ -8450,10 +8491,28 @@ export async function updateBookingAssets({
          * aggregate, still claiming a phantom add. An asset is "added" if this
          * call created its standalone row or any of its kit-driven rows.
          */
+        /**
+         * An asset was ADDED by this call if it gained a standalone row or a
+         * kit-driven row that did not exist before.
+         *
+         * The previous version read
+         * `newlyStandaloneAssetIds.has(id) || !preExistingStandaloneAssetIds.has(id)`,
+         * whose first operand is a strict subset of the second — so it reduced
+         * to the second alone and never looked at kit rows at all, despite the
+         * comment claiming it did. Harmless in practice (the kit insert is
+         * `ON CONFLICT DO NOTHING` and the picker filters already-added kits),
+         * but code and comment disagreeing is how the next reader gets misled.
+         */
+        const assetsGainingAKitSlice = new Set<string>(
+          effectiveSlices
+            .filter((slice) => !preExistingAssetKitIds.has(slice.assetKitId))
+            .map((slice) => slice.assetId)
+        );
+
         const newlyAddedAssetIds = addedAssetIds.filter(
           (assetId: string) =>
             newlyStandaloneAssetIds.has(assetId) ||
-            !preExistingStandaloneAssetIds.has(assetId)
+            assetsGainingAKitSlice.has(assetId)
         );
 
         await recordEvents(

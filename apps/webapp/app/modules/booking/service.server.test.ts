@@ -1740,7 +1740,11 @@ describe("updateBookingAssets", () => {
     ]);
     // `asset-1` is already on the booking — the operator merely resubmitted it.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ assetId: "asset-1" }]);
+    // why: the pre-existing read now selects `assetKitId` so it can tell a
+    // standalone row from a kit slice — `null` means standalone.
+    db.bookingAsset.findMany.mockResolvedValue([
+      { assetId: "asset-1", assetKitId: null },
+    ]);
 
     await updateBookingAssets({
       id: "booking-1",
@@ -2073,7 +2077,7 @@ describe("updateBookingAssets", () => {
     // why: the asset already exists on the booking as a standalone row.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ assetId: "asset-1" }]);
+    ).mockResolvedValue([{ assetId: "asset-1", assetKitId: null }]);
 
     await updateBookingAssets({
       id: "booking-1",
@@ -3041,6 +3045,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-1",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
       {
@@ -3048,6 +3056,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-2",
         quantity: 3,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "HP MX-500" },
       },
     ]);
@@ -3065,6 +3077,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-1",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
       {
@@ -3072,6 +3088,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-2",
         quantity: 3,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "HP MX-500" },
       },
     ]);
@@ -3677,6 +3697,10 @@ describe("fulfilModelRequestsAndCheckout", () => {
         bookingId: "booking-1",
         assetModelId: "am-dell",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
     ]);
@@ -3856,6 +3880,10 @@ describe("fulfilModelRequestsAndCheckout", () => {
         bookingId: "booking-1",
         assetModelId: "am-dell",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
     ]);

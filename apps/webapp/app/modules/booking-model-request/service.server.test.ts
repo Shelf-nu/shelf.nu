@@ -28,6 +28,13 @@ vitest.mock("~/database/db.server", () => ({
     // why: the service calls the callback form of $transaction; route it
     // through the same mocked `db` so per-test overrides are visible
     // inside the tx callback.
+    // why: the unit claim is a single conditional
+    // `UPDATE ... WHERE fulfilledQuantity < quantity ... RETURNING`, so the
+    // capacity check, the increment and the completion stamp are one atomic
+    // statement. Tests drive it by queueing the RETURNING rows: a row means
+    // "this transaction claimed a unit", an empty array means another
+    // transaction took the last one.
+    $queryRaw: vitest.fn(),
     $transaction: vitest
       .fn()
       .mockImplementation((callbackOrArray) =>
@@ -95,6 +102,35 @@ vitest.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vitest.fn().mockResolvedValue({}),
 }));
 
+/**
+ * Simulates the conditional claim statement:
+ *
+ *   UPDATE ... SET fulfilledQuantity = fulfilledQuantity + 1,
+ *                  fulfilledAt = CASE WHEN +1 >= quantity THEN NOW() ...
+ *   WHERE id = $1 AND fulfilledQuantity < quantity
+ *   RETURNING fulfilledQuantity, quantity
+ *
+ * why: the claim is raw SQL, so a plain `mockResolvedValue` would let a test
+ * pass while the statement's actual capacity semantics regressed. Reading the
+ * row the test already staged on `findUnique` keeps the mock honest: it
+ * refuses when full, returns the POST-write count when it claims, and mutates
+ * the staged row so a loop's next read sees the committed value.
+ */
+function installClaimSimulator() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (db.$queryRaw as any).mockImplementation(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = await (db.bookingModelRequest.findUnique as any)();
+    if (!row) return [];
+    if (row.fulfilledQuantity >= row.quantity) return [];
+    row.fulfilledQuantity += 1;
+    if (row.fulfilledQuantity >= row.quantity) row.fulfilledAt = new Date();
+    return [
+      { fulfilledQuantity: row.fulfilledQuantity, quantity: row.quantity },
+    ];
+  });
+}
+
 const BOOKING_ID = "booking-1";
 const ORG_ID = "org-1";
 const USER_ID = "user-1";
@@ -106,6 +142,7 @@ const to = new Date("2026-05-05T18:00:00Z");
 describe("getAssetModelAvailability", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
     // Re-default the aggregates so each test starts from a clean pool.
@@ -241,6 +278,7 @@ describe("getAssetModelAvailability", () => {
 describe("upsertBookingModelRequest", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // Default to a DRAFT booking so the status guard passes.
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
@@ -345,6 +383,7 @@ describe("upsertBookingModelRequest", () => {
 describe("removeBookingModelRequest", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
     // Re-default the aggregates so each test starts from a clean pool.
@@ -440,6 +479,7 @@ describe("removeBookingModelRequest", () => {
 describe("materializeModelRequestForAsset", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
     // Re-default the aggregates so each test starts from a clean pool.
@@ -501,20 +541,11 @@ describe("materializeModelRequestForAsset", () => {
       remaining: 2,
       modelName: "Dell Latitude 5550",
     });
-    // Update writes fulfilledQuantity: 1 (one unit scanned). fulfilledAt
-    // stays absent from the payload because we haven't caught up to
-    // quantity yet — the row is still outstanding.
-    expect(db.bookingModelRequest.update).toHaveBeenCalledWith({
-      where: {
-        bookingId_assetModelId: {
-          bookingId: BOOKING_ID,
-          assetModelId: MODEL_ID,
-        },
-      },
-      // Relative, not absolute: two concurrent transactions that both read
-      // the same value must not lose one another's unit.
-      data: { fulfilledQuantity: { increment: 1 } },
-    });
+    // The claim is a conditional atomic write. Assert the capacity predicate
+    // is IN the statement — a pre-read guard plus an unconditional increment
+    // is exactly the shape that over-filled the row under concurrency.
+    const sql = ((vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ?? []).join("?");
+    expect(sql).toContain('"fulfilledQuantity" < "quantity"');
     // Row is NEVER deleted under the audit-trail schema.
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
   });
@@ -554,11 +585,16 @@ describe("materializeModelRequestForAsset", () => {
     // Update payload must include BOTH the incremented fulfilledQuantity
     // AND a fulfilledAt timestamp — this is the scan that completes the
     // reservation, so the row becomes historical.
-    const updateCall = (
-      db.bookingModelRequest.update as ReturnType<typeof vitest.fn>
-    ).mock.calls[0]?.[0];
-    expect(updateCall?.data?.fulfilledQuantity).toEqual({ increment: 1 });
-    expect(updateCall?.data?.fulfilledAt).toBeInstanceOf(Date);
+    // The stamp is computed from the POST-write value inside the statement
+    // (`CASE WHEN "fulfilledQuantity" + 1 >= "quantity"`), not from the
+    // pre-write read — that gap is what let two concurrent claims both decide
+    // "not complete" and leave the row delivered-but-unstamped, invisible to
+    // the UI and still blocking check-out.
+    const sql =
+      ((vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ?? []).join("?");
+    expect(sql).toContain('"fulfilledQuantity" + 1 >= "quantity"');
+    // COALESCE keeps an existing stamp rather than moving it on a later write.
+    expect(sql).toContain("COALESCE");
   });
 
   it("returns matched:false when the asset has no model", async () => {
@@ -608,6 +644,7 @@ describe("materializeModelRequestForAsset", () => {
 describe("getBookingModelTabData", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
     // Re-default the aggregates so each test starts from a clean pool.
@@ -840,6 +877,7 @@ describe("fulfilModelRequestsForAssets", () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
+    installClaimSimulator();
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
   });
@@ -891,27 +929,20 @@ describe("fulfilModelRequestsForAssets", () => {
     // A single 3-unit reservation, read fresh before each write. The service
     // must see the previous increment, so the mock advances the counter the
     // way the database would.
-    let fulfilledQuantity = 0;
+    // ONE mutable row, so the claim simulator's increment is visible to the
+    // loop's next read — exactly how a committed row behaves.
+    const row = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      fulfilledAt: null as Date | null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockImplementation(() =>
-      Promise.resolve({
-        id: "req-1",
-        bookingId: BOOKING_ID,
-        assetModelId: MODEL_ID,
-        quantity: 3,
-        fulfilledQuantity,
-        fulfilledAt: null,
-        assetModel: { name: "Dell Latitude 5550" },
-      })
-    );
-    // @ts-expect-error mocked
-    db.bookingModelRequest.update.mockImplementation(
-      ({ data }: { data: { fulfilledQuantity: { increment: number } } }) => {
-        // Mirror what Postgres does with a relative update, so the next read
-        // in the loop sees the committed value.
-        fulfilledQuantity += data.fulfilledQuantity.increment;
-        return Promise.resolve({});
-      }
+      Promise.resolve(row)
     );
 
     const result = await fulfilModelRequestsForAssets({
@@ -926,33 +957,24 @@ describe("fulfilModelRequestsForAssets", () => {
     // exactly. Running these concurrently would let two reads observe the
     // same `fulfilledQuantity` and lose an increment — which is why the
     // helper loops sequentially.
-    expect(fulfilledQuantity).toBe(3);
+    expect(row.fulfilledQuantity).toBe(3);
     expect(result.size).toBe(3);
   });
 
   it("stops decrementing once the reservation is full, so extras are plain assets", async () => {
     expect.assertions(2);
-    let fulfilledQuantity = 0;
+    const row = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 1,
+      fulfilledQuantity: 0,
+      fulfilledAt: null as Date | null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockImplementation(() =>
-      Promise.resolve({
-        id: "req-1",
-        bookingId: BOOKING_ID,
-        assetModelId: MODEL_ID,
-        quantity: 1,
-        fulfilledQuantity,
-        fulfilledAt: null,
-        assetModel: { name: "Dell Latitude 5550" },
-      })
-    );
-    // @ts-expect-error mocked
-    db.bookingModelRequest.update.mockImplementation(
-      ({ data }: { data: { fulfilledQuantity: { increment: number } } }) => {
-        // Mirror what Postgres does with a relative update, so the next read
-        // in the loop sees the committed value.
-        fulfilledQuantity += data.fulfilledQuantity.increment;
-        return Promise.resolve({});
-      }
+      Promise.resolve(row)
     );
 
     const result = await fulfilModelRequestsForAssets({
@@ -966,7 +988,7 @@ describe("fulfilModelRequestsForAssets", () => {
     // Over-delivery is legitimate — the operator may want more than they
     // reserved. The extras join the booking as ordinary assets; only the
     // first discharges the promise, so only it carries provenance.
-    expect(fulfilledQuantity).toBe(1);
+    expect(row.fulfilledQuantity).toBe(1);
     expect(result).toEqual(new Map([["a1", "req-1"]]));
   });
 
@@ -997,5 +1019,98 @@ describe("fulfilModelRequestsForAssets", () => {
     expect(result).toEqual(new Map([["asset-1", "req-1"]]));
     // The note is still written, in the system voice.
     expect(db.bookingNote.create).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The unit claim under concurrency.
+ *
+ * Nothing exercised this before: the previous test asserted the update PAYLOAD
+ * (`{ increment: 1 }`), which says nothing about what happens when two
+ * transactions race. That gap is how a fix for the lost update shipped while
+ * introducing a worse failure — a row delivered in full but never stamped,
+ * invisible to every UI surface and still hard-blocking check-out.
+ */
+describe("materializeModelRequestForAsset — concurrent claims", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tx = db as any;
+
+  const asset = {
+    id: "asset-1",
+    title: "Laptop #1",
+    assetModelId: MODEL_ID,
+    type: AssetType.INDIVIDUAL,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    installClaimSimulator();
+  });
+
+  it("refuses the claim when another transaction took the last unit", async () => {
+    expect.assertions(2);
+
+    // Staged as already full — the same state a concurrent transaction leaves
+    // behind after taking the final unit between our read and our write.
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 1,
+      fulfilledQuantity: 1,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    const result = await materializeModelRequestForAsset({
+      bookingId: BOOKING_ID,
+      asset,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // The loser reports no match, so its asset lands as an ordinary add rather
+    // than over-filling the reservation to 2/1.
+    expect(result).toEqual({ matched: false });
+    // And writes no note — a countdown line for a unit it never claimed would
+    // put a lie in the activity feed.
+    expect(db.bookingNote.create).not.toHaveBeenCalled();
+  });
+
+  it("never leaves a request delivered-in-full but unstamped", async () => {
+    expect.assertions(2);
+
+    const row = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 2,
+      fulfilledQuantity: 0,
+      fulfilledAt: null as Date | null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(() =>
+      Promise.resolve(row)
+    );
+
+    // Two claims against one 2-unit reservation.
+    for (const id of ["asset-1", "asset-2"]) {
+      await materializeModelRequestForAsset({
+        bookingId: BOOKING_ID,
+        asset: { ...asset, id },
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        tx,
+      });
+    }
+
+    expect(row.fulfilledQuantity).toBe(2);
+    // The unrecoverable state: full by unit count, no stamp. The UI hides it
+    // (`2 < 2` is false) while the checkout guard blocks on it, and
+    // `removeBookingModelRequest` refuses to delete it. Nothing to click.
+    expect(row.fulfilledAt).not.toBeNull();
   });
 });

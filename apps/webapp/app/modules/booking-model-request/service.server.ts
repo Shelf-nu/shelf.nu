@@ -836,8 +836,26 @@ export async function materializeModelRequestForAsset({
 > {
   try {
     if (!asset.assetModelId) {
-      // INDIVIDUAL asset without a model — no model request can
-      // possibly match. Caller handles via the direct-booking path.
+      // Asset without a model — no model request can possibly match.
+      // Caller handles via the direct-booking path.
+      return { matched: false };
+    }
+
+    /**
+     * Only INDIVIDUAL assets are model units.
+     *
+     * `getAssetModelAvailability` counts the pool as INDIVIDUAL-only, so
+     * accepting anything with a matching `assetModelId` here made the two
+     * halves disagree about what a unit is: a QUANTITY_TRACKED asset could
+     * discharge a reservation whose availability math never counted it,
+     * over-stating what the booking actually holds.
+     *
+     * The UI producers are closed today (the asset form hides the model
+     * selector for QT, and `bulkUpdateAssetModel` skips them), but CSV import,
+     * direct API writes and an INDIVIDUAL → QT conversion are not. One clause
+     * makes both halves agree regardless of how the row got its model.
+     */
+    if (asset.type !== AssetType.INDIVIDUAL) {
       return { matched: false };
     }
 
@@ -855,42 +873,65 @@ export async function materializeModelRequestForAsset({
       return { matched: false };
     }
 
-    const alreadyFulfilled = existing.fulfilledQuantity >= existing.quantity;
-    if (alreadyFulfilled) {
-      // Request exists but is fully fulfilled — the scan is "over the
-      // count" and should land as a regular BookingAsset. Caller's
-      // direct-booking path handles that.
+    /**
+     * Claim one unit ATOMICALLY: capacity check, increment and completion
+     * stamp in a single statement.
+     *
+     * All three have to move together. A relative `{ increment: 1 }` alone
+     * fixes the lost update on the column but leaves the guard and the stamp
+     * reading a PRE-write snapshot, which is strictly worse than the absolute
+     * write it replaced:
+     *
+     *   T1 reads 0, T2 reads 0. Both compute `justCompleted = (1 === 2)` =
+     *   false. Both increment. The row lands on `2/2` with `fulfilledAt` still
+     *   NULL — invisible to `getOutstandingModelRequests` (`2 < 2` is false),
+     *   still hard-blocking check-out (the guard matched `fulfilledAt: null`
+     *   alone), and un-removable (`removeBookingModelRequest` refuses while
+     *   `fulfilledQuantity > 0`). No visible row to fix. The old absolute write
+     *   at least produced a visible, recoverable under-count.
+     *
+     * The stale capacity check had the mirror problem: on a 1-unit request two
+     * concurrent fulfilments both read 0, both passed, both incremented, and
+     * the row over-filled to `2/1`.
+     *
+     * `WHERE "fulfilledQuantity" < "quantity"` makes the capacity check part of
+     * the write, so the second transaction claims nothing and its asset lands
+     * as an ordinary add. The `CASE` computes completion from the POST-write
+     * value, so whichever transaction takes the last unit stamps it.
+     * `COALESCE` keeps an existing stamp rather than moving it.
+     *
+     * Column names are literal — `BookingModelRequest` declares no `@map`.
+     * @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+     */
+    const claimed = await tx.$queryRaw<
+      Array<{ fulfilledQuantity: number; quantity: number }>
+    >`
+      UPDATE "BookingModelRequest"
+      SET "fulfilledQuantity" = "fulfilledQuantity" + 1,
+          "fulfilledAt" = CASE
+            WHEN "fulfilledQuantity" + 1 >= "quantity"
+              THEN COALESCE("fulfilledAt", NOW())
+            ELSE "fulfilledAt"
+          END
+      WHERE "id" = ${existing.id}
+        AND "fulfilledQuantity" < "quantity"
+      RETURNING "fulfilledQuantity", "quantity"
+    `;
+
+    if (claimed.length === 0) {
+      // Either it was already full when we read it, or a concurrent
+      // transaction took the last unit between our read and this write. Both
+      // mean the same thing to the caller: this asset is "over the count" and
+      // lands as an ordinary `BookingAsset`.
       return { matched: false };
     }
 
-    const nextFulfilledQuantity = existing.fulfilledQuantity + 1;
-    const justCompleted = nextFulfilledQuantity === existing.quantity;
-
-    await tx.bookingModelRequest.update({
-      where: {
-        bookingId_assetModelId: {
-          bookingId,
-          assetModelId: asset.assetModelId,
-        },
-      },
-      data: {
-        // Relative, not absolute. Two transactions that both read
-        // `fulfilledQuantity = 1` and both wrote the literal `2` used to lose a
-        // unit: two assets land, the request reads 2/3, and check-out stays
-        // blocked with no outstanding unit left to go and find. Web picker plus
-        // companion is a realistic pairing now that both discharge, so the
-        // cross-transaction race this PR makes reachable has to be closed here.
-        // Postgres evaluates `x = x + 1` against the row's committed value, so
-        // the second writer lands on top of the first.
-        fulfilledQuantity: { increment: 1 },
-        // Stamp completion on the very scan that tipped us over. If
-        // the operator later edits `quantity` upward, the upsert will
-        // null this out again and re-open the request.
-        ...(justCompleted ? { fulfilledAt: new Date() } : {}),
-      },
-    });
-
-    const remaining = existing.quantity - nextFulfilledQuantity;
+    // Remaining is derived from what the database actually committed, not from
+    // the pre-write snapshot, so a concurrent claim is reflected in the note.
+    const remaining = Math.max(
+      0,
+      claimed[0].quantity - claimed[0].fulfilledQuantity
+    );
 
     // Activity note — IN the tx so the note rolls back with the
     // materialization if anything later in the pipeline fails.

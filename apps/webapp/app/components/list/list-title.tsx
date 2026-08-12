@@ -167,9 +167,16 @@ export default function ListTitle({
               </p>
             ) : (
               <span>
+                {/* The noun agrees with the number actually PRINTED. This
+                    branch prints `totalItems` but pluralised on `rowCount`,
+                    which are different quantities — and a header that lies
+                    about its own count is the defect this whole change is
+                    about. Narrow in practice (the branch only runs when
+                    `perPage >= totalItems`), but both branches should derive
+                    the noun from the number beside it. */}
                 {countLabel
                   ? countLabel()
-                  : `${totalItems} ${rowCount === 1 ? singular : plural}`}
+                  : `${totalItems} ${totalItems === 1 ? singular : plural}`}
               </span>
             )}
           </div>
