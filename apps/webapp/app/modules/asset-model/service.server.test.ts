@@ -2,12 +2,14 @@ import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { createAssetModel as createAssetModelFactory } from "@factories";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { parseFileFormData } from "~/utils/storage.server";
 import {
   createAssetModel,
   createAssetModelsIfNotExists,
   getAssetModels,
   getAssetModel,
   updateAssetModel,
+  updateAssetModelImage,
   deleteAssetModel,
   bulkDeleteAssetModels,
 } from "./service.server";
@@ -21,10 +23,44 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn(),
       findFirstOrThrow: vitest.fn(),
       update: vitest.fn(),
+      updateMany: vitest.fn(),
       deleteMany: vitest.fn(),
       count: vitest.fn(),
     },
+    asset: {
+      findMany: vitest.fn(),
+      updateMany: vitest.fn(),
+    },
   },
+}));
+
+// why: parseFileFormData streams a multipart body to Supabase storage — a
+// network boundary. Stubbing it lets the URL/persist wiring be asserted without
+// an upload. getFileUploadPath is pure, so it keeps its real implementation.
+vitest.mock("~/utils/storage.server", async () => {
+  const actual = await vitest.importActual<Record<string, unknown>>(
+    "~/utils/storage.server"
+  );
+  return {
+    ...actual,
+    parseFileFormData: vitest.fn(),
+  };
+});
+
+// why: the Supabase admin client is a network client; only its pure public-URL
+// builder is exercised here, so a stub that mirrors the real URL shape is enough.
+vitest.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: () => ({
+    storage: {
+      from: (bucket: string) => ({
+        getPublicUrl: (path: string) => ({
+          data: {
+            publicUrl: `https://xyz.supabase.co/storage/v1/object/public/${bucket}/${path}`,
+          },
+        }),
+      }),
+    },
+  }),
 }));
 
 describe("createAssetModel", () => {
@@ -314,6 +350,8 @@ describe("updateAssetModel", () => {
 describe("deleteAssetModel", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // @ts-expect-error mock setup — no inheriting assets unless a test says so
+    db.asset.findMany.mockResolvedValue([]);
   });
 
   it("deletes an asset model scoped to organization", async () => {
@@ -464,15 +502,88 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes all asset models when ALL_SELECTED key is present", async () => {
     // @ts-expect-error mock setup
-    db.assetModel.deleteMany.mockResolvedValue({ count: 5 });
+    db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
     });
 
+    // why: the assets of a deleted model need no image cleanup — they never
+    // stored a copy, so ON DELETE SET NULL alone drops them to the placeholder.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: "org-123" },
+    });
+  });
+});
+
+describe("updateAssetModelImage", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("stores public urls for the image and its thumbnail, scoped to the org", async () => {
+    const withImage = new FormData();
+    withImage.set(
+      "image",
+      JSON.stringify({
+        originalPath: "org-1/asset-models/model-1/abc.jpg",
+        thumbnailPath: "org-1/asset-models/model-1/abc-thumbnail.jpg",
+      })
+    );
+    vitest.mocked(parseFileFormData).mockResolvedValue(withImage);
+
+    const result = await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toContain(
+      "/object/public/files/org-1/asset-models/model-1/abc.jpg"
+    );
+    expect(db.assetModel.update).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
+      data: {
+        image: expect.stringContaining("abc.jpg"),
+        thumbnailImage: expect.stringContaining("abc-thumbnail.jpg"),
+      },
+    });
+  });
+
+  // why: a plain "Save" on the model form posts an empty file input; it must not
+  // clear an image the user uploaded earlier.
+  it("no-ops when the form carries no file, keeping the current image", async () => {
+    vitest.mocked(parseFileFormData).mockResolvedValue(new FormData());
+
+    const result = await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toBeNull();
+    expect(db.assetModel.update).not.toHaveBeenCalled();
+  });
+
+  it("stores a null thumbnail when the parser returned a bare path", async () => {
+    const barePath = new FormData();
+    barePath.set("image", "org-1/asset-models/model-1/abc.jpg");
+    vitest.mocked(parseFileFormData).mockResolvedValue(barePath);
+
+    await updateAssetModelImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      assetModelId: "model-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetModel.update).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
+      data: {
+        image: expect.stringContaining("abc.jpg"),
+        thumbnailImage: null,
+      },
     });
   });
 });

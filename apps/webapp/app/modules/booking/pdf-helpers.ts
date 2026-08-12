@@ -8,6 +8,7 @@ import type {
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -69,6 +70,9 @@ export interface PdfDbResult {
     quantity: number;
     /** Unique `BookingAsset.id` — the rendered row's React key. */
     bookingAssetId: string;
+    /** Cover image of the asset's model, rendered in the PDF when the asset
+     * has no image of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
   })[];
   totalValue: string;
   organization: Pick<
@@ -143,6 +147,9 @@ export async function fetchAllPdfRelatedData(
           organizationId,
         },
         include: {
+          // Model cover image for assets with no image of their own — the
+          // exported PDF renders the same cascade as every web surface.
+          ...ASSET_MODEL_IMAGE_SELECT,
           category: {
             select: {
               name: true,

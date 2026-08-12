@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
@@ -54,6 +55,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         description: true,
         status: true,
         mainImage: true,
+        // Model cover image; the shaper resolves the cascade
+        ...ASSET_MODEL_IMAGE_SELECT,
         mainImageExpiration: true,
         thumbnailImage: true,
         availableToBook: true,
@@ -168,6 +171,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       title: asset.title,
       status: asset.status,
       mainImage: asset.mainImage,
+      // Passed through so the helper can resolve the model-image cascade —
+      // the detail screen renders the model's cover image for an asset that
+      // has none of its own.
+      thumbnailImage: asset.thumbnailImage,
+      assetModel: asset.assetModel,
       availableToBook: asset.availableToBook,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
@@ -242,6 +250,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: _,
       assetLocations: __,
       assetKits: ___,
+      // Dropped from the response: the helper already resolved the cascade
+      // into flat image fields, and shipping the nested relation alongside
+      // them would give the client two sources of truth for one decision.
+      assetModel: ____,
       custody: detailCustody,
       category: detailCategory,
       ...assetData
@@ -280,6 +292,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return data({
       asset: {
         ...assetData,
+        // why: `assetData` carries the RAW image columns. Take the resolved
+        // ones from the helper so an asset with no image of its own renders
+        // its model's cover image on the detail screen.
+        mainImage: flattened.mainImage,
+        thumbnailImage: flattened.thumbnailImage,
+        imageSource: flattened.imageSource,
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,

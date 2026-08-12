@@ -65,6 +65,10 @@ export function useAssetAvailabilityData(items: Items) {
           mainImage: item.mainImage,
           thumbnailImage: item.thumbnailImage,
           mainImageExpiration: item.mainImageExpiration,
+          // Carried through so the availability view renders the model's cover
+          // image for assets that have none of their own, same as every other
+          // asset surface (see `~/modules/asset/image-resolution`).
+          assetModel: item.assetModel ?? null,
           status: item.status,
           availableToBook: item.availableToBook,
           category: item.category,

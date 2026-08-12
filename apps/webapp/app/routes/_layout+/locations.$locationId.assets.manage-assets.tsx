@@ -561,6 +561,9 @@ type LocationRowItem = Prisma.AssetGetPayload<{
     };
     category: true;
     tags: true;
+    // Model cover image for assets with no image of their own. Type literal,
+    // so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
+    assetModel: { select: { image: true; thumbnailImage: true } };
   };
 }> & {
   /** Attached by the loader. Null for INDIVIDUAL rows or when the
@@ -625,6 +628,7 @@ const RowComponent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
