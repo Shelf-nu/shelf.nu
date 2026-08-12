@@ -10,6 +10,7 @@ import {
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
@@ -353,6 +354,12 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   materializeModelRequestForAsset: vitest
     .fn()
     .mockResolvedValue({ matched: true, remaining: 0 }),
+  // why: every add-assets path now discharges model reservations through this
+  // chokepoint. Its own behaviour is covered in
+  // booking-model-request/service.server.test.ts; here we only care WHICH
+  // assets each caller hands it, so the default is an empty result and tests
+  // assert on the call argument.
+  fulfilModelRequestsForAssets: vitest.fn().mockResolvedValue(new Map()),
 }));
 
 // why: spying on booking update email calls without executing
@@ -1648,6 +1655,113 @@ describe("updateBookingAssets", () => {
     vitest.clearAllMocks();
   });
 
+  /**
+   * The booking activity feed must record one add as ONE event.
+   *
+   * `updateBookingAssets` writes a booking-side note as a side effect, and the
+   * only way to opt out used to be passing a non-empty `kitIds` — that flag was
+   * standing in for "the caller writes its own note". A non-kit caller that also
+   * wrote one (manage-assets) had no way to say so, so a single add produced two
+   * rows. For one INDIVIDUAL asset they were byte-identical, because
+   * `formatUnitCount` returns null off QUANTITY_TRACKED and the service's
+   * single-asset wrapper then collapses to the same bare link the route emits.
+   * A reader could not tell one add from two — the audit trail stated something
+   * untrue, which is the one thing an audit trail may not do.
+   */
+  it("writes the booking-side note by default", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+    });
+
+    // Callers that do NOT compose their own note still get one — removing the
+    // note wholesale would leave those feeds silent instead of duplicated.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalled();
+  });
+
+  it("suppresses the booking-side note when the caller owns it", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      skipBookingNote: true,
+    });
+
+    expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Model reservations are discharged by an asset ARRIVING on the booking.
+   * `updateBookingAssets` is the "Manage assets" path, and that dialog reposts
+   * the operator's full selection on every save — so the set of assets it
+   * touched is NOT the set of assets that are new. Keying fulfilment off the
+   * former lets a plain re-save decrement the reservation again, and a 3-unit
+   * reservation reaches 3/3 with only two physical assets behind it. Nothing
+   * else in the system would flag that: the counts simply lie.
+   */
+  it("only offers newly added assets for model-request fulfilment", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+    // `asset-1` is already on the booking — the operator merely resubmitted it.
+    //@ts-expect-error missing vitest type
+    // why: the pre-existing read now selects `assetKitId` so it can tell a
+    // standalone row from a kit slice — `null` means standalone.
+    db.bookingAsset.findMany.mockResolvedValue([
+      { assetId: "asset-1", assetKitId: null },
+    ]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+    });
+
+    const handedOver = vitest.mocked(fulfilModelRequestsForAssets).mock
+      .calls[0]?.[0].assets;
+
+    expect(handedOver?.map((a) => a.id)).toEqual(["asset-2"]);
+    // Stated explicitly: the resubmitted asset must not reach the helper at
+    // all, rather than being filtered somewhere downstream.
+    expect(handedOver?.map((a) => a.id)).not.toContain("asset-1");
+  });
+
   const mockUpdateBookingAssetsParams = {
     id: "booking-1",
     organizationId: "org-1",
@@ -1963,7 +2077,7 @@ describe("updateBookingAssets", () => {
     // why: the asset already exists on the booking as a standalone row.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([{ assetId: "asset-1" }]);
+    ).mockResolvedValue([{ assetId: "asset-1", assetKitId: null }]);
 
     await updateBookingAssets({
       id: "booking-1",
@@ -2931,6 +3045,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-1",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
       {
@@ -2938,6 +3056,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-2",
         quantity: 3,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "HP MX-500" },
       },
     ]);
@@ -2955,6 +3077,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-1",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
       {
@@ -2962,6 +3088,10 @@ describe("checkoutBooking", () => {
         bookingId: "booking-1",
         assetModelId: "am-2",
         quantity: 3,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "HP MX-500" },
       },
     ]);
@@ -3456,6 +3586,14 @@ describe("fulfilModelRequestsAndCheckout", () => {
       },
     ]);
     // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
+    // why: `addScannedAssetsToBookingWithinTx` first reads which scanned assets
+    // ALREADY hold a standalone row, so only newly-arrived ones can discharge a
+    // reservation. None do here, so this queued value is empty. It must come
+    // first — the chain below is order-dependent.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+
     // booking by this point (1 pre-existing HP + 3 newly materialized Dells).
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
@@ -3559,6 +3697,10 @@ describe("fulfilModelRequestsAndCheckout", () => {
         bookingId: "booking-1",
         assetModelId: "am-dell",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
     ]);
@@ -3738,6 +3880,10 @@ describe("fulfilModelRequestsAndCheckout", () => {
         bookingId: "booking-1",
         assetModelId: "am-dell",
         quantity: 2,
+        // why: the checkout guard now shares `getOutstandingModelRequests`
+        // with the UI, so a row must carry the fields that predicate reads.
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
         assetModel: { name: "Dell Latitude 5550" },
       },
     ]);
