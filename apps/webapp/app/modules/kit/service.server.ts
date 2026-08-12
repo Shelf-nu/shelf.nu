@@ -2986,6 +2986,7 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -2997,6 +2998,7 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
