@@ -35,6 +35,7 @@ import {
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
 } from "~/modules/asset/availability.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
@@ -9912,6 +9913,8 @@ export async function getBookings(params: {
                   status: true,
                   mainImage: true,
                   thumbnailImage: true,
+                  // Model cover image for assets with no image of their own
+                  ...ASSET_MODEL_IMAGE_SELECT,
                   mainImageExpiration: true,
                   // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
                   // Surfaced by the BookingAssetsSidebar so the chip matches the

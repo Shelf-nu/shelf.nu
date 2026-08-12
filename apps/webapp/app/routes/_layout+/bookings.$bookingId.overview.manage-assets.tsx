@@ -117,6 +117,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export type AssetWithBooking = Asset & {
+  /** Cover image of the asset's model, rendered when the asset has no image
+   * of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   bookingAssets: { booking: Booking }[];
   custody: Custody | null;
   category: Category;
@@ -1508,6 +1511,7 @@ const RowComponent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

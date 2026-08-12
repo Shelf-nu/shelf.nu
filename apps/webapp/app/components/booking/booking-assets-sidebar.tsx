@@ -78,6 +78,9 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             mainImage: true;
             thumbnailImage: true;
             mainImageExpiration: true;
+            // Model cover image for assets with no image of their own.
+            // Type literal, so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
+            assetModel: { select: { image: true; thumbnailImage: true } };
             // Code-resolution fields — mirror of getBookings' assets select.
             // Enables the asset-code chip on every row, matching the booking
             // overview list and other code-bearing surfaces.
@@ -790,6 +793,8 @@ export function BookingAssetsSidebar({
                                               asset.thumbnailImage,
                                             mainImageExpiration:
                                               asset.mainImageExpiration,
+                                            assetModel:
+                                              asset.assetModel ?? null,
                                           }}
                                           alt={`Image of ${asset.title}`}
                                           className="size-full rounded-[4px] border border-gray-300 object-cover"
@@ -851,6 +856,7 @@ export function BookingAssetsSidebar({
                                     thumbnailImage: asset.thumbnailImage,
                                     mainImageExpiration:
                                       asset.mainImageExpiration,
+                                    assetModel: asset.assetModel ?? null,
                                   }}
                                   alt={`Image of ${asset.title}`}
                                   className="size-full rounded-[4px] border object-cover"

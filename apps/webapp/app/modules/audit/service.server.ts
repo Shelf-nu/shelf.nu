@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
@@ -48,6 +49,7 @@ import {
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { resolveAssetImage } from "../asset/image-resolution";
 import { getPrimaryLocation } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
@@ -656,6 +658,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Model cover image for assets with no image of their own
+                ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
                 // field worker can match the physical asset to the row.
                 // See `app/modules/barcode/display.ts`.
@@ -769,14 +773,33 @@ export async function getAuditSessionDetails({
           custodian?.name ||
           null;
 
+        /**
+         * Resolve the model-image cascade HERE rather than forwarding the raw
+         * columns. This is a hand-written projection, so nothing downstream can
+         * reach `asset.assetModel` — `GetAuditSessionResult.session` doesn't
+         * even declare the relation. Both consumers of this payload (the mobile
+         * audit screen and the web scan drawer) read the flat fields, so an
+         * asset inheriting its model's cover renders blank unless it is
+         * collapsed at this point.
+         *
+         * Placeholder stays `null` so the existing client-side "no image"
+         * branches keep working — same contract as `serializeAssetImage`.
+         */
+        const image = resolveAssetImage({
+          mainImage: auditAsset.asset?.mainImage ?? null,
+          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          assetModel: auditAsset.asset?.assetModel ?? null,
+        });
+        const hasImage = image.source !== "placeholder";
+
         return {
           id: auditAsset.assetId,
           name: auditAsset.asset?.title ?? "",
           auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
           auditNotesCount: auditAsset._count?.notes ?? 0,
           auditImagesCount: auditAsset._count?.images ?? 0,
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          mainImage: hasImage ? image.fullUrl : null,
+          thumbnailImage: hasImage ? image.thumbnailUrl : null,
           // An asset can sit at multiple locations via the AssetLocation
           // pivot; surface only its single primary placement on the row.
           locationName: getPrimaryLocation(auditAsset.asset)?.name ?? null,
@@ -1043,6 +1066,8 @@ export async function getAssetsForAuditSession({
         title: true,
         mainImage: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         mainImageExpiration: true,
         // Asset-code resolution fields. Audits are the strongest use case —
         // a field worker matches the physical label to a row. See

@@ -115,6 +115,9 @@ type ListBookingsContentProps = {
               mainImage: true;
               thumbnailImage: true;
               mainImageExpiration: true;
+              // Model cover image for assets with no image of their own. Type
+              // literal, so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
+              assetModel: { select: { image: true; thumbnailImage: true } };
               // Code-resolution fields - mirror of getBookings' assets select
               sequentialId: true;
               preferredBarcodeId: true;
