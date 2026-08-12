@@ -85,6 +85,7 @@ import {
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -404,12 +405,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     let {
       assetIds,
@@ -488,6 +490,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
+        // ADDS the matched assets to the booking, which then lists them — so an
+        // unscoped custodian filter would hand a restricted user a readable
+        // copy of exactly what a colleague holds.
+        allowedTeamMemberIds: await scopeCustodianFilterIds({
+          teamMemberIds: searchParams.getAll("teamMember"),
+          canSeeAllCustody,
+          userId: authSession?.userId,
+          organizationId,
+        }),
       });
 
       const allAssets = await db.asset.findMany({

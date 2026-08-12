@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
 import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -245,15 +246,6 @@ export const getPaginatedAndFilterableTeamMembers = async ({
 };
 
 /**
- * Stand-in id used when a custodian filter is refused.
- *
- * Callers substitute this for the requested ids when narrowing removes all of
- * them, so the query matches nothing instead of the filter being dropped. It
- * is not a cuid, so it can never collide with a real `TeamMember.id`.
- */
-export const CUSTODY_FILTER_REFUSED = "__custody-filter-refused__";
-
-/**
  * Narrows caller-supplied custodian filter ids to those the caller may use.
  *
  * `?teamMember=` is raw request input that list queries apply straight to a
@@ -303,6 +295,38 @@ export async function narrowCustodianFilterIds({
   const allowed = new Set<string>([...own.map((tm) => tm.id), userId]);
 
   return requested.filter((id) => allowed.has(id));
+}
+
+/**
+ * {@link narrowCustodianFilterIds}, with a refusal that a where-builder can act
+ * on.
+ *
+ * Narrowing alone is not enough at the query layer. The list where-builders
+ * treat an EMPTY id list as "no custodian filter requested" — they guard on
+ * `.length` — so handing them `[]` after narrowing removed everything DROPS the
+ * filter and returns the caller's whole list. That reads as though the filter
+ * had worked, which is worse than refusing it: the UI still shows the
+ * colleague's chip beside results that ignore it.
+ *
+ * So a fully-narrowed request becomes {@link CUSTODY_FILTER_REFUSED} — an id no
+ * row can carry — and the query returns nothing.
+ *
+ * @param args - Same arguments as {@link narrowCustodianFilterIds}.
+ * @returns The allowed ids, or `[CUSTODY_FILTER_REFUSED]` when a restricted
+ *   caller asked only for other people. Empty only when nothing was requested.
+ */
+export async function scopeCustodianFilterIds(args: {
+  teamMemberIds?: string[] | null;
+  canSeeAllCustody: boolean;
+  userId: string;
+  organizationId: Organization["id"];
+}): Promise<string[]> {
+  const requested = args.teamMemberIds ?? [];
+  const allowed = await narrowCustodianFilterIds(args);
+
+  return requested.length > 0 && allowed.length === 0
+    ? [CUSTODY_FILTER_REFUSED]
+    : allowed;
 }
 
 /** What a custodian picker is being used for. */

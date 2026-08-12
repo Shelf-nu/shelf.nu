@@ -2380,6 +2380,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let caught: unknown;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-other",
@@ -2425,6 +2426,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-self",
@@ -2463,6 +2465,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-anyone",
@@ -2501,6 +2504,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
         // caller passes through the SELF_SERVICE guard. Pass ADMIN here to
@@ -2786,6 +2790,9 @@ describe("bulkUpdateAssetModel", () => {
       organizationId: "org-1",
       currentSearchParams: "assetModel=is:without-model",
       settings: { mode: "ADVANCED" },
+      // `asset: update` is ADMIN/OWNER-only, so this bulk path declares that
+      // the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
     });
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
@@ -3176,6 +3183,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
 
     await expect(
       bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "me",
         role: OrganizationRoles.SELF_SERVICE,
         assetIds: ["asset-1"],

@@ -23,7 +23,11 @@ vi.mock("~/database/db.server", () => ({
   db: { teamMember: { findMany: dbMocks.findMany } },
 }));
 
-import { narrowCustodianFilterIds } from "./service.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
+import {
+  narrowCustodianFilterIds,
+  scopeCustodianFilterIds,
+} from "./service.server";
 
 const ORG = "org-1";
 const USER = "user-me";
@@ -120,5 +124,67 @@ describe("narrowCustodianFilterIds", () => {
     });
 
     expect(out).toEqual(["tm-b"]);
+  });
+});
+
+describe("scopeCustodianFilterIds", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMocks.findMany.mockResolvedValue([{ id: MY_TEAM_MEMBER }]);
+  });
+
+  it("refuses the filter with an unmatchable id when narrowing leaves nothing", async () => {
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [COLLEAGUE_TEAM_MEMBER],
+      canSeeAllCustody: false,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    // NOT `[]`. The where-builders read an empty list as "no custodian filter"
+    // and drop the clause, which would return the caller's WHOLE list while the
+    // UI still showed the colleague's chip — a refusal that looks like a result.
+    expect(out).toEqual([CUSTODY_FILTER_REFUSED]);
+  });
+
+  it("leaves 'nothing requested' as an empty list", async () => {
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [],
+      canSeeAllCustody: false,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    // The one case that MUST stay empty — substituting the sentinel here would
+    // filter every unfiltered list down to nothing.
+    expect(out).toEqual([]);
+  });
+
+  it("does not refuse when at least one requested id survives", async () => {
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [COLLEAGUE_TEAM_MEMBER, MY_TEAM_MEMBER],
+      canSeeAllCustody: false,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    expect(out).toEqual([MY_TEAM_MEMBER]);
+  });
+
+  it("passes a permitted caller's ids through untouched", async () => {
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [COLLEAGUE_TEAM_MEMBER],
+      canSeeAllCustody: true,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    expect(out).toEqual([COLLEAGUE_TEAM_MEMBER]);
+  });
+
+  it("uses a sentinel that cannot collide with a real id", () => {
+    // Ids are cuids; this one contains characters a cuid never does, so it can
+    // never match a row by accident.
+    expect(CUSTODY_FILTER_REFUSED).not.toMatch(/^[a-z0-9]+$/);
   });
 });

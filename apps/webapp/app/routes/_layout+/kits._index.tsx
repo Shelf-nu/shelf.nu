@@ -121,6 +121,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Governs `?teamMember=`: a viewer who may not see all custody may
+        // only ever filter this list by their own custody.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
           assetKits: {

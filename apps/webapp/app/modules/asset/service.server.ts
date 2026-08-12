@@ -73,9 +73,8 @@ import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
-  CUSTODY_FILTER_REFUSED,
   getTeamMemberForCustodianFilter,
-  narrowCustodianFilterIds,
+  scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
@@ -174,6 +173,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
@@ -4137,31 +4137,16 @@ export async function getPaginatedAndFilterableAssets({
    * `?teamMember=` is raw request input. Redacting the custodian from the
    * response is not enough on its own — filtering by a colleague's id and
    * reading which rows come back still reveals what they hold. Narrow the ids
-   * to the caller's own before they reach any custody clause.
+   * to the caller's own before they reach any custody clause, and refuse the
+   * filter outright when that leaves nothing (see the helper's JSDoc for why an
+   * empty list cannot express a refusal here).
    */
-  const allowedTeamMemberIds = await narrowCustodianFilterIds({
+  const scopedTeamMemberIds = await scopeCustodianFilterIds({
     teamMemberIds,
     canSeeAllCustody,
     userId: userId ?? "",
     organizationId,
   });
-
-  /**
-   * When narrowing removes every requested id, the filter must match NOTHING
-   * — not be dropped. An empty array cannot carry that meaning here, because
-   * `getParamsValues` already returns `[]` for "no filter requested" and the
-   * where-builder guards on `.length`. So an id that cannot exist is used to
-   * force an empty result.
-   *
-   * Dropping the filter instead would show the caller every asset while the
-   * UI still displayed the colleague's chip — reading as though the filter had
-   * worked, and leaving them unable to tell a real result from a refused one.
-   */
-  const requestedTeamMemberIds = teamMemberIds ?? [];
-  const scopedTeamMemberIds =
-    requestedTeamMemberIds.length > 0 && allowedTeamMemberIds.length === 0
-      ? [CUSTODY_FILTER_REFUSED]
-      : allowedTeamMemberIds;
 
   try {
     /**
@@ -5731,6 +5716,9 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -5845,6 +5833,7 @@ export async function bulkCheckOutAssets({
   currentSearchParams,
   settings,
   timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -5867,6 +5856,13 @@ export async function bulkCheckOutAssets({
    * off-by-one for non-UTC users). Defaults to "UTC".
    */
   timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required because
+   * `asset: custody` is a SELF_SERVICE permission — without narrowing, a
+   * self-service user could select-all filtered by a colleague's id and act on
+   * exactly that person's assets.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5875,6 +5871,7 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
       timeZone,
     });
 
@@ -6083,6 +6080,7 @@ export async function bulkCheckInAssets({
   currentSearchParams,
   settings,
   timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -6102,6 +6100,12 @@ export async function bulkCheckInAssets({
    * off-by-one for non-UTC users). Defaults to "UTC".
    */
   timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required for the
+   * same reason as on `bulkCheckOutAssets` — releasing custody is reachable
+   * with the SELF_SERVICE `asset: custody` permission.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6110,6 +6114,7 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
       timeZone,
     });
 
@@ -6312,6 +6317,9 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -6626,6 +6634,9 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -6810,6 +6821,9 @@ export async function bulkUpdateAssetModel({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
     });
 
     /** An empty `assetModelId` is the "remove from asset model" request. */
@@ -6967,6 +6981,9 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -7139,6 +7156,9 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
