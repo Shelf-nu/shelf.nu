@@ -75,6 +75,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -297,7 +298,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       search,
-      items: kits,
+      // `KITS_INCLUDE_FIELDS` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER (above) does not shape the rows, so the
+      // identity has to be redacted here too. Not the literal `false` passed to
+      // the filter: that argument is deliberately fixed for a seed nothing
+      // renders, and reusing it would redact for ADMIN/OWNER as well.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       totalItems: totalKits,
       bookingKitIds,
       ...modelTabData,

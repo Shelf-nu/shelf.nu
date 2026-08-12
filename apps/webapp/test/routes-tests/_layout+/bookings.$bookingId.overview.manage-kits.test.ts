@@ -1036,4 +1036,55 @@ describe("manage-kits loader — Models tab payload", () => {
       booking: mockLoaderBooking,
     });
   });
+
+  it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // The picker never renders a custodian column, so nothing prints "private"
+    // here — the identity simply rides along in the route payload. `email` is
+    // the field that makes this matter: KITS_INCLUDE_FIELDS selects the full
+    // `custody.custodian.user`, and BASE/SELF_SERVICE both hold `booking:update`
+    // and can open this picker on their own DRAFT booking.
+    vi.mocked(kitService.getPaginatedAndFilterableKits).mockResolvedValue({
+      ...mockPaginatedKits,
+      kits: [
+        {
+          id: "kit1",
+          name: "Camera Kit",
+          custody: {
+            custodian: {
+              name: "Colleague Name",
+              userId: "someone-else",
+              user: {
+                id: "someone-else",
+                email: "colleague@example.com",
+                firstName: "Colleague",
+                lastName: "Name",
+              },
+            },
+          },
+        },
+      ],
+    } as any);
+
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    const custodian = result.items[0].custody.custodian;
+    expect(custodian.name).toBe("");
+    expect(custodian.userId).toBeNull();
+    expect(custodian.user).toBeNull();
+    // The custody row itself must survive — the picker's availability label
+    // tests it for presence (`hasCustody`), so dropping it would change which
+    // kits read as available.
+    expect(result.items[0].custody).toBeTruthy();
+  });
 });

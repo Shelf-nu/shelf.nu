@@ -91,6 +91,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -188,13 +190,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     // getPaginatedAndFilterableAssets + getBooking both only need
     // `organizationId` (from requirePermission above). They're
@@ -357,7 +363,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       booking,
-      items: assetsWithAvailability,
+      // `assetIndexFields()` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER does not shape the rows, so the identity
+      // has to be redacted here too. The cast mirrors `asset/data.server.ts`:
+      // the declared row type resolves `custody` to the raw Prisma model with
+      // no `custodian`, while the runtime include nests one.
+      items: redactCustodianForViewer(
+        assetsWithAvailability as unknown as Array<
+          (typeof assetsWithAvailability)[number] & RowWithCustody
+        >,
+        { canSeeAllCustody, userId: authSession?.userId }
+      ),
       categories,
       tags,
       search,
