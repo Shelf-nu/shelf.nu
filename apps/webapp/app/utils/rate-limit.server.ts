@@ -10,7 +10,7 @@ import { ShelfError } from "./error";
  * billing meter.
  */
 
-type Bucket = "read" | "write" | "bulk";
+type Bucket = "read" | "bulk";
 
 type BucketConfig = {
   windowMs: number;
@@ -19,19 +19,15 @@ type BucketConfig = {
 
 // why: bulk operations write across many rows; cap them tighter than reads.
 // The hourly cap on "bulk" is a burst-and-cooldown — short bursts are fine,
-// sustained hammering is not. "write" sits between: single-row irreversible
-// writes (e.g. QR claim/link) where a field worker scanning a full label
-// sheet must never be throttled, but scripted hammering should be.
+// sustained hammering is not.
 const BUCKET_CONFIG: Record<string, BucketConfig> = {
   "read:1m": { windowMs: 60_000, limit: 120 },
-  "write:1m": { windowMs: 60_000, limit: 60 },
   "bulk:1m": { windowMs: 60_000, limit: 10 },
   "bulk:1h": { windowMs: 60 * 60_000, limit: 200 },
 };
 
 const buckets: Record<string, BucketConfig[]> = {
   read: [BUCKET_CONFIG["read:1m"]],
-  write: [BUCKET_CONFIG["write:1m"]],
   bulk: [BUCKET_CONFIG["bulk:1m"], BUCKET_CONFIG["bulk:1h"]],
 };
 

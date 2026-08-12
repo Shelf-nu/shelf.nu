@@ -33,7 +33,6 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /** Zod schema for the claim JSON body. */
 const ClaimQrSchema = z.object({
@@ -79,10 +78,6 @@ export async function action({ request }: ActionFunctionArgs) {
       entity: PermissionEntity.qr,
       action: PermissionAction.update,
     });
-
-    // Claiming is irreversible on a shared physical label — per-user write
-    // bucket (generous enough for a full label sheet, unlike "bulk").
-    await enforceUserRateLimit(user.id, "write");
 
     // why: raw `.parse` surfaces a ZodError as a 500 through makeShelfError's
     // unknown-error branch, and `request.json()` itself throws a SyntaxError

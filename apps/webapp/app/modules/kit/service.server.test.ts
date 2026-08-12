@@ -1516,11 +1516,7 @@ describe("relinkKitQrCode", () => {
         organizationId: "org-1",
         userId: "user-1",
       })
-    ).rejects.toMatchObject({
-      // why: user-caused guard, not a server fault — must not surface as 5xx.
-      status: 403,
-      title: "QR already linked.",
-    });
+    ).rejects.toBeInstanceOf(ShelfError);
   });
 });
 

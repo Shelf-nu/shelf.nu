@@ -136,9 +136,7 @@ describe("claimQrCode", () => {
     const err = await captureClaimThrow();
 
     expect(err.status).toBe(403);
-    expect(err.message).toBe(
-      "This QR code already belongs to an organization so you cannot claim it."
-    );
+    expect(err.message).toBe("Failed to claim qr code");
     expect(db.qr.update).not.toHaveBeenCalled();
   });
 
@@ -161,9 +159,7 @@ describe("claimQrCode", () => {
     // not-found (404) — makeShelfError would collapse a propagated P2025
     // to a 404 if the mapping branch were removed.
     expect(err.status).toBe(403);
-    expect(err.message).toBe(
-      "This QR code has already been claimed or linked so you cannot claim it."
-    );
+    expect(err.message).toBe("Failed to claim qr code");
   });
 
   it("claims atomically: the update WHERE requires the unclaimed AND unlinked state", async () => {
