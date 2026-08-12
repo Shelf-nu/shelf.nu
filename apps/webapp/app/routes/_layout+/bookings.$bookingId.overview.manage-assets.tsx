@@ -218,6 +218,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Ignores the custodian-filter seed — scope it rather than fetch a
+        // roster nobody renders.
+        canSeeAllCustody: false,
         extraInclude: {
           assetLocations: {
             select: { quantity: true, location: LOCATION_WITH_HIERARCHY },

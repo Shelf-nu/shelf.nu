@@ -123,6 +123,72 @@ describe("redactCustodianForViewer", () => {
     expect(out[0].custody).toBeNull();
   });
 
+  /**
+   * Assets carry an ARRAY of custody rows, not one — a quantity-tracked asset
+   * can be split across several custodians at once (`Custody.quantity`). An
+   * array is truthy and has no `.custodian`, so a helper written only for the
+   * object shape skips every asset silently.
+   */
+  describe("assets, where custody is an array", () => {
+    /** An asset row with its units split between two custodians. */
+    const splitAsset = () => ({
+      id: "asset-1",
+      title: "Dell Latitude",
+      custody: [
+        {
+          quantity: 3,
+          custodian: {
+            userId: COLLEAGUE,
+            name: "Someone Else",
+            user: { id: COLLEAGUE, email: "someone@example.com" },
+          },
+        },
+        {
+          quantity: 2,
+          custodian: {
+            userId: VIEWER,
+            name: "Me Myself",
+            user: { id: VIEWER, email: "me@example.com" },
+          },
+        },
+      ],
+    });
+
+    it("redacts each colleague entry while keeping the viewer's own", () => {
+      const out = redactCustodianForViewer([splitAsset()], {
+        canSeeAllCustody: false,
+        userId: VIEWER,
+      });
+
+      const serialized = JSON.stringify(out);
+      expect(serialized).not.toContain("Someone Else");
+      expect(serialized).not.toContain("someone@example.com");
+      // The viewer's own slice survives.
+      expect(serialized).toContain("Me Myself");
+    });
+
+    it("preserves the array length and each entry's quantity", () => {
+      const out = redactCustodianForViewer([splitAsset()], {
+        canSeeAllCustody: false,
+        userId: VIEWER,
+      });
+
+      const custody = out[0].custody as Array<{ quantity: number }>;
+      // Dropping or collapsing entries would corrupt the custody breakdown.
+      expect(custody).toHaveLength(2);
+      expect(custody.map((c) => c.quantity)).toEqual([3, 2]);
+    });
+
+    it("leaves an empty custody array alone", () => {
+      const out = redactCustodianForViewer([{ id: "a", custody: [] }], {
+        canSeeAllCustody: false,
+        userId: VIEWER,
+      });
+
+      expect(out[0].custody).toEqual([]);
+    });
+  });
+
   it("does not mutate the caller's array", () => {
     const rows = [rowHeldBy(COLLEAGUE)];
 

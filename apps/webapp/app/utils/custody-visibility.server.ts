@@ -36,11 +36,24 @@ type CustodianIdentity = {
   } | null;
 } | null;
 
-/** A list row carrying an optional custody relation. */
-type RowWithCustody = {
-  custody?:
-    | ({ custodian?: CustodianIdentity } & Record<string, unknown>)
-    | null;
+/** One custody record — the thing that names a custodian. */
+type CustodyEntry = { custodian?: CustodianIdentity };
+
+/**
+ * A list row carrying an optional custody relation.
+ *
+ * The relation has TWO shapes and both must be handled: a kit has a single
+ * custody row, while an asset has an ARRAY of them, because a
+ * quantity-tracked asset can be split across several custodians at once
+ * (`Custody.quantity`). Handling only the object form silently misses every
+ * asset — the array is not falsy, so it slips through untouched.
+ *
+ * Deliberately loose otherwise: an intersection with `Record<string, unknown>`
+ * here defeats inference, collapsing `T` to this constraint and stripping
+ * every loader consumer of its real row type.
+ */
+export type RowWithCustody = {
+  custody?: CustodyEntry | CustodyEntry[] | null;
 };
 
 /**
@@ -78,26 +91,34 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
     return rows;
   }
 
+  /**
+   * The viewer's own custody stays visible — redacting it would print
+   * "private" on an item they are holding.
+   */
+  const maySee = (custodian: CustodianIdentity) =>
+    !!userId &&
+    !!custodian &&
+    (custodian.userId === userId || custodian.user?.id === userId);
+
+  /** Empties one custody record's custodian, or returns it untouched. */
+  const redactEntry = (entry: CustodyEntry) =>
+    !entry?.custodian || maySee(entry.custodian)
+      ? entry
+      : { ...entry, custodian: { ...REDACTED_CUSTODIAN } };
+
+  // Casts: only `custody[].custodian` is replaced, so each row keeps its
+  // shape. TypeScript cannot verify a spread still satisfies `T`, and widening
+  // the signature instead erases the caller's row type — which is exactly what
+  // the loader's consumers are typed against.
   return rows.map((row) => {
-    const custodian = row.custody?.custodian;
+    if (Array.isArray(row.custody)) {
+      return { ...row, custody: row.custody.map(redactEntry) } as T;
+    }
 
-    if (!custodian) {
+    if (!row.custody) {
       return row;
     }
 
-    // The viewer's own custody stays visible — redacting it would show someone
-    // "private" on an item they are holding.
-    const isOwnCustody =
-      !!userId &&
-      (custodian.userId === userId || custodian.user?.id === userId);
-
-    if (isOwnCustody) {
-      return row;
-    }
-
-    return {
-      ...row,
-      custody: { ...row.custody, custodian: { ...REDACTED_CUSTODIAN } },
-    };
+    return { ...row, custody: redactEntry(row.custody) } as T;
   });
 }

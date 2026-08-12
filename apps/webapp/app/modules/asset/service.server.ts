@@ -4077,6 +4077,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery = false,
   filters = "",
   isSelfService,
+  canSeeAllCustody,
   userId,
 }: {
   request: LoaderFunctionArgs["request"];
@@ -4091,6 +4092,12 @@ export async function getPaginatedAndFilterableAssets({
   filters?: string;
 
   isSelfService?: boolean;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required so
+   * the custodian filter seed is scoped by the rule rather than by a role
+   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   */
+  canSeeAllCustody: boolean;
   userId?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
@@ -4154,7 +4161,11 @@ export async function getPaginatedAndFilterableAssets({
         organizationId,
         selectedTeamMembers: teamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        filterByUserId: isSelfService,
+        // A read FILTER, so the resolved custody rule governs — NOT the role.
+        // `isSelfService` was false for BASE, which left this seed unscoped
+        // and shipped the whole roster to a BASE user with
+        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
       getAssets({
@@ -7252,6 +7263,9 @@ export async function getUserAssetsTabLoaderData({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // Ignores the custodian-filter seed — scope it rather than fetch a
+      // roster this caller never returns.
+      canSeeAllCustody: false,
       filters: filtersSearchParams.toString(),
     });
 

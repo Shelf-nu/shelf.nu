@@ -14,6 +14,8 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -152,7 +154,11 @@ export async function simpleModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
+  // Threaded into the asset query so the custodian FILTER seed is scoped —
+  // it used a role-only check that let BASE through unscoped. See
+  // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const isSelfServiceOrBase =
@@ -230,6 +236,9 @@ export async function simpleModeLoader({
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // The fix: this route DOES render the custodian filter, and the seed was
+      // scoped on a role check that let BASE through unscoped.
+      canSeeAllCustody,
       filters,
       extraInclude:
         view === "availability"
@@ -381,7 +390,22 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
-      items: assets,
+      /**
+       * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
+       * and `user.email` shipped in this payload regardless, so a restricted
+       * viewer read them out of `/assets.data` while the column said "private".
+       *
+       * The cast is load-bearing, not cosmetic. `getAssets` builds its include
+       * dynamically from `assetIndexFields()`, which nests `custodian` — but
+       * the DECLARED return type resolves `custody` to the raw Prisma model,
+       * with no `custodian` at all. Trusting the type here means skipping the
+       * redaction entirely; the browser payload proves the custodian is
+       * present at runtime.
+       */
+      items: redactCustodianForViewer(
+        assets as unknown as Array<(typeof assets)[number] & RowWithCustody>,
+        { canSeeAllCustody, userId }
+      ),
       categories,
       tags,
       search,
@@ -690,7 +714,14 @@ export async function advancedModeLoader({
   return data(
     payload({
       header,
-      items: refreshedAssets,
+      // Same redaction as simple mode. ADVANCED is ADMIN/OWNER-only today
+      // (`assets._index.tsx` refuses it to restricted roles), so this is a
+      // no-op in practice — applied so the rule lives with the payload rather
+      // than depending on a gate two files away.
+      items: redactCustodianForViewer(refreshedAssets, {
+        canSeeAllCustody,
+        userId,
+      }),
       search,
       page,
       totalItems: totalAssets,
