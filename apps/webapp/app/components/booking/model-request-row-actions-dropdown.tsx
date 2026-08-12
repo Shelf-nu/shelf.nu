@@ -9,10 +9,15 @@
  * rows and asset rows feel like siblings in the list.
  *
  * Menu items:
- *   - **Scan to assign** — links to the generic scan-assets drawer; the
- *     scan flow materialises the matching request via the shared
- *     `materializeModelRequestForAsset` helper. Rendered only when the
- *     booking is in a manage-eligible state.
+ *   - **Select assets to assign** — opens "Manage assets". Ticking a matching
+ *     asset there discharges the reservation, because fulfilment is a property
+ *     of an asset landing on the booking rather than of the scanner (see
+ *     `fulfilModelRequestsForAssets`). Listed first: it is the only route that
+ *     works without a camera or a scannable label.
+ *   - **Scan to assign** — links to the generic scan-assets drawer. Same
+ *     server path, same result, faster when you are holding the thing.
+ *
+ * Both are rendered only when the booking is in a manage-eligible state.
  *   - **Remove reservation** — posts `DELETE` to the model-requests API
  *     via a fetcher. Only shown on DRAFT/RESERVED bookings with no
  *     materialised units (server-side guard in
@@ -66,6 +71,13 @@ interface Props {
    *  (mirrors `manageAssetsButtonDisabled`). When false the menu has no
    *  actionable items and the whole popover is skipped. */
   canManage: boolean;
+  /**
+   * Destination for "Select assets to assign" — the booking-window-filtered
+   * `manage-assets` URL built by the parent. Required rather than defaulted:
+   * an unfiltered picker lists assets that cannot legally be added, and a
+   * silent fallback is exactly how the two entry points drifted apart.
+   */
+  manageAssetsUrl: string;
   fullWidth?: boolean;
 }
 
@@ -101,6 +113,7 @@ const ConditionalActionsDropdown = ({
   bookingId,
   bookingStatus,
   canManage,
+  manageAssetsUrl,
   fullWidth,
 }: Props) => {
   // `skipDefault: true` — no auto-open-on-QR-scan behaviour for this row.
@@ -162,18 +175,33 @@ const ConditionalActionsDropdown = ({
           >
             <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
               {canScanToAssign ? (
-                <div className="border-b px-0 py-1 md:p-0">
-                  <Button
-                    to={scanUrl}
-                    variant="link"
-                    icon="scan"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                    width="full"
-                    onClick={handleMenuClose}
-                  >
-                    Scan to assign
-                  </Button>
-                </div>
+                <>
+                  <div className="border-b px-0 py-1 md:p-0">
+                    <Button
+                      to={manageAssetsUrl}
+                      variant="link"
+                      icon="asset"
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      onClick={handleMenuClose}
+                    >
+                      Select assets to assign
+                    </Button>
+                  </div>
+
+                  <div className="border-b px-0 py-1 md:p-0">
+                    <Button
+                      to={scanUrl}
+                      variant="link"
+                      icon="scan"
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      onClick={handleMenuClose}
+                    >
+                      Scan to assign
+                    </Button>
+                  </div>
+                </>
               ) : null}
 
               {canRemove ? (
@@ -226,6 +254,7 @@ export const ModelRequestRowActionsDropdown = ({
   bookingId,
   bookingStatus,
   canManage,
+  manageAssetsUrl,
   fullWidth,
 }: Props) => {
   // SSR fallback: render a static trigger until hydration so server
@@ -254,6 +283,7 @@ export const ModelRequestRowActionsDropdown = ({
         bookingId={bookingId}
         bookingStatus={bookingStatus}
         canManage={canManage}
+        manageAssetsUrl={manageAssetsUrl}
         fullWidth={fullWidth}
       />
     </div>

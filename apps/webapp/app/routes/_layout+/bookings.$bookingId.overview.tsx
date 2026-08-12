@@ -1147,18 +1147,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
         page,
-        // `totalItems` drives the `ListTitle` header count. We include
-        // outstanding `BookingModelRequest` rows on top of the paginated
-        // asset/kit items because the Assets & Kits list now renders a
-        // model-request row per outstanding request (Phase 3d-Polish).
-        // `totalPaginationItems` stays at `view.totalPaginationItems` so
-        // pagination arithmetic over the concrete asset/kit list is
-        // unaffected.
-        totalItems:
-          view.totalPaginationItems +
-          (booking.modelRequests ?? []).filter(
-            (req) => req.fulfilledAt === null
-          ).length,
+        // `totalItems` counts CONCRETE asset/kit rows only, and is identical to
+        // `totalPaginationItems` by construction. Do not add anything to it.
+        //
+        // It used to have the outstanding-`BookingModelRequest` count added on
+        // top, because reservations were rendered as rows inside the assets
+        // table. One number meaning two things drifted two ways: the
+        // `clientLoader` below re-derives it WITHOUT the addend, so re-sorting
+        // the list silently changed the header count while the rows stayed
+        // put; and the bookings index, which counts concrete assets, always
+        // disagreed with it. A customer reported the latter as a counting bug.
+        //
+        // Reservations now render in their own titled section above the table
+        // (`BookingModelReservationsSection`), so this count describes exactly
+        // the rows beneath it and there is no addend left to forget.
+        totalItems: view.totalPaginationItems,
         totalPaginationItems: view.totalPaginationItems,
         perPage,
         totalPages: view.totalPages,

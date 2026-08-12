@@ -10,6 +10,7 @@ import type {
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
@@ -286,22 +287,20 @@ export async function fetchAllPdfRelatedData(
     // section. `getBooking` merges with `BOOKING_WITH_ASSETS_INCLUDE`
     // which already pulls `modelRequests` with `assetModel`, so this
     // pass-through is cheap — no extra database query required.
-    const modelRequests: PdfModelRequest[] = (
+    const modelRequests: PdfModelRequest[] = getOutstandingModelRequests(
       (booking as unknown as { modelRequests?: PdfModelRequest[] })
-        .modelRequests ?? []
-    )
-      .filter((req) => req.fulfilledAt === null)
-      .map((req) => ({
-        id: req.id,
-        assetModelId: req.assetModelId,
-        quantity: req.quantity,
-        fulfilledQuantity: req.fulfilledQuantity,
-        fulfilledAt: req.fulfilledAt,
-        assetModel: {
-          id: req.assetModel.id,
-          name: req.assetModel.name,
-        },
-      }));
+        .modelRequests
+    ).map((req) => ({
+      id: req.id,
+      assetModelId: req.assetModelId,
+      quantity: req.quantity,
+      fulfilledQuantity: req.fulfilledQuantity,
+      fulfilledAt: req.fulfilledAt,
+      assetModel: {
+        id: req.assetModel.id,
+        name: req.assetModel.name,
+      },
+    }));
 
     return {
       booking,
