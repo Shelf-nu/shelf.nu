@@ -1,7 +1,7 @@
 import type { Asset } from "@prisma/client";
 import { tw } from "~/utils/tw";
+import type { KitRemovalBookingImpact } from "./booking-removal-notice";
 import RemoveAssetFromKit from "./remove-asset-from-kit";
-import type { ReservedBookingForNotice } from "./reserved-booking-removal-notice";
 import { VerticalDotsIcon } from "../icons/library";
 import {
   DropdownMenu,
@@ -13,17 +13,18 @@ type AssetRowActionsDropdownProps = {
   asset: Pick<Asset, "id" | "title">;
   fullWidth?: boolean;
   /**
-   * RESERVED bookings holding this asset through the kit being viewed. Passed
-   * straight to the Remove dialog, which warns that confirming also removes
-   * the asset from them. Defaults to none.
+   * Bookings holding this asset through the kit being viewed, split into the
+   * ones that lose it (RESERVED) and the ones that keep it flagged as removed
+   * from the kit (ONGOING/OVERDUE). Passed straight to the Remove dialog,
+   * which names both before the user confirms. Defaults to none.
    */
-  reservedBookings?: ReservedBookingForNotice[];
+  bookingImpact?: KitRemovalBookingImpact;
 };
 
 export default function AssetRowActionsDropdown({
   asset,
   fullWidth,
-  reservedBookings,
+  bookingImpact,
 }: AssetRowActionsDropdownProps) {
   return (
     <DropdownMenu modal={false}>
@@ -39,7 +40,7 @@ export default function AssetRowActionsDropdown({
         align="end"
         className="order w-[180px] rounded-md bg-white p-1.5 text-right "
       >
-        <RemoveAssetFromKit asset={asset} reservedBookings={reservedBookings} />
+        <RemoveAssetFromKit asset={asset} bookingImpact={bookingImpact} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

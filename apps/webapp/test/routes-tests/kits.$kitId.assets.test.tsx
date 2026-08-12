@@ -2,11 +2,11 @@
  * Route loader tests for `kits.$kitId.assets.tsx`.
  *
  * The route is gated on `kit`/`read`, which SELF_SERVICE and BASE both hold —
- * but the reserved-booking removal warning it ships names RESERVED bookings
- * from across the whole organization, which those roles otherwise never see,
- * and describes a removal they have no permission to perform. These tests pin
- * that the warning data is computed (and shipped) only for callers with
- * `kit`/`update`.
+ * but the booking-removal notice it ships names RESERVED / ONGOING / OVERDUE
+ * bookings from across the whole organization, which those roles otherwise
+ * never see, and describes a removal they have no permission to perform. These
+ * tests pin that the notice data is computed (and shipped) only for callers
+ * with `kit`/`update`.
  *
  * @see {@link file://./../../app/routes/_layout+/kits.$kitId.assets.tsx}
  */
@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getAssetsForKits,
-  getReservedBookingImpactForAssetKits,
+  getBookingImpactForAssetKits,
 } from "~/modules/kit/service.server";
 import { loader } from "~/routes/_layout+/kits.$kitId.assets";
 import { requirePermission } from "~/utils/roles.server";
@@ -35,11 +35,11 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 // why: the loader's two data reads are exercised elsewhere
-// (kit/service.server.test.ts); here we only care about WHETHER the reserved
+// (kit/service.server.test.ts); here we only care about WHETHER the booking
 // impact read happens for a given role.
 vi.mock("~/modules/kit/service.server", () => ({
   getAssetsForKits: vi.fn(),
-  getReservedBookingImpactForAssetKits: vi.fn().mockResolvedValue({}),
+  getBookingImpactForAssetKits: vi.fn().mockResolvedValue({}),
 }));
 
 // why: the route module imports the asset-index filter/list UI, which
@@ -54,7 +54,7 @@ vi.mock("~/components/location/scan-details", () => ({
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const getAssetsForKitsMock = vi.mocked(getAssetsForKits);
-const reservedImpactMock = vi.mocked(getReservedBookingImpactForAssetKits);
+const bookingImpactMock = vi.mocked(getBookingImpactForAssetKits);
 
 /** One kit member holding membership `ak-1`, enough to drive the impact read. */
 const KIT_MEMBER = {
@@ -82,52 +82,59 @@ function createLoaderArgs(): LoaderFunctionArgs {
   } as unknown as LoaderFunctionArgs;
 }
 
-describe("kits.$kitId.assets loader — reserved-booking warning gate", () => {
+describe("kits.$kitId.assets loader — booking-removal notice gate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.kit.findFirst.mockResolvedValue({ name: "Rack Kit" });
     getAssetsForKitsMock.mockResolvedValue({
       items: [KIT_MEMBER],
     } as unknown as Awaited<ReturnType<typeof getAssetsForKits>>);
-    reservedImpactMock.mockResolvedValue({
-      "ak-1": [{ id: "booking-1", name: "Acme Corp — Q3 rollout" }],
+    bookingImpactMock.mockResolvedValue({
+      "ak-1": {
+        reserved: [{ id: "booking-1", name: "Acme Corp — Q3 rollout" }],
+        checkedOut: [{ id: "booking-2", name: "Acme Corp — site survey" }],
+      },
     });
   });
 
   it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "never ships reserved booking names to %s, which cannot remove kit assets",
+    "never ships booking names to %s, which cannot remove kit assets",
     async (role) => {
       // why: booking names routinely carry customer / project identifiers, and
       // these roles normally see only bookings they created or hold. The route
       // only requires `kit`/`read`, so without this gate `kit: [read]` is
-      // enough to enumerate every RESERVED booking holding the kit's assets.
+      // enough to enumerate every reserved or checked-out booking holding the
+      // kit's assets.
       expect.assertions(2);
 
       mockRole(role);
 
       const result = await loader(createLoaderArgs());
 
-      expect(result).not.toHaveProperty("reservedBookingsByAssetId");
+      expect(result).not.toHaveProperty("bookingImpactByAssetId");
       // Not merely withheld from the payload — never read at all.
-      expect(reservedImpactMock).not.toHaveBeenCalled();
+      expect(bookingImpactMock).not.toHaveBeenCalled();
     }
   );
 
-  it("ships the warning to a role that can actually remove the asset", async () => {
+  it("ships the notice to a role that can actually remove the asset", async () => {
     // why: the gate must not break the feature for the roles it is meant for —
-    // ADMIN has `kit`/`update`, so the Remove dialog still gets its warning.
+    // ADMIN has `kit`/`update`, so the Remove dialog still gets both groups.
     expect.assertions(2);
 
     mockRole(OrganizationRoles.ADMIN);
 
     const result = await loader(createLoaderArgs());
 
-    expect(reservedImpactMock).toHaveBeenCalledWith({
+    expect(bookingImpactMock).toHaveBeenCalledWith({
       assetKitIds: ["ak-1"],
       organizationId: "org-1",
     });
-    expect(result).toHaveProperty("reservedBookingsByAssetId", {
-      "asset-1": [{ id: "booking-1", name: "Acme Corp — Q3 rollout" }],
+    expect(result).toHaveProperty("bookingImpactByAssetId", {
+      "asset-1": {
+        reserved: [{ id: "booking-1", name: "Acme Corp — Q3 rollout" }],
+        checkedOut: [{ id: "booking-2", name: "Acme Corp — site survey" }],
+      },
     });
   });
 });

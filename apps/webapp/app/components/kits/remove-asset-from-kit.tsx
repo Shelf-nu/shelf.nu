@@ -1,8 +1,8 @@
 import type { Asset } from "@prisma/client";
 import { useNavigation } from "react-router";
 import { isFormProcessing } from "~/utils/form";
-import type { ReservedBookingForNotice } from "./reserved-booking-removal-notice";
-import { ReservedBookingRemovalNotice } from "./reserved-booking-removal-notice";
+import type { KitRemovalBookingImpact } from "./booking-removal-notice";
+import { BookingRemovalNotice } from "./booking-removal-notice";
 import { Form } from "../custom-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
@@ -19,15 +19,16 @@ import {
 
 export default function RemoveAssetFromKit({
   asset,
-  reservedBookings = [],
+  bookingImpact,
 }: {
   asset: Pick<Asset, "id" | "title">;
   /**
-   * RESERVED bookings holding this asset through this kit. Removing the asset
-   * from the kit deletes their slice, so they're named in the dialog before
-   * the user confirms. Advisory — the removal is never blocked.
+   * Bookings holding this asset through this kit, split by what the removal
+   * does to them: RESERVED ones lose their slice, ONGOING/OVERDUE ones keep it
+   * flagged as removed from the kit. Both are named in the dialog before the
+   * user confirms. Advisory — the removal is never blocked.
    */
-  reservedBookings?: ReservedBookingForNotice[];
+  bookingImpact?: KitRemovalBookingImpact;
 }) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -61,12 +62,18 @@ export default function RemoveAssetFromKit({
           <AlertDialogDescription>
             Are you sure you want to remove this asset from the kit? Asset will
             lose any status that is inherited by the kit.
-            <ReservedBookingRemovalNotice
+            <BookingRemovalNotice
               // `text-left` because AlertDialogHeader centres its text on
               // mobile; a centred warning block reads as decoration.
               className="mt-3 text-left"
-              assetCount={1}
-              bookings={reservedBookings}
+              reserved={{
+                bookings: bookingImpact?.reserved ?? [],
+                assetCount: 1,
+              }}
+              checkedOut={{
+                bookings: bookingImpact?.checkedOut ?? [],
+                assetCount: 1,
+              }}
             />
           </AlertDialogDescription>
         </AlertDialogHeader>

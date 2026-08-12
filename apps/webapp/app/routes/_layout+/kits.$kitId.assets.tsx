@@ -13,7 +13,7 @@ import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters"
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
-import type { ReservedBookingForNotice } from "~/components/kits/reserved-booking-removal-notice";
+import type { KitRemovalBookingImpact } from "~/components/kits/booking-removal-notice";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -31,7 +31,7 @@ import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getAssetsForKits,
-  getReservedBookingImpactForAssetKits,
+  getBookingImpactForAssetKits,
 } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -108,8 +108,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Which RESERVED bookings would lose a slice if one of the rows on THIS
-     * page were removed from the kit — the row's Remove dialog warns before
+     * Which bookings a removal of one of the rows on THIS page would affect —
+     * RESERVED ones lose the slice, ONGOING/OVERDUE ones keep it flagged as
+     * removed from the kit. The row's Remove dialog names both before
      * confirming. Second narrow fetch over the page's `AssetKit` ids (same
      * pattern as `getKitPickerMeta`), deliberately NOT a widening of the
      * parent route's `bookingAssets` include: that one loads every member of
@@ -118,12 +119,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Left `undefined` for callers without kit-update — neither the query nor
      * the booking names happen at all — and the key is then dropped from the
      * payload entirely rather than shipped empty. The Remove dialog those
-     * roles never see defaults to no warning.
+     * roles never see defaults to no notice.
      *
-     * `assetId -> reserved bookings holding it through this kit`.
+     * `assetId -> impact of removing it from this kit`.
      */
-    let reservedBookingsByAssetId:
-      | Record<string, ReservedBookingForNotice[]>
+    let bookingImpactByAssetId:
+      | Record<string, KitRemovalBookingImpact>
       | undefined;
 
     if (canUpdateKit) {
@@ -132,18 +133,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           .filter((ak) => ak.kitId === kitId)
           .map((ak) => [asset.id, ak.id] as const)
       );
-      const reservedImpactByAssetKitId =
-        await getReservedBookingImpactForAssetKits({
-          assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
-          organizationId,
-        });
-      reservedBookingsByAssetId = Object.fromEntries(
+      const impactByAssetKitId = await getBookingImpactForAssetKits({
+        assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
+        organizationId,
+      });
+      bookingImpactByAssetId = Object.fromEntries(
         assetKitIdsByAssetId
           .map(
             ([assetId, assetKitId]) =>
-              [assetId, reservedImpactByAssetKitId[assetKitId] ?? []] as const
+              [assetId, impactByAssetKitId[assetKitId]] as const
           )
-          .filter(([, bookings]) => bookings.length > 0)
+          // Memberships with no impact at all are dropped, so the dialog's
+          // `bookingImpact` prop stays absent rather than arriving empty.
+          .filter(
+            (entry): entry is readonly [string, KitRemovalBookingImpact] =>
+              entry[1] !== undefined
+          )
       );
     }
 
@@ -159,7 +164,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       ...assets,
-      ...(reservedBookingsByAssetId ? { reservedBookingsByAssetId } : {}),
+      ...(bookingImpactByAssetId ? { bookingImpactByAssetId } : {}),
       modelName,
     });
   } catch (cause) {
@@ -245,11 +250,12 @@ export default function KitAssets() {
 
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { category, tags } = item;
-  // Reserved bookings this asset is on THROUGH this kit — removing it from the
-  // kit deletes their slice, so the row's Remove dialog names them first.
-  // Absent for roles without kit-update permission (the loader omits it), which
-  // is why every read below is optional — the dialog then warns about nothing.
-  const { reservedBookingsByAssetId } = useLoaderData<typeof loader>();
+  // Bookings this asset is on THROUGH this kit — reserved ones lose their slice
+  // when it's removed, checked-out ones keep it flagged as removed from the
+  // kit, and the row's Remove dialog names both first. Absent for roles without
+  // kit-update permission (the loader omits it), which is why every read below
+  // is optional — the dialog then shows no notice.
+  const { bookingImpactByAssetId } = useLoaderData<typeof loader>();
   // Render only the single primary-location badge — a qty-tracked asset
   // can sit at multiple locations via AssetLocation.
   const location = getPrimaryLocation(item);
@@ -370,7 +376,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
         <Td className="pr-4 text-right">
           <AssetRowActionsDropdown
             asset={item}
-            reservedBookings={reservedBookingsByAssetId?.[item.id] ?? []}
+            bookingImpact={bookingImpactByAssetId?.[item.id]}
           />
         </Td>
       </When>

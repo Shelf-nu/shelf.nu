@@ -104,8 +104,8 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   // custody`, which is wrong once the kit can hold a strict subset of the
   // pool.
   // `id` is the `AssetKit` id — `BookingAsset.assetKitId` points at it, so the
-  // kit page can resolve which reserved bookings a row's removal would empty
-  // (`getReservedBookingImpactForAssetKits`).
+  // kit page can resolve which bookings a row's removal would affect
+  // (`getBookingImpactForAssetKits`).
   assetKits: {
     select: { id: true, kitId: true, quantity: true },
   },

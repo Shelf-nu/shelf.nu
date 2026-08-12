@@ -4431,10 +4431,11 @@ describe("removeKitSlicesFromPlanningBookings", () => {
 
 /**
  * Read-only counterpart to `removeKitSlicesFromPlanningBookings`: it answers
- * "which RESERVED bookings would lose a slice" so the removal UI can warn
- * before the user confirms.
+ * "which bookings does this removal visibly affect, and how" so the removal UI
+ * can say so before the user confirms. RESERVED bookings LOSE the slice;
+ * ONGOING/OVERDUE ones KEEP it, relabelled.
  */
-describe("getReservedBookingImpactForAssetKits", () => {
+describe("getBookingImpactForAssetKits", () => {
   /** The kit-driven slice read goes through `bookingAsset.findMany`. */
   const sliceReads = () =>
     db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>;
@@ -4443,25 +4444,21 @@ describe("getReservedBookingImpactForAssetKits", () => {
     vitest.clearAllMocks();
   });
 
-  it("scopes the read to the acting org and to RESERVED bookings, grouped by membership", async () => {
+  it("scopes the read to the acting org and to the two actionable status groups", async () => {
     // why: two filters, two different reasons, both load-bearing.
     // `organizationId` is the tenancy guard — this helper renders BOOKING NAMES
     // back to the user, so an `AssetKit` id from another org must return
-    // nothing. `RESERVED` is the advisory scope: DRAFT removals are
-    // unremarkable (nobody has committed to them), so the read must not widen.
-    // The exact `toEqual` below is what makes dropping either clause fail.
-    expect.assertions(2);
+    // nothing. The status list is the advisory scope: DRAFT removals are
+    // unremarkable (nobody has committed to them) and COMPLETE / ARCHIVED /
+    // CANCELLED are historical noise the operator can do nothing about, so the
+    // read must not widen. The exact `toEqual` below is what makes dropping
+    // either clause — or adding a status — fail.
+    expect.assertions(1);
 
-    sliceReads().mockResolvedValueOnce([
-      { assetKitId: "ak-1", booking: { id: "b-1", name: "Rack job" } },
-      { assetKitId: "ak-1", booking: { id: "b-2", name: "Field day" } },
-      { assetKitId: "ak-2", booking: { id: "b-1", name: "Rack job" } },
-    ]);
+    sliceReads().mockResolvedValueOnce([]);
 
-    const { getReservedBookingImpactForAssetKits } = await import(
-      "./service.server"
-    );
-    const impact = await getReservedBookingImpactForAssetKits({
+    const { getBookingImpactForAssetKits } = await import("./service.server");
+    await getBookingImpactForAssetKits({
       assetKitIds: ["ak-1", "ak-2"],
       organizationId: "org-1",
     });
@@ -4471,45 +4468,150 @@ describe("getReservedBookingImpactForAssetKits", () => {
       where: {
         assetKitId: { in: ["ak-1", "ak-2"] },
         booking: {
-          status: BookingStatus.RESERVED,
+          status: {
+            in: [
+              BookingStatus.RESERVED,
+              BookingStatus.ONGOING,
+              BookingStatus.OVERDUE,
+            ],
+          },
           organizationId: "org-1",
         },
       },
       select: {
         assetKitId: true,
-        booking: { select: { id: true, name: true } },
+        booking: { select: { id: true, name: true, status: true } },
       },
     });
-    expect(impact).toEqual({
-      "ak-1": [
-        { id: "b-1", name: "Rack job" },
-        { id: "b-2", name: "Field day" },
-      ],
-      "ak-2": [{ id: "b-1", name: "Rack job" }],
+  });
+
+  it("splits reserved bookings from checked-out ones, per membership", async () => {
+    // why: the two groups get different copy because the outcomes differ — a
+    // RESERVED booking LOSES the asset, an ONGOING/OVERDUE one KEEPS it
+    // relabelled. Collapsing them into one list would tell the operator the
+    // wrong thing about half the bookings named.
+    expect.assertions(1);
+
+    sliceReads().mockResolvedValueOnce([
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-1",
+          name: "Rack job",
+          status: BookingStatus.RESERVED,
+        },
+      },
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-2",
+          name: "Field day",
+          status: BookingStatus.ONGOING,
+        },
+      },
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-3",
+          name: "Late return",
+          status: BookingStatus.OVERDUE,
+        },
+      },
+      {
+        assetKitId: "ak-2",
+        booking: {
+          id: "b-1",
+          name: "Rack job",
+          status: BookingStatus.RESERVED,
+        },
+      },
+    ]);
+
+    const { getBookingImpactForAssetKits } = await import("./service.server");
+
+    await expect(
+      getBookingImpactForAssetKits({
+        assetKitIds: ["ak-1", "ak-2"],
+        organizationId: "org-1",
+      })
+    ).resolves.toEqual({
+      "ak-1": {
+        reserved: [{ id: "b-1", name: "Rack job" }],
+        checkedOut: [
+          { id: "b-2", name: "Field day" },
+          { id: "b-3", name: "Late return" },
+        ],
+      },
+      "ak-2": {
+        reserved: [{ id: "b-1", name: "Rack job" }],
+        checkedOut: [],
+      },
     });
+  });
+
+  it("drops a historical booking rather than defaulting it into a group", async () => {
+    // why: belt-and-braces behind the status filter. Each group's copy makes a
+    // promise about what happens to the booking; a COMPLETE one would make the
+    // wrong promise in either group, and the membership must not be reported
+    // as impacted at all when that row is its only one.
+    expect.assertions(1);
+
+    sliceReads().mockResolvedValueOnce([
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-9",
+          name: "Last winter's shoot",
+          status: BookingStatus.COMPLETE,
+        },
+      },
+    ]);
+
+    const { getBookingImpactForAssetKits } = await import("./service.server");
+
+    await expect(
+      getBookingImpactForAssetKits({
+        assetKitIds: ["ak-1"],
+        organizationId: "org-1",
+      })
+    ).resolves.toEqual({});
   });
 
   it("names a booking once even when it holds several slices of the membership", async () => {
     // why: the copy reads "2 reserved bookings: Rack job, Rack job" otherwise.
-    // Defensive rather than reachable today, but the warning's count is the
-    // whole point of the notice — it must never overstate.
+    // Defensive rather than reachable today, but the notice's count is the
+    // whole point — it must never overstate.
     expect.assertions(1);
 
     sliceReads().mockResolvedValueOnce([
-      { assetKitId: "ak-1", booking: { id: "b-1", name: "Rack job" } },
-      { assetKitId: "ak-1", booking: { id: "b-1", name: "Rack job" } },
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-1",
+          name: "Rack job",
+          status: BookingStatus.RESERVED,
+        },
+      },
+      {
+        assetKitId: "ak-1",
+        booking: {
+          id: "b-1",
+          name: "Rack job",
+          status: BookingStatus.RESERVED,
+        },
+      },
     ]);
 
-    const { getReservedBookingImpactForAssetKits } = await import(
-      "./service.server"
-    );
+    const { getBookingImpactForAssetKits } = await import("./service.server");
 
     await expect(
-      getReservedBookingImpactForAssetKits({
+      getBookingImpactForAssetKits({
         assetKitIds: ["ak-1"],
         organizationId: "org-1",
       })
-    ).resolves.toEqual({ "ak-1": [{ id: "b-1", name: "Rack job" }] });
+    ).resolves.toEqual({
+      "ak-1": { reserved: [{ id: "b-1", name: "Rack job" }], checkedOut: [] },
+    });
   });
 
   it("short-circuits an empty input without querying", async () => {
@@ -4517,12 +4619,10 @@ describe("getReservedBookingImpactForAssetKits", () => {
     // members must not cost a round-trip.
     expect.assertions(2);
 
-    const { getReservedBookingImpactForAssetKits } = await import(
-      "./service.server"
-    );
+    const { getBookingImpactForAssetKits } = await import("./service.server");
 
     await expect(
-      getReservedBookingImpactForAssetKits({
+      getBookingImpactForAssetKits({
         assetKitIds: [],
         organizationId: "org-1",
       })

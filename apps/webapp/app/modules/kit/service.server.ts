@@ -330,7 +330,7 @@ export type RemovedPlanningBookingSlice = {
  * rows, so a stray `AssetKit` id from another org would destroy another
  * tenant's booking data. `organizationId` is a required param so the compiler
  * forces every call site to supply it, matching its read-only sibling
- * {@link getReservedBookingImpactForAssetKits} (see
+ * {@link getBookingImpactForAssetKits} (see
  * `.claude/rules/org-scope-user-supplied-ids.md`).
  *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
@@ -663,20 +663,56 @@ export async function removeKitSlicesFromPlanningBookings(
 }
 
 /**
- * Which RESERVED bookings would lose a slice if these `AssetKit` memberships
- * were deleted.
+ * Booking statuses whose impact is worth naming before a kit removal is
+ * confirmed — the two the operator can still act on.
  *
- * Removing an asset from a kit deletes the kit-driven `BookingAsset` row on
- * every booking still in a planning status (see
- * {@link removeKitSlicesFromPlanningBookings}). For a DRAFT that is
- * unremarkable — nobody has committed to it. A RESERVED booking has committed
- * dates and a custodian, so the removal UI names those bookings before the
- * user confirms.
+ * `RESERVED`: the slice is DELETED (see {@link removeKitSlicesFromPlanningBookings}).
+ * `ONGOING` / `OVERDUE`: the slice is KEPT and relabelled "removed from kit".
+ *
+ * `DRAFT` is deliberately out even though its slice is deleted too — nobody has
+ * committed to a draft, so the warning would be noise. `COMPLETE` / `ARCHIVED` /
+ * `CANCELLED` are out because they are historical: the operator can take no
+ * action about them, and a popular kit can carry dozens, which would bury the
+ * two actionable groups.
+ */
+const KIT_REMOVAL_NOTICE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/** A booking named in the removal notice. */
+type BookingForRemovalImpact = { id: string; name: string };
+
+/**
+ * Per-membership removal impact, split by what actually happens to the slice.
+ *
+ * @property reserved - RESERVED bookings that LOSE the slice on removal.
+ * @property checkedOut - ONGOING/OVERDUE bookings that KEEP the slice, relabelled.
+ */
+export type AssetKitBookingImpact = {
+  reserved: BookingForRemovalImpact[];
+  checkedOut: BookingForRemovalImpact[];
+};
+
+/**
+ * Which bookings a removal from a kit would visibly affect, grouped by outcome.
+ *
+ * Removing an asset from a kit does two different things depending on the
+ * booking's status. On a planning booking the kit-driven `BookingAsset` row is
+ * DELETED (see {@link removeKitSlicesFromPlanningBookings}) — for a DRAFT that
+ * is unremarkable, but a RESERVED booking has committed dates and a custodian.
+ * On an ONGOING/OVERDUE booking the row is KEPT, still grouped under its
+ * original kit and flagged as removed from it, because those units are
+ * physically out and the booking must still record what went out.
+ *
+ * Both outcomes get named before the user confirms, in their own group — see
+ * `~/components/kits/booking-removal-notice`.
  *
  * Read-only and purely advisory: it takes no `tx` and nothing branches on the
  * result server-side. The removal itself is never blocked — kit maintenance
- * would be impossible whenever anything is reserved. (`moveAssetKitUnits`
- * blocks, deliberately, for a different operation.)
+ * would be impossible whenever anything is reserved or out.
+ * (`moveAssetKitUnits` blocks, deliberately, for a different operation.)
  *
  * Org-scoped in the query itself, not by caller discipline: this renders BOOKING
  * NAMES back to the user, so a stray `AssetKit` id from another org would leak
@@ -685,16 +721,16 @@ export async function removeKitSlicesFromPlanningBookings(
  *
  * @param assetKitIds `AssetKit` rows the UI offers to remove
  * @param organizationId Acting org — bookings outside it are never returned
- * @returns `assetKitId -> [{ id, name }]`, deduped by booking id. An absent key
- *   means that membership has no reserved impact.
+ * @returns `assetKitId -> { reserved, checkedOut }`, each deduped by booking id.
+ *   An absent key means that membership has no impact worth naming.
  */
-export async function getReservedBookingImpactForAssetKits({
+export async function getBookingImpactForAssetKits({
   assetKitIds,
   organizationId,
 }: {
   assetKitIds: string[];
   organizationId: string;
-}): Promise<Record<string, Array<{ id: string; name: string }>>> {
+}): Promise<Record<string, AssetKitBookingImpact>> {
   if (assetKitIds.length === 0) return {};
 
   const rows = await db.bookingAsset.findMany({
@@ -702,24 +738,57 @@ export async function getReservedBookingImpactForAssetKits({
       assetKitId: { in: assetKitIds },
       // Both clauses on the booking: `organizationId` is the tenancy guard,
       // `status` the advisory scope.
-      booking: { status: BookingStatus.RESERVED, organizationId },
+      booking: {
+        status: { in: KIT_REMOVAL_NOTICE_BOOKING_STATUSES },
+        organizationId,
+      },
     },
     select: {
       assetKitId: true,
-      booking: { select: { id: true, name: true } },
+      // `status` picks the bucket — the two outcomes read differently, so the
+      // notice can't collapse them into one list.
+      booking: { select: { id: true, name: true, status: true } },
     },
   });
 
-  const impact: Record<string, Array<{ id: string; name: string }>> = {};
+  const impact: Record<string, AssetKitBookingImpact> = {};
   for (const row of rows) {
     // Rows are keyed on `assetKitId` — a null one is a standalone slice the
     // membership doesn't own, and removal never touches it.
     if (!row.assetKitId || !row.booking) continue;
-    const bucket = (impact[row.assetKitId] ??= []);
-    // Dedupe per key: the notice counts bookings, not rows, so a membership
+
+    // Bucket by outcome. Anything outside the two groups is dropped rather
+    // than defaulted into one of them: the copy makes a promise about what
+    // happens to the booking, and a status this function doesn't model would
+    // make the wrong promise.
+    let bucket: BookingForRemovalImpact[];
+    const groups = (impact[row.assetKitId] ??= {
+      reserved: [],
+      checkedOut: [],
+    });
+    if (row.booking.status === BookingStatus.RESERVED) {
+      bucket = groups.reserved;
+    } else if (
+      row.booking.status === BookingStatus.ONGOING ||
+      row.booking.status === BookingStatus.OVERDUE
+    ) {
+      bucket = groups.checkedOut;
+    } else {
+      continue;
+    }
+
+    // Dedupe per bucket: the notice counts bookings, not rows, so a membership
     // holding several slices of one booking must still read "1 booking".
     if (bucket.some((booking) => booking.id === row.booking.id)) continue;
     bucket.push({ id: row.booking.id, name: row.booking.name });
+  }
+
+  // A membership whose only rows were dropped above would otherwise ship an
+  // empty pair of groups and be counted as "impacted" by call sites.
+  for (const [assetKitId, groups] of Object.entries(impact)) {
+    if (groups.reserved.length === 0 && groups.checkedOut.length === 0) {
+      delete impact[assetKitId];
+    }
   }
   return impact;
 }
