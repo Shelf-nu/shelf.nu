@@ -35,7 +35,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { claimQrCode } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
-import { action } from "./qr.claim";
+import { action } from "~/routes/api+/mobile+/qr.claim";
 
 /**
  * Tests for POST /api/mobile/qr/claim — the native takeover of the web claim
@@ -43,7 +43,7 @@ import { action } from "./qr.claim";
  * permission denials, and that the claim is always bound to the caller's
  * current org (never a body-supplied one).
  *
- * @see {@link file://./qr.claim.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.claim.ts}
  */
 
 /** Shape of the `data()` result the route action returns. */

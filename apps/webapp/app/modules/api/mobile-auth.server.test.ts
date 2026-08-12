@@ -1,13 +1,33 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { shapeMobileAssetResponse } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  requireMobileAuth,
+  shapeMobileAssetResponse,
+} from "~/modules/api/mobile-auth.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
-// Mocking the db module to an empty object short-circuits the connection.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+// Mocking the db module short-circuits the connection; `user.findUnique` is a
+// spy so the `requireMobileAuth` test can assert the select shape.
+vi.mock("~/database/db.server", () => ({
+  db: { user: { findUnique: vi.fn() } },
+}));
+
+// why: `requireMobileAuth` validates the Bearer JWT via Supabase Admin — an
+// external network call with no service available under `pnpm test:run`.
+vi.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: vi.fn(),
+}));
+
+// why: fire-and-forget usage recorder that would touch the mocked db; it is
+// irrelevant to the auth/format-prefs contract, so stub it to a no-op.
+vi.mock("./mobile-usage.server", () => ({
+  recordMobileActivity: vi.fn(),
+}));
 
 /**
  * Tests for `shapeMobileAssetResponse` — the back-compat helper that flattens
@@ -32,6 +52,11 @@ const baseAsset = {
   title: "Test Asset",
   status: "AVAILABLE",
   mainImage: null,
+  thumbnailImage: null,
+  assetModel: null as {
+    image: string | null;
+    thumbnailImage: string | null;
+  } | null,
   availableToBook: true,
   category: null,
   type: "INDIVIDUAL" as const,
@@ -134,6 +159,52 @@ describe("shapeMobileAssetResponse", () => {
     expect(result).not.toHaveProperty("assetLocations");
     // `custody` IS a key on the output but as a single object, not an array.
     expect(Array.isArray(result.custody)).toBe(false);
+  });
+
+  // why: the companion reads `mainImage`/`thumbnailImage` directly and ships as
+  // a native binary, so it cannot be updated in lockstep with the API. The
+  // cascade therefore has to be resolved server-side or inherited images never
+  // reach the app.
+  it("resolves an inherited model image into mainImage/thumbnailImage", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: null,
+      thumbnailImage: null,
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/model-main.jpg");
+    expect(result.thumbnailImage).toBe("https://cdn/model-thumb.jpg");
+    expect(result.imageSource).toBe("model");
+    expect(result).not.toHaveProperty("assetModel");
+  });
+
+  it("keeps the asset's own image when it has one", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: "https://cdn/asset-main.jpg",
+      thumbnailImage: "https://cdn/asset-thumb.jpg",
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/asset-main.jpg");
+    expect(result.imageSource).toBe("asset");
+  });
+
+  // why: the companion renders its own placeholder on a null mainImage, so the
+  // placeholder PATH must not leak into the response.
+  it("leaves the image fields null when neither asset nor model has one", () => {
+    const result = shapeMobileAssetResponse(baseAsset);
+
+    expect(result.mainImage).toBeNull();
+    expect(result.thumbnailImage).toBeNull();
+    expect(result.imageSource).toBe("placeholder");
   });
 
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {
@@ -239,5 +310,82 @@ describe("shapeMobileAssetResponse", () => {
         releasableQuantity: 3,
       },
     ]);
+  });
+});
+
+/**
+ * Tests for `requireMobileAuth`'s user contract — specifically that the four
+ * date/time format-preference columns (`dateFormat`, `timeFormat`, `weekStart`,
+ * `timeZone`) are both SELECTED and RETURNED, since `/api/mobile/me` hands the
+ * returned `user` straight to the companion. If a refactor drops them from the
+ * select, the companion silently falls back to device-local formatting — a
+ * regression with no other automated guard.
+ *
+ * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
+ */
+describe("requireMobileAuth", () => {
+  // Reset the module-scoped `findUnique` spy before each test so this suite's
+  // assertions read only its own call, not calls accumulated by earlier suites.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
+    // why: stub the Supabase JWT validation to yield a valid auth user.
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: { email: "ada@example.com" } },
+      error: null,
+    });
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      auth: { getUser },
+    } as unknown as ReturnType<typeof getSupabaseAdmin>);
+
+    // A full DB row as selected by requireMobileAuth: the 4 pref columns plus
+    // the two internal-only fields that must be stripped from the response.
+    const dbRow = {
+      id: "user-1",
+      email: "ada@example.com",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      profilePicture: null,
+      onboarded: true,
+      dateFormat: "YYYY_MM_DD",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Asia/Tokyo",
+      deletedAt: null,
+      lastMobileActiveAt: null,
+    };
+    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+
+    const request = new Request("https://shelf.test/api/mobile/me", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+
+    const { user } = await requireMobileAuth(request);
+
+    // The 4 format-pref columns are part of the select (regression guard). Read
+    // the LATEST call so a future test that reaches requireMobileAuth first
+    // can't shift the call this assertion inspects.
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    const select = lastCall?.[0].select;
+    expect(select).toMatchObject({
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
+    });
+
+    // ...and they survive into the returned (safe) user.
+    expect(user).toMatchObject({
+      dateFormat: "YYYY_MM_DD",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Asia/Tokyo",
+    });
+
+    // Internal-only fields are stripped by the `safeUser` destructure.
+    expect(user).not.toHaveProperty("deletedAt");
+    expect(user).not.toHaveProperty("lastMobileActiveAt");
   });
 });

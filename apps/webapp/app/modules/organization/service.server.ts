@@ -494,7 +494,10 @@ export async function getOrganizationAdminsEmails({
 
 /**
  * Returns admin and owner users for an organization with their full
- * notification-relevant fields: `id`, `email`, `firstName`, `lastName`.
+ * notification-relevant fields: `id`, `email`, `firstName`, `lastName`, plus
+ * the four raw date/time format-preference columns (`dateFormat`,
+ * `timeFormat`, `weekStart`, `timeZone`) so recipient-specific email
+ * formatting resolves from the loaded row.
  *
  * This differs from `getOrganizationAdminsEmails()` (which returns only
  * email strings) because the notification recipient resolver needs the
@@ -526,6 +529,14 @@ export async function getOrganizationAdminsForNotification({
             email: true,
             firstName: true,
             lastName: true,
+            // Format-preference columns so the booking notification resolver
+            // can carry them onto each recipient and resolve recipient-specific
+            // email date/time formatting from the loaded row (no per-recipient
+            // DB fetch). See `NotificationRecipient`.
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
       },

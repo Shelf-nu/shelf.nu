@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -55,6 +55,20 @@ type Props = ModelFilterProps & {
 
   /** Is this input required. Used to show a required star */
   required?: boolean;
+
+  /**
+   * Validation message for the current selection.
+   *
+   * Pass this instead of rendering your own paragraph next to the picker: a
+   * hand-rolled one is invisible to assistive tech, so a screen-reader user who
+   * submits an empty required picker gets nothing at all — the form just
+   * silently refuses to submit. Rendering it here lets the component announce
+   * the message (`role="alert"`) and point `aria-describedby` at it, which only
+   * the component can do because it owns the trigger element.
+   *
+   * Naming matches `~/components/forms/input.tsx`, which takes the same prop.
+   */
+  error?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -115,6 +129,7 @@ export default function DynamicSelect({
   label,
   hideLabel,
   required,
+  error,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -139,6 +154,8 @@ export default function DynamicSelect({
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  /** Stable id linking the trigger to its error text via `aria-describedby`. */
+  const errorId = useId();
   /**
    * Focus the search input when the popover opens — replaces a bare
    * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
@@ -361,6 +378,17 @@ export default function DynamicSelect({
                 "w-full",
                 disabled && "cursor-not-allowed opacity-60"
               )}
+              // Radix's `asChild` trigger injects aria-expanded/haspopup/controls
+              // onto this element but never this one, so there is no collision.
+              //
+              // No `aria-invalid`: ARIA only allows it on input widgets, and
+              // this trigger's implicit role is `button` (jsx-a11y flags it as
+              // an error). Re-roling it to `combobox` would satisfy the
+              // attribute but lie about the popup — Radix Popover advertises
+              // `aria-haspopup="dialog"`, not a listbox. The announcement comes
+              // from the message's `role="alert"` and the association from
+              // `aria-describedby`; the red border carries the visual half.
+              aria-describedby={error ? errorId : undefined}
             >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
@@ -370,7 +398,11 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50"
+                className={tw(
+                  "flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50",
+                  // Same visual error signal as `Input`, so the two read alike.
+                  error && "border-error-300"
+                )}
               >
                 <span
                   className={tw(
@@ -590,6 +622,14 @@ export default function DynamicSelect({
             </PopoverContent>
           </PopoverPortal>
         </Popover>
+
+        {/* Inserting a role="alert" node announces it, which is the whole point:
+            submit-time validation on a picker is otherwise silent. */}
+        {error ? (
+          <p id={errorId} role="alert" className="text-sm text-error-500">
+            {error}
+          </p>
+        ) : null}
       </div>
     </>
   );

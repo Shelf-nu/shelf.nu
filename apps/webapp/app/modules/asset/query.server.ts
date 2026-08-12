@@ -10,6 +10,10 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
+import {
+  CUSTOM_FIELD_SEARCH_PATHS,
+  splitAssetSearchTerms,
+} from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -20,21 +24,18 @@ import type { Column } from "../asset-index-settings/helpers";
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
 
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
-
 /**
  * Generates the SQL WHERE clause for asset filtering
  * @param organizationId - Organization ID to filter by
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
+ * @param availableToBookOnly - Restrict to assets with `availableToBook = true`
+ * @param timeZone - IANA timezone name the acting user displays dates in.
+ *   Used only by built-in date-column filters so their day truncation matches
+ *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
+ *   preserve behavior for callers that don't supply it.
+ * @param lowStockOnly - Restrict to low-stock QUANTITY_TRACKED assets (see below)
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -42,12 +43,22 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false
+  availableToBookOnly = false,
+  timeZone: string = "UTC",
+  lowStockOnly = false
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
   if (availableToBookOnly) {
     whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  }
+
+  if (lowStockOnly) {
+    // Low stock = a QUANTITY_TRACKED asset whose stock is at/below its
+    // reorder threshold. Deliberately stock-vs-threshold only, NOT
+    // custody-aware (a one-line change could add a custody-aware variant
+    // later if that's ever wanted) — keeps this fast and simple.
+    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND a."quantity" <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided
@@ -56,11 +67,10 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search
-      .trim()
-      .split(",")
-      .map((term) => term.trim())
-      .filter(Boolean);
+    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
+    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
+    // cannot fan into unbounded OR groups in the generated SQL.
+    const words = splitAssetSearchTerms(search);
 
     if (words.length > 0) {
       // Create OR conditions for each search term, searching across multiple fields
@@ -127,6 +137,11 @@ export function generateWhereClause(
         searchConditions,
         " OR "
       )})`;
+    } else {
+      // Typed input yielding zero terms (whitespace / bare commas) matches
+      // nothing — mirrors getAssets' fail-closed guard so the same search
+      // box behaves identically in simple and advanced mode.
+      whereClause = Prisma.sql`${whereClause} AND FALSE`;
     }
   }
 
@@ -153,7 +168,7 @@ export function generateWhereClause(
         whereClause = addBooleanFilter(whereClause, filter);
         break;
       case "date":
-        whereClause = addDateFilter(whereClause, filter);
+        whereClause = addDateFilter(whereClause, filter, timeZone);
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
@@ -434,29 +449,64 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   }`;
 }
 
-function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+/**
+ * Adds a built-in date-column filter to the WHERE clause.
+ *
+ * Built-in date columns (`createdAt`, `updatedAt`, …) are Prisma's default
+ * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+ * as a bare wall clock. A plain `::date` cast resolves the calendar day of that
+ * UTC wall clock, which disagrees with the day the row is *displayed* in for a
+ * non-UTC user — an off-by-one when they filter "on the day a row shows".
+ *
+ * To get the user-tz calendar day we must convert in TWO steps, because
+ * `AT TIME ZONE` behaves differently on a `timestamp` than on a `timestamptz`:
+ *   1. `AT TIME ZONE 'UTC'` — reinterpret the bare wall clock AS a UTC instant
+ *      (`timestamp` → `timestamptz`). A single `AT TIME ZONE ${timeZone}` here
+ *      would instead ASSUME the value is already in the user's zone, mis-shifting
+ *      it by the offset (verified: an asset at `2026-07-20 23:00Z`, which shows
+ *      as Jul 21 in Tokyo, truncated to Jul 20 under the single-cast bug).
+ *   2. `AT TIME ZONE ${timeZone}` — convert that instant to the user's wall
+ *      clock (`timestamptz` → `timestamp`), then `::date` is session-independent.
+ * The right-hand side stays a date-only string (`value::date`), unchanged.
+ *
+ * NOTE: this is intentionally NOT applied to custom-field DATE filters
+ * ({@link addCustomFieldDateFilter}) — those values are stored date-only, so
+ * there is no timezone to reconcile.
+ *
+ * @param whereClause - The existing WHERE clause to extend.
+ * @param filter - The date filter (operator + value).
+ * @param timeZone - IANA timezone name the day should be resolved in (the
+ *   acting user's resolved pref tz). Bound as a SQL parameter, never
+ *   string-interpolated, so it stays injection-safe.
+ * @returns The extended WHERE clause.
+ */
+function addDateFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  timeZone: string
+): Prisma.Sql {
+  // The UTC-stored `timestamp` column truncated to a calendar date in the
+  // user's tz. `AT TIME ZONE 'UTC'` reinterprets the bare wall clock as a UTC
+  // instant; the second `AT TIME ZONE ${timeZone}` converts it to the user's
+  // wall clock before `::date` (see the two-step rationale above). `'UTC'` is a
+  // fixed literal; `timeZone` is a bound parameter (`AT TIME ZONE $n`), not raw
+  // SQL, so it stays injection-safe.
+  const localDate = Prisma.sql`(a."${Prisma.raw(
+    filter.name
+  )}" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ${filter.value}::date`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date != ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} != ${filter.value}::date`;
     case "before":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} < ${filter.value}::date`;
     case "after":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} > ${filter.value}::date`;
     case "between": {
       const [start, end] = filter.value as [string, string];
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" BETWEEN ${start}::date AND ${end}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} BETWEEN ${start}::date AND ${end}::date`;
     }
     case "inDates": {
       // Split comma-separated dates and remove whitespace
@@ -466,9 +516,7 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         dates.map((d) => Prisma.sql`${d}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ANY(ARRAY[${datesArray}]::date[])`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ANY(ARRAY[${datesArray}]::date[])`;
     }
     default:
       return whereClause;
@@ -1446,7 +1494,8 @@ type DirectAssetField =
   | "updatedAt"
   | "availableToBook"
   | "type"
-  | "quantity";
+  | "quantity"
+  | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1460,6 +1509,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  minQuantity: "assetMinQuantity",
 };
 
 /**
@@ -1853,6 +1903,67 @@ export type AssetReturnOptions = {
   orderBy?: Prisma.Sql;
 };
 
+/**
+ * Serialises a `timestamp without time zone` column into an explicitly-UTC
+ * ISO-8601 string for embedding in `jsonb_build_object` / `json_agg`.
+ *
+ * **Why this exists.** Prisma maps `DateTime` to Postgres `TIMESTAMP(3)` —
+ * *without* time zone — and stores UTC instants in it. A top-level `$queryRaw`
+ * column is fine: the Prisma driver knows the column type and decodes it into a
+ * proper JS `Date`. But once a timestamp is nested inside JSON, Prisma sees only
+ * an opaque blob, and Postgres has already rendered the value with **no zone
+ * designator**:
+ *
+ * ```
+ * jsonb_build_object('createdAt', a."createdAt")
+ *   -> {"createdAt": "2026-07-27T19:42:46.459"}     <-- no "Z", no offset
+ * ```
+ *
+ * Per ECMA-262 a date-time string without an offset is parsed as **local** time,
+ * so `new Date(...)` in the browser reinterprets a UTC instant as the viewer's
+ * wall clock. A user in `America/Costa_Rica` (UTC-6) saw asset "Created at"
+ * rendered 6 hours ahead of the truth, while the asset's Activity tab — which
+ * goes through the normal Prisma path and serialises with a `Z` — showed it
+ * correctly. Late-evening UTC timestamps also rolled over to the wrong *day*.
+ *
+ * The symptom is a stable wrong time rather than a flicker: on desktop the
+ * advanced table is never server-rendered (`assets-list.tsx` renders
+ * `AdvancedModeMobileFallback` while `isMd` is still `false` during SSR), so the
+ * browser's misparse is the only value ever painted. Below the `md` breakpoint,
+ * where the table does render on the server, it additionally produced a silent
+ * text-content hydration mismatch.
+ *
+ * `to_char` is used deliberately instead of the terser `AT TIME ZONE 'UTC'`:
+ * that cast yields a `timestamptz`, which `to_jsonb` renders in the **session**
+ * TimeZone (`SET TIME ZONE 'America/Costa_Rica'` turns `+00:00` into `-06:00`).
+ * Both denote the same instant, but the payload shape would then depend on
+ * ambient server configuration. `to_char` on the bare `timestamp` formats the
+ * stored wall clock verbatim and is therefore session-independent. NULL input
+ * yields SQL NULL, which becomes JSON `null` — matching the previous behaviour.
+ *
+ * ⚠️ Only for `timestamp WITHOUT time zone` columns. Columns declared
+ * `@db.Timestamptz` (`Booking.from`/`to`, `Booking.createdAt`,
+ * `ActivityEvent.occurredAt`, …) are serialised by `jsonb_build_object` *with*
+ * an offset and are already correct — wrapping those here would re-introduce the
+ * session-TZ dependency this helper exists to avoid. Note their safety comes
+ * from the jsonb path specifically: a `::text` cast on a timestamptz emits a
+ * 2-digit offset (`…+00`) that `new Date()` rejects outright.
+ *
+ * `column` is a closed union rather than `string` on purpose: `Prisma.raw` does
+ * no escaping, so restricting the parameter to these four compile-time literals
+ * makes it impossible for a caller to route user input in here.
+ *
+ * @param column - Qualified name of a `timestamp without time zone` column
+ * @returns A `Prisma.Sql` fragment producing `YYYY-MM-DDTHH:MM:SS.mmmZ` or NULL
+ */
+const utcJsonTimestamp = (
+  column:
+    | 'aq."assetCreatedAt"'
+    | 'aq."assetUpdatedAt"'
+    | 'aq."assetMainImageExpiration"'
+    | 'ar."alertDateTime"'
+) => Prisma.raw(`to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);
+
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const {
@@ -1860,6 +1971,11 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     withBarcodes = false,
     withCustomFieldDefinitions = true,
   } = options;
+
+  // Hoisted out of the return template's interpolation on purpose — see the
+  // note on `rankOrderBy` in buildAdvancedAssetsQuery about esbuild dropping
+  // functions that build nested SQL fragments inline.
+  const alertDateTimeField = utcJsonTimestamp('ar."alertDateTime"');
 
   const bookingsSelect = withBookings
     ? Prisma.sql`,
@@ -2041,6 +2157,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",
+      -- Cover image of the asset's model. Rendered by any asset that has no
+      -- image of its own (see resolveAssetImage). The am alias is already
+      -- joined for the name above, and the query groups by am.id, so
+      -- Postgres's functional dependency on the primary key permits these
+      -- without adding them to GROUP BY. AssetModel declares no @map, so the
+      -- column names here match the Prisma field names.
+      am.image AS "assetModelImage",
+      am."thumbnailImage" AS "assetModelThumbnailImage",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -2158,7 +2282,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           'id', ar.id,
           'name', ar.name,
           'message', ar.message,
-          'alertDateTime', ar."alertDateTime"
+          'alertDateTime', ${alertDateTimeField}
         )
         FROM public."AssetReminder" ar
         WHERE 
@@ -2324,6 +2448,17 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
   // input relation yields. The rewrite passes the integer sort rank here.
   const aggOrderBy = orderBy ? Prisma.sql` ORDER BY ${orderBy}` : Prisma.empty;
 
+  // Hoisted out of the return template's interpolation for the same reason as
+  // `rankOrderBy` in buildAdvancedAssetsQuery: constructing a nested SQL
+  // fragment inside a `${}` of the outer template has previously tripped
+  // esbuild into silently dropping the enclosing function from the production
+  // bundle. See {@link utcJsonTimestamp} for why these three need wrapping.
+  const createdAtField = utcJsonTimestamp('aq."assetCreatedAt"');
+  const updatedAtField = utcJsonTimestamp('aq."assetUpdatedAt"');
+  const mainImageExpirationField = utcJsonTimestamp(
+    'aq."assetMainImageExpiration"'
+  );
+
   return Prisma.sql`
     COALESCE(
       json_agg(
@@ -2333,15 +2468,24 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'qrId', aq."qrId",
           'title', aq."assetTitle",
           'description', aq."assetDescription",
-          'createdAt', aq."assetCreatedAt",
-          'updatedAt', aq."assetUpdatedAt",
+          'createdAt', ${createdAtField},
+          'updatedAt', ${updatedAtField},
           'userId', aq."assetUserId", 
           'mainImage', aq."assetMainImage",
           'thumbnailImage', aq."assetThumbnailImage",
-          'mainImageExpiration', aq."assetMainImageExpiration",
+          'mainImageExpiration', ${mainImageExpirationField},
           'categoryId', aq."assetCategoryId",
           'assetModelId', aq."assetModelId",
           'assetModelName', aq."assetModelName",
+          -- Shaped as the nested relation the Prisma selects return, so
+          -- resolveAssetImage takes the same input on both index modes.
+          'assetModel', CASE
+            WHEN aq."assetModelId" IS NULL THEN NULL
+            ELSE jsonb_build_object(
+              'image', aq."assetModelImage",
+              'thumbnailImage', aq."assetModelThumbnailImage"
+            )
+          END,
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
           'type', aq."assetType",
@@ -2748,6 +2892,7 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
+          a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",
           a.status AS "assetStatus",

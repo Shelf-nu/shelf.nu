@@ -35,7 +35,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { relinkAssetQrCode } from "~/modules/asset/service.server";
 import { ShelfError } from "~/utils/error";
-import { action } from "./qr.link-asset";
+import { action } from "~/routes/api+/mobile+/qr.link-asset";
 
 /**
  * Tests for POST /api/mobile/qr/link-asset — the native takeover of the web
@@ -45,7 +45,7 @@ import { action } from "./qr.link-asset";
  * pass-through of the service's guard errors (404 / wrong-org 403 /
  * already-linked 403).
  *
- * @see {@link file://./qr.link-asset.ts}
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.link-asset.ts}
  */
 
 /** Shape of the `data()` result the route action returns. */

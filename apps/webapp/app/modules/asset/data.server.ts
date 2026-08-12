@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
@@ -60,6 +61,12 @@ interface Props {
   currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
   settings: AssetIndexSettings;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required, not
+   * optional: the custodian filter seed previously passed no scoping at all,
+   * and an optional field would let a caller silently restore that.
+   */
+  canSeeAllCustody: boolean;
 }
 
 const searchFieldTooltipText = `
@@ -205,6 +212,8 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
     },
@@ -392,6 +401,13 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      /**
+       * Seeds the asset model picker in the bulk "Update asset model" dialog.
+       * Advanced mode already returned these; simple mode was querying them and
+       * throwing them away, so this adds no database work.
+       */
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
       currentUserTeamMember,
@@ -433,6 +449,7 @@ export async function advancedModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
@@ -486,6 +503,15 @@ export async function advancedModeLoader({
     parsedFilters
   );
 
+  // Off-by-one fix: date filters on built-in timestamptz columns
+  // (createdAt/updatedAt) must compare the calendar DAY in the acting user's
+  // resolved timezone preference — the same zone the list is displayed in — not
+  // the DB session zone (UTC). Resolve it once and thread it into the fetch.
+  const { timeZone: prefTimeZone } = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
@@ -531,6 +557,7 @@ export async function advancedModeLoader({
     getAdvancedPaginatedAndFilterableAssets({
       request,
       organizationId,
+      timeZone: prefTimeZone,
       filters,
       settings,
       getBookings: view === "availability",
@@ -552,6 +579,9 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
+      // A FILTER. This passed no scoping argument at all, so the seed
+      // disagreed with the search endpoint for any restricted role.
+      filterByUserId: !canSeeAllCustody,
     }),
 
     // Kits

@@ -18,11 +18,20 @@ export type BookingNoteTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
+    /** Batched ownership check used by {@link createSystemBookingNotes} */
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
   bookingNote: {
     create: (args: {
       data: Prisma.BookingNoteCreateInput;
     }) => Promise<BookingNote>;
+    /** Batched insert used by {@link createSystemBookingNotes} */
+    createMany: (args: {
+      data: Prisma.BookingNoteCreateManyInput[];
+    }) => Promise<{ count: number }>;
   };
 };
 
@@ -203,6 +212,80 @@ export function createSystemBookingNote(
     },
     tx
   );
+}
+
+/**
+ * Bulk variant of {@link createSystemBookingNote} — writes many system notes,
+ * possibly spanning several bookings, in a fixed TWO statements regardless of
+ * how many notes are passed.
+ *
+ * The singular helper costs two statements PER note (ownership check + insert),
+ * which is fine one-off but adds up inside a transaction: a caller writing
+ * notes for N bookings issues 2N serial round-trips against the 15s
+ * transaction budget. This validates every distinct booking in ONE query, then
+ * inserts with a single `createMany`.
+ *
+ * @param notes - Note content paired with its target booking id
+ * @param organizationId - Organization ALL target bookings must belong to
+ * @param tx - Optional transaction client so the check + insert commit with the
+ *   caller's mutation
+ * @throws {ShelfError} 404 if any target booking is not in `organizationId`
+ */
+export async function createSystemBookingNotes(
+  {
+    notes,
+    organizationId,
+  }: {
+    notes: Array<Pick<BookingNote, "content"> & { bookingId: Booking["id"] }>;
+    organizationId: string;
+  },
+  tx?: BookingNoteTxClient
+) {
+  if (notes.length === 0) {
+    return;
+  }
+
+  try {
+    const client = tx ?? db;
+    const bookingIds = [...new Set(notes.map((note) => note.bookingId))];
+
+    // Single ownership check covering every target booking. Same invariant the
+    // singular helper enforces per note — a missing id means it either doesn't
+    // exist or belongs to another organization; both are a hard 404.
+    const found = await client.booking.findMany({
+      where: { id: { in: bookingIds }, organizationId },
+      select: { id: true },
+    });
+
+    if (found.length !== bookingIds.length) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking not found or access denied",
+        additionalData: { bookingIds, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    await client.bookingNote.createMany({
+      data: notes.map((note) => ({
+        content: note.content,
+        type: "UPDATE" as const,
+        bookingId: note.bookingId,
+      })),
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating booking notes",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }
 
 /**

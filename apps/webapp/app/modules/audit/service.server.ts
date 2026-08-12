@@ -11,11 +11,13 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
 import type { ClientHint } from "~/utils/client-hints";
+import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -47,6 +49,7 @@ import {
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { resolveAssetImage } from "../asset/image-resolution";
 import { getPrimaryLocation } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
@@ -655,6 +658,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Model cover image for assets with no image of their own
+                ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
                 // field worker can match the physical asset to the row.
                 // See `app/modules/barcode/display.ts`.
@@ -768,14 +773,33 @@ export async function getAuditSessionDetails({
           custodian?.name ||
           null;
 
+        /**
+         * Resolve the model-image cascade HERE rather than forwarding the raw
+         * columns. This is a hand-written projection, so nothing downstream can
+         * reach `asset.assetModel` — `GetAuditSessionResult.session` doesn't
+         * even declare the relation. Both consumers of this payload (the mobile
+         * audit screen and the web scan drawer) read the flat fields, so an
+         * asset inheriting its model's cover renders blank unless it is
+         * collapsed at this point.
+         *
+         * Placeholder stays `null` so the existing client-side "no image"
+         * branches keep working — same contract as `serializeAssetImage`.
+         */
+        const image = resolveAssetImage({
+          mainImage: auditAsset.asset?.mainImage ?? null,
+          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          assetModel: auditAsset.asset?.assetModel ?? null,
+        });
+        const hasImage = image.source !== "placeholder";
+
         return {
           id: auditAsset.assetId,
           name: auditAsset.asset?.title ?? "",
           auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
           auditNotesCount: auditAsset._count?.notes ?? 0,
           auditImagesCount: auditAsset._count?.images ?? 0,
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          mainImage: hasImage ? image.fullUrl : null,
+          thumbnailImage: hasImage ? image.thumbnailUrl : null,
           // An asset can sit at multiple locations via the AssetLocation
           // pivot; surface only its single primary placement on the row.
           locationName: getPrimaryLocation(auditAsset.asset)?.name ?? null,
@@ -1042,6 +1066,8 @@ export async function getAssetsForAuditSession({
         title: true,
         mainImage: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         mainImageExpiration: true,
         // Asset-code resolution fields. Audits are the strongest use case —
         // a field worker matches the physical label to a row. See
@@ -1781,6 +1807,12 @@ export async function completeAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the completion email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         assignments: {
@@ -1791,6 +1823,11 @@ export async function completeAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -1827,6 +1864,12 @@ export async function completeAuditSession({
             firstName: completedAudit.createdBy.firstName,
             lastName: completedAudit.createdBy.lastName,
             displayName: completedAudit.createdBy.displayName,
+            // Carry the creator's format prefs so their notify row resolves the
+            // same way an assignee row does (from the loaded row, no N+1).
+            dateFormat: completedAudit.createdBy.dateFormat,
+            timeFormat: completedAudit.createdBy.timeFormat,
+            weekStart: completedAudit.createdBy.weekStart,
+            timeZone: completedAudit.createdBy.timeZone,
           },
         });
       }
@@ -2127,6 +2170,12 @@ export async function cancelAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the cancellation email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         organization: {
@@ -2144,6 +2193,11 @@ export async function cancelAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -2279,12 +2333,14 @@ export async function cancelAuditSession({
     //    the creator that their audit was killed.
     const assigneesToNotify: Array<{
       userId: string;
+      // Raw format-preference columns travel on each recipient row so the email
+      // helper resolves prefs from the loaded row (no per-recipient DB fetch).
       user: {
         email: string;
         firstName: string | null;
         lastName: string | null;
         displayName?: string | null;
-      };
+      } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -2309,6 +2365,12 @@ export async function cancelAuditSession({
           firstName: auditSession.createdBy.firstName,
           lastName: auditSession.createdBy.lastName,
           displayName: auditSession.createdBy.displayName,
+          // Carry the creator's format prefs so their notify row resolves the
+          // same way an assignee row does (from the loaded row, no N+1).
+          dateFormat: auditSession.createdBy.dateFormat,
+          timeFormat: auditSession.createdBy.timeFormat,
+          weekStart: auditSession.createdBy.weekStart,
+          timeZone: auditSession.createdBy.timeZone,
         },
       });
     }

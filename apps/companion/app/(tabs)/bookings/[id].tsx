@@ -30,13 +30,8 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import {
-  fontSize,
-  spacing,
-  borderRadius,
-  formatStatus,
-  formatDateTime,
-} from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { BookingDetailSkeleton } from "@/components/skeleton-loader";
@@ -110,6 +105,7 @@ export default function BookingDetailScreen() {
   const { currentOrg } = useOrg();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
@@ -832,17 +828,38 @@ export default function BookingDetailScreen() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            {item.type === "QUANTITY_TRACKED" && (
-              <QuantityBadge
-                value={item.quantity}
-                unitOfMeasure={item.unitOfMeasure}
-                label="booked"
-              />
-            )}
-            {item.kit && (
-              <Text style={styles.assetKit} numberOfLines={1}>
-                Kit: {item.kit.name}
-              </Text>
+            {item.type === "QUANTITY_TRACKED" &&
+            item.slices &&
+            item.slices.length > 1 ? (
+              <View style={styles.sliceList}>
+                {item.slices.map((slice) => (
+                  <View key={slice.bookingAssetId} style={styles.sliceRow}>
+                    <QuantityBadge
+                      value={slice.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    <Text style={styles.assetKit} numberOfLines={1}>
+                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
+                {item.type === "QUANTITY_TRACKED" && (
+                  <QuantityBadge
+                    value={item.quantity}
+                    unitOfMeasure={item.unitOfMeasure}
+                    label="booked"
+                  />
+                )}
+                {item.kit && (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    Kit: {item.kit.name}
+                  </Text>
+                )}
+              </>
             )}
             {item.category && (
               <Text style={styles.assetCategory} numberOfLines={1}>
@@ -2195,6 +2212,14 @@ const useStyles = createStyles((colors, shadows) => ({
   assetKit: {
     fontSize: fontSize.xs,
     color: colors.checkedOut,
+  },
+  sliceList: {
+    gap: 2,
+  },
+  sliceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   assetCategory: {
     fontSize: fontSize.xs,

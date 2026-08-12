@@ -67,6 +67,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -101,6 +102,7 @@ import {
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
@@ -115,6 +117,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export type AssetWithBooking = Asset & {
+  /** Cover image of the asset's model, rendered when the asset has no image
+   * of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   bookingAssets: { booking: Booking }[];
   custody: Custody | null;
   category: Category;
@@ -228,91 +233,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * For QUANTITY_TRACKED assets, compute available quantity factoring
-     * in kit allocations, custody, AND overlapping booking reservations.
-     * Exclude the current booking so its own reservation doesn't reduce
-     * the displayed availability.
+     * For QUANTITY_TRACKED assets, compute available quantity via the
+     * shared `getAssetAvailabilityBatch` primitive — the SAME formula
+     * `getAssetAvailability` uses (kit allocations, custody, checked-out,
+     * and windowed reservations), batched across every candidate asset in
+     * ONE round of queries so listing N qty-tracked assets doesn't turn
+     * into N per-asset lookups. Exclude the current booking so its own
+     * reservation doesn't reduce the displayed availability.
      *
-     * Kits MUST be in the formula — qty-tracked-in-kit assets are
-     * selectable in the picker for their free pool, so the picker's
-     * MAX has to subtract the slices committed to any kit. Matches the
-     * asset-overview "Available" formula in `quantity-overview-card.tsx`
-     * so the two surfaces agree.
+     * Reserved rows are restricted to standalone (`assetKitId: null`)
+     * slices inside the primitive — kit-driven slices are already counted
+     * via `inKits`, so this also fixes the double-count the old inline
+     * `groupBy` had (it summed EVERY overlapping `BookingAsset` row,
+     * including kit-driven ones, on top of subtracting `inKits`
+     * separately). The window is peak-concurrent swept rather than
+     * plain-summed, so two non-overlapping bookings inside the query
+     * window no longer stack (the bb1/bb2 bug).
      */
     const qtyAssetIds = assets
       .filter((a) => a.type === "QUANTITY_TRACKED")
       .map((a) => a.id);
 
-    const [assetKitSums, custodySums, bookingSums] =
-      qtyAssetIds.length > 0
-        ? await Promise.all([
-            db.assetKit.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds }, organizationId },
-              _sum: { quantity: true },
-            }),
-            db.custody.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds } },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIds },
-                bookingId: { not: id },
-                booking: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  /**
-                   * Only count reservations from bookings whose dates
-                   * overlap with the current booking. Non-overlapping
-                   * bookings don't compete for the same quantity window.
-                   */
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
-                        },
-                      ],
-                    }),
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], [], []];
-
-    const inKitsByAsset = new Map(
-      assetKitSums.map((k) => [k.assetId, k._sum.quantity ?? 0])
-    );
-    const custodyByAsset = new Map(
-      custodySums.map((c) => [c.assetId, c._sum.quantity ?? 0])
-    );
-    const reservedByAsset = new Map(
-      bookingSums.map((b) => [b.assetId, b._sum.quantity ?? 0])
-    );
+    const availabilityByAsset = await getAssetAvailabilityBatch(qtyAssetIds, {
+      organizationId,
+      window:
+        booking.from && booking.to
+          ? { from: booking.from, to: booking.to }
+          : null,
+      excludeBookingId: id,
+    });
 
     /** Attach availableQuantity and filter out fully-allocated qty assets */
     const assetsWithAvailability = assets
       .map((a) => {
         if (a.type !== "QUANTITY_TRACKED") return a;
-        const inKits = inKitsByAsset.get(a.id) ?? 0;
-        const inCustody = custodyByAsset.get(a.id) ?? 0;
-        const reserved = reservedByAsset.get(a.id) ?? 0;
-        const availableQuantity =
-          (a.quantity ?? 0) - inKits - inCustody - reserved;
+        const availableQuantity = availabilityByAsset.get(a.id)?.bookable ?? 0;
         return { ...a, availableQuantity };
       })
       .filter((a) => {
@@ -771,7 +726,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
-          .map((a) => `**${a.title}** (x${newQuantities[a.id]})`)
+          // Asset titles are user input rendered as literal text here.
+          .map(
+            (a) =>
+              `**${stripMarkdocDelimiters(a.title)}** (x${newQuantities[a.id]})`
+          )
           .join(", ");
         const qtySuffix = qtyAnnotations
           ? ` with quantities: ${qtyAnnotations}`
@@ -906,11 +865,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const bookingAdjustSummary = adjustments
           .map(
             (adj) =>
-              `{% link to="/assets/${
-                adj.asset!.id
-              }" text="${adj.asset!.title.replace(/"/g, "&quot;")}" /%} (**${
-                adj.from
-              }** → **${adj.to}**)`
+              // Use the shared wrapper rather than hand-rolling the tag: it is
+              // the one place that guarantees the title lands inside a quoted,
+              // escaped attribute.
+              `${wrapLinkForNote(
+                `/assets/${adj.asset!.id}`,
+                adj.asset!.title
+              )} (**${adj.from}** → **${adj.to}**)`
           )
           .join(", ");
         await createSystemBookingNote({
@@ -1525,6 +1486,7 @@ const RowComponent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

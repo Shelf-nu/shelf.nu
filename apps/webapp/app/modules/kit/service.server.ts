@@ -31,8 +31,10 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
+import { getClientHint } from "~/utils/client-hints";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -49,6 +51,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCustodianForNote,
   wrapKitsWithDataForNote,
@@ -480,10 +483,13 @@ export async function emitAssetKitDetachmentNotes({
     }
   }
   for (const group of groups.values()) {
+    // Asset titles and the kit name are user-supplied and render as literal
+    // text in this Markdoc note.
+    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
     const subjects =
-      group.assetTitles.length === 1
-        ? `**${group.assetTitles[0]}**`
-        : `**${group.assetTitles.length} assets** (${group.assetTitles
+      safeTitles.length === 1
+        ? `**${safeTitles[0]}**`
+        : `**${safeTitles.length} assets** (${safeTitles
             .map((t) => `*${t}*`)
             .join(", ")})`;
     // `createSystemBookingNote` doesn't accept a tx (matches the other
@@ -494,7 +500,9 @@ export async function emitAssetKitDetachmentNotes({
     await createSystemBookingNote({
       bookingId: group.bookingId,
       organizationId,
-      content: `${actorLink} removed ${subjects} from kit **${group.kitName}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
+      content: `${actorLink} removed ${subjects} from kit **${stripMarkdocDelimiters(
+        group.kitName
+      )}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
     });
   }
 }
@@ -1651,7 +1659,9 @@ async function performKitDeletion({
           );
           const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${k.name.trim()}** was deleted.`,
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${stripMarkdocDelimiters(
+              k.name
+            )}** was deleted.`,
             type: "UPDATE" as const,
             userId,
             assetId: asset.id,
@@ -2339,11 +2349,17 @@ export async function bulkAssignKitCustody({
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
     if (someKitsNotAvailable) {
+      // User-input validation against a freshly-queried, real-time availability
+      // guard — not a server fault. A 400 keeps it out of the Sentry error
+      // pipeline (the outer catch inherits status/shouldBeCaptured from this
+      // cause). See SHELF-WEBAPP-226.
       throw new ShelfError({
         cause: null,
         message:
           "There are some unavailable kits. Please make sure you are selecting only available kits.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2368,11 +2384,15 @@ export async function bulkAssignKitCustody({
         asset.type !== "QUANTITY_TRACKED" && asset.status !== "AVAILABLE"
     );
     if (someAssetsUnavailable) {
+      // Same handled-validation class as the unavailable-kits guard above:
+      // a 400, not a captured 500. See SHELF-WEBAPP-226.
       throw new ShelfError({
         cause: null,
         message:
           "There are some unavailable assets in some kits. Please make sure you have all available assets in kits.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2475,7 +2495,8 @@ export async function bulkAssignKitCustody({
       });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => {
           const kitLink = asset.kit
@@ -5167,13 +5188,21 @@ export async function bulkRemoveAssetsFromKits({
       lastName: user?.lastName,
     });
 
-    // Resolve IDs (works for both simple and advanced mode)
+    // Resolve IDs (works for both simple and advanced mode).
+    // Acting user's timezone: when "select all" is active the affected set is
+    // resolved from the current date filters, which must truncate the day in
+    // the user's tz (avoids an off-by-one for non-UTC users).
     const searchParams = getCurrentSearchParams(request);
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const resolvedIds = await resolveAssetIdsForBulkOperation({
       assetIds,
       organizationId,
       currentSearchParams: searchParams.toString(),
       settings,
+      timeZone,
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through
@@ -5614,9 +5643,14 @@ export async function moveAssetKitUnits(
 
       // 2. Lock the asset row for the duration of the tx — serializes
       //    concurrent moves on the same asset (Phase 2 pattern).
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
-      // Defence-in-depth: lock helper doesn't org-scope; assert again.
+      // Defence-in-depth: the lock is now org-scoped (a foreign-org id 404s at
+      // the lock, taking no lock), so this re-check is belt-and-braces.
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
           cause: null,

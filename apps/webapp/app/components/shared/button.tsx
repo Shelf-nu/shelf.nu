@@ -260,6 +260,17 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       "target" in props;
     const newTab = hasTarget(props) && props.target === "_blank";
 
+    /**
+     * Reverse-tabnabbing guard: a `target="_blank"` link without `rel` hands
+     * the opened page a `window.opener` handle back to ours. Applied to every
+     * new-tab button rather than case by case, and only as a default — an
+     * explicit `rel` on the call site still wins.
+     */
+    const newTabRel =
+      newTab && !("rel" in props)
+        ? { rel: "noopener noreferrer" as const }
+        : {};
+
     const buttonContent = (
       <>
         {icon && <Icon icon={icon} />}
@@ -309,6 +320,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           <HoverCardTrigger className="disabled cursor-not-allowed" asChild>
             <Component
               {...props}
+              {...newTabRel}
               className={finalStyles}
               aria-label={ariaLabel}
               onMouseDown={(e: MouseEvent) => e.preventDefault()}
@@ -334,6 +346,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
             <TooltipTrigger asChild>
               <Component
                 {...props}
+                {...newTabRel}
                 className={finalStyles}
                 aria-label={ariaLabel}
                 prefetch={
@@ -363,6 +376,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           {...props}
+          {...newTabRel}
           className={finalStyles}
           aria-label={ariaLabel}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}

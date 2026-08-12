@@ -256,6 +256,25 @@ export async function createSignedUrl({
   }
 }
 
+/**
+ * Derives the storage path of an image's 108px thumbnail from the path of the
+ * full-size image: `-thumbnail` goes before the extension, or is appended when
+ * the path has none.
+ *
+ * Single source of truth for the convention, shared by the upload path (which
+ * creates the object) and the lazy `api+/asset.generate-thumbnail` route (which
+ * recreates it on demand) — the two must agree or a thumbnail is uploaded to
+ * one path and read from another.
+ *
+ * @param filename - Storage path of the full-size image (no bucket prefix)
+ * @returns Storage path its thumbnail lives at
+ */
+export function getThumbnailStoragePath(filename: string): string {
+  return filename.includes(".")
+    ? filename.replace(/(\.[^.]+)$/, "-thumbnail$1")
+    : `${filename}-thumbnail`;
+}
+
 export async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
   {
@@ -287,17 +306,7 @@ export async function uploadFile(
 
     // If thumbnail generation is requested
     if (generateThumbnail) {
-      // Generate a thumbnail filename
-      let thumbFilename: string;
-
-      // Check if the file has an extension
-      if (filename.includes(".")) {
-        // File has extension, add '-thumbnail' before the extension
-        thumbFilename = filename.replace(/(\.[^.]+)$/, "-thumbnail$1");
-      } else {
-        // File has no extension, just append '-thumbnail'
-        thumbFilename = `${filename}-thumbnail`;
-      }
+      const thumbFilename = getThumbnailStoragePath(filename);
 
       // Create thumbnail version with Sharp
       const thumbnailFile = await cropImage(
@@ -848,7 +857,7 @@ export function getFileUploadPath({
   typeId,
 }: {
   organizationId: string;
-  type: "locations" | "audits";
+  type: "locations" | "audits" | "asset-models";
   typeId: string;
 }) {
   return `${organizationId}/${type}/${typeId}/${id()}`;

@@ -13,7 +13,9 @@ export default function AnnouncementBar() {
       </div>
       <div className="flex-1 items-center gap-1.5 xl:flex">
         <div>
-          <MarkdownViewer content={announcement.content} />
+          {/* Announcements are authored behind `requireAdmin` (Shelf staff),
+              so linking out is deliberate content, not injected. */}
+          <MarkdownViewer content={announcement.content} allowExternalLinks />
         </div>
       </div>
       <Button variant="primary" to={announcement.link} className="">

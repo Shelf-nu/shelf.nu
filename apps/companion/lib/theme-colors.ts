@@ -49,6 +49,12 @@ export const lightColors = {
   errorBorder: "#FDA29B",
   warning: "#F79009",
   warningBg: "#FFFAEB",
+  // Accessible amber for WARNING TEXT/ICONS on light surfaces. `warning`
+  // itself is only ~2.35:1 on white (fine for badge fills, fails the 4.5:1
+  // text bar and the 3:1 non-text bar), so small amber labels/icons (e.g.
+  // the low-stock indicator) must use this deeper shade instead. Mirrors
+  // `primaryText`'s relationship to `primary`. WCAG AA 7.1:1 on white.
+  warningText: "#92400E",
   success: "#12B76A",
   successBg: "#ECFDF3",
 
@@ -121,6 +127,10 @@ export const darkColors: Colors = {
   errorBorder: "#A84040",
   warning: "#F0A020",
   warningBg: "#2E200A",
+  // `warning` is already legible as text on the dark surfaces (~8.0:1 on
+  // #161B22), so the text token matches `warning` here — same pattern as
+  // dark `primaryText` matching `primary`.
+  warningText: "#F0A020",
   success: "#3FB950",
   successBg: "#0D2818",
 

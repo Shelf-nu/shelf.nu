@@ -27,6 +27,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { AssetImage } from "~/components/assets/asset-image";
+import type { AssetModelImage } from "~/components/assets/asset-image/types";
 import KitImage from "~/components/kits/kit-image";
 import { DateS } from "~/components/shared/date";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -298,22 +299,30 @@ export function StatusCell({
  * Date cell renderer with consistent formatting.
  *
  * Delegates to the shared {@link DateS} component so dates render in the
- * user's locale + timezone (from `useHints()`) rather than a hardcoded
- * `en-US` format — per the CLAUDE.md "Date Display" rule that all UI dates
- * must go through `DateS`. The outer span preserves `tabular-nums` column
- * alignment in report tables.
+ * acting user's resolved format prefs (order, numeric-vs-name month,
+ * separator, and timezone) rather than any hardcoded shape — per the
+ * CLAUDE.md "Date Display" rule that all UI dates must go through `DateS`.
+ * The outer span preserves `tabular-nums` column alignment in report tables.
+ *
+ * @param date - the value to render, or `null` for an em-dash placeholder.
+ * @param includeTime - when true, append the time portion (per the user's
+ *   time-format pref). Used by datetime columns such as the Asset-Activity
+ *   "Date & Time" column.
  */
-export function DateCell({ date }: { date: Date | null }) {
+export function DateCell({
+  date,
+  includeTime,
+}: {
+  date: Date | null;
+  includeTime?: boolean;
+}) {
   if (!date) {
     return <span className="text-gray-400">—</span>;
   }
 
   return (
     <span className="tabular-nums">
-      <DateS
-        date={date}
-        options={{ month: "short", day: "numeric", year: "numeric" }}
-      />
+      <DateS date={date} includeTime={includeTime} />
     </span>
   );
 }
@@ -495,11 +504,26 @@ export function BooleanCell({
 export function AssetCell({
   name,
   thumbnailImage,
+  mainImage,
   assetId,
+  assetModel,
 }: {
   name: string;
   thumbnailImage: string | null;
+  /**
+   * The asset's OWN full-size image. Load-bearing, not decorative:
+   * `resolveAssetImage` decides the ownership tier from `mainImage` alone, so
+   * omitting it makes an asset that HAS its own image look like one that has
+   * none — it would render its model's cover, or the placeholder.
+   */
+  mainImage: string | null;
   assetId: string;
+  /**
+   * The asset's model cover image, rendered when the asset has none of its
+   * own. Required (not defaulted) so a report that forgets to select it fails
+   * typecheck instead of quietly showing placeholders.
+   */
+  assetModel: AssetModelImage;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -507,6 +531,8 @@ export function AssetCell({
         asset={{
           id: assetId,
           thumbnailImage,
+          mainImage,
+          assetModel,
         }}
         alt="" // Decorative - asset name is displayed in adjacent text
         className="size-8 shrink-0 rounded object-cover"

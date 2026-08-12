@@ -20,6 +20,7 @@ import {
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -112,10 +113,16 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       id: string;
     };
     const password = generateRandomCode(10);
+    // Detect the accepter's prefs from browser hints so their brand-new user
+    // row is stamped at creation. timeZone is left null when the CH-time-zone
+    // cookie hasn't round-tripped yet (see detectFormatPrefsForPersistence), so
+    // the lazy backfill fills the real zone later rather than sticking on "UTC".
+    const formatPrefs = detectFormatPrefsForPersistence(request);
     const updatedInvite = await updateInviteStatus({
       id: decodedInvite.id,
       status: InviteStatuses.ACCEPTED,
       password,
+      formatPrefs,
     });
 
     if (updatedInvite.status !== InviteStatuses.ACCEPTED) {

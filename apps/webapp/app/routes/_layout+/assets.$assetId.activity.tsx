@@ -28,6 +28,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    /**
+     * Two-step gate, in this order deliberately.
+     *
+     * Step 1 is `asset:read` against the SELECTED workspace, which is what
+     * `getAsset` needs to run its cross-workspace resolution below. Gating on
+     * `note:read` here instead would 403 a deep link to an asset that lives in
+     * a DIFFERENT workspace of the same user — one where they may well hold
+     * `note:read` — before `getAsset` ever gets the chance to offer the
+     * switch-workspace path. Assets are unusual in having that affordance;
+     * the bookings activity route has no equivalent, which is why it can gate
+     * on `bookingNote:read` alone.
+     */
     const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
@@ -36,37 +48,56 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Fetch the asset (which also enforces org/permission scoping) for the page
-     * header and the "Export activity CSV" link, and the notes page in
-     * parallel. Notes are fetched separately — and paginated/searched/filtered —
-     * so the activity log behaves like every other list in the app. Both are
-     * independently org-scoped, so they can run concurrently.
+     * Resolve the asset FIRST. Besides supplying the page header and the
+     * "Export activity CSV" link, this is the call that detects an asset
+     * belonging to another of the user's workspaces and hands off to the
+     * switch-workspace path. It must run before the note gate so that
+     * hand-off still happens (see the ordering note above).
      */
-    const [
-      asset,
-      {
-        page,
-        perPage,
-        search,
-        items,
-        totalItems,
-        totalPages,
-        hasNotes,
-        cookie,
-      },
-    ] = await Promise.all([
-      getAsset({
-        id,
-        organizationId,
-        userOrganizations,
-        request,
-      }),
-      getPaginatedAndFilterableAssetNotes({
-        assetId: id,
-        organizationId,
-        request,
-      }),
-    ]);
+    const asset = await getAsset({
+      id,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+
+    /**
+     * Step 2 of the gate: `note:read`, enforced BEFORE a single note is
+     * fetched. This MUST stay server-side. `asset: [read]` is granted to BASE
+     * and SELF_SERVICE while `note: []` is not, so gating only on `asset:read`
+     * and hiding the notes in the component put every asset note in the page
+     * payload of users not allowed to read them — visible to anyone who opens
+     * devtools.
+     *
+     * The two steps are sequential rather than parallel by necessity: the
+     * switch-workspace hand-off has to precede the gate, and the gate has to
+     * precede the fetch.
+     */
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.note,
+      action: PermissionAction.read,
+    });
+
+    /**
+     * Notes are fetched separately — and paginated/searched/filtered — so the
+     * activity log behaves like every other list in the app.
+     */
+    const {
+      page,
+      perPage,
+      search,
+      items,
+      totalItems,
+      totalPages,
+      hasNotes,
+      cookie,
+    } = await getPaginatedAndFilterableAssetNotes({
+      assetId: id,
+      organizationId,
+      request,
+    });
 
     const header: HeaderData = {
       title: `${asset.title}'s activity`,

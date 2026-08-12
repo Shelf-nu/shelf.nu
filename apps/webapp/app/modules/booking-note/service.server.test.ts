@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   createBookingNote,
   createSystemBookingNote,
+  createSystemBookingNotes,
   deleteBookingNote,
   getBookingNotes,
 } from "./service.server";
@@ -11,11 +12,13 @@ vi.mock("~/database/db.server", () => ({
   db: {
     bookingNote: {
       create: vi.fn(),
+      createMany: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
     booking: {
       findFirst: vi.fn(),
+      findMany: vi.fn(),
     },
   },
 }));
@@ -196,6 +199,75 @@ describe("BookingNote Service", () => {
       ).rejects.toThrow("Booking not found or access denied");
 
       expect(mockDb.db.bookingNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createSystemBookingNotes", () => {
+    it("validates every target booking and inserts in a single batch", async () => {
+      // The whole point of the plural helper: a fixed TWO statements no matter
+      // how many notes are written, so a large batch can't burn the caller's
+      // transaction budget on audit notes.
+      (mockDb.db.booking.findMany as any).mockResolvedValue([
+        { id: "booking-1" },
+        { id: "booking-2" },
+      ]);
+      (mockDb.db.bookingNote.createMany as any).mockResolvedValue({ count: 3 });
+
+      await createSystemBookingNotes({
+        notes: [
+          { bookingId: "booking-1", content: "a" },
+          { bookingId: "booking-2", content: "b" },
+          { bookingId: "booking-1", content: "c" },
+        ],
+        organizationId: "org-1",
+      });
+
+      // One ownership check covering the DISTINCT booking ids...
+      expect(mockDb.db.booking.findMany).toHaveBeenCalledTimes(1);
+      expect(mockDb.db.booking.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ["booking-1", "booking-2"] },
+          organizationId: "org-1",
+        },
+        select: { id: true },
+      });
+      // ...and one insert for all three notes, all typed as system notes.
+      expect(mockDb.db.bookingNote.createMany).toHaveBeenCalledTimes(1);
+      expect(mockDb.db.bookingNote.createMany).toHaveBeenCalledWith({
+        data: [
+          { bookingId: "booking-1", content: "a", type: "UPDATE" },
+          { bookingId: "booking-2", content: "b", type: "UPDATE" },
+          { bookingId: "booking-1", content: "c", type: "UPDATE" },
+        ],
+      });
+    });
+
+    it("writes nothing when a target booking is outside the organization", async () => {
+      // Cross-org guard: the caller passes booking ids derived from related
+      // records, so a foreign id must abort the whole batch rather than
+      // silently writing the notes it could match.
+      (mockDb.db.booking.findMany as any).mockResolvedValue([
+        { id: "booking-1" },
+      ]);
+
+      await expect(
+        createSystemBookingNotes({
+          notes: [
+            { bookingId: "booking-1", content: "a" },
+            { bookingId: "foreign-booking", content: "b" },
+          ],
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow("Booking not found or access denied");
+
+      expect(mockDb.db.bookingNote.createMany).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op for an empty list (no ownership query, no insert)", async () => {
+      await createSystemBookingNotes({ notes: [], organizationId: "org-1" });
+
+      expect(mockDb.db.booking.findMany).not.toHaveBeenCalled();
+      expect(mockDb.db.bookingNote.createMany).not.toHaveBeenCalled();
     });
   });
 

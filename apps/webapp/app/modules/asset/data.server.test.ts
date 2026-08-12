@@ -1,3 +1,9 @@
+// @vitest-environment node
+// why: this is a server-module (data-loader) test. Its import graph now
+// transitively reaches `availability.server` → `booking/service.server`, which
+// pulls in canvas-dependent UI deps that crash happy-dom at import time. Server
+// tests don't need a DOM — run under node (the branch's established fix for
+// this lottie/happy-dom transitive-import crash).
 /**
  * Asset index data-loader tests
  *

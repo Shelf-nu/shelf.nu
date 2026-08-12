@@ -68,6 +68,15 @@ model User {
   // recently-active member (join via UserOrganization). Null until first use.
   lastMobileActiveAt DateTime?
 
+  // User datetime-formatting preferences. Nullable: null = not yet detected, so
+  // the resolver falls back to live browser hints (today's behavior) until the
+  // user's next authenticated load lazily backfills concrete values. See
+  // ~/utils/date-format (resolveFormatPrefs / detectFormatPrefsFromHints).
+  dateFormat DateFormatPreference? // null → not yet detected
+  timeFormat TimeFormatPreference? // null → not yet detected
+  weekStart  WeekStartPreference?  // null → not yet detected
+  timeZone   String?               // IANA name; null → not yet detected
+
   // Relationships
   assets             Asset[]
   categories         Category[]
@@ -220,6 +229,10 @@ model Asset {
   minQuantity     Int? // Low-stock alert threshold
   consumptionType ConsumptionType? // How consumption is tracked
   unitOfMeasure   String? // e.g., "pcs", "boxes", "liters"
+  // Debounce marker for low-stock alerting: set when available first crosses
+  // to/below minQuantity (alert sent), cleared when it recovers above. Prevents
+  // re-alerting on every subsequent decrement while already low.
+  lowStockNotifiedAt DateTime?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -411,11 +424,19 @@ model Category {
  * and provides default field values when creating new assets from the model.
  */
 model AssetModel {
-  id              String    @id @default(cuid())
-  name            String
-  description     String?
-  image           String?
-  imageExpiration DateTime?
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  /// Public URL (bucket `files`) of the model's cover image. Rendered by any
+  /// asset of this model that has no image of its own. Public — and therefore
+  /// never-expiring and cacheable — like Location.imageUrl; see
+  /// resolveAssetImage() for the cascade.
+  image String?
+
+  /// Public URL of the 108px thumbnail generated alongside `image`. Used at
+  /// list sizes so inheriting assets never render the full-size original.
+  thumbnailImage String?
 
   // Template defaults (applied when creating a new asset from this model)
   defaultCategoryId String?
@@ -1026,6 +1047,29 @@ enum QrIdDisplayPreference {
   DataMatrix
   ExternalQR
   EAN13
+}
+
+// User date-format preference — controls day/month/year ordering in rendered
+// dates. Stored per-User (nullable); null resolves from live browser hints.
+enum DateFormatPreference {
+  DD_MM_YYYY // e.g. 03/04/2026
+  MM_DD_YYYY // e.g. 04/03/2026
+  YYYY_MM_DD // e.g. 2026-04-03
+  MMM_DD_YYYY // e.g. Jul 20, 2026
+  DD_MMM_YYYY // e.g. 20 Jul 2026
+}
+
+// User time-format preference — 12-hour (AM/PM) vs 24-hour clock.
+enum TimeFormatPreference {
+  H12 // 1:30 PM
+  H24 // 13:30
+}
+
+// User "start of week" preference for calendar/date-picker rendering.
+enum WeekStartPreference {
+  MONDAY
+  SUNDAY
+  SATURDAY
 }
 
 enum OrganizationRoles {
@@ -2365,6 +2409,8 @@ enum ActivityAction {
   ASSET_TAGS_CHANGED
   ASSET_STATUS_CHANGED
   ASSET_VALUATION_CHANGED
+  ASSET_QUANTITY_CHANGED
+  ASSET_MIN_QUANTITY_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED
