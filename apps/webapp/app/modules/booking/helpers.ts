@@ -661,13 +661,23 @@ export type PdfBookingAssetSlice = {
   id: string;
   /**
    * The slice's `BookingAsset.assetKitId`: `null` for a standalone (free-pool)
-   * slice, otherwise the `AssetKit.id` this slice was booked under. Matched
-   * against `assetKits[].id` on the joined asset to resolve the slice's kit.
-   * Distinct from the projected `kitId` (the shared `Kit.id`, used for search
-   * re-expansion and grouping) — a QT asset in two kits has two slices with the
-   * SAME asset id but different `assetKitId`s and different `kitId`s.
+   * slice, otherwise the `AssetKit.id` (a MEMBERSHIP row id, NOT a `Kit.id`)
+   * this slice was booked under. Matched against `assetKits[].id` on the
+   * joined asset to resolve the slice's kit.
+   *
+   * Named `assetKitId` — not `kitId` — because {@link PdfSliceOverrides.kitId}
+   * on the produced row holds a real `Kit.id`; the two were previously
+   * indistinguishable by name. A QT asset in two kits has two slices with
+   * the SAME asset id but different `assetKitId`s and different `kitId`s.
    */
   assetKitId: string | null;
+  /**
+   * The slice's `BookingAsset.sourceKitId`: the `Kit` this slice was booked
+   * under, recorded durably. Unlike `assetKitId` it survives the asset leaving
+   * the kit, so it is the fallback that keeps detached residue rendering under
+   * its original kit instead of degrading to a loose asset row.
+   */
+  sourceKitId: string | null;
   /** Booked units for THIS slice (`BookingAsset.quantity`). */
   quantity: number;
   /** Unique `BookingAsset.id`, used as the rendered row's React key. */
@@ -694,6 +704,18 @@ type PdfRawAssetShape = {
   assetLocations?: Array<{ location?: { name: string } | null }>;
 };
 
+/**
+ * A kit resolved from `BookingAsset.sourceKitId` rather than from a live
+ * `AssetKit` membership — the snapshot of a kit whose members have since
+ * changed. Deliberately the same shape a live membership's `kit` has, so both
+ * resolution paths produce identical rows.
+ */
+export type PdfSnapshotKit = {
+  id: string;
+  name: string;
+  location: { name: string } | null;
+};
+
 /** The resolved kit + location + slice metadata layered onto each raw asset. */
 type PdfSliceOverrides = {
   /** The resolved kit's id (a `Kit.id`), or `null` for a standalone slice. */
@@ -708,6 +730,15 @@ type PdfSliceOverrides = {
   quantity: number;
   /** Unique React key for the rendered row. */
   bookingAssetId: string;
+  /**
+   * Detached kit residue: the slice renders under a kit resolved from the
+   * durable `sourceKitId`, but the asset is no longer a member of that kit.
+   * Mirrors the booking overview's `isRemovedFromKit` (see the loader in
+   * `bookings.$bookingId.overview.tsx`) so the printed PDF marks exactly the
+   * rows the web UI badges — a printed checklist otherwise shows a removed
+   * asset as an indistinguishable live kit member.
+   */
+  isRemovedFromKit: boolean;
 };
 
 /**
@@ -722,21 +753,34 @@ type PdfSliceOverrides = {
  * asset ids), keeping each kit's slices contiguous.
  *
  * The join is done by asset id: `rawAssetsById` holds the full (deduped) asset
- * payload, and each slice's kit is resolved by matching the slice's `assetKitId`
- * (a `BookingAsset.assetKitId`) against the asset's `assetKits[].id`. A slice
- * whose asset didn't resolve is skipped defensively rather than crashing — it
- * cannot normally happen, since the visible slices are the source of the asset
- * ids fetched into `rawAssetsById`.
+ * payload, and each slice's kit is resolved by matching the slice's
+ * `assetKitId` (a `BookingAsset.assetKitId`) against the asset's
+ * `assetKits[].id`. A slice whose asset didn't resolve is skipped defensively
+ * rather than crashing — it cannot normally happen, since the visible slices
+ * are the source of the asset ids fetched into `rawAssetsById`.
+ *
+ * When that membership is gone (the asset was removed from the kit, which
+ * `SET NULL`s `assetKitId`), the slice falls back to its durable
+ * `sourceKitId` via `snapshotKitsById`. Without it a finished booking's PDF
+ * would retroactively re-describe the job as containing loose assets. Such a
+ * row is flagged `isRemovedFromKit` so the renderer can print that it is no
+ * longer a member of the kit it groups under — unless the asset has since been
+ * re-added to that kit, in which case it is a live member again.
  *
  * @param visibleSlices - The search-visible, per-slice `BookingAsset` list
  *   (each already reduced to {@link PdfBookingAssetSlice}).
  * @param rawAssetsById - Full per-asset data keyed by asset id (deduped fetch).
+ * @param snapshotKitsById - Org-scoped kits keyed by `Kit.id`, used only to
+ *   resolve slices whose live membership is gone. Omit when no slice can be
+ *   detached residue.
  * @returns One row per slice: the full asset data plus the slice's resolved
- *   kit, primary location, booked quantity and unique key.
+ *   kit, primary location, booked quantity, unique key and the
+ *   `isRemovedFromKit` residue marker.
  */
 export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
   visibleSlices: PdfBookingAssetSlice[],
-  rawAssetsById: Map<string, TRaw>
+  rawAssetsById: Map<string, TRaw>,
+  snapshotKitsById: Map<string, PdfSnapshotKit> = new Map()
 ): Array<TRaw & PdfSliceOverrides> {
   const rows: Array<TRaw & PdfSliceOverrides> = [];
 
@@ -748,11 +792,32 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
     }
 
     // Resolve THIS slice's kit (with location) from the full asset data. A
-    // standalone slice (`assetKitId === null`) has no kit; a kit-driven slice
-    // matches its `AssetKit.id` against the asset's memberships.
-    const sliceKit = slice.assetKitId
+    // standalone slice (`assetKitId === null`) has no live membership; a
+    // kit-driven slice matches its `AssetKit.id` against the asset's
+    // memberships. Detached residue (membership gone, `sourceKitId` kept)
+    // falls back to the snapshot map so it still renders under its kit.
+    const liveKit = slice.assetKitId
       ? raw.assetKits.find((ak) => ak.id === slice.assetKitId)?.kit ?? null
       : null;
+    const snapshotKit =
+      !liveKit && slice.sourceKitId
+        ? snapshotKitsById.get(slice.sourceKitId) ?? null
+        : null;
+    const sliceKit = liveKit ?? snapshotKit;
+
+    /**
+     * Detached kit residue marker, an exact mirror of the booking overview
+     * loader's `isRemovedFromKit`: the row groups under a SNAPSHOT kit AND the
+     * asset is not currently a member of that same kit.
+     *
+     * The membership re-check is load-bearing. Re-adding the asset to the kit
+     * creates a NEW `AssetKit` row that the already-nulled slice never points
+     * at, so the slice still resolves through `sourceKitId` — without this
+     * condition a genuine current member would be printed as removed.
+     */
+    const isRemovedFromKit =
+      Boolean(snapshotKit) &&
+      !raw.assetKits.some((ak) => ak.kit?.id === slice.sourceKitId);
 
     rows.push({
       ...raw,
@@ -765,6 +830,7 @@ export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
       location: getPrimaryLocation<{ name: string }>(raw),
       quantity: slice.quantity,
       bookingAssetId: slice.bookingAssetId,
+      isRemovedFromKit,
     });
   }
 
@@ -795,6 +861,13 @@ type PdfBookingAssetSliceProjection = {
   kitId: string | null;
   /** The slice's `AssetKit.id` — the discriminator {@link buildPdfAssetRows} joins on. */
   assetKitId: string | null;
+  /**
+   * The slice's durable `BookingAsset.sourceKitId`. Survives the asset leaving
+   * the kit (which `SET NULL`s `assetKitId`), so it is what lets a finished
+   * booking's PDF keep rendering that slice under the kit it went out as part
+   * of, instead of retroactively re-describing it as a loose asset.
+   */
+  sourceKitId: string | null;
   kit: { id: string; name: string; location: { name: string } | null } | null;
   location: { name: string } | null;
   quantity: number;
@@ -824,6 +897,7 @@ export function buildPdfBookingAssetSlices<TAsset extends PdfSliceSourceAsset>(
     id: string;
     quantity: number;
     assetKitId: string | null;
+    sourceKitId: string | null;
     asset: TAsset;
   }>
 ): Array<TAsset & PdfBookingAssetSliceProjection> {
@@ -833,9 +907,12 @@ export function buildPdfBookingAssetSlices<TAsset extends PdfSliceSourceAsset>(
     return {
       ...ba.asset,
       // Kit.id (shared across the kit) — drives search re-expansion + grouping.
-      kitId: kit?.id ?? null,
+      // Falls back to the durable `sourceKitId` when the membership is gone, so
+      // a detached slice still groups with its kit siblings on search.
+      kitId: kit?.id ?? ba.sourceKitId ?? null,
       // AssetKit.id (per membership) — the per-slice join discriminator.
       assetKitId: ba.assetKitId,
+      sourceKitId: ba.sourceKitId,
       kit,
       location: getPrimaryLocation<{ name: string }>(ba.asset),
       quantity: ba.quantity,

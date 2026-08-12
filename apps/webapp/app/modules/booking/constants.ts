@@ -23,6 +23,25 @@ export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
 ];
 
 /**
+ * Statuses where a booking is still being planned and nothing has physically
+ * left the warehouse.
+ *
+ * Drives kit-membership removal: a kit-driven `BookingAsset` slice on one of
+ * these bookings is DELETED when the asset leaves the kit (the booking tracks
+ * the kit's contents), whereas on any other status the row survives as a
+ * snapshot of what actually went out. See `removeKitSlicesFromPlanningBookings`
+ * in `~/modules/kit/service.server`.
+ *
+ * Deliberately NOT {@link ADDABLE_BOOKING_STATUSES}: that list also includes
+ * ONGOING/OVERDUE, where the items ARE physically out and deleting a slice
+ * would strand custody and checkout attribution.
+ */
+export const PLANNING_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+];
+
+/**
  * Whether an asset or kit can still be added to this booking.
  *
  * Used by the "Add to existing booking" dialogs to decide whether to render a

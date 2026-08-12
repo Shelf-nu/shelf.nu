@@ -102,7 +102,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           orderDirection,
           custodianTeamMemberIds: teamMemberIds,
           tags: filterTags,
-          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+          extraInclude: {
+            tags: TAG_WITH_COLOR_SELECT,
+            /**
+             * Needed for the amber "N units unassigned" pill.
+             *
+             * `BookingsIndexPage` renders the same row component here as
+             * `/bookings` does, and the pill reads `item.modelRequests`. Without
+             * this include it is `undefined`, `countUnassignedModelUnits`
+             * returns 0, and the pill silently disappears — so a booking with 4
+             * unassigned units looked ready to go out on this tab while
+             * `/bookings` flagged it. A signal that is only sometimes present is
+             * worse than none, because its absence reads as "nothing to do".
+             */
+            modelRequests: {
+              include: {
+                assetModel: { select: { id: true, name: true } },
+              },
+            },
+          },
         }),
 
         // team members/custodian

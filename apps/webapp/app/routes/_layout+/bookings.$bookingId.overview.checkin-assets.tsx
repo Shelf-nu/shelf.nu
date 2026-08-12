@@ -287,6 +287,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Resolve the kit attribution for THIS slice (kit-driven row
         // has `assetKitId`; standalone rows fall back to null even when
         // the asset happens to belong to other kits).
+        //
+        // why: out of this rule — deliberately no `sourceKitId` fallback here.
+        // The booking overview renders detached residue under its original
+        // kit because it describes what the booking WAS; this drawer drives a
+        // live physical operation, where CURRENT membership is the more
+        // useful grouping for the person holding the items.
         const sourceKit = ba.assetKitId
           ? asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
           : null;

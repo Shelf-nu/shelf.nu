@@ -1540,6 +1540,32 @@ model BookingAsset {
   assetId   String
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
+  // The model reservation this row discharged, when it came from one. `null`
+  // for assets added directly — picked, scanned onto the booking, or pulled in
+  // via a kit. That is most rows.
+  //
+  // Without it the link is narrative only: `materializeModelRequestForAsset`
+  // writes a note ("assigned X (Model A) — 2 remaining") and then the
+  // relationship is gone. An assigned asset becomes indistinguishable from one
+  // added by hand, so "which assets discharged the LED reservation?" is not
+  // answerable from data, only by reading the activity feed.
+  //
+  // Deliberately a plain column without a Prisma `@relation` accessor, for
+  // exactly the reason spelled out on `assetKitId` below — adding one more
+  // relation to this model pushed the dynamic extended client's deep generic
+  // past TS's recursion limit (TS2321), first in `organization/service.server`
+  // and then in `asset/service.server`. Services read it directly:
+  //   db.bookingAsset.findMany({ where: { bookingModelRequestId } })
+  //   db.bookingAsset.create({ data: { ..., bookingModelRequestId } })
+  //
+  // `SET NULL` cascade (DB-enforced, not Prisma) means a vanished reservation
+  // costs the row its provenance, never its place in the booking — the asset
+  // stays physically committed. In practice this rarely fires:
+  // `removeBookingModelRequest` refuses to delete a request with
+  // `fulfilledQuantity > 0`, so the realistic path is the booking cascade,
+  // which removes both rows together.
+  bookingModelRequestId String?
+
   // Discriminator for "this booked slice came from a kit" vs "this booked
   // slice is standalone from the asset's free pool". Mirror of
   // `Custody.kitCustodyId` and `AssetLocation.assetKitId`. `null` =
@@ -1564,6 +1590,32 @@ model BookingAsset {
   // conversion.
   assetKitId String?
 
+  // Durable provenance: the `Kit` this slice was booked under. Unlike
+  // `assetKitId` — which points at the `AssetKit` MEMBERSHIP row and is
+  // `SET NULL`'d the moment the asset leaves the kit — this survives
+  // membership changes, so a booking still knows the slice arrived as part
+  // of a kit after the kit's contents change.
+  //
+  // Read by duplication, kit-drift, and display grouping (a slice whose asset
+  // has left the kit still renders under that kit on bookings past the planning
+  // stage). All availability/quantity math keeps using `assetKitId`, which
+  // remains the source of truth for LIVE membership. The two are related,
+  // never redundant:
+  //   assetKitId NOT NULL -> sourceKitId NOT NULL, and they agree
+  //   assetKitId NULL + sourceKitId NOT NULL -> detached kit residue
+  //   both NULL                              -> genuine standalone slice
+  //
+  // Same plain-column treatment as `assetKitId` above: the FK to `Kit("id")`
+  // with `ON DELETE SET NULL ON UPDATE CASCADE` is created in the migration
+  // SQL, NOT via a Prisma `@relation`. Declaring the relation would add a
+  // `bookingAssets` back-relation to `Kit` — a hub model — and push the
+  // extended client's generics past TS's recursion limit (TS2321).
+  //
+  // `SET NULL` on kit deletion is deliberate: deleting a kit degrades its
+  // slices to loose assets on existing bookings, which is exactly what
+  // happened before this column existed, so no behaviour regresses.
+  sourceKitId String?
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1574,6 +1626,7 @@ model BookingAsset {
 
   @@index([assetId])
   @@index([assetKitId])
+  @@index([sourceKitId])
 }
 
 model Booking {
@@ -1805,6 +1858,14 @@ model Kit {
   qrCodes  Qr[]
   barcodes Barcode[]
   reports  ReportFound[]
+
+  // NOTE: there is intentionally no `bookingAssets BookingAsset[]`
+  // back-relation here. `BookingAsset.sourceKitId` is a plain FK column
+  // (DB-enforced, see the comment on that field) — exposing it as a Prisma
+  // relation tips TS past its recursion limit (TS2321) because Booking is a
+  // hub model with many relations. Services query it directly via
+  // `db.bookingAsset.findMany({ where: { sourceKitId } })`. The `SET NULL`
+  // cascade still fires at the DB level when a Kit row is deleted.
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String

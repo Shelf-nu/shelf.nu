@@ -160,6 +160,18 @@ export type AssetWithBooking = Asset & {
    * booking). Only meaningful for QUANTITY_TRACKED assets.
    */
   checkedOutQuantity?: number | null;
+  /**
+   * True when this row is detached kit residue: the booking slice was created
+   * as part of a kit (`BookingAsset.sourceKitId`) but its membership row is
+   * gone (`assetKitId IS NULL`, `ON DELETE SET NULL`). The row still renders
+   * grouped under its original kit — this flag lets the row explain WHY, since
+   * it would otherwise be indistinguishable from a live kit member.
+   *
+   * Resolved by the booking-overview loader (planning-status bookings delete
+   * such slices outright, so only ONGOING/OVERDUE/COMPLETE/ARCHIVED/CANCELLED
+   * bookings ever see it). Absent on surfaces that don't project it.
+   */
+  isRemovedFromKit?: boolean | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.
@@ -663,6 +675,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: newAssetIds, // Only the newly added assets
         userId,
         quantities: newQuantities,
+        // This route writes its own booking-side note below (the one that
+        // carries the quantity annotations). Without this the service writes
+        // a second one that is byte-identical for a single INDIVIDUAL asset,
+        // so the feed reports one add twice. `userId` is still passed — it
+        // attributes the BOOKING_ASSETS_ADDED events and the model-request
+        // assignment notes, which are separate concerns.
+        skipBookingNote: true,
       });
 
       /**
@@ -722,7 +741,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             });
           })
         );
+      } catch (noteError) {
+        Logger.error(
+          makeShelfError(noteError, {
+            userId,
+            bookingId,
+            newAssetIds,
+            context: "manage-assets per-asset add-note creation",
+          })
+        );
+      }
 
+      try {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
@@ -820,6 +850,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: changedAssetIds,
         userId,
         quantities: changedQuantities,
+        // These assets are ALREADY on the booking — this is a pure quantity
+        // edit. The service derives `addedAssetIds` from everything the call
+        // touched, not from what is new, so without this it logs a phantom
+        // "added X to the booking." for an asset that was already there. The
+        // route's own "adjusted booked quantity" note below is the truthful
+        // record of what happened.
+        skipBookingNote: true,
       });
 
       /**
