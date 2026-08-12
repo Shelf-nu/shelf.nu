@@ -42,12 +42,21 @@ vi.mock("~/components/assets/assets-index/assets-list", () => ({
   AssetsList: () => null,
 }));
 
+// why: importing either route reaches the Prisma client transitively, which
+// opens a real connection at import time and fails the run with P1001. Nothing
+// in this file queries.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
+// why: `canSeeAllCustody` is the value under test on one axis, so each case has
+// to set it directly rather than build an org whose override flags happen to
+// resolve to it.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: only `getParams` is stubbed — it supplies the profile SUBJECT id, the
+// other half of the viewer-vs-subject distinction. The rest of the module is
+// kept real so `payload`/`error` behave normally around the loader.
 vi.mock("~/utils/http.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/utils/http.server")>();
   return { ...actual, getParams: vi.fn() };
