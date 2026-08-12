@@ -454,4 +454,94 @@ describe("getBookingNotificationRecipients", () => {
     );
     expect(emptyEmailRecipients).toHaveLength(0);
   });
+  /**
+   * Regression: SSO group-claim revocation.
+   *
+   * When an SSO login drops a workspace's group claim,
+   * `reconcileSsoGroupMembership` revokes access via
+   * `revokeAccessToOrganization`, which disconnects the `TeamMember` from the
+   * `User` and leaves the row behind so custody and booking history keeps a
+   * name. `TeamMember.user === null` is therefore the shape a revoked member
+   * has here, and it is the ONLY signal this resolver gets — none of the
+   * team-member branches re-check membership.
+   *
+   * Before that fix the group-claim path deleted the `UserOrganization` alone,
+   * so `TeamMember.user` still resolved and the revoked person carried on
+   * receiving this workspace's booking emails. For a university running an
+   * annual cohort rollover through IdP groups, that is a whole year group.
+   *
+   * @see {@link file://../user/sso-group-claim-revocation.test.ts}
+   */
+  describe("revoked SSO member", () => {
+    /** The post-revocation shape: row survives, user link gone. */
+    const revokedTeamMember = {
+      id: "tm-revoked",
+      name: "Jane Doe",
+      user: null,
+    };
+
+    /** The same person before revocation, for the contrast. */
+    const activeTeamMember = {
+      id: "tm-revoked",
+      name: "Jane Doe",
+      user: {
+        id: "revoked-user",
+        email: "jane@university.edu",
+        firstName: "Jane",
+        lastName: "Doe",
+        profilePicture: null,
+        ...nullFormatPrefs,
+      },
+    };
+
+    it("is dropped from the org's always-notify list", async () => {
+      mockedGetSettings.mockResolvedValue({
+        ...defaultSettings(),
+        alwaysNotifyTeamMembers: [revokedTeamMember] as unknown as ReturnType<
+          typeof defaultSettings
+        >["alwaysNotifyTeamMembers"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking: buildMockBooking(),
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).not.toContain("jane@university.edu");
+    });
+
+    it("is dropped from a booking's own recipient list", async () => {
+      const booking = buildMockBooking({
+        notificationRecipients: [
+          revokedTeamMember,
+        ] as unknown as BookingForEmail["notificationRecipients"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking,
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).not.toContain("jane@university.edu");
+    });
+
+    it("still notifies them while the group claim holds", async () => {
+      // Guards the assertions above against passing for the wrong reason:
+      // the same fixture WITH the user link must still be notified.
+      mockedGetSettings.mockResolvedValue({
+        ...defaultSettings(),
+        alwaysNotifyTeamMembers: [activeTeamMember],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking: buildMockBooking(),
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).toContain("jane@university.edu");
+    });
+  });
 });
