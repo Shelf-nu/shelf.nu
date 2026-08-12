@@ -15,9 +15,9 @@
  */
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "react-router";
-import { hasCustody } from "~/modules/custody/utils";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import { bookingIncludesUnavailableAssets } from "~/utils/booking-assets";
 import {
   canAssignModelUnits,
   countUnassignedModelUnits,
@@ -216,10 +216,11 @@ export default function ListBookingsContent({
     bookingAssets: rawItem.bookingAssets ?? [],
   };
 
-  const hasUnavaiableAssets =
-    item.bookingAssets.some(
-      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
-    ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
+  // Shared, tested predicate — see `bookingIncludesUnavailableAssets`.
+  const hasUnavaiableAssets = bookingIncludesUnavailableAssets(
+    item.bookingAssets.map((ba) => ba.asset),
+    item.status
+  );
 
   /**
    * Pull this booking's slice of the page-wide dispositioned-quantity

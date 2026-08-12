@@ -1,4 +1,4 @@
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 
 /**
@@ -797,4 +797,58 @@ export function resolveQtyStockBadgeVariant({
   }
 
   return null;
+}
+
+/** Minimal row shape the unavailable-assets badge needs. */
+export type BookingRowAssetForBadge = {
+  availableToBook: boolean;
+  type: AssetType;
+  custody: unknown[] | null | undefined;
+};
+
+/**
+ * Whether a booking should show the "Includes unavailable assets" badge.
+ *
+ * Two things make a booking's contents unavailable:
+ *
+ *  1. An asset flagged `availableToBook: false` — an explicit operator choice,
+ *     independent of type.
+ *  2. An **INDIVIDUAL** asset held in custody. An INDIVIDUAL asset is one
+ *     indivisible thing, so if someone holds it, it is not free.
+ *
+ * `QUANTITY_TRACKED` assets are deliberately excluded from the custody arm.
+ * Custody on a QT asset means SOME units are allocated, not all of them:
+ * assigning 3 of 12 leaves 9 genuinely bookable. Treating any custody row as
+ * disqualifying made the badge fire on bookings that were completely valid,
+ * and a badge that cries wolf trains people to ignore it — which is worse than
+ * not having it, because the cases it exists for are real.
+ *
+ * This mirrors `hasAssetsInCustody` in `getBookingFlags`
+ * (`~/modules/booking/service.server`), which already draws exactly this line
+ * server-side. The badge had its own inline copy that never got the same fix.
+ *
+ * Per-unit availability for QT assets is enforced properly at the service layer
+ * by `computeBookingAvailableQuantity()` when assets are added or quantities
+ * adjusted, so nothing is lost by dropping them from this cosmetic signal.
+ *
+ * @param assets - The booking's assets (flattened from `bookingAssets`).
+ * @param bookingStatus - Terminal bookings never show the badge; the warning is
+ *   about what can still go wrong, and nothing can.
+ * @returns True when the badge should render.
+ */
+export function bookingIncludesUnavailableAssets(
+  assets: BookingRowAssetForBadge[],
+  bookingStatus: string
+): boolean {
+  if (["COMPLETE", "CANCELLED", "ARCHIVED"].includes(bookingStatus)) {
+    return false;
+  }
+
+  return assets.some(
+    (asset) =>
+      !asset.availableToBook ||
+      (asset.type !== AssetType.QUANTITY_TRACKED &&
+        !!asset.custody &&
+        asset.custody.length > 0)
+  );
 }
