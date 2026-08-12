@@ -14,9 +14,8 @@
  * @see {@link file://./permission.validator.server.ts} — the server counterpart
  */
 import type { OrganizationRoles } from "@prisma/client";
+import type { PermissionAction, PermissionEntity } from "@shelf/permissions";
 import { roleHasPermission } from "@shelf/permissions";
-
-import type { PermissionAction, PermissionEntity } from "./permission.data";
 
 type UserHasPermissionArgs = {
   /** Role of the user for which we have to check for permission */

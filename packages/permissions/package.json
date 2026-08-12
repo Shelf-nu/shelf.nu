@@ -11,10 +11,13 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test"
   },
   "devDependencies": {
     "@shelf/typescript-config": "workspace:*",
+    "@types/node": "^22.19.17",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
 }
