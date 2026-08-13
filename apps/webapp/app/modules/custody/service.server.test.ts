@@ -21,7 +21,9 @@ vitest.mock("~/database/db.server", () => ({
       // `status: { not: CHECKED_OUT }` predicate that a nested `update`
       // cannot express.
       updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
-      findUniqueOrThrow: vitest.fn().mockResolvedValue({ id: "asset-1", custody: [] }),
+      findUniqueOrThrow: vitest
+        .fn()
+        .mockResolvedValue({ id: "asset-1", custody: [] }),
     },
   },
 }));
@@ -75,6 +77,12 @@ describe("releaseCustody status write", () => {
     (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       null
     );
+    // why: `clearAllMocks` resets calls but NOT implementations, so a per-test
+    // `mockResolvedValue` would leak into every test after it. Re-assert the
+    // not-checked-out default here so each case starts from a known count.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("refuses to clear CHECKED_OUT when returning the asset to AVAILABLE", async () => {
@@ -98,14 +106,26 @@ describe("releaseCustody status write", () => {
   });
 
   it("deletes the custody rows regardless, so a checked-out asset still loses its custodian", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
-    await releaseCustody({
-      assetId: "asset-1",
-      organizationId: "org-1",
-      userId: "me",
-      role: OrganizationRoles.ADMIN,
+    // why: `count: 0` is what the guarded `updateMany` actually returns when
+    // the asset IS checked out — `status: { not: CHECKED_OUT }` matches no
+    // row. The shared mock returns `count: 1`, which is the NOT-checked-out
+    // path, so without this override the test asserted nothing about the case
+    // its own name describes.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 0,
     });
+
+    // A refused status write must not fail the release.
+    await expect(
+      releaseCustody({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "me",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).resolves.toBeDefined();
 
     // Custody and checkout are independent commitments. Refusing the status
     // write must not refuse the release itself.

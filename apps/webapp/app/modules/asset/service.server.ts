@@ -5948,16 +5948,8 @@ export async function bulkCheckOutAssets({
         where: { assetId: { in: assets.map((a) => a.id) } },
       });
 
-      /** Creating custodies over assets */
-      await tx.custody.createMany({
-        data: assets.map((asset) => ({
-          assetId: asset.id,
-          teamMemberId: custodianId,
-        })),
-      });
-
       /**
-       * Updating status of assets to IN_CUSTODY.
+       * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
        *
        * Routed through the shared guard so it cannot disturb `CHECKED_OUT`.
        * The `assetsNotAvailable` pre-check above already rejects checked-out
@@ -5966,14 +5958,39 @@ export async function bulkCheckOutAssets({
        * write closes that window and keeps every custody-driven status write
        * uniform.
        *
+       * It runs FIRST because its return count gates everything after it. The
+       * guard skipping a row is not a no-op we can absorb: writing the custody
+       * row, note and CUSTODY_ASSIGNED event anyway would assert in the audit
+       * trail that custody was granted over an asset that is physically out on
+       * a booking. A shortfall means the world moved under the pre-check, so
+       * the whole batch rolls back rather than half-applying.
+       *
        * @see {@link file://./custody-status.server.ts}
        */
-      await setCustodyDrivenAssetStatus(
+      const statusUpdatedCount = await setCustodyDrivenAssetStatus(
         tx,
         assets.map((asset) => asset.id),
         organizationId,
         AssetStatus.IN_CUSTODY
       );
+
+      if (statusUpdatedCount !== assets.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some of the selected assets were checked out while this action was in progress. No custody was assigned. Please refresh and try again.",
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      /** Creating custodies over assets */
+      await tx.custody.createMany({
+        data: assets.map((asset) => ({
+          assetId: asset.id,
+          teamMemberId: custodianId,
+        })),
+      });
 
       /** Creating notes for the assets */
       const actor = wrapUserLinkForNote({

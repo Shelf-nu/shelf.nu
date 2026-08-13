@@ -109,6 +109,11 @@ vitest.mock("~/database/db.server", () => ({
       // status-flip branch doesn't fire — tests that exercise the
       // "last release" branch override this.
       count: vitest.fn().mockResolvedValue(1),
+      // why: `bulkCheckOutAssets` clears stale rows then bulk-inserts. Without
+      // these the transaction body throws on an undefined stub before it ever
+      // reaches the status guard under test.
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
@@ -3217,6 +3222,89 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
   // route's own integration tests cover the behaviour today.
   it.skip("blocks a SELF_SERVICE user from releasing someone else's custody (centralised in service)", async () => {
     // intentionally empty — see comment above.
+  });
+});
+
+/**
+ * The guarded status write gates the whole batch.
+ *
+ * `assetsNotAvailable` rejects checked-out assets, but that read happens
+ * OUTSIDE the transaction. If a checkout commits in between, the guard on
+ * `setCustodyDrivenAssetStatus` correctly refuses to overwrite `CHECKED_OUT` —
+ * and pre-fix the batch carried on regardless, writing a custody row, a note
+ * and a CUSTODY_ASSIGNED event for an asset that is physically out on a
+ * booking. The audit trail then asserted a grant that never happened.
+ *
+ * @see {@link file://./custody-status.server.ts}
+ */
+describe("bulkCheckOutAssets — status guard gates the batch", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Custodian",
+        user: {
+          id: "custodian-user",
+          firstName: "Cust",
+          lastName: "Odian",
+          displayName: null,
+        },
+      }
+    );
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+      { id: "asset-2", title: "Saw", status: "AVAILABLE", type: "INDIVIDUAL" },
+    ]);
+  });
+
+  it("aborts without writing custody when an asset was checked out mid-flight", async () => {
+    // why: two assets passed the pre-check, but by write time only one still
+    // matches `status: { not: CHECKED_OUT }`. That shortfall IS the race.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await expect(
+      bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1", "asset-2"],
+        custodianId: "tm-1",
+        custodianName: "Custodian",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(/checked out while this action was in progress/);
+
+    // The whole point: no half-applied custody. The throw rolls the
+    // transaction back, but the rows must not be attempted either.
+    expect(db.custody.createMany).not.toHaveBeenCalled();
+  });
+
+  it("proceeds to write custody when every asset survives the guard", async () => {
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 2,
+    });
+
+    // Downstream note/event stubs may be incomplete; all this asserts is that
+    // the gate itself did not fire and custody insertion was reached.
+    await bulkCheckOutAssets({
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch(() => undefined);
+
+    expect(db.custody.createMany).toHaveBeenCalled();
   });
 });
 
