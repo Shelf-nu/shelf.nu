@@ -79,15 +79,21 @@ function isValidUser(
   return userOrganizations.find((uo) => uo?.organizationId === organizationId);
 }
 
+/**
+ * A scan row with the relations `parseScanData` needs: the scanning user
+ * (with their org memberships, to decide whether to name them) and the QR
+ * (for its organization). Named so tests can build fixtures against the real
+ * shape instead of casting — a schema change then fails typecheck.
+ */
+export type ScanWithRelations = Scan & {
+  user: (User & { userOrganizations: UserOrganization[] | null }) | null;
+} & { qr: Qr | null };
+
 export function parseScanData({
   scan,
   userId,
 }: {
-  scan:
-    | (Scan & {
-        user: (User & { userOrganizations: UserOrganization[] | null }) | null;
-      } & { qr: Qr | null })
-    | null;
+  scan: ScanWithRelations | null;
   userId: string;
 }) {
   try {

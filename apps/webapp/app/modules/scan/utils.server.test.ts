@@ -10,6 +10,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { createScanWithRelations } from "@factories";
+
 import { parseCompanionUserAgent, parseScanData } from "./utils.server";
 
 describe("parseCompanionUserAgent", () => {
@@ -86,40 +88,37 @@ describe("parseCompanionUserAgent", () => {
 });
 
 describe("parseScanData", () => {
-  // why: parseScanData only reads plain fields off the scan record; a
-  // literal fixture keeps the test honest without a database.
-  const baseScan = {
-    id: "scan-1",
-    latitude: "51.97",
-    longitude: "5.98",
-    userAgent: "ShelfCompanion/1.3.0 (iPhone; iOS 18.6)",
-    userId: "user-1",
-    qrId: "qr-1",
-    rawQrId: "qr-1",
-    manuallyGenerated: false,
-    createdAt: new Date("2026-08-12T13:10:00Z"),
-    updatedAt: new Date("2026-08-12T13:10:00Z"),
-    user: null,
-    qr: null,
-  } as unknown as Parameters<typeof parseScanData>[0]["scan"];
-
   it("routes the companion UA through the app attribution", () => {
-    const result = parseScanData({ scan: baseScan, userId: "user-1" });
+    const result = parseScanData({
+      scan: createScanWithRelations(),
+      userId: "user-1",
+    });
 
     expect(result?.ua.browser.name).toBe("Shelf app 1.3.0");
     expect(result?.ua.device.vendor).toBe("Apple");
   });
 
   it("still parses browser user agents with ua-parser-js", () => {
-    const scan = {
-      ...(baseScan as object),
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-    } as typeof baseScan;
-
-    const result = parseScanData({ scan, userId: "user-1" });
+    const result = parseScanData({
+      scan: createScanWithRelations({
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+      }),
+      userId: "user-1",
+    });
 
     expect(result?.ua.browser.name).toBe("Safari");
     expect(result?.ua.os.name).toBe("Mac OS");
+  });
+
+  it("leaves the rest of the payload intact for an app scan", () => {
+    const result = parseScanData({
+      scan: createScanWithRelations(),
+      userId: "user-1",
+    });
+
+    // why: the UA change must not disturb the other fields the panel reads.
+    expect(result?.coordinates).toBe("51.97956847999077, 5.981302259884078");
+    expect(result?.manuallyGenerated).toBe(false);
   });
 });

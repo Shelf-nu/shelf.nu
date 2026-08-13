@@ -10,3 +10,4 @@ export * from "./organization";
 export * from "./assetModel";
 export * from "./activityEvent";
 export * from "./stripePrice";
+export * from "./scan";
