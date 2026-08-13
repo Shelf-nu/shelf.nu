@@ -20,20 +20,13 @@
  */
 import { Prisma } from "@prisma/client";
 import { ShelfError } from "~/utils/error";
+// CUSTOM_FIELD_SEARCH_PATHS is owned by ./search.server (the pure, db-free
+// search module). Import it here so the UNION searches the SAME custom-field
+// paths as the Prisma buildFullAssetSearchOr — one list, no drift — and
+// re-export for this module's existing importers/tests.
+import { CUSTOM_FIELD_SEARCH_PATHS } from "./search.server";
 
-/**
- * JSON paths inside `AssetCustomFieldValue.value` that hold user-visible text.
- * Moved here (from query.server.ts) so both the advanced query and this helper
- * can reference it without an import cycle.
- */
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
+export { CUSTOM_FIELD_SEARCH_PATHS };
 
 /** Row shape when the UNION is executed standalone (simple index). */
 export type AssetSearchIdRow = { id: string };
