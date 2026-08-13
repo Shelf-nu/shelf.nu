@@ -1,11 +1,20 @@
-import { OrganizationRoles } from "@prisma/client";
+/**
+ * Server-side permission validation.
+ *
+ * Resolves the caller's roles (from the passed array or the database) and
+ * delegates the actual (roles, entity, action) decision to the shared
+ * `roleHasPermission` resolver in `@shelf/permissions` — the same logic the
+ * companion app uses for UI gating, so web and mobile can never disagree
+ * about what a role may do. This module keeps the webapp-specific concerns:
+ * the UserOrganization lookup and ShelfError semantics.
+ *
+ * @see {@link file://../../../../../packages/permissions/src/index.ts}
+ */
+import type { OrganizationRoles } from "@prisma/client";
+import { roleHasPermission } from "@shelf/permissions";
 import { db } from "~/database/db.server";
 
-import {
-  Role2PermissionMap,
-  type PermissionAction,
-  type PermissionEntity,
-} from "./permission.data";
+import type { PermissionAction, PermissionEntity } from "./permission.data";
 import { ShelfError } from "../error";
 
 export interface PermissionCheckProps {
@@ -16,6 +25,15 @@ export interface PermissionCheckProps {
   entity: PermissionEntity;
 }
 
+/**
+ * Checks whether a user holds a role granting `action` on `entity` within
+ * the organization. Loads the user's roles from the database when they are
+ * not supplied by the caller.
+ *
+ * @returns `true` when permitted, `false` otherwise.
+ * @throws {ShelfError} 403 when the user does not belong to the
+ *   organization, or a wrapped error if the roles lookup fails.
+ */
 export async function hasPermission(
   params: PermissionCheckProps
 ): Promise<boolean> {
@@ -40,27 +58,8 @@ export async function hasPermission(
       roles = userOrg.roles;
     }
 
-    if (
-      roles.includes(OrganizationRoles.ADMIN) ||
-      roles.includes(OrganizationRoles.OWNER)
-    ) {
-      //owner and admin can do anything for now
-      return true;
-    }
-
-    const validRoles = roles.filter((role) => {
-      const entityPermMap = Role2PermissionMap[role];
-
-      if (!entityPermMap) {
-        return false;
-      }
-
-      const permissions = entityPermMap[entity];
-
-      return permissions.includes(action);
-    });
-
-    return validRoles.length > 0;
+    // Shared resolver: ADMIN/OWNER allow-all short-circuit + matrix lookup.
+    return roleHasPermission({ roles, entity, action });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -71,6 +70,12 @@ export async function hasPermission(
   }
 }
 
+/**
+ * Asserts the permission, throwing a 403 ShelfError when denied.
+ *
+ * @returns `true` when the permission check passes.
+ * @throws {ShelfError} 403 when the user lacks the permission.
+ */
 export const validatePermission = async (props: PermissionCheckProps) => {
   const res = await hasPermission(props);
 
