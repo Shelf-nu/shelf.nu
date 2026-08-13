@@ -52,6 +52,29 @@
 import { AssetStatus } from "@prisma/client";
 
 /**
+ * The slice of a Prisma transaction client this module actually uses.
+ *
+ * Structural rather than `Pick<ExtendedPrismaClient, "asset">` so the in-memory
+ * fake clients in the service tests satisfy it without an `as` cast at every
+ * call site — the same trade-off `buildKitCustodyInheritData` makes in
+ * `~/modules/kit/service.server`. Narrow enough that a typo in the `where`
+ * shape (the guard itself) is still a compile error, which is the property
+ * `any` was giving up.
+ */
+type CustodyStatusTxClient = {
+  asset: {
+    updateMany: (args: {
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        status: { not: AssetStatus };
+      };
+      data: { status: AssetStatus };
+    }) => Promise<{ count: number }>;
+  };
+};
+
+/**
  * Sets `Asset.status` for a custody flow, refusing to disturb `CHECKED_OUT`.
  *
  * @param tx - Interactive transaction client. Required: the status write must
@@ -64,8 +87,7 @@ import { AssetStatus } from "@prisma/client";
  *   to report on the outcome should read it rather than assume.
  */
 export async function setCustodyDrivenAssetStatus(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any,
+  tx: CustodyStatusTxClient,
   assetIds: string[],
   organizationId: string,
   nextStatus: AssetStatus
@@ -93,8 +115,7 @@ export async function setCustodyDrivenAssetStatus(
  * and this emphatically is not.
  */
 export async function releaseAssetsToAvailableUnlessCheckedOut(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any,
+  tx: CustodyStatusTxClient,
   assetIds: string[],
   organizationId: string
 ): Promise<number> {

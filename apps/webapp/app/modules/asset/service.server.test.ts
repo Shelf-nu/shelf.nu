@@ -3285,6 +3285,22 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // The whole point: no half-applied custody. The throw rolls the
     // transaction back, but the rows must not be attempted either.
     expect(db.custody.createMany).not.toHaveBeenCalled();
+
+    // 409, not the ShelfError default of 500: a valid request that lost a race
+    // is the client's cue to refresh, not a server fault. `shouldBeCaptured`
+    // is false for the same reason — this must not page anyone.
+    const caught = await bulkCheckOutAssets({
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch((err: unknown) => err);
+
+    expect((caught as ShelfError).status).toBe(409);
+    expect((caught as ShelfError).shouldBeCaptured).toBe(false);
   });
 
   it("proceeds to write custody when every asset survives the guard", async () => {

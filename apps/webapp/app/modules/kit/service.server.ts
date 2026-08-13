@@ -179,7 +179,6 @@ type KitCustodyInheritTxClient = {
   };
 };
 
-
 /**
  * Pre-fetches the kit-driven `BookingAsset` rows that will
  * be converted to standalone (via the DB-level `SET NULL` cascade) when

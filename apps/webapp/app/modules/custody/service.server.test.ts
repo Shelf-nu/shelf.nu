@@ -73,13 +73,13 @@ describe("releaseCustody SELF_SERVICE self-restriction", () => {
  */
 describe("releaseCustody status write", () => {
   beforeEach(() => {
+    // `clearAllMocks` clears calls but NOT implementations, so re-establish the
+    // not-checked-out default here — otherwise a test that models a shortfall
+    // would leak `{ count: 0 }` into every test after it.
     vitest.clearAllMocks();
     (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       null
     );
-    // why: `clearAllMocks` resets calls but NOT implementations, so a per-test
-    // `mockResolvedValue` would leak into every test after it. Re-assert the
-    // not-checked-out default here so each case starts from a known count.
     (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
       count: 1,
     });
@@ -108,16 +108,14 @@ describe("releaseCustody status write", () => {
   it("deletes the custody rows regardless, so a checked-out asset still loses its custodian", async () => {
     expect.assertions(2);
 
-    // why: `count: 0` is what the guarded `updateMany` actually returns when
-    // the asset IS checked out — `status: { not: CHECKED_OUT }` matches no
-    // row. The shared mock returns `count: 1`, which is the NOT-checked-out
-    // path, so without this override the test asserted nothing about the case
-    // its own name describes.
+    // Model the asset this test is named for: `{ count: 0 }` is what the
+    // guarded write returns when the row was filtered out for being
+    // CHECKED_OUT. With the default `{ count: 1 }` this test would exercise
+    // the not-checked-out path and its name would be a lie.
     (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
       count: 0,
     });
 
-    // A refused status write must not fail the release.
     await expect(
       releaseCustody({
         assetId: "asset-1",
@@ -128,7 +126,8 @@ describe("releaseCustody status write", () => {
     ).resolves.toBeDefined();
 
     // Custody and checkout are independent commitments. Refusing the status
-    // write must not refuse the release itself.
+    // write must not refuse the release itself — otherwise a checked-out asset
+    // is stuck with a custodian it no longer has.
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
       where: { assetId: "asset-1" },
     });

@@ -5926,6 +5926,14 @@ export async function bulkCheckOutAssets({
     }
 
     /**
+     * The ids this call will take custody of. Unique by construction —
+     * `allAssets` comes from a `findMany`, so one row per asset — which is what
+     * lets the guarded status write below compare its updated-row count against
+     * this length to detect a raced checkout.
+     */
+    const assetIdsToCustody = assets.map((asset) => asset.id);
+
+    /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
@@ -5969,17 +5977,25 @@ export async function bulkCheckOutAssets({
        */
       const statusUpdatedCount = await setCustodyDrivenAssetStatus(
         tx,
-        assets.map((asset) => asset.id),
+        assetIdsToCustody,
         organizationId,
         AssetStatus.IN_CUSTODY
       );
 
-      if (statusUpdatedCount !== assets.length) {
+      // This is the RACE path only — the common case is caught by the
+      // `assetsNotAvailable` pre-check, which names the offending assets and
+      // reads better. 409 rather than the ShelfError default of 500: the world
+      // moved under a valid request, which is the client's cue to refresh, not
+      // a server fault worth capturing.
+      if (statusUpdatedCount !== assetIdsToCustody.length) {
         throw new ShelfError({
           cause: null,
+          title: "Asset is checked out",
           message:
             "Some of the selected assets were checked out while this action was in progress. No custody was assigned. Please refresh and try again.",
+          additionalData: { userId, custodianId, assetIds: assetIdsToCustody },
           label: "Assets",
+          status: 409,
           shouldBeCaptured: false,
         });
       }
