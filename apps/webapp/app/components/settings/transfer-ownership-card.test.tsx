@@ -1,3 +1,8 @@
+import type {
+  AnchorHTMLAttributes,
+  FormHTMLAttributes,
+  PropsWithChildren,
+} from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -21,8 +26,19 @@ vi.mock("react-router", async () => {
     useRouteLoaderData: (...args: unknown[]) => mockUseRouteLoaderData(...args),
     useActionData: () => mockUseActionData(),
     useNavigation: () => mockUseNavigation(),
-    Form: ({ children, ...props }: any) => <form {...props}>{children}</form>,
-    Link: ({ to, children, ...rest }: any) => (
+    Form: ({
+      children,
+      ...props
+    }: PropsWithChildren<FormHTMLAttributes<HTMLFormElement>>) => (
+      <form {...props}>{children}</form>
+    ),
+    Link: ({
+      to,
+      children,
+      ...rest
+    }: PropsWithChildren<
+      AnchorHTMLAttributes<HTMLAnchorElement> & { to?: unknown }
+    >) => (
       <a {...rest} href={typeof to === "string" ? to : undefined}>
         {children}
       </a>

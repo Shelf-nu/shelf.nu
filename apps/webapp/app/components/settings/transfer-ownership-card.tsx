@@ -44,6 +44,7 @@ type Admin = {
   email: string;
 };
 
+/** Knowledge-base walkthrough linked from every state of the transfer card */
 export const TRANSFER_OWNERSHIP_KB_URL =
   "https://www.shelf.nu/knowledge-base/transfer-workspace-ownership";
 
