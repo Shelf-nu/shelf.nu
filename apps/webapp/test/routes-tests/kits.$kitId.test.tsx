@@ -26,7 +26,7 @@ import { getUserByID } from "~/modules/user/service.server";
 
 const dbMocks = vi.hoisted(() => ({
   kit: { update: vi.fn() },
-  asset: { update: vi.fn() },
+  asset: { update: vi.fn(), updateMany: vi.fn() },
   custody: { deleteMany: vi.fn(), count: vi.fn() },
   assetKit: { findMany: vi.fn() },
 }));
@@ -34,7 +34,10 @@ const dbMocks = vi.hoisted(() => ({
 vi.mock("~/database/db.server", () => ({
   db: {
     kit: { update: dbMocks.kit.update },
-    asset: { update: dbMocks.asset.update },
+    asset: {
+      update: dbMocks.asset.update,
+      updateMany: dbMocks.asset.updateMany,
+    },
     custody: {
       deleteMany: dbMocks.custody.deleteMany,
       count: dbMocks.custody.count,
@@ -46,7 +49,10 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         kit: { update: dbMocks.kit.update },
-        asset: { update: dbMocks.asset.update },
+        asset: {
+          update: dbMocks.asset.update,
+          updateMany: dbMocks.asset.updateMany,
+        },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,
           count: dbMocks.custody.count,
@@ -236,7 +242,7 @@ describe("kits/$kitId removeAsset action", () => {
 
     // Status flip path was NOT triggered — the asset still has custody
     // (operator-assigned), so it must stay IN_CUSTODY.
-    expect(dbMocks.asset.update).not.toHaveBeenCalled();
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
   });
 
   it("flips asset status to AVAILABLE only when no custody rows remain", async () => {
@@ -255,9 +261,14 @@ describe("kits/$kitId removeAsset action", () => {
       where: { assetId: "asset-sole", kitCustodyId: "kc-2" },
     });
 
-    // Status flip happened.
-    expect(dbMocks.asset.update).toHaveBeenCalledWith({
-      where: { id: "asset-sole", organizationId: "org-1" },
+    // Status flip happened — guarded so an asset that is still checked out
+    // on a booking is never advertised as AVAILABLE by a custody release.
+    expect(dbMocks.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-sole",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
       data: { status: "AVAILABLE" },
     });
   });
@@ -274,7 +285,7 @@ describe("kits/$kitId removeAsset action", () => {
 
     expect(dbMocks.custody.deleteMany).not.toHaveBeenCalled();
     expect(dbMocks.custody.count).not.toHaveBeenCalled();
-    expect(dbMocks.asset.update).not.toHaveBeenCalled();
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
   });
 
   it("runs the full kit→booking detach sequence, in order, before the pivot delete", async () => {

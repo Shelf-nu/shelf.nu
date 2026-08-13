@@ -77,6 +77,10 @@ import {
 import { getKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
+import {
+  releaseAssetsToAvailableUnlessCheckedOut,
+  setCustodyDrivenAssetStatus,
+} from "../asset/custody-status.server";
 import type {
   MoveAssetKitUnitsArgs,
   MoveUnitsResult,
@@ -185,6 +189,9 @@ type KitCustodyInheritTxClient = {
  * `tx.assetKit.deleteMany(...)` inside the same transaction; pair the
  * returned array with {@link emitAssetKitDetachmentNotes} after the
  * delete completes to log a per-booking system note.
+ *
+ * @see {@link releaseAssetsToAvailableUnlessCheckedOut} for the shared
+ *   custody-release status flip these kit flows all funnel through.
  *
  * Scope filter: only DRAFT / RESERVED / ONGOING / OVERDUE bookings get
  * notes — already-completed / cancelled / archived bookings are
@@ -2235,12 +2242,11 @@ async function performKitDeletion({
       const assetsToFlipAvailable = allAssetIds.filter(
         (assetId) => !stillCustodiedAssetIds.has(assetId)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToFlipAvailable }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
     }
   });
 
@@ -2573,12 +2579,11 @@ export async function releaseCustody({
       const assetsToFlipAvailable = assetIds.filter(
         (id) => !stillCustodiedAssetIds.has(id)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToFlipAvailable }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
     });
 
     // Notes can be created outside transaction (not critical for consistency).
@@ -3105,12 +3110,14 @@ export async function bulkAssignKitCustody({
           : undefined;
       };
 
-      /** Updating status of all assets of kits */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assets are derived from `kits` (kit.assets) loaded by the org-scoped findMany above; not from request input
-        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
-      });
+      // Guarded, and org-scoped by the helper.
+      // @see {@link file://./../asset/custody-status.server.ts}
+      await setCustodyDrivenAssetStatus(
+        tx,
+        allAssetsOfAllKits.map((asset) => asset.id),
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
 
       /** Creating notes for all the assets of the kit */
       const actor = wrapUserLinkForNote({
@@ -3437,13 +3444,13 @@ export async function bulkReleaseKitCustody({
       const assetsToFlipAvailable = allAssetIds.filter(
         (id) => !stillCustodiedIds.has(id)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetsToFlipAvailable` derive from `allAssetsOfAllKits` loaded via the org-scoped kits findMany earlier in this flow
-          where: { id: { in: assetsToFlipAvailable } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      // The helper org-scopes the write itself, so the previous
+      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({
@@ -5512,11 +5519,16 @@ export async function updateKitAssets({
 
         await tx.custody.createMany({ data: inheritData });
 
+        // `assetsToInheritStatus` filters on `hasCustody` alone, which does
+        // not exclude a checked-out asset — hence the guarded write.
+        // @see {@link file://./../asset/custody-status.server.ts}
         const inheritedIds = inheritData.map((row) => row.assetId);
-        await tx.asset.updateMany({
-          where: { id: { in: inheritedIds }, organizationId },
-          data: { status: AssetStatus.IN_CUSTODY },
-        });
+        await setCustodyDrivenAssetStatus(
+          tx,
+          inheritedIds,
+          organizationId,
+          AssetStatus.IN_CUSTODY
+        );
 
         // Activity events — one CUSTODY_ASSIGNED per asset that inherited
         // custody. `meta.quantity` is the per-row count `buildKitCustodyInheritData`
@@ -5734,12 +5746,11 @@ export async function updateKitAssets({
         const assetsToFlipAvailable = assetIds.filter(
           (id) => !stillCustodiedIds.has(id)
         );
-        if (assetsToFlipAvailable.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: assetsToFlipAvailable }, organizationId },
-            data: { status: AssetStatus.AVAILABLE },
-          });
-        }
+        await releaseAssetsToAvailableUnlessCheckedOut(
+          tx,
+          assetsToFlipAvailable,
+          organizationId
+        );
       });
 
       // Notes can be created outside transaction (not critical for consistency).
@@ -6126,13 +6137,13 @@ export async function bulkRemoveAssetsFromKits({
           organizationId,
         },
       });
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetsToFlipAvailable` derive from `assets` loaded via the org-scoped `where: { id: { in: resolvedIds }, organizationId }` query earlier in bulkRemoveAssetsFromKits
-          where: { id: { in: assetsToFlipAvailable } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      // The helper org-scopes the write itself, so the previous
+      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {
