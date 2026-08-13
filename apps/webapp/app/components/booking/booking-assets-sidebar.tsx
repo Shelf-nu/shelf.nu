@@ -18,7 +18,7 @@
 import React, { useState } from "react";
 import type { ReactNode } from "react";
 import type { BookingStatus, Prisma } from "@prisma/client";
-import { ChevronDownIcon, PackageIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
@@ -37,13 +37,18 @@ import {
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { BADGE_COLORS } from "~/utils/badge-colors";
 import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
+import {
+  canAssignModelUnits,
+  getOutstandingModelRequests,
+} from "~/utils/booking-model-requests";
+import { describeBookingRows } from "~/utils/booking-rows";
 import { tw } from "~/utils/tw";
 import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
+import { BookingModelReservationsSection } from "./booking-model-reservations-section";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -260,6 +265,13 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
     // detail loader). Standalone slices have `ba.assetKitId == null`
     // and render in the individual bucket regardless of whether the
     // asset happens to be in any kit.
+    //
+    // why: out of this rule — unlike the booking overview, this surface does
+    // NOT fall back to `BookingAsset.sourceKitId`, so a slice whose asset has
+    // left the kit shows here as a loose asset. `getBookings` feeds this list
+    // through an explicit `select` that omits `sourceKitId`, and there is no
+    // kit lookup on the path — resolving the snapshot would need the select,
+    // both hand-written payload types and a new query, for a compact sidebar.
     const sourceKit = ba.assetKitId
       ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
       : null;
@@ -577,112 +589,6 @@ function AssetTitleAndStatus({
   );
 }
 
-/**
- * Render the "Unassigned model reservations" section shown above the
- * asset list when a booking has outstanding `BookingModelRequest` rows.
- *
- * Rows with `fulfilledAt !== null` (fully fulfilled) are filtered out
- * so the section disappears once every unit has been materialised.
- * The "Scan to assign" CTA routes to the generic scan-assets drawer —
- * scans materialise the matching request via the shared code path.
- * The *checkout* flow (with fulfil-enforcement + early-date alert)
- * lives separately on the main booking URL's Check Out button, which
- * routes to `/fulfil-and-checkout`.
- */
-function UnassignedModelRequestsSection({
-  bookingId,
-  bookingStatus,
-  modelRequests,
-}: {
-  bookingId: string;
-  bookingStatus: BookingStatus;
-  modelRequests: SidebarModelRequest[];
-}) {
-  const outstanding = modelRequests.filter((req) => req.fulfilledAt === null);
-  if (outstanding.length === 0) {
-    return null;
-  }
-
-  const totalRemaining = outstanding.reduce(
-    (sum, req) => sum + (req.quantity - req.fulfilledQuantity),
-    0
-  );
-
-  // Scan-to-assign is available whenever the booking is in a
-  // manage-assets-eligible state. Keeps DRAFT/RESERVED unblocked — the
-  // checkout guard requires all requests to be drained before ONGOING.
-  const canScanToAssign =
-    bookingStatus === "DRAFT" ||
-    bookingStatus === "RESERVED" ||
-    bookingStatus === "ONGOING" ||
-    bookingStatus === "OVERDUE";
-
-  return (
-    <>
-      <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
-        <h5 className="text-left capitalize">
-          Unassigned model reservations ({totalRemaining})
-        </h5>
-        <p>
-          <span>
-            {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
-          </span>
-        </p>
-      </div>
-      <div className="border border-b-0 border-gray-200 bg-white md:mx-0">
-        <table className="w-full border-collapse">
-          <tbody>
-            {outstanding.map((req) => (
-              <tr
-                key={req.id}
-                className="border-b border-gray-200 last:border-b-0"
-              >
-                <td className="w-full whitespace-normal p-0 md:p-0">
-                  <div className="flex items-center gap-3 px-6 py-4 md:pr-6">
-                    {/* Model placeholder — we intentionally don't fetch
-                        a per-model image for the sidebar (extra query
-                        cost) so a neutral packaging glyph stands in. */}
-                    <div
-                      aria-hidden
-                      className="flex size-12 shrink-0 items-center justify-center rounded-[4px] border border-gray-200 bg-gray-50"
-                    >
-                      <PackageIcon className="size-5 text-gray-400" />
-                    </div>
-                    <div className="min-w-[180px]">
-                      <span className="word-break mb-1 block font-medium text-gray-700">
-                        {req.assetModel.name}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className="inline-flex items-center rounded-2xl px-2 py-[2px] text-[12px] font-medium"
-                          style={{
-                            backgroundColor: BADGE_COLORS.amber.bg,
-                            color: BADGE_COLORS.amber.text,
-                          }}
-                        >
-                          {req.quantity - req.fulfilledQuantity} remaining
-                        </span>
-                        {canScanToAssign ? (
-                          <Link
-                            to={`/bookings/${bookingId}/overview/scan-assets`}
-                            className="text-[12px] font-medium text-primary-700 hover:text-primary-800 hover:underline"
-                          >
-                            Scan to assign
-                          </Link>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
 export function BookingAssetsSidebar({
   booking,
   trigger,
@@ -707,11 +613,24 @@ export function BookingAssetsSidebar({
   // worth showing — concrete assets OR outstanding model-level
   // reservations. Pure book-by-model bookings legitimately have
   // `bookingAssets.length === 0` but still carry content.
-  const outstandingModelRequestCount = (booking.modelRequests ?? []).filter(
-    (req) => req.fulfilledAt === null
+  const outstandingModelRequestCount = getOutstandingModelRequests(
+    booking.modelRequests
   ).length;
   const hasItems =
     booking.bookingAssets.length > 0 || outstandingModelRequestCount > 0;
+
+  /**
+   * Scan-to-assign is offered whenever the booking is in a manage-eligible
+   * state. Mirrors the same gate in `ModelRequestRowActionsDropdown`; the
+   * server-side guards in `booking-model-request/service.server` are what
+   * actually enforce it.
+   */
+  const canScanToAssign =
+    booking.status === "DRAFT" ||
+    booking.status === "RESERVED" ||
+    booking.status === "ONGOING" ||
+    booking.status === "OVERDUE";
+
   const defaultTrigger = (
     <Button
       type="button"
@@ -741,17 +660,37 @@ export function BookingAssetsSidebar({
           </SheetHeader>
 
           <div className="flex flex-1 flex-col overflow-hidden">
-            {booking.modelRequests && booking.modelRequests.length > 0 ? (
-              <UnassignedModelRequestsSection
-                bookingId={booking.id}
-                bookingStatus={booking.status}
-                modelRequests={booking.modelRequests}
-              />
-            ) : null}
+            {/* Same component the booking overview renders, so the two
+                surfaces cannot drift. The drawer is launched from the
+                bookings index and is read-oriented, so its row affordance is
+                a plain scan link rather than the overview's full actions
+                dropdown — presentation identical, capability scoped to the
+                surface. */}
+            <BookingModelReservationsSection
+              modelRequests={booking.modelRequests}
+              canAssign={canAssignModelUnits(booking.status)}
+              className="rounded-none border-x-0 border-t-0"
+              renderAction={
+                canScanToAssign
+                  ? () => (
+                      <Link
+                        to={`/bookings/${booking.id}/overview/scan-assets`}
+                        className="whitespace-nowrap text-[12px] font-medium text-primary-700 hover:text-primary-800 hover:underline"
+                      >
+                        Scan to assign
+                      </Link>
+                    )
+                  : undefined
+              }
+            />
             <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
               <h5 className="text-left capitalize">Assets & kits</h5>
               <p>
-                <span>{paginatedItems.length} items</span>
+                {/* Same helper the booking overview uses. This drawer groups
+                    kits into one row exactly as the overview does, so a bare
+                    "N items" here disagreed with the "N assets" in this very
+                    drawer's own header one line above. */}
+                <span>{describeBookingRows(paginatedItems)}</span>
               </p>
             </div>
 

@@ -14,6 +14,7 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 
+import { db } from "~/database/db.server";
 import {
   ADDABLE_BOOKING_STATUSES,
   isAddableBooking,
@@ -21,6 +22,7 @@ import {
 import {
   assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
+  createKitBookingNote,
   getExistingBookingDetails,
   loadBookingsData,
   updateBookingAssets,
@@ -237,6 +239,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const addedAssetIds = Array.from(
       new Set(kitSlices.map((slice) => slice.assetId))
     );
+
+    /**
+     * Booking-side note for the kit add.
+     *
+     * This route forwards a non-empty `kitIds` to `updateBookingAssets`, which
+     * suppresses the service's own booking note on the assumption that a kit
+     * caller writes its own. `manage-kits` does. This route did not — so adding
+     * a kit to a booking from the KIT's page left the booking's activity feed
+     * completely silent, while the same action from the booking's page recorded
+     * it. Two doors to one outcome, two different audit trails.
+     *
+     * Names are fetched (rather than letting `createKitBookingNote` fall back
+     * to `wrapKitsForNote`'s id-only tag) so both doors produce an identical
+     * note. Org-scoped: `kitIds` is request-supplied.
+     */
+    const addedKits = await db.kit.findMany({
+      where: { id: { in: kitIds }, organizationId },
+      select: { id: true, name: true },
+    });
+
+    await createKitBookingNote({
+      bookingId: booking.id,
+      organizationId,
+      kitIds,
+      kits: addedKits,
+      userId: authSession.userId,
+      action: "added",
+    });
 
     const actor = wrapUserLinkForNote({
       id: authSession.userId,

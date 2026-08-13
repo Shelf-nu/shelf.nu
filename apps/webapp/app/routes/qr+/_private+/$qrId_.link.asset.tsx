@@ -110,6 +110,9 @@ export const loader = async ({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // This route ignores the custodian-filter seed, so scope it: no reason to
+      // fetch a roster nobody renders.
+      canSeeAllCustody: false,
     });
 
     if (totalPages !== 0 && page > totalPages) {

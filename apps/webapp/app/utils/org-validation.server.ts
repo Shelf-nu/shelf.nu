@@ -102,10 +102,12 @@ export type OrgValidationTxClient = {
     }) => Promise<{ id: string } | null>;
   };
   assetKit: {
+    // `kitId` rides along so `assertAssetKitsBelongToOrg` can hand callers an
+    // org-proven `assetKitId -> kitId` map without a second round-trip.
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string }[]>;
+      select: { id: true; kitId: true };
+    }) => Promise<{ id: string; kitId: string }[]>;
   };
   assetModel: {
     // `name` is selected (not just `id`) because the guard hands the row back —
@@ -170,9 +172,20 @@ export async function assertAssetsBelongToOrg(
  * could attach Org B's `AssetKit.id` to their own booking row (cross-org
  * reference). Dedupes first; a no-op for an empty list.
  *
+ * Also RETURNS the org-proven `assetKitId -> kitId` mapping the same query
+ * already had to load. Booking write paths persist that kit id to
+ * `BookingAsset.sourceKitId`, a column whose FK accepts any `Kit` row in any
+ * organization — so deriving it from this map (rather than from the
+ * request-supplied `kitSlices[].kitId`) is what keeps a caller in Org A from
+ * stamping Org B's kit onto its own booking row. It also enforces the
+ * schema's stated invariant that `sourceKitId` AGREES with `assetKitId`,
+ * which no separate lookup could guarantee.
+ *
  * @param params.assetKitIds - AssetKit IDs sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns Map of `AssetKit.id` → owning `Kit.id`, one entry per validated ID
+ *   (empty for an empty input list)
  * @throws {ShelfError} 400 if any ID is missing or belongs to another org
  */
 export async function assertAssetKitsBelongToOrg(
@@ -181,15 +194,15 @@ export async function assertAssetKitsBelongToOrg(
     organizationId,
   }: { assetKitIds: string[]; organizationId: string },
   tx?: OrgValidationTxClient
-): Promise<void> {
-  if (assetKitIds.length === 0) return;
+): Promise<Map<string, string>> {
+  if (assetKitIds.length === 0) return new Map();
 
   const client = tx ?? db;
   const uniqueIds = [...new Set(assetKitIds)];
 
   const found = await client.assetKit.findMany({
     where: { id: { in: uniqueIds }, organizationId },
-    select: { id: true },
+    select: { id: true, kitId: true },
   });
 
   if (found.length !== uniqueIds.length) {
@@ -204,6 +217,10 @@ export async function assertAssetKitsBelongToOrg(
       additionalData: { organizationId },
     });
   }
+
+  // Every requested id is present (the count check above proves it), so the
+  // map is total over `uniqueIds` — callers can treat a miss as impossible.
+  return new Map(found.map((ak) => [ak.id, ak.kitId]));
 }
 
 /**

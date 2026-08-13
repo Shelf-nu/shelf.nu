@@ -74,6 +74,7 @@ import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
   getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
@@ -142,6 +143,7 @@ import {
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import type {
   MoveAssetLocationUnitsArgs,
@@ -172,6 +174,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
@@ -331,6 +334,10 @@ export async function setKitCustodyAfterAssetImport({
       custodianId,
       custodianName,
       userId,
+      // CSV import, gated on `asset: import` — ADMIN/OWNER only. Doubly inert
+      // here anyway: the kit ids are explicit (never ALL_SELECTED_KEY) and no
+      // `currentSearchParams` is passed, so no custodian filter is ever built.
+      allowedTeamMemberIds: "all",
     });
   }
 }
@@ -4077,6 +4084,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery = false,
   filters = "",
   isSelfService,
+  canSeeAllCustody,
   userId,
 }: {
   request: LoaderFunctionArgs["request"];
@@ -4091,6 +4099,12 @@ export async function getPaginatedAndFilterableAssets({
   filters?: string;
 
   isSelfService?: boolean;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required so
+   * the custodian filter seed is scoped by the rule rather than by a role
+   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   */
+  canSeeAllCustody: boolean;
   userId?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
@@ -4124,6 +4138,21 @@ export async function getPaginatedAndFilterableAssets({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  /**
+   * `?teamMember=` is raw request input. Redacting the custodian from the
+   * response is not enough on its own — filtering by a colleague's id and
+   * reading which rows come back still reveals what they hold. Narrow the ids
+   * to the caller's own before they reach any custody clause, and refuse the
+   * filter outright when that leaves nothing (see the helper's JSDoc for why an
+   * empty list cannot express a refusal here).
+   */
+  const scopedTeamMemberIds = await scopeCustodianFilterIds({
+    teamMemberIds,
+    canSeeAllCustody,
+    userId: userId ?? "",
+    organizationId,
+  });
+
   try {
     /**
      * These three queries are independent (no data flows between them),
@@ -4152,9 +4181,15 @@ export async function getPaginatedAndFilterableAssets({
       }),
       getTeamMemberForCustodianFilter({
         organizationId,
-        selectedTeamMembers: teamMemberIds,
+        // Narrowed too: the seed renders the filter's current selection, and an
+        // unscoped id here would fetch that person's row back.
+        selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        filterByUserId: isSelfService,
+        // A read FILTER, so the resolved custody rule governs — NOT the role.
+        // `isSelfService` was false for BASE, which left this seed unscoped
+        // and shipped the whole roster to a BASE user with
+        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
       getAssets({
@@ -4172,7 +4207,7 @@ export async function getPaginatedAndFilterableAssets({
         hideUnavailable,
         unhideAssetsBookigIds,
         locationIds,
-        teamMemberIds,
+        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
         availableToBookOnly: isSelfService,
@@ -5686,6 +5721,9 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -5800,6 +5838,7 @@ export async function bulkCheckOutAssets({
   currentSearchParams,
   settings,
   timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -5822,6 +5861,13 @@ export async function bulkCheckOutAssets({
    * off-by-one for non-UTC users). Defaults to "UTC".
    */
   timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required because
+   * `asset: custody` is a SELF_SERVICE permission — without narrowing, a
+   * self-service user could select-all filtered by a colleague's id and act on
+   * exactly that person's assets.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5830,6 +5876,7 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
       timeZone,
     });
 
@@ -5925,6 +5972,14 @@ export async function bulkCheckOutAssets({
     }
 
     /**
+     * The ids this call will take custody of. Unique by construction —
+     * `allAssets` comes from a `findMany`, so one row per asset — which is what
+     * lets the guarded status write below compare its updated-row count against
+     * this length to detect a raced checkout.
+     */
+    const assetIdsToCustody = assets.map((asset) => asset.id);
+
+    /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
@@ -5947,19 +6002,56 @@ export async function bulkCheckOutAssets({
         where: { assetId: { in: assets.map((a) => a.id) } },
       });
 
+      /**
+       * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
+       *
+       * Routed through the shared guard so it cannot disturb `CHECKED_OUT`.
+       * The `assetsNotAvailable` pre-check above already rejects checked-out
+       * assets, but that read happens OUTSIDE this transaction — a checkout
+       * committing in between would be silently overwritten. Guarding the
+       * write closes that window and keeps every custody-driven status write
+       * uniform.
+       *
+       * It runs FIRST because its return count gates everything after it. The
+       * guard skipping a row is not a no-op we can absorb: writing the custody
+       * row, note and CUSTODY_ASSIGNED event anyway would assert in the audit
+       * trail that custody was granted over an asset that is physically out on
+       * a booking. A shortfall means the world moved under the pre-check, so
+       * the whole batch rolls back rather than half-applying.
+       *
+       * @see {@link file://./custody-status.server.ts}
+       */
+      const statusUpdatedCount = await setCustodyDrivenAssetStatus(
+        tx,
+        assetIdsToCustody,
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
+
+      // This is the RACE path only — the common case is caught by the
+      // `assetsNotAvailable` pre-check, which names the offending assets and
+      // reads better. 409 rather than the ShelfError default of 500: the world
+      // moved under a valid request, which is the client's cue to refresh, not
+      // a server fault worth capturing.
+      if (statusUpdatedCount !== assetIdsToCustody.length) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset is checked out",
+          message:
+            "Some of the selected assets were checked out while this action was in progress. No custody was assigned. Please refresh and try again.",
+          additionalData: { userId, custodianId, assetIds: assetIdsToCustody },
+          label: "Assets",
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
         })),
-      });
-
-      /** Updating status of assets to IN_CUSTODY */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
       });
 
       /** Creating notes for the assets */
@@ -6038,6 +6130,7 @@ export async function bulkCheckInAssets({
   currentSearchParams,
   settings,
   timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -6057,6 +6150,12 @@ export async function bulkCheckInAssets({
    * off-by-one for non-UTC users). Defaults to "UTC".
    */
   timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required for the
+   * same reason as on `bulkCheckOutAssets` — releasing custody is reachable
+   * with the SELF_SERVICE `asset: custody` permission.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6065,6 +6164,7 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
       timeZone,
     });
 
@@ -6164,10 +6264,24 @@ export async function bulkCheckInAssets({
         },
       });
 
-      /** Updating status of assets to AVAILABLE */
+      /**
+       * Updating status of assets to AVAILABLE.
+       *
+       * `status: { not: CHECKED_OUT }` — releasing custody must never put an
+       * asset that is still out on a booking back onto the shelf. `Asset.status`
+       * is a single column, so without the guard this bulk release advertised
+       * physically-absent assets as free on every picker, index and
+       * availability sum. Precedence
+       * (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+       * `reconcileAssetStatusForBookingExit`; the booking flows own the exit
+       * from `CHECKED_OUT`.
+       */
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
+        where: {
+          id: { in: assets.map((asset) => asset.id) },
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -6267,6 +6381,9 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -6581,6 +6698,9 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -6765,6 +6885,9 @@ export async function bulkUpdateAssetModel({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
     });
 
     /** An empty `assetModelId` is the "remove from asset model" request. */
@@ -6922,6 +7045,9 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -7094,6 +7220,9 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
       timeZone,
     });
 
@@ -7284,12 +7413,36 @@ export async function relinkAssetQrCode({
   });
 }
 
+/**
+ * Payload for the two user Assets tabs (`/me/assets` and a team member's
+ * profile), which list the assets a given user holds.
+ *
+ * Takes TWO identities on purpose, because they are not the same person on
+ * every route: `/me/assets` views itself, while the profile tab views someone
+ * else. The helper injects `teamMember=<subject>` into the filter string, and
+ * that filter is narrowed against the CALLER's own custody — so collapsing the
+ * two is wrong in both directions. Omitting the viewer refuses the injected
+ * filter and renders an empty tab; passing the SUBJECT as the viewer would make
+ * the narrowing treat the requested custodian as the principal, letting any
+ * caller list any user's custody.
+ *
+ * @param args.userId - SUBJECT: whose assets to list.
+ * @param args.viewerId - CALLER: the principal the custody narrowing measures
+ *   against.
+ * @param args.canSeeAllCustody - Resolved by `requirePermission` on the calling
+ *   route. Required rather than assumed, so the profile tab (ADMIN/OWNER only,
+ *   who resolve `true`) still lists the subject's assets.
+ */
 export async function getUserAssetsTabLoaderData({
   userId,
+  viewerId,
+  canSeeAllCustody,
   request,
   organizationId,
 }: {
   userId: User["id"];
+  viewerId: User["id"];
+  canSeeAllCustody: boolean;
   request: Request;
   organizationId: Organization["id"];
 }) {
@@ -7320,6 +7473,12 @@ export async function getUserAssetsTabLoaderData({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // This route injects its OWN `teamMember` filter above, so these two must
+      // be the caller's real values. Hardcoding `false` with no `userId` (the
+      // original shape) narrowed the injected filter against an empty
+      // principal, refused it, and rendered both tabs empty for every role.
+      canSeeAllCustody,
+      userId: viewerId,
       filters: filtersSearchParams.toString(),
     });
 
@@ -7818,14 +7977,31 @@ export async function checkOutQuantity({
        * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
        * the asset as available even though it has units in custody, which
        * (e.g.) lets the kit-assign route bypass its
-       * `someUnavailableAsset` guard. Always a write because the asset
-       * status is no longer guaranteed to be `AVAILABLE` (could be a
-       * second checkout into the same asset), but the value is constant
-       * so it's a no-op in the already-`IN_CUSTODY` case.
+       * `someUnavailableAsset` guard.
+       *
+       * `CHECKED_OUT` WINS. A quantity-tracked asset can hold custody units
+       * and booking units at the same time, but `Asset.status` is a single
+       * column — so whoever writes last used to win, and assigning custody
+       * to an asset with units already out on an ONGOING booking silently
+       * erased `CHECKED_OUT`. That is not cosmetic: every reader of the
+       * "is this asset off the shelf" signal keys on this column, so the
+       * checked-out units stopped being counted and `Available` overstated
+       * free stock by exactly the booked quantity.
+       *
+       * The precedence is the one already documented on
+       * `reconcileAssetStatusForBookingExit` (`booking/service.server.ts`):
+       * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`. Constraining the UPDATE
+       * itself keeps the read-and-write atomic under the row lock rather
+       * than racing a concurrent checkout between a read and a write. The
+       * booking flows restore the correct terminal status on check-in /
+       * cancel, at which point the custody row (untouched here) takes over.
        */
-      await tx.asset.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-        where: { id: assetId },
+      await tx.asset.updateMany({
+        where: {
+          id: assetId,
+          organizationId,
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
@@ -8109,14 +8285,25 @@ export async function releaseQuantity({
        * `updateKitAssets` removal). We only flip when zero rows remain so
        * an asset that still has other operator or kit-allocated custody
        * keeps its IN_CUSTODY status.
+       *
+       * `CHECKED_OUT` WINS here too, and this direction is the more
+       * dangerous of the pair: releasing the last custody row while units
+       * are still out on an ONGOING booking would advertise the asset as
+       * `AVAILABLE` on every picker and index while it is physically gone.
+       * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
+       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
         where: { assetId },
       });
       if (remainingCustodyCount === 0) {
-        await tx.asset.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-          where: { id: assetId },
+        await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
       }

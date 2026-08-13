@@ -10,9 +10,11 @@ import type {
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
+import type { PdfSnapshotKit } from "./helpers";
 import {
   buildPdfAssetRows,
   buildPdfBookingAssetSlices,
@@ -70,6 +72,14 @@ export interface PdfDbResult {
     quantity: number;
     /** Unique `BookingAsset.id` — the rendered row's React key. */
     bookingAssetId: string;
+    /**
+     * `true` when this slice renders under a kit it is no longer a member of
+     * (detached residue kept by a non-planning booking). Resolved in
+     * {@link buildPdfAssetRows}; the renderer prints a short note in the Kit
+     * cell, the print-medium equivalent of the web overview's
+     * "Removed from kit" badge.
+     */
+    isRemovedFromKit: boolean;
     /** Cover image of the asset's model, rendered in the PDF when the asset
      * has no image of its own. See `~/modules/asset/image-resolution`. */
     assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -138,7 +148,21 @@ export async function fetchAllPdfRelatedData(
     );
     const visibleAssetIds = [...new Set(visibleBookingAssets.map((a) => a.id))];
 
-    const [rawAssets, organization] = await Promise.all([
+    /**
+     * Kits referenced by a visible slice's durable `BookingAsset.sourceKitId`.
+     * Fetched because the PDF, unlike the booking overview, has no kit query of
+     * its own — a kit only ever reaches it through `asset.assetKits`, which is
+     * exactly what a detached slice no longer has.
+     */
+    const snapshotKitIds = [
+      ...new Set(
+        visibleBookingAssets
+          .map((slice) => slice.sourceKitId)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
+
+    const [rawAssets, organization, snapshotKits] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: visibleAssetIds },
@@ -197,6 +221,21 @@ export async function fetchAllPdfRelatedData(
           updatedAt: true,
         },
       }),
+      // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
+      // organization, so this lookup is org-scoped and an id that doesn't
+      // resolve simply leaves the slice rendering as a standalone row.
+      snapshotKitIds.length > 0
+        ? db.kit.findMany({
+            where: { id: { in: snapshotKitIds }, organizationId },
+            select: {
+              id: true,
+              name: true,
+              // Kit location — `groupAndSortAssetsByKit` sorts kit groups by
+              // it, so a snapshot kit must carry it like a live one.
+              location: { select: { name: true } },
+            },
+          })
+        : Promise.resolve<PdfSnapshotKit[]>([]),
     ]);
 
     if (!organization) {
@@ -213,7 +252,12 @@ export async function fetchAllPdfRelatedData(
     // and carrying its own booked quantity + unique row key. A QT asset booked
     // standalone + via two kits produces three rows here.
     const rawAssetsById = new Map(rawAssets.map((asset) => [asset.id, asset]));
-    const assets = buildPdfAssetRows(visibleBookingAssets, rawAssetsById);
+    const snapshotKitsById = new Map(snapshotKits.map((kit) => [kit.id, kit]));
+    const assets = buildPdfAssetRows(
+      visibleBookingAssets,
+      rawAssetsById,
+      snapshotKitsById
+    );
 
     // Group by kit and sort - this keeps each kit's per-slice rows contiguous.
     const sortedAssets = groupAndSortAssetsByKit(
@@ -243,22 +287,20 @@ export async function fetchAllPdfRelatedData(
     // section. `getBooking` merges with `BOOKING_WITH_ASSETS_INCLUDE`
     // which already pulls `modelRequests` with `assetModel`, so this
     // pass-through is cheap — no extra database query required.
-    const modelRequests: PdfModelRequest[] = (
+    const modelRequests: PdfModelRequest[] = getOutstandingModelRequests(
       (booking as unknown as { modelRequests?: PdfModelRequest[] })
-        .modelRequests ?? []
-    )
-      .filter((req) => req.fulfilledAt === null)
-      .map((req) => ({
-        id: req.id,
-        assetModelId: req.assetModelId,
-        quantity: req.quantity,
-        fulfilledQuantity: req.fulfilledQuantity,
-        fulfilledAt: req.fulfilledAt,
-        assetModel: {
-          id: req.assetModel.id,
-          name: req.assetModel.name,
-        },
-      }));
+        .modelRequests
+    ).map((req) => ({
+      id: req.id,
+      assetModelId: req.assetModelId,
+      quantity: req.quantity,
+      fulfilledQuantity: req.fulfilledQuantity,
+      fulfilledAt: req.fulfilledAt,
+      assetModel: {
+        id: req.assetModel.id,
+        name: req.assetModel.name,
+      },
+    }));
 
     return {
       booking,
