@@ -652,12 +652,26 @@ export async function getAssets(params: {
         // subset and fell back on zero rows); id-shaped searches therefore now
         // return the full result set — a superset of before, the more-correct
         // answer.
-        const rows = await db.$queryRaw<AssetSearchIdRow[]>(
-          Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
-            organizationId,
-            terms: searchTerms,
-          })} AS "search_ids"`
+        // Wrapped in withPrismaRetry (operationIsRead) like the advanced
+        // index's raw query below — a raw $queryRaw bypasses the client's
+        // auto-retry extension, so a transient pool/connection blip on the
+        // id-resolution query would otherwise surface as a hard error (the
+        // SHELF-WEBAPP-227 class) instead of being retried.
+        const rows = await withPrismaRetry(
+          () =>
+            db.$queryRaw<AssetSearchIdRow[]>(
+              Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
+                organizationId,
+                terms: searchTerms,
+              })} AS "search_ids"`
+            ),
+          { operationIsRead: true }
         );
+        // Materialize the matching ids into a Prisma `id: { in }` member.
+        // Bounded by the org's asset count; an extreme org + a very broad term
+        // could push the bind-param list toward Postgres' ~65k ceiling — if
+        // that ever bites, switch to a raw fetch-by-ids (like the advanced
+        // index's inlined subquery, which never materializes the id set).
         where.OR = [{ id: { in: rows.map((row) => row.id) } }];
       }
     }
