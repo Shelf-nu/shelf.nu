@@ -6,9 +6,18 @@
  * (`getAssets`, Prisma). Historically each expressed this as a single
  * multi-table `OR`, which forced cross-org sequential scans (Category 156k
  * rows, Custody/TeamMember/User seq scans) — ~1.5s mean, 36s max on a 14k-asset
- * org. This module replaces that with an org-scoped `UNION` in which each
- * source is its own index-driven, org-scoped branch, producing the set of
- * matching asset ids. Measured ~165ms exact on the same org.
+ * org. This module replaces that with an org-scoped `UNION` of one branch per
+ * source, producing the set of matching asset ids. Eight of the ten branches
+ * are served by trigram (GIN) indexes — Asset title/description/sequentialId,
+ * Category.name, Location.name, Tag.name, Qr.id, Barcode.value, TeamMember.name.
+ * The remaining two — `User.firstName`/`lastName` and the custom-field
+ * `value #>>` JSON paths — have no trigram index and instead rely on
+ * org-scoping to bound their scan (the user-name branch is gated by
+ * `tm.organizationId` before the ILIKE; the custom-field branch is
+ * Asset-org-scoped). A GIN index on `AssetCustomFieldValue.value` is a tracked,
+ * measure-later follow-up, not an oversight. Measured ~165ms on the 14k-asset
+ * org that surfaced this — a measurement, not a guarantee for orgs with very
+ * large custom-field data.
  *
  * The advanced index inlines this as `a.id IN (<union>)`; the simple index
  * executes it via `$queryRaw` and feeds the ids into its Prisma `where`.
