@@ -1,8 +1,6 @@
-import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
-
 import type { ScanWithRelations } from "~/modules/scan/utils.server";
 
-/** Fixed timestamp so snapshots and date assertions stay deterministic. */
+/** Fixed timestamp so date assertions stay deterministic. */
 const SCAN_AT = new Date("2026-08-12T13:10:00.000Z");
 
 /**
@@ -10,10 +8,16 @@ const SCAN_AT = new Date("2026-08-12T13:10:00.000Z");
  *
  * Defaults to an anonymous companion-app scan with coordinates — the shape
  * the mobile QR resolve route writes — so callers override only what their
- * assertion is about (e.g. `userAgent`, or a `user` to test attribution).
+ * assertion is about (e.g. `userAgent`).
  *
- * @param overrides - partial scan fields, including `user` and `qr` relations
- * @returns a fully typed scan; a schema change breaks this at compile time
+ * The `user` and `qr` relations default to `null` and have no helper of their
+ * own on purpose: building them would mean either listing every required
+ * Prisma column or casting, and casting is exactly what this factory exists
+ * to avoid. A test that needs them should pass fully-typed objects, so a
+ * schema change fails the build rather than the assertion.
+ *
+ * @param overrides - partial scan fields, including the `user` and `qr` relations
+ * @returns a fully typed scan; a `Scan` schema change breaks this at compile time
  */
 export function createScanWithRelations(
   overrides: Partial<ScanWithRelations> = {}
@@ -31,44 +35,6 @@ export function createScanWithRelations(
     updatedAt: SCAN_AT,
     user: null,
     qr: null,
-    ...overrides,
-  };
-}
-
-/**
- * Builds the `user` relation for a scan, including the org memberships
- * `parseScanData` checks before naming the scanner.
- *
- * @param overrides - partial user fields; pass `userOrganizations` to control
- * whether the viewer's organization matches the QR's
- */
-export function createScanUser(
-  overrides: Partial<
-    User & { userOrganizations: UserOrganization[] | null }
-  > = {}
-): User & { userOrganizations: UserOrganization[] | null } {
-  return {
-    ...({
-      id: "user-1",
-      email: "scanner@example.com",
-      username: "scanner",
-      firstName: "Scanner",
-      lastName: "User",
-    } as User),
-    userOrganizations: null,
-    ...overrides,
-  };
-}
-
-/**
- * Builds the `qr` relation for a scan.
- *
- * @param overrides - partial QR fields; `organizationId` decides whether the
- * scanning user counts as a member for display purposes
- */
-export function createScanQr(overrides: Partial<Qr> = {}): Qr {
-  return {
-    ...({ id: "qr-1", organizationId: "org-1" } as Qr),
     ...overrides,
   };
 }
