@@ -333,6 +333,10 @@ export async function setKitCustodyAfterAssetImport({
       custodianId,
       custodianName,
       userId,
+      // CSV import, gated on `asset: import` — ADMIN/OWNER only. Doubly inert
+      // here anyway: the kit ids are explicit (never ALL_SELECTED_KEY) and no
+      // `currentSearchParams` is passed, so no custodian filter is ever built.
+      allowedTeamMemberIds: "all",
     });
   }
 }

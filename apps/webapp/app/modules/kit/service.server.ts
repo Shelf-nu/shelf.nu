@@ -18,6 +18,7 @@ import {
   ErrorCorrection,
   KitStatus,
   NoteType,
+  OrganizationRoles,
 } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";
@@ -86,6 +87,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import type { AllowedCustodianFilterIds } from "../asset/utils.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import {
   createSystemBookingNote,
@@ -2790,8 +2792,9 @@ export async function bulkDeleteKits({
       ? getKitsWhereInput({
           organizationId,
           currentSearchParams,
-          // Kit write permissions are ADMIN/OWNER-only, so the custodian
-          // filter here can never come from a restricted viewer.
+          // `kit: delete` is ADMIN/OWNER-only (SELF_SERVICE holds only
+          // `kit: [read, custody]`), so no restricted viewer can supply
+          // this filter.
           allowedTeamMemberIds: "all",
         })
       : { id: { in: kitIds }, organizationId };
@@ -2882,6 +2885,7 @@ export async function bulkAssignKitCustody({
   custodianName,
   userId,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
@@ -2889,6 +2893,15 @@ export async function bulkAssignKitCustody({
   custodianName: TeamMember["name"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  /**
+   * Custodian ids the caller may filter a "select all" by.
+   *
+   * NOT `"all"`: this is reached through `kits.bulk-actions` with
+   * `PermissionAction.custody`, which SELF_SERVICE holds. An unscoped filter
+   * turns the "some kits are not available" rejection into an oracle for
+   * "does <teamMemberId> hold any kit".
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     /**
@@ -2898,9 +2911,7 @@ export async function bulkAssignKitCustody({
       ? getKitsWhereInput({
           organizationId,
           currentSearchParams,
-          // Kit write permissions are ADMIN/OWNER-only, so the custodian
-          // filter here can never come from a restricted viewer.
-          allowedTeamMemberIds: "all",
+          allowedTeamMemberIds,
         })
       : { id: { in: kitIds }, organizationId };
 
@@ -3176,12 +3187,25 @@ export async function bulkReleaseKitCustody({
   kitIds,
   organizationId,
   userId,
+  role,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
   userId: User["id"];
+  /**
+   * Caller's role. The SELF_SERVICE "release only your own custody" rule is
+   * enforced HERE rather than in the route, because it has to run against the
+   * RESOLVED kits. The route version queried `kitCustody` with the raw
+   * `kitIds`, which is `["all-selected"]` on a select-all — zero rows matched,
+   * so the guard silently passed and every matched kit was released.
+   * Mirrors `bulkCheckInAssets`, where the guard already lives in the service.
+   */
+  role: OrganizationRoles;
   currentSearchParams?: string | null;
+  /** See the twin parameter on `bulkAssignKitCustody`. */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     /** If we are selecting all, then we have to consider filters */
@@ -3189,9 +3213,7 @@ export async function bulkReleaseKitCustody({
       ? getKitsWhereInput({
           organizationId,
           currentSearchParams,
-          // Kit write permissions are ADMIN/OWNER-only, so the custodian
-          // filter here can never come from a restricted viewer.
-          allowedTeamMemberIds: "all",
+          allowedTeamMemberIds,
         })
       : { id: { in: kitIds }, organizationId };
 
@@ -3252,6 +3274,49 @@ export async function bulkReleaseKitCustody({
         kit: { id: kit.id, name: kit.name },
       })),
     }));
+
+    /**
+     * SELF_SERVICE may release only custody they hold themselves.
+     *
+     * This runs on the RESOLVED kits, which is the whole point of it living
+     * here: the route-level version queried `kitCustody` with the raw
+     * `kitIds`, so a select-all (`["all-selected"]`) matched zero rows, the
+     * guard passed, and a self-service user could release custody on kits
+     * held by anyone — targeted precisely by pairing it with `?teamMember=`.
+     */
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const someoneElsesCustody = kits.some(
+        (kit) => kit.custody?.custodian?.userId !== userId
+      );
+
+      if (someoneElsesCustody) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self user can release custody of themselves only.",
+          additionalData: { userId, kitIds },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * Nothing matched — a refused custodian filter, or a selection that no
+     * longer exists. Reading `kits[0]` below would throw a 500 and hand the
+     * caller a binary oracle for "does this custodian hold any kit".
+     */
+    if (kits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "None of the selected kits are available to release. Please refresh and try again.",
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const custodian = kits[0].custody?.custodian;
 
@@ -4167,8 +4232,9 @@ export async function bulkUpdateKitLocation({
       ? getKitsWhereInput({
           organizationId,
           currentSearchParams,
-          // Kit write permissions are ADMIN/OWNER-only, so the custodian
-          // filter here can never come from a restricted viewer.
+          // `kit: update` is ADMIN/OWNER-only (SELF_SERVICE holds only
+          // `kit: [read, custody]`), so no restricted viewer can supply
+          // this filter.
           allowedTeamMemberIds: "all",
         })
       : { id: { in: kitIds }, organizationId };
