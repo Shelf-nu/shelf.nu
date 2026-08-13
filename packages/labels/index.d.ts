@@ -33,3 +33,32 @@ export declare const BOOKING_STATUS_LABELS: {
   readonly ARCHIVED: "Archived";
   readonly CANCELLED: "Cancelled";
 };
+
+export declare const AUDIT_STATUS_LABELS: {
+  readonly PENDING: "Pending";
+  readonly ACTIVE: "Active";
+  readonly COMPLETED: "Completed";
+  readonly CANCELLED: "Cancelled";
+  readonly ARCHIVED: "Archived";
+};
+
+export declare const AUDIT_ASSET_STATUS_LABELS: {
+  readonly PENDING: "Not scanned";
+  readonly FOUND: "Found";
+  readonly MISSING: "Missing";
+  readonly UNEXPECTED: "Unexpected";
+};
+
+export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;
+
+export type AuditAssetStatusLabel =
+  (typeof AUDIT_ASSET_STATUS_LABELS)[AuditAssetStatusKey];
+
+/**
+ * Label for a per-asset audit status. An expected asset that has not been
+ * scanned only becomes "Missing" once the audit is completed.
+ */
+export declare function auditAssetStatusLabel(
+  status: AuditAssetStatusKey,
+  isAuditCompleted: boolean
+): AuditAssetStatusLabel;

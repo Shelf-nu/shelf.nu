@@ -57,3 +57,52 @@ export const BOOKING_STATUS_LABELS = Object.freeze({
   ARCHIVED: "Archived",
   CANCELLED: "Cancelled",
 });
+
+// Audit session status enum (AuditStatus in the Prisma schema).
+export const AUDIT_STATUS_LABELS = Object.freeze({
+  PENDING: "Pending",
+  ACTIVE: "Active",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  ARCHIVED: "Archived",
+});
+
+// Per-asset audit status (AuditAssetStatus in the Prisma schema).
+//
+// PENDING is deliberately "Not scanned", not "Expected"/"Pending"/"Remaining":
+// all three were in use at once (web rows said "Expected", the web statistics
+// tile said "Missing", mobile said "Pending", the mobile scanner said
+// "Remaining") for one and the same set of assets. "Expected" was already
+// taken by the tile that counts EVERY expected asset, so the not-yet-scanned
+// subset needs a word of its own.
+//
+// MISSING is only true once the audit is completed — that is when the
+// completion flow turns unscanned rows into MISSING. Before completion, use
+// PENDING's label. `auditAssetStatusLabel` below encodes that rule; call it
+// instead of indexing this map directly.
+export const AUDIT_ASSET_STATUS_LABELS = Object.freeze({
+  PENDING: "Not scanned",
+  FOUND: "Found",
+  MISSING: "Missing",
+  UNEXPECTED: "Unexpected",
+});
+
+/**
+ * Resolves the user-facing label for an expected-but-unscanned asset.
+ *
+ * Nothing is "missing" until the audit is closed: while it is still running the
+ * asset simply has not been reached yet. Both apps must apply this rule, so it
+ * lives here next to the strings rather than in either app.
+ *
+ * @param {"PENDING"|"FOUND"|"MISSING"|"UNEXPECTED"} status
+ * @param {boolean} isAuditCompleted
+ * @returns {string}
+ */
+export function auditAssetStatusLabel(status, isAuditCompleted) {
+  if (status === "PENDING") {
+    return isAuditCompleted
+      ? AUDIT_ASSET_STATUS_LABELS.MISSING
+      : AUDIT_ASSET_STATUS_LABELS.PENDING;
+  }
+  return AUDIT_ASSET_STATUS_LABELS[status];
+}

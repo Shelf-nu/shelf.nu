@@ -25,6 +25,10 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  auditAssetStatusLabel,
+} from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -35,10 +39,10 @@ import { useReducedMotion, announce } from "@/lib/a11y";
 
 const ASSET_FILTERS = [
   { label: "All", value: "ALL" },
-  { label: "Pending", value: "PENDING" },
-  { label: "Found", value: "FOUND" },
-  { label: "Missing", value: "MISSING" },
-  { label: "Unexpected", value: "UNEXPECTED" },
+  { label: AUDIT_ASSET_STATUS_LABELS.PENDING, value: "PENDING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.FOUND, value: "FOUND" },
+  { label: AUDIT_ASSET_STATUS_LABELS.MISSING, value: "MISSING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED, value: "UNEXPECTED" },
 ] as const;
 
 type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
@@ -277,11 +281,11 @@ function AuditDetailContent() {
       scanMap.set(scan.assetId, scan);
     }
 
-    // why: an expected asset that hasn't been scanned is "Pending" while the
+    // why: an expected asset that hasn't been scanned is "Not scanned" while the
     // audit is still active (the field worker may yet find it) but becomes
     // "Missing" once the audit is completed (it's a real discrepancy). This
-    // mirrors the unified web + companion vocabulary — "Missing" is reserved
-    // for completed audits, never shown mid-scan.
+    // mirrors the unified web + companion vocabulary (@shelf/labels) — "Missing"
+    // is reserved for completed audits, never shown mid-scan.
     const notFoundStatus: AuditAssetStatus =
       audit.status === "COMPLETED" ? "MISSING" : "PENDING";
 
@@ -346,14 +350,9 @@ function AuditDetailContent() {
         text: colors.muted,
       };
 
-      const statusLabel =
-        item.status === "FOUND"
-          ? "Found"
-          : item.status === "PENDING"
-          ? "Pending"
-          : item.status === "MISSING"
-          ? "Missing"
-          : "Unexpected";
+      // Status already encodes the audit state (PENDING while active, MISSING
+      // once completed), so the label map can be read directly.
+      const statusLabel = AUDIT_ASSET_STATUS_LABELS[item.status];
 
       // why: surfacing location / category / custodian inline removes
       // the field worker's reason to navigate away from the audit. Each
@@ -662,9 +661,12 @@ function AuditDetailContent() {
                         // The leading icon keeps the brighter `primary`.
                         { color: colors.primaryText, fontWeight: "600" },
                       ]}
-                      numberOfLines={1}
+                      // why: the ownership line is the one place that states
+                      // WHO may act on an unassigned audit; truncating it to
+                      // "admins and owners c…" defeats the point.
+                      numberOfLines={2}
                     >
-                      Unassigned · anyone can scan
+                      Unassigned · admins and owners can scan
                     </Text>
                   )}
                 </View>
@@ -755,7 +757,11 @@ function AuditDetailContent() {
                     ]}
                   />
                   <Text style={styles.heroStatText}>
-                    {notFoundCount} {isCompleted ? "missing" : "pending"}
+                    {notFoundCount}{" "}
+                    {auditAssetStatusLabel(
+                      "PENDING",
+                      isCompleted
+                    ).toLowerCase()}
                   </Text>
                 </View>
                 {audit.unexpectedAssetCount > 0 ? (

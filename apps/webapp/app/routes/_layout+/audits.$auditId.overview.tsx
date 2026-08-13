@@ -1,4 +1,8 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  auditAssetStatusLabel,
+} from "@shelf/labels";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -296,6 +300,14 @@ export default function AuditOverview() {
   const expectedCount = session.expectedAssetCount || 0;
   const foundCount = session.foundAssetCount || 0;
   const missingCount = session.missingAssetCount || 0;
+  // why: `missingAssetCount` is seeded with the FULL expected count when the
+  // audit is created and only decrements as assets are found, so before the
+  // audit is completed it is the not-yet-scanned count, not a missing count.
+  // Labelling it "Missing" told users a brand-new audit was already missing
+  // every one of its assets. The asset rows have always been completion-aware
+  // (getAuditStatusLabel); this makes the tile agree with them.
+  const isAuditCompleted = session.status === AuditStatus.COMPLETED;
+  const unscannedLabel = auditAssetStatusLabel("PENDING", isAuditCompleted);
   const unexpectedCount = session.unexpectedAssetCount || 0;
 
   const filterMetadata = getAuditFilterMetadata(currentFilter);
@@ -318,19 +330,19 @@ export default function AuditOverview() {
               isActive={currentFilter === "EXPECTED"}
             />
             <StatCard
-              label="Found"
+              label={AUDIT_ASSET_STATUS_LABELS.FOUND}
               value={foundCount}
               filterType="FOUND"
               isActive={currentFilter === "FOUND"}
             />
             <StatCard
-              label="Missing"
+              label={unscannedLabel}
               value={missingCount}
               filterType="MISSING"
               isActive={currentFilter === "MISSING"}
             />
             <StatCard
-              label="Unexpected"
+              label={AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
               value={unexpectedCount}
               filterType="UNEXPECTED"
               isActive={currentFilter === "UNEXPECTED"}

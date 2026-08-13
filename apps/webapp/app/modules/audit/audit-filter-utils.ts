@@ -1,4 +1,9 @@
 import type { AuditAssetStatus } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  auditAssetStatusLabel,
+  type AuditAssetStatusLabel,
+} from "@shelf/labels";
 
 export type AuditFilterType =
   | "ALL"
@@ -67,15 +72,19 @@ export function getAuditFilterMetadata(
   return FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
 }
 
-export type AuditStatusLabel = "Expected" | "Found" | "Missing" | "Unexpected";
+/**
+ * Canonical per-asset audit status label, owned by `@shelf/labels` so the
+ * companion app renders the exact same words.
+ */
+export type AuditStatusLabel = AuditAssetStatusLabel;
 
 /**
  * Determine the audit status label for an asset based on its audit data.
  * Used to display status badges in the "ALL" filter view.
  *
  * The label changes based on audit completion state:
- * - Active/Pending audit: Expected assets show "Expected" or "Found"
- * - Completed audit: Expected assets that weren't scanned show "Missing" instead of "Expected"
+ * - Active/Pending audit: expected assets show "Not scanned" or "Found"
+ * - Completed audit: expected assets that weren't scanned show "Missing"
  *
  * @param auditData - The asset's audit status data
  * @param isAuditCompleted - Whether the audit has been completed (default: false)
@@ -84,30 +93,30 @@ export function getAuditStatusLabel(
   auditData: { expected: boolean; auditStatus: AuditAssetStatus } | null,
   isAuditCompleted: boolean = false
 ): AuditStatusLabel {
-  if (!auditData) return isAuditCompleted ? "Missing" : "Expected";
+  if (!auditData) return auditAssetStatusLabel("PENDING", isAuditCompleted);
 
   // Found: Expected asset that was scanned
   if (auditData.expected && auditData.auditStatus === "FOUND") {
-    return "Found";
+    return AUDIT_ASSET_STATUS_LABELS.FOUND;
   }
 
   // Missing: Expected asset that wasn't scanned (always shows as Missing)
   if (auditData.expected && auditData.auditStatus === "MISSING") {
-    return "Missing";
+    return AUDIT_ASSET_STATUS_LABELS.MISSING;
   }
 
   // Unexpected: Asset that was scanned but not expected
   if (!auditData.expected && auditData.auditStatus === "UNEXPECTED") {
-    return "Unexpected";
+    return AUDIT_ASSET_STATUS_LABELS.UNEXPECTED;
   }
 
   // Expected assets with PENDING status:
   // - On completed audit: Show as "Missing" (they weren't scanned)
   // - On active/pending audit: Show as "Expected" (still waiting to be scanned)
   if (auditData.expected && auditData.auditStatus === "PENDING") {
-    return isAuditCompleted ? "Missing" : "Expected";
+    return auditAssetStatusLabel("PENDING", isAuditCompleted);
   }
 
   // Default fallback
-  return isAuditCompleted ? "Missing" : "Expected";
+  return auditAssetStatusLabel("PENDING", isAuditCompleted);
 }

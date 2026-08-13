@@ -1,5 +1,6 @@
 import type { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
+import { AUDIT_ASSET_STATUS_LABELS } from "@shelf/labels";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
@@ -173,7 +174,15 @@ export default function AuditsIndexPage() {
               <Th>Completed</Th>
               <Th className="text-right">Expected</Th>
               <Th className="text-right">Found</Th>
-              <Th className="text-right">Missing</Th>
+              {/* why: this column spans audits in every state, so it cannot be
+                  completion-aware per row. "Not scanned" is true in both states
+                  (a missing asset is one that was never scanned); "Missing" was
+                  not — it claimed a brand-new audit had already lost its assets,
+                  because missingAssetCount is seeded with the full expected
+                  count at creation. */}
+              <Th className="text-right">
+                {AUDIT_ASSET_STATUS_LABELS.PENDING}
+              </Th>
               <Th className="text-right">Unexpected</Th>
             </>
           }

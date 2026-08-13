@@ -1,3 +1,4 @@
+import { AUDIT_ASSET_STATUS_LABELS } from "@shelf/labels";
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { createStyles } from "@/lib/create-styles";
@@ -51,7 +52,7 @@ export function SegmentedControl({
         activeOpacity={0.7}
         accessibilityRole="tab"
         accessibilityState={{ selected: activeTab === "remaining" }}
-        accessibilityLabel={`Remaining ${remainingCount}`}
+        accessibilityLabel={`${AUDIT_ASSET_STATUS_LABELS.PENDING} ${remainingCount}`}
       >
         <Text
           style={[
@@ -59,7 +60,7 @@ export function SegmentedControl({
             activeTab === "remaining" && styles.segmentedOptionTextActive,
           ]}
         >
-          Remaining ({remainingCount})
+          {AUDIT_ASSET_STATUS_LABELS.PENDING} ({remainingCount})
         </Text>
       </TouchableOpacity>
     </View>

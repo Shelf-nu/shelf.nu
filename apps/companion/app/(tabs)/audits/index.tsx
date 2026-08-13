@@ -70,7 +70,7 @@ function AuditsListContent() {
   // landing on an empty "nothing assigned to you" screen — when in fact
   // there were active, unassigned audits anyone could pick up. The list
   // is server-sorted by due date (most urgent first) and every card now
-  // states its ownership ("Unassigned · anyone can scan" / "Assigned to
+  // states its ownership ("Unassigned · admins and owners can scan" / "Assigned to
   // you" / "N assigned"), so the urgency-first flat list is legible
   // without forcing a scope filter. Admins can still narrow to their own
   // work with the toggle below. BASE/SELF_SERVICE are server-scoped to
@@ -307,7 +307,7 @@ function AuditsListContent() {
           ? "due soon"
           : null,
         ownership === "open"
-          ? "unassigned, anyone can scan"
+          ? "unassigned, admins and owners can scan"
           : ownership === "mine"
           ? "assigned to you"
           : null,
@@ -434,7 +434,7 @@ function AuditsListContent() {
                 ]}
               >
                 {ownership === "open"
-                  ? "Unassigned · anyone can scan"
+                  ? "Unassigned · admins and owners can scan"
                   : ownership === "mine"
                   ? item.assigneeCount === 1
                     ? "Assigned to you"
