@@ -177,7 +177,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -438,7 +437,7 @@ export default function AuditOverview() {
                           iconClassName="size-4"
                           content={
                             <p className="text-sm text-gray-600">
-                              Any user with access can perform this audit
+                              Workspace admins and owners can perform this audit
                               because it has no specific assignee.
                             </p>
                           }

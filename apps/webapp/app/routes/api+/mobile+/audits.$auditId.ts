@@ -116,7 +116,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),
-      canScan: session.status === "PENDING" || session.status === "ACTIVE",
+      // why: same eligibility as record-scan's server-side gate, so the app
+      // never offers a scanner whose submissions are guaranteed to 403
+      canScan:
+        (session.status === "PENDING" || session.status === "ACTIVE") &&
+        (isAssignee || !isSelfServiceOrBase),
       canComplete: canCompleteAudit,
     });
   } catch (cause) {

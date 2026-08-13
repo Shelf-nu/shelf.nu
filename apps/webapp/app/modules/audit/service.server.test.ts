@@ -2168,14 +2168,9 @@ describe("audit service", () => {
       userId: "user-1",
     };
 
-    /** Minimal session shape for the assignee check via getAuditSessionDetails */
+    /** Slim shape returned by requireAuditAssignee's assignment lookup */
     function mockSessionWithAssignments(assignments: { userId: string }[]) {
-      mockDb.auditSession.findFirst.mockResolvedValue({
-        id: "session-1",
-        organizationId: "org-1",
-        assignments,
-        assets: [],
-      });
+      mockDb.auditSession.findFirst.mockResolvedValue({ assignments });
     }
 
     beforeEach(() => {
@@ -2207,6 +2202,14 @@ describe("audit service", () => {
       await expect(
         requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
       ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it("returns 404 for a BASE/SELF_SERVICE user when the session is not in the org", async () => {
+      mockDb.auditSession.findFirst.mockResolvedValue(null);
+
+      await expect(
+        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 });

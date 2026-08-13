@@ -108,7 +108,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
       canUseBarcodes: true,
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (requireAuditAssignee as any).mockResolvedValue(undefined);
+    vi.mocked(requireAuditAssignee).mockResolvedValue(undefined);
   });
 
   it("should record a scan and return scan data with counts", async () => {
@@ -160,11 +160,13 @@ describe("POST /api/mobile/audits/record-scan", () => {
       canUseAudits: true,
       canUseBarcodes: true,
     });
-    const assigneeError = new Error(
-      "Only users assigned to this audit can perform this action. Please contact the audit creator to be assigned."
+    const assigneeError = Object.assign(
+      new Error(
+        "Only users assigned to this audit can perform this action. Please contact the audit creator to be assigned."
+      ),
+      { status: 403 }
     );
-    (assigneeError as any).status = 403;
-    (requireAuditAssignee as any).mockRejectedValue(assigneeError);
+    vi.mocked(requireAuditAssignee).mockRejectedValue(assigneeError);
     (makeShelfError as any).mockReturnValue({
       message: assigneeError.message,
       status: 403,

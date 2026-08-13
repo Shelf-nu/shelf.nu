@@ -123,7 +123,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId,
-      request,
       isSelfServiceOrBase,
     });
 
@@ -305,16 +304,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/audits/${auditId}/overview`);
     }
 
-    // Permission logic for scan access:
-    // - If audit has assignees: only assignees can scan
-    // - If audit has NO assignees: admins/owners can scan, BASE/SELF_SERVICE cannot
-    const hasNoAssignees = session.assignments.length === 0;
-    const shouldForceAssigneeCheck = isSelfServiceOrBase || !hasNoAssignees;
-
+    // Scan access: ADMIN/OWNER can scan any audit,
+    // BASE/SELF_SERVICE only when assigned.
     requireAuditAssigneeForBaseSelfService({
       audit: session,
       userId,
-      isSelfServiceOrBase: shouldForceAssigneeCheck,
+      isSelfServiceOrBase,
       auditId,
     });
 

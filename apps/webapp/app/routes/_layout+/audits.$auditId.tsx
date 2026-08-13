@@ -131,7 +131,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -363,9 +362,9 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // Allow admin/owner to scan/complete if audit has no assignees
-  const hasNoAssignees = session.assignments.length === 0;
-  const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
+  // ADMIN/OWNER can scan/complete any audit;
+  // BASE/SELF_SERVICE only when assigned
+  const canScanAndComplete = isAssignee || isAdminOrOwner;
 
   // The activity loader requires `auditNote:read` and 403s without it, so the
   // tab follows the same gate rather than routing the user into an error.

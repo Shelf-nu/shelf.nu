@@ -2054,13 +2054,11 @@ export async function requireAuditAssignee({
   auditSessionId,
   organizationId,
   userId,
-  request,
   isSelfServiceOrBase = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  request?: Request;
   /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
   isSelfServiceOrBase?: boolean;
 }): Promise<void> {
@@ -2072,12 +2070,34 @@ export async function requireAuditAssignee({
     return;
   }
 
-  const { session } = await getAuditSessionDetails({
-    id: auditSessionId,
-    organizationId,
-    userOrganizations: [],
-    request,
-  });
+  // why: this guard runs on the per-scan hot path, so it fetches only the
+  // assignment user ids — not the full session details with every expected
+  // asset (that would make an N-asset audit O(N²) in transferred data).
+  let session: { assignments: { userId: string }[] } | null;
+  try {
+    session = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { assignments: { select: { userId: true } } },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while validating audit access. Please try again or contact support.",
+      additionalData: { auditSessionId, organizationId },
+      label,
+    });
+  }
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit session not found",
+      additionalData: { auditSessionId, organizationId },
+      status: 404,
+      label,
+    });
+  }
 
   const isAssignee = session.assignments.some(
     (assignment) => assignment.userId === userId
