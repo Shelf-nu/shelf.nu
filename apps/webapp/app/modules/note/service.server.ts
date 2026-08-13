@@ -58,6 +58,9 @@ export type NotesTxClient = OrgValidationTxClient & {
     createMany: (args: {
       data: Prisma.NoteUncheckedCreateInput[];
     }) => Promise<{ count: number }>;
+    // why: `createNote` (singular) writes through nested `connect`, so it needs
+    // `NoteCreateInput` rather than the unchecked shape `createMany` takes.
+    create: (args: { data: Prisma.NoteCreateInput }) => Promise<Note>;
   };
 };
 
@@ -71,22 +74,31 @@ export type TagSummary = Pick<Tag, "id" | "name">;
  * where a caller supplies an asset ID from another tenant.
  *
  * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional transaction client. When the note must commit or roll
+ *   back together with the mutation it describes — e.g. the QR relink, where a
+ *   note for a link that lost a race would falsify the audit trail — pass it so
+ *   the org guard and the note write join that transaction.
  * @throws {ShelfError} 400 if the asset is not in `organizationId`
  */
-export async function createNote({
-  content,
-  type,
-  userId,
-  assetId,
-  organizationId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetId: Asset["id"];
-  organizationId: string;
-}) {
+export async function createNote(
+  {
+    content,
+    type,
+    userId,
+    assetId,
+    organizationId,
+  }: Pick<Note, "content"> & {
+    type?: Note["type"];
+    userId: User["id"];
+    assetId: Asset["id"];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
   try {
-    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+    const client = tx ?? db;
+
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }, tx);
 
     const data = {
       content,
@@ -103,7 +115,7 @@ export async function createNote({
       },
     };
 
-    return await db.note.create({
+    return await client.note.create({
       data,
     });
   } catch (cause) {

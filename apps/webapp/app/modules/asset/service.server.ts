@@ -7278,6 +7278,30 @@ export async function relinkAssetQrCode({
     }),
   ]);
 
+  /**
+   * why: `asset` is scoped to the caller's org, so null means "missing or not
+   * yours". Without this the null falls through to `tx.asset.update` and
+   * surfaces as a generic "The requested resource could not be found." from
+   * makeShelfError's P2025 branch, which tells the user nothing.
+   *
+   * `status: 404` is explicit and load-bearing: `cause: null` is not a P2025,
+   * so the ShelfError constructor would otherwise resolve this to 500 (see
+   * `status || 500` in utils/error.ts). The `relinkKitQrCode` sibling omits it
+   * and returns 500 for exactly this reason — fixed there in the same commit.
+   */
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      title: "Asset not found.",
+      message:
+        "The asset you are trying to link this code to does not exist in your workspace. Please reload and try again.",
+      additionalData: { assetId, organizationId, qrId },
+      label: "QR",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
   /** User cannot link qr code of other organization */
   if (qr.organizationId && qr.organizationId !== organizationId) {
     throw new ShelfError({
@@ -7297,6 +7321,7 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -7308,19 +7333,58 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
 
-  const oldQrCode = asset?.qrCodes[0];
+  const oldQrCode = asset.qrCodes[0];
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    db.asset.update({
+  /**
+   * why: the guards above read `qr` once and then act on it, so they are
+   * check-then-act. Two callers can pass them concurrently for the same code —
+   * including two ADMINs in DIFFERENT orgs racing on the same UNCLAIMED label,
+   * since a null `organizationId` satisfies the org guard for everyone.
+   *
+   * The QR write therefore re-asserts the exact state the guards observed. A
+   * competing writer that changed it makes this update match zero rows (P2025)
+   * and that caller loses, mirroring `claimQrCode`'s atomic claim. Running it
+   * first, inside a transaction, is what stops a loser from still clearing the
+   * asset's existing code (`set: []`) or writing a "changed QR code" note for a
+   * link that never persisted.
+   */
+  await db.$transaction(async (tx) => {
+    try {
+      await tx.qr.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the guards above reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId. The WHERE additionally pins that observed state so a concurrent claim cannot interleave.
+        where: {
+          id: qr.id,
+          organizationId: qr.organizationId,
+          kitId: null,
+          assetId: qr.assetId,
+        },
+        data: { organizationId, userId },
+      });
+    } catch (updateCause) {
+      if (isNotFoundError(updateCause)) {
+        throw new ShelfError({
+          // why: cause deliberately null — makeShelfError collapses any P2025
+          // anywhere in the cause chain to a 404, which would misreport this
+          // lost race as not-found.
+          cause: null,
+          title: "QR already linked.",
+          message:
+            "This QR code was claimed or linked by someone else while you were linking it. Refresh and try again.",
+          additionalData: { qrId, assetId, organizationId },
+          label: "QR",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+      throw updateCause;
+    }
+
+    await tx.asset.update({
       where: { id: assetId, organizationId },
       data: {
         qrCodes: {
@@ -7328,21 +7392,25 @@ export async function relinkAssetQrCode({
           connect: { id: qr.id },
         },
       },
-    }),
-    createNote({
-      assetId,
-      userId,
-      organizationId,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      })} changed QR code ${
-        oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**.`,
-    }),
-  ]);
+    });
+
+    await createNote(
+      {
+        assetId,
+        userId,
+        organizationId,
+        type: "UPDATE",
+        content: `${wrapUserLinkForNote({
+          id: userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        })} changed QR code ${
+          oldQrCode ? `from **${oldQrCode.id}**` : ""
+        } to **${qrId}**.`,
+      },
+      tx
+    );
+  });
 }
 
 /**

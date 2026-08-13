@@ -3570,18 +3570,38 @@ export async function createKitsIfNotExists({
   }
 }
 
-export async function updateKitQrCode({
-  kitId,
-  newQrId,
-  organizationId,
-}: {
-  organizationId: string;
-  kitId: string;
-  newQrId: string;
-}) {
+/**
+ * Minimal Prisma surface `updateKitQrCode` needs when run inside a
+ * transaction. Typed structurally because the extended transaction client is
+ * not directly assignable to the generated `Prisma.TransactionClient` (same
+ * approach as `NotesTxClient` / `OrgValidationTxClient`).
+ */
+export type KitQrCodeTxClient = {
+  kit: {
+    update: (args: {
+      where: { id: string; organizationId: string };
+      data: { qrCodes: { set?: { id: string }[]; connect?: { id: string } } };
+    }) => Promise<Kit>;
+  };
+};
+
+export async function updateKitQrCode(
+  {
+    kitId,
+    newQrId,
+    organizationId,
+  }: {
+    organizationId: string;
+    kitId: string;
+    newQrId: string;
+  },
+  tx?: KitQrCodeTxClient
+) {
   try {
+    const client = tx ?? db;
+
     // Disconnect all existing QR codes
-    await db.kit
+    await client.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -3600,7 +3620,7 @@ export async function updateKitQrCode({
       });
 
     // Connect the new QR code
-    return await db.kit
+    return await client.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -3656,6 +3676,10 @@ export async function relinkKitQrCode({
       message: "Kit not found.",
       label,
       additionalData: { kitId, organizationId, qrId },
+      // why: without an explicit status this resolves to 500 — `cause: null` is
+      // not a P2025, so the ShelfError constructor falls through to
+      // `status || 500`. A missing/cross-org kit is a 404, not a server fault.
+      status: 404,
       shouldBeCaptured: false,
     });
   }
@@ -3678,6 +3702,7 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -3689,24 +3714,59 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
 
   const oldQrCode = kit.qrCodes[0];
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: qr.organizationId checked against caller's organizationId above (guard at the `qr.organizationId && qr.organizationId !== organizationId` throw); null-org QR is a claimable code being assigned here
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    updateKitQrCode({
-      kitId,
-      newQrId: qr.id,
-      organizationId,
-    }),
-  ]);
+  /**
+   * why: mirrors `relinkAssetQrCode` — the guards above are check-then-act, so
+   * the QR write re-asserts the state they observed and a concurrent writer
+   * makes it match zero rows (P2025). Running it first, inside a transaction,
+   * stops a loser from still disconnecting the kit's existing code.
+   */
+  await db.$transaction(async (tx) => {
+    try {
+      await tx.qr.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: qr.organizationId checked against caller's organizationId above (guard at the `qr.organizationId && qr.organizationId !== organizationId` throw); null-org QR is a claimable code being assigned here. The WHERE additionally pins that observed state so a concurrent claim cannot interleave.
+        where: {
+          id: qr.id,
+          organizationId: qr.organizationId,
+          assetId: null,
+          kitId: qr.kitId,
+        },
+        data: { organizationId, userId },
+      });
+    } catch (updateCause) {
+      if (isNotFoundError(updateCause)) {
+        throw new ShelfError({
+          // why: cause deliberately null — makeShelfError collapses any P2025
+          // anywhere in the cause chain to a 404, which would misreport this
+          // lost race as not-found.
+          cause: null,
+          title: "QR already linked.",
+          message:
+            "This QR code was claimed or linked by someone else while you were linking it. Refresh and try again.",
+          additionalData: { qrId, kitId, organizationId },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+      throw updateCause;
+    }
+
+    await updateKitQrCode(
+      {
+        kitId,
+        newQrId: qr.id,
+        organizationId,
+      },
+      tx
+    );
+  });
 
   return {
     oldQrCodeId: oldQrCode?.id,
