@@ -5369,4 +5369,23 @@ describe("updateKitAssets - kit-booking propagation scope", () => {
       }),
     ]);
   });
+
+  it("writes the propagated rows and their events on one transaction client", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // A propagated row that commits without its event is unrecoverable, not
+    // merely untidy: the membership transaction has already persisted the
+    // AssetKit row, so a retried call computes `newlyAddedAssets` as empty,
+    // skips propagation entirely and never re-emits the event. Passing the
+    // transaction client to `recordEvents` is what makes the row and its
+    // audit trail commit or roll back together.
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "BOOKING_ASSETS_ADDED" }),
+      ]),
+      expect.anything()
+    );
+  });
 });

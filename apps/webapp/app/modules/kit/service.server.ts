@@ -5837,47 +5837,6 @@ export async function updateKitAssets({
           : [];
       const akByAssetId = new Map(newAssetKits.map((ak) => [ak.assetId, ak]));
 
-      await Promise.all(
-        bookingsToUpdate.flatMap((booking) => {
-          const ops = [];
-          if (newlyAddedAssets.length > 0) {
-            ops.push(
-              db.bookingAsset.createMany({
-                data: newlyAddedAssets.map((a) => {
-                  const ak = akByAssetId.get(a.id);
-                  return {
-                    bookingId: booking.id,
-                    assetId: a.id,
-                    quantity: ak?.quantity ?? 1,
-                    assetKitId: ak?.id ?? null,
-                    // Mirror the assetKitId branch exactly: a row that falls
-                    // back to standalone has no kit provenance either. Writing
-                    // one without the other breaks the
-                    // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
-                    sourceKitId: ak ? kit.id : null,
-                  };
-                }),
-                skipDuplicates: true,
-              })
-            );
-          }
-          // why: removing an asset from a kit no longer deletes its
-          // BookingAsset rows from active bookings. The DB-level
-          // `BookingAsset.assetKitId` FK fires `ON DELETE SET NULL` when
-          // the AssetKit row is dropped (the actual delete happens in
-          // the outer tx above), converting the kit-driven booking slice
-          // into a standalone reservation. A per-booking system note
-          // emitted by `emitAssetKitDetachmentNotes` explains the
-          // conversion to the user. Deleting the row here would undo
-          // the SET NULL and silently shrink the booking — the opposite
-          // of the documented behaviour.
-          //
-          // Asset-bulk-remove (asset-side flow) is unaffected; it still
-          // goes through `removeAssets` which deletes the rows explicitly.
-          return ops;
-        })
-      );
-
       /**
        * Reporting events for the rows just propagated above.
        *
@@ -5905,9 +5864,6 @@ export async function updateKitAssets({
        * The `ak`-less fallback writes a standalone row that MAY be skipped
        * against an existing one, and claiming an add that did not happen would
        * make the trail lie.
-       *
-       * Emitted outside the transaction because the inserts above are too —
-       * they run on `db`, after the membership tx has committed.
        */
       const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
         newlyAddedAssets.flatMap((asset) => {
@@ -5929,9 +5885,75 @@ export async function updateKitAssets({
         })
       );
 
-      if (propagatedEvents.length > 0) {
-        await recordEvents(propagatedEvents);
+      /**
+       * Propagated rows and their events commit together.
+       *
+       * A row that lands without its event is not merely untidy, it is
+       * unrecoverable: the membership transaction above has already persisted
+       * the `AssetKit` rows, so a retried call recomputes `newlyAddedAssets` as
+       * empty (it diffs the submitted ids against the kit's CURRENT members),
+       * skips this block entirely, and never re-emits the event. The booking
+       * would keep an asset whose arrival nothing recorded — the exact
+       * untraceability these events exist to prevent.
+       *
+       * A NEW narrow transaction rather than the membership one above: that tx
+       * already carries the detachment-impact fetch, collision merge, placement
+       * preservation, location cascade and a `consumptionLog.groupBy`, and has
+       * produced P2028 on large operations. Reads stay outside it (the
+       * `assetKit.findMany` above, and the event array is pure computation) so
+       * it holds writes only.
+       *
+       * Sequential, not `Promise.all`: an interactive transaction runs on a
+       * single connection, so concurrent queries on one `tx` client are unsafe.
+       * `bookingsToUpdate` is the set of bookings holding this kit — small.
+       *
+       * Residual, deliberately accepted: the membership tx has already
+       * committed, so a failure here still surfaces an error over a partly
+       * applied operation. This guarantees only that the propagated rows and
+       * their audit trail live or die together.
+       */
+      if (newlyAddedAssets.length > 0) {
+        await db.$transaction(async (tx) => {
+          for (const booking of bookingsToUpdate) {
+            await tx.bookingAsset.createMany({
+              data: newlyAddedAssets.map((a) => {
+                const ak = akByAssetId.get(a.id);
+                return {
+                  bookingId: booking.id,
+                  assetId: a.id,
+                  quantity: ak?.quantity ?? 1,
+                  assetKitId: ak?.id ?? null,
+                  // Mirror the assetKitId branch exactly: a row that falls
+                  // back to standalone has no kit provenance either. Writing
+                  // one without the other breaks the
+                  // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
+                  sourceKitId: ak ? kit.id : null,
+                };
+              }),
+              skipDuplicates: true,
+            });
+          }
+
+          if (propagatedEvents.length > 0) {
+            await recordEvents(propagatedEvents, tx);
+          }
+        });
       }
+
+      // why: there is deliberately no delete counterpart here. Removing an
+      // asset from a kit does not delete its BookingAsset rows from ACTIVE
+      // bookings — the DB-level `BookingAsset.assetKitId` FK fires
+      // `ON DELETE SET NULL` when the AssetKit row is dropped (the actual
+      // delete happens in the membership tx above), converting the kit-driven
+      // slice into a standalone reservation, and
+      // `emitAssetKitDetachmentNotes` writes a per-booking system note
+      // explaining the conversion. Deleting the row here would undo that SET
+      // NULL and silently shrink the booking. Planning-status bookings are the
+      // exception and are handled by `removeKitSlicesFromPlanningBookings`,
+      // inside that same tx.
+      //
+      // Asset-bulk-remove (asset-side flow) is unaffected; it still goes
+      // through `removeAssets`, which deletes the rows explicitly.
     }
 
     /**
