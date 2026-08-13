@@ -42,6 +42,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -98,14 +99,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, role } = await requirePermission(
-      {
+    const { organizationId, userOrganizations, role, canSeeAllCustody } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.read,
-      }
-    );
+      });
 
     const asset = await getAsset({
       id,
@@ -244,7 +244,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           request,
           userId,
-          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          // The rule, not a role check: `isSelfService` was false for BASE, so
+          // the seed shipped the whole roster — with every user's email and
+          // Stripe id — to a role that cannot assign custody at all.
+          role,
+          canSeeAllCustody,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
@@ -252,8 +256,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
+    /**
+     * `custody: { include: { custodian: true } }` selects the whole TeamMember
+     * row, and this route is gated on `asset: read` — held by BASE and
+     * SELF_SERVICE. Redacting the list payloads is not enough on its own: the
+     * ids are in the list, so iterating the detail pages recovers exactly the
+     * identities the index just removed.
+     */
+    const [redactedAsset] = redactCustodianForViewer(
+      [assetWithEffectiveBookingAssets],
+      { canSeeAllCustody, userId }
+    );
+
     return payload({
-      asset: assetWithEffectiveBookingAssets,
+      asset: redactedAsset,
       header,
       teamMembers,
       totalTeamMembers,

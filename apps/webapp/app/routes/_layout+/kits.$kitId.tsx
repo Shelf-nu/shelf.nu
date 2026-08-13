@@ -55,6 +55,7 @@ import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -96,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -197,7 +199,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return payload({
-      kit,
+      // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
+      // `email`, and this route is gated on `kit: read` — held by BASE and
+      // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
+      // applies here (assets carry an array).
+      kit: redactCustodianForViewer([kit], { canSeeAllCustody, userId })[0],
       currentBooking,
       header,
       modelName,
