@@ -1304,37 +1304,47 @@ export async function recordAuditScan(
     // Record the scan in a transaction
     const result = await db.$transaction(
       async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it
+        // If this is the first scan and audit is still PENDING, activate it.
+        // `startedAt` is only stamped the FIRST time: an audit that returns to
+        // PENDING and is scanned again must keep the moment it actually began,
+        // otherwise the audit's own history moves. Seen in production data as
+        // three "started the audit" entries on one audit, with both the web and
+        // the companion "Started" field showing only the latest.
+        const isFirstStart = session.startedAt === null;
         if (session.status === AuditStatus.PENDING) {
           await tx.auditSession.update({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
             where: { id: auditSessionId },
             data: {
               status: AuditStatus.ACTIVE,
-              startedAt: new Date(),
+              ...(isFirstStart ? { startedAt: new Date() } : {}),
             },
           });
 
-          // Create automatic note for audit being started
-          await createAuditStartedNote({
-            auditSessionId,
-            userId,
-            tx,
-            prefetchedUser: scannerUser,
-          });
-
-          // Activity event — AUDIT_STARTED.
-          await recordEvent(
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "AUDIT_STARTED",
-              entityType: "AUDIT",
-              entityId: auditSessionId,
+          // Create automatic note for audit being started — only on the real
+          // first start, so the activity feed cannot claim one audit began
+          // several times.
+          if (isFirstStart) {
+            await createAuditStartedNote({
               auditSessionId,
-            },
-            tx
-          );
+              userId,
+              tx,
+              prefetchedUser: scannerUser,
+            });
+
+            // Activity event — AUDIT_STARTED.
+            await recordEvent(
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "AUDIT_STARTED",
+                entityType: "AUDIT",
+                entityId: auditSessionId,
+                auditSessionId,
+              },
+              tx
+            );
+          }
         }
 
         // Create the scan record

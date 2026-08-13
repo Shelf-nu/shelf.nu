@@ -177,6 +177,8 @@ export type AssetQuantityBreakdown = {
 export type AssetDetail = {
   id: string;
   title: string;
+  /** Workspace-scoped human ID ("SAM-0017"); what the scanner accepts as a SAM ID. */
+  sequentialId: string | null;
   description: string | null;
   status: string;
   mainImage: string | null;
@@ -187,6 +189,8 @@ export type AssetDetail = {
   updatedAt: string;
   organizationId: string;
   category: { id: string; name: string; color: string } | null;
+  /** Identity only — cover images arrive pre-resolved in mainImage/thumbnailImage. */
+  assetModel: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
   custody: {
     createdAt: string;

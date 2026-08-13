@@ -12,7 +12,6 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
-import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
@@ -55,8 +54,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         description: true,
         status: true,
         mainImage: true,
-        // Model cover image; the shaper resolves the cascade
-        ...ASSET_MODEL_IMAGE_SELECT,
+        // The web asset overview shows "Asset ID SAM-0017"; the companion
+        // scanner even invites you to type a SAM ID ("Enter QR, barcode, or
+        // SAM ID"), but no mobile screen could show you one because this
+        // payload never carried it.
+        sequentialId: true,
+        // Superset of ASSET_MODEL_IMAGE_SELECT: the shaper resolves the cover
+        // image cascade from image/thumbnailImage, and the detail screen shows
+        // the model NAME, which web has always shown and mobile never did.
+        assetModel: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            thumbnailImage: true,
+          },
+        },
         mainImageExpiration: true,
         thumbnailImage: true,
         availableToBook: true,
@@ -250,10 +263,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: _,
       assetLocations: __,
       assetKits: ___,
-      // Dropped from the response: the helper already resolved the cascade
-      // into flat image fields, and shipping the nested relation alongside
-      // them would give the client two sources of truth for one decision.
-      assetModel: ____,
+      // The image fields are dropped here on purpose — the helper already
+      // resolved the cover-image cascade into flat fields, and shipping the
+      // nested relation alongside them would give the client two sources of
+      // truth for one decision. The model's identity is re-attached below as
+      // `assetModel` so the detail screen can show it, the way web does.
+      assetModel: detailAssetModel,
       custody: detailCustody,
       category: detailCategory,
       ...assetData
@@ -264,6 +279,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's QuantityCustodyList filter + hidden-count
     // (quantity-custody-list.tsx:121-126).
+    const assetModel = detailAssetModel
+      ? { id: detailAssetModel.id, name: detailAssetModel.name }
+      : null;
+
     const { custodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
@@ -301,6 +320,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,
+        // Identity only (no image fields — see the destructure above).
+        assetModel,
         // why: re-attach the detail-shape custody (with createdAt +
         // custodian.user) — the helper's narrower shape drops both.
         // Nulled when the caller lacks custody-view permission (see above).

@@ -642,6 +642,23 @@ export default function AssetDetailScreen() {
                 )}
               />
             )}
+            {asset.assetModel?.name ? (
+              <InfoRow
+                icon="cube-outline"
+                label="Asset Model"
+                value={asset.assetModel.name}
+              />
+            ) : null}
+            {asset.sequentialId ? (
+              // why: the scanner's manual entry accepts a SAM ID, so the app
+              // has to be able to tell you what an asset's SAM ID is. Web has
+              // always shown it as "Asset ID".
+              <InfoRow
+                icon="pricetag-outline"
+                label="Asset ID"
+                value={asset.sequentialId}
+              />
+            ) : null}
             <InfoRow
               icon="calendar-outline"
               label="Created"

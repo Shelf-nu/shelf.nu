@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { sendAuditCancelledEmails } from "./email-helpers";
+import { createAuditStartedNote } from "./helpers.server";
 import {
   createAuditSession,
   addAssetsToAudit,
@@ -29,6 +30,7 @@ vi.mock("~/utils/storage.server", () => ({
 // why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
 vi.mock("./helpers.server", () => ({
   createAuditCreationNote: vi.fn(),
+  createAuditStartedNote: vi.fn(),
   createAssetScanNote: vi.fn(),
   createAssetsAddedToAuditNote: vi.fn(),
   createAssetRemovedFromAuditNote: vi.fn(),
@@ -2157,6 +2159,79 @@ describe("audit service", () => {
         status: 404,
         shouldBeCaptured: false,
       });
+    });
+  });
+
+  describe("recordAuditScan start stamping", () => {
+    const scanInput = {
+      auditSessionId: "audit-1",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      isExpected: true,
+      userId: "user-1",
+      organizationId: "org-1",
+    };
+
+    /** A PENDING session whose startedAt is whatever the test needs. */
+    function mockPendingSession(startedAt: Date | null) {
+      mockDb.auditSession.findFirst.mockResolvedValue({
+        id: "audit-1",
+        organizationId: "org-1",
+        status: AuditStatus.PENDING,
+        startedAt,
+        foundAssetCount: 0,
+        unexpectedAssetCount: 0,
+        missingAssetCount: 0,
+      });
+      mockDb.auditScan.findFirst.mockResolvedValue(null);
+      mockDb.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "Scan",
+        lastName: "User",
+        displayName: "Scan User",
+      });
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Camera",
+        organizationId: "org-1",
+      });
+      mockDb.auditScan.create.mockResolvedValue({ id: "scan-1" });
+      mockDb.auditAsset.findUnique.mockResolvedValue({ id: "audit-asset-1" });
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
+    });
+
+    it("stamps startedAt on the genuine first start", async () => {
+      mockPendingSession(null);
+
+      await recordAuditScan(scanInput).catch(() => {});
+
+      const update = mockDb.auditSession.update.mock.calls.find(
+        (c: any) => c[0]?.data?.status === AuditStatus.ACTIVE
+      );
+      expect(update).toBeDefined();
+      expect(update?.[0].data.startedAt).toBeInstanceOf(Date);
+      expect(createAuditStartedNote).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the original startedAt when a started audit is scanned again", async () => {
+      // why: production data showed one audit with three "started the audit"
+      // entries, its Started field moving to the latest each time. The moment
+      // an audit actually began must not be rewritten.
+      const original = new Date("2026-06-15T09:19:00.000Z");
+      mockPendingSession(original);
+
+      await recordAuditScan(scanInput).catch(() => {});
+
+      const update = mockDb.auditSession.update.mock.calls.find(
+        (c: any) => c[0]?.data?.status === AuditStatus.ACTIVE
+      );
+      expect(update).toBeDefined();
+      expect(update?.[0].data).not.toHaveProperty("startedAt");
+      expect(createAuditStartedNote).not.toHaveBeenCalled();
     });
   });
 });
