@@ -2984,6 +2984,10 @@ export async function relinkKitQrCode({
       message: "Kit not found.",
       label,
       additionalData: { kitId, organizationId, qrId },
+      // why: without an explicit status this resolves to 500 — `cause: null` is
+      // not a P2025, so the ShelfError constructor falls through to
+      // `status || 500`. A missing/cross-org kit is a 404, not a server fault.
+      status: 404,
       shouldBeCaptured: false,
     });
   }

@@ -1525,6 +1525,27 @@ describe("relinkKitQrCode", () => {
     });
   });
 
+  it("throws 404 when the kit is missing or not in the caller's org", async () => {
+    // why: this guard existed but omitted `status`, so it resolved to 500 —
+    // `cause: null` is not a P2025, so the ShelfError constructor falls through
+    // to `status || 500`. A missing/cross-org kit is a client error.
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue(null);
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 404,
+      message: "Kit not found.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
   it("throws 403 when the QR belongs to another organization", async () => {
     //@ts-expect-error missing vitest type
     getQr.mockResolvedValue({

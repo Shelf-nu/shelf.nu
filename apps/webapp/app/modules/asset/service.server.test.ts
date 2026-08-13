@@ -326,6 +326,29 @@ describe("relinkAssetQrCode (asset)", () => {
     expect(db.qr.update).not.toHaveBeenCalled();
   });
 
+  it("throws 404 when the asset is missing or not in the caller's org", async () => {
+    // why: `db.asset.findFirst` is org-scoped, so null means missing OR another
+    // tenant's. Explicitly 404 and uncaptured — not the generic
+    // "requested resource could not be found" a bare P2025 would produce, and
+    // not the 500 a statusless ShelfError would resolve to.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue(null);
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 404,
+      title: "Asset not found.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+  });
+
   it("throws when QR is already linked to a kit", async () => {
     //@ts-expect-error mock setup
     getQr.mockResolvedValue({
