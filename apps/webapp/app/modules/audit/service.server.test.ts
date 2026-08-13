@@ -19,6 +19,7 @@ import {
   bulkDeleteAudits,
   duplicateAuditSession,
   recordAuditScan,
+  requireAuditAssignee,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -2157,6 +2158,55 @@ describe("audit service", () => {
         status: 404,
         shouldBeCaptured: false,
       });
+    });
+  });
+
+  describe("requireAuditAssignee", () => {
+    const baseArgs = {
+      auditSessionId: "session-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    };
+
+    /** Minimal session shape for the assignee check via getAuditSessionDetails */
+    function mockSessionWithAssignments(assignments: { userId: string }[]) {
+      mockDb.auditSession.findFirst.mockResolvedValue({
+        id: "session-1",
+        organizationId: "org-1",
+        assignments,
+        assets: [],
+      });
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("allows ADMIN/OWNER even when the audit has other assignees", async () => {
+      await expect(
+        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: false })
+      ).resolves.toBeUndefined();
+
+      // why: the admin path must not depend on the assignee list at all —
+      // the pre-fix rule blocked admins as soon as an audit had assignees,
+      // which locked audit creators out of their own audits.
+      expect(mockDb.auditSession.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("allows a BASE/SELF_SERVICE user who is an assignee", async () => {
+      mockSessionWithAssignments([{ userId: "user-1" }]);
+
+      await expect(
+        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects a BASE/SELF_SERVICE user who is not an assignee with 403", async () => {
+      mockSessionWithAssignments([{ userId: "user-2" }]);
+
+      await expect(
+        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+      ).rejects.toMatchObject({ status: 403 });
     });
   });
 });

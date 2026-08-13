@@ -171,8 +171,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: ADMIN/OWNER may complete any audit,
+      // BASE/SELF_SERVICE only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,

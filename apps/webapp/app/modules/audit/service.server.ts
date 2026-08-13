@@ -2040,13 +2040,15 @@ export async function getAuditsForOrganization(params: {
 }
 
 /**
- * Validates that the user is assigned to the audit session.
- * Throws a 403 ShelfError if the user is not an assignee.
+ * Validates that the user may act on the audit session.
  *
- * When isSelfServiceOrBase is false (admin/owner), allows the user to perform
- * actions if the audit has no assignees.
+ * ADMIN/OWNER users (isSelfServiceOrBase = false) always pass: they manage
+ * every audit in their workspace, mirroring both
+ * requireAuditAssigneeForBaseSelfService and the ADMIN/OWNER allow-all
+ * short-circuit in @shelf/permissions. BASE/SELF_SERVICE users must be
+ * assignees of the audit.
  *
- * @throws {ShelfError} 403 error if user is not an assignee
+ * @throws {ShelfError} 403 error if a BASE/SELF_SERVICE user is not an assignee
  */
 export async function requireAuditAssignee({
   auditSessionId,
@@ -2059,23 +2061,23 @@ export async function requireAuditAssignee({
   organizationId: string;
   userId: string;
   request?: Request;
-  /** When true, always require assignee. When false (admin/owner), allow if no assignees. */
+  /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
   isSelfServiceOrBase?: boolean;
 }): Promise<void> {
+  // ADMIN/OWNER act on any audit in their workspace. Returning before the
+  // session fetch is safe: every caller's downstream service re-verifies the
+  // session against organizationId (recordAuditScan, completeAuditSession,
+  // requireAuditAssetInSession all 404 on cross-org ids).
+  if (!isSelfServiceOrBase) {
+    return;
+  }
+
   const { session } = await getAuditSessionDetails({
     id: auditSessionId,
     organizationId,
     userOrganizations: [],
     request,
   });
-
-  const hasNoAssignees = session.assignments.length === 0;
-  const isAdminOrOwner = !isSelfServiceOrBase;
-
-  // Allow admin/owner to perform actions if audit has no assignees
-  if (isAdminOrOwner && hasNoAssignees) {
-    return;
-  }
 
   const isAssignee = session.assignments.some(
     (assignment) => assignment.userId === userId

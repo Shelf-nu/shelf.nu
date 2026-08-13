@@ -117,8 +117,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Only assignees can complete the audit via scan route
-    // Exception: if audit has no assignees, admins/owners can complete
+    // Assignee-gated: ADMIN/OWNER may act on any audit,
+    // BASE/SELF_SERVICE only when assigned.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
