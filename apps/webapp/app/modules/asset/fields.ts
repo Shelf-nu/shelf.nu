@@ -170,8 +170,21 @@ export const getAssetOverviewFields = (
             id: true,
             name: true,
             from: true,
-            custodianTeamMember: true,
-            custodianUser: true,
+            // Narrowed from `true` on both — that shipped the whole
+            // TeamMember row and the ENTIRE User row (email, Stripe
+            // `customerId`, billing flags). `userId` stays for the redaction.
+            custodianTeamMember: {
+              select: { id: true, name: true, userId: true },
+            },
+            custodianUser: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                profilePicture: true,
+              },
+            },
           },
         },
       },
@@ -279,7 +292,12 @@ export const assetIndexFields = ({
           select: {
             id: true,
             status: true,
-            custodianTeamMember: true,
+            // Narrowed from `true`, which selected the whole TeamMember row.
+            // `userId` is required by `redactCustodianForViewer` to recognise
+            // the viewer's own booking custody.
+            custodianTeamMember: {
+              select: { id: true, name: true, userId: true },
+            },
             custodianUser: {
               select: {
                 firstName: true,
@@ -323,7 +341,11 @@ export const assetIndexFields = ({
               id: true,
               name: true,
               // Custodian fields needed by updateAssetsWithBookingCustodians()
-              custodianTeamMember: true,
+              // Narrowed from `true`; `userId` is what lets the redaction
+              // recognise the viewer's own booking custody.
+              custodianTeamMember: {
+                select: { id: true, name: true, userId: true },
+              },
               custodianUser: {
                 select: {
                   firstName: true,

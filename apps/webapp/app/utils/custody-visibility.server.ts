@@ -57,6 +57,30 @@ export type RowWithCustody = {
 };
 
 /**
+ * The SECOND path to the same identity, walked at runtime rather than declared
+ * on {@link RowWithCustody}.
+ *
+ * A CHECKED_OUT item has no `Custody` row — its holder is the custodian of the
+ * ONGOING/OVERDUE booking. `assetIndexFields()` selects that inline, and
+ * `updateAssetsWithBookingCustodians` copies it into `custody.custodian` for
+ * the chip, so redacting only `custody` emptied the COPY while the source rode
+ * along untouched in the same payload.
+ *
+ * It is deliberately NOT part of the public constraint: adding a field there
+ * makes every call site fail to infer `T`, which collapses to the constraint
+ * and strips loader consumers of their real row types (the same trap the
+ * `Record<string, unknown>` note above describes). The rows are probed
+ * structurally instead.
+ */
+type BookingCustodianCarrier = {
+  booking?: {
+    custodianUserId?: string | null;
+    custodianTeamMember?: CustodianIdentity;
+    custodianUser?: { id?: string | null } | null;
+  } | null;
+};
+
+/**
  * What a redacted custodian looks like on the wire.
  *
  * Every identifying field is emptied rather than removed, so the shape stays
@@ -110,15 +134,90 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
   // shape. TypeScript cannot verify a spread still satisfies `T`, and widening
   // the signature instead erases the caller's row type — which is exactly what
   // the loader's consumers are typed against.
+  /**
+   * Whether the viewer is themselves the custodian of this booking — checked
+   * across all three shapes the select may provide, since callers differ in
+   * which of them they ask for.
+   */
+  const ownsBooking = (
+    booking: NonNullable<BookingCustodianCarrier["booking"]>
+  ) =>
+    !!userId &&
+    (booking.custodianUserId === userId ||
+      booking.custodianTeamMember?.userId === userId ||
+      booking.custodianUser?.id === userId);
+
+  /** Empties the booking-derived custodian on one `bookingAssets` entry. */
+  const redactBookingAsset = (entry: BookingCustodianCarrier) => {
+    if (!entry?.booking || ownsBooking(entry.booking)) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      booking: {
+        ...entry.booking,
+        custodianTeamMember: entry.booking.custodianTeamMember
+          ? { ...REDACTED_CUSTODIAN }
+          : entry.booking.custodianTeamMember,
+        custodianUser: entry.booking.custodianUser ? null : undefined,
+      },
+    };
+  };
+
   return rows.map((row) => {
+    // Structural probe — see `BookingCustodianCarrier` for why this is not on
+    // the public type.
+    const rawBookingAssets = (row as { bookingAssets?: unknown }).bookingAssets;
+    const bookingAssets = Array.isArray(rawBookingAssets)
+      ? (rawBookingAssets as BookingCustodianCarrier[]).map(redactBookingAsset)
+      : rawBookingAssets;
+
+    /**
+     * The kits index nests the same booking custodians one level deeper —
+     * `assetKits[].asset.bookingAssets` — because a kit's holder is derived
+     * from its member assets' bookings. A top-level probe alone misses every
+     * one of them.
+     */
+    const rawAssetKits = (row as { assetKits?: unknown }).assetKits;
+    const assetKits = Array.isArray(rawAssetKits)
+      ? (
+          rawAssetKits as Array<{ asset?: { bookingAssets?: unknown } | null }>
+        ).map((ak) => {
+          const nested = ak?.asset?.bookingAssets;
+          if (!Array.isArray(nested)) {
+            return ak;
+          }
+
+          return {
+            ...ak,
+            asset: {
+              ...ak.asset,
+              bookingAssets: (nested as BookingCustodianCarrier[]).map(
+                redactBookingAsset
+              ),
+            },
+          };
+        })
+      : rawAssetKits;
+
+    const withBookings = {
+      ...row,
+      ...(rawBookingAssets === undefined ? {} : { bookingAssets }),
+      ...(rawAssetKits === undefined ? {} : { assetKits }),
+    };
+
     if (Array.isArray(row.custody)) {
-      return { ...row, custody: row.custody.map(redactEntry) } as T;
+      return {
+        ...withBookings,
+        custody: row.custody.map(redactEntry),
+      } as T;
     }
 
     if (!row.custody) {
-      return row;
+      return withBookings as T;
     }
 
-    return { ...row, custody: redactEntry(row.custody) } as T;
+    return { ...withBookings, custody: redactEntry(row.custody) } as T;
   });
 }
