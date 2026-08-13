@@ -14,6 +14,7 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -299,6 +300,32 @@ describe("relinkAssetQrCode (asset)", () => {
     vitest.clearAllMocks();
   });
 
+  /** Shared happy-path args; individual tests vary only the QR state. */
+  const args = {
+    qrId: "qr-1",
+    assetId: "asset-1",
+    organizationId: "org-1",
+    userId: "user-1",
+  };
+
+  it("throws 403 when the QR belongs to another organization", async () => {
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-other",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR not valid.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
   it("throws when QR is already linked to a kit", async () => {
     //@ts-expect-error mock setup
     getQr.mockResolvedValue({
@@ -310,18 +337,51 @@ describe("relinkAssetQrCode (asset)", () => {
     //@ts-expect-error mock setup
     db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
 
-    await expect(
-      relinkAssetQrCode({
-        qrId: "qr-1",
-        assetId: "asset-1",
-        organizationId: "org-1",
-        userId: "user-1",
-      })
-    ).rejects.toMatchObject({
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
       // why: user-caused guard, not a server fault — the mobile route
       // documents 403 for it and clients must not retry it as a 5xx.
       status: 403,
       title: "QR already linked.",
+    });
+  });
+
+  it("throws 403 when the QR is already linked to a different asset", async () => {
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-other",
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("claims an UNCLAIMED QR inline, pinning the still-unclaimed state", async () => {
+    // why: this is the branch the mobile link flow now depends on — the
+    // separate claimQrCode step was removed, so an unclaimed code is claimed
+    // as part of the link. Nothing covered it before.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await relinkAssetQrCode(args);
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1", organizationId: null, kitId: null, assetId: null },
+      data: { organizationId: "org-1", userId: "user-1" },
     });
   });
 
@@ -336,15 +396,17 @@ describe("relinkAssetQrCode (asset)", () => {
     //@ts-expect-error mock setup
     db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
 
-    await relinkAssetQrCode({
-      qrId: "qr-1",
-      assetId: "asset-1",
-      organizationId: "org-1",
-      userId: "user-1",
-    });
+    await relinkAssetQrCode(args);
 
     expect(db.qr.update).toHaveBeenCalledWith({
-      where: { id: "qr-1" },
+      // why: the WHERE re-asserts the state the guards observed, so a
+      // concurrent writer that changed it loses instead of both winning.
+      where: {
+        id: "qr-1",
+        organizationId: "org-1",
+        kitId: null,
+        assetId: null,
+      },
       data: { organizationId: "org-1", userId: "user-1" },
     });
     expect(db.asset.update).toHaveBeenCalledWith({
@@ -356,6 +418,33 @@ describe("relinkAssetQrCode (asset)", () => {
         },
       },
     });
+  });
+
+  it("loses the race safely: 403, and no asset or note write", async () => {
+    // why: the conditional WHERE means a competing writer makes this update
+    // match zero rows (P2025). The asset's existing code must NOT be cleared
+    // and no "changed QR code" note may be written for a link that never
+    // happened — that would falsify the audit trail.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
+    //@ts-expect-error mock setup
+    db.qr.update.mockRejectedValueOnce(
+      Object.assign(new Error("no rows"), { code: "P2025" })
+    );
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
   });
 });
 

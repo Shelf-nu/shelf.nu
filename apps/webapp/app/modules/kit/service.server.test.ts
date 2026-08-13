@@ -1468,6 +1468,13 @@ describe("relinkKitQrCode", () => {
     vitest.clearAllMocks();
   });
 
+  const args = {
+    qrId: "qr-1",
+    kitId: "kit-1",
+    organizationId: "org-1",
+    userId: "user-1",
+  };
+
   it("should relink qr code to kit", async () => {
     expect.assertions(3);
     //@ts-expect-error missing vitest type
@@ -1482,15 +1489,17 @@ describe("relinkKitQrCode", () => {
     //@ts-expect-error missing vitest type
     db.kit.update.mockResolvedValue({});
 
-    const result = await relinkKitQrCode({
-      qrId: "qr-1",
-      kitId: "kit-1",
-      organizationId: "org-1",
-      userId: "user-1",
-    });
+    const result = await relinkKitQrCode(args);
 
     expect(db.qr.update).toHaveBeenCalledWith({
-      where: { id: "qr-1" },
+      // why: the WHERE re-asserts the state the guards observed, so a
+      // concurrent writer that changed it loses instead of both winning.
+      where: {
+        id: "qr-1",
+        organizationId: "org-1",
+        assetId: null,
+        kitId: null,
+      },
       data: { organizationId: "org-1", userId: "user-1" },
     });
     expect(db.kit.update).toHaveBeenCalledTimes(2);
@@ -1509,18 +1518,93 @@ describe("relinkKitQrCode", () => {
     //@ts-expect-error missing vitest type
     db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
 
-    await expect(
-      relinkKitQrCode({
-        qrId: "qr-1",
-        kitId: "kit-1",
-        organizationId: "org-1",
-        userId: "user-1",
-      })
-    ).rejects.toMatchObject({
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
       // why: user-caused guard, not a server fault — must not surface as 5xx.
       status: 403,
       title: "QR already linked.",
     });
+  });
+
+  it("throws 403 when the QR belongs to another organization", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-other",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR not valid.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("throws 403 when the QR is already linked to a different kit", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: "kit-other",
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("claims an UNCLAIMED QR inline, pinning the still-unclaimed state", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue({});
+
+    await relinkKitQrCode(args);
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1", organizationId: null, assetId: null, kitId: null },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+  });
+
+  it("loses the race safely: 403, and no kit write", async () => {
+    // why: a competing writer makes the conditional update match zero rows
+    // (P2025). The kit's existing code must not be disconnected for a link
+    // that never persisted.
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr-id" }] });
+    //@ts-expect-error missing vitest type
+    db.qr.update.mockRejectedValueOnce(
+      Object.assign(new Error("no rows"), { code: "P2025" })
+    );
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.kit.update).not.toHaveBeenCalled();
   });
 });
 
