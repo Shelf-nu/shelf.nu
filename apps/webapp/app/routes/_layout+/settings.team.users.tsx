@@ -19,6 +19,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -234,9 +235,40 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             role={item.role}
             roleEnum={item.roleEnum}
           />
-        ) : null}
+        ) : (
+          <OwnerRowActions ownerName={item.name} />
+        )}
       </Td>
     </>
+  );
+}
+
+/**
+ * The one owner-level action that belongs with the member list is transferring
+ * ownership, which lives on the general settings page. Surface it here so it
+ * is discoverable where people manage their team.
+ */
+function OwnerRowActions({ ownerName }: { ownerName: string }) {
+  const { isOwner } = useUserRoleHelper();
+
+  if (isOwner) {
+    return (
+      <Button to="/settings/general#transfer-ownership" variant="secondary">
+        Transfer ownership
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      disabled={{
+        reason: `Only the workspace owner (${ownerName}) can transfer ownership of this workspace.`,
+      }}
+    >
+      Transfer ownership
+    </Button>
   );
 }
 
