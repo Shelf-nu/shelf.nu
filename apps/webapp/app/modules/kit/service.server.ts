@@ -4688,6 +4688,11 @@ export async function updateKitAssets({
           // `asset.assetKits[0]?.kitId`.
           assetKits: {
             select: {
+              // This kit's OWN membership ids. `BookingAsset.assetKitId` points
+              // at one of these exactly when a booking holds a slice of THIS
+              // kit, which is how the `kitBookings` derivation below scopes the
+              // new-member propagation.
+              id: true,
               kitId: true,
               // This kit's per-row slice — surfaced in the membership-remove
               // note + ASSET_KIT_CHANGED event ("removed 50 units from ...").
@@ -5034,10 +5039,45 @@ export async function updateKitAssets({
       });
     }
 
-    const kitBookings =
-      kit.assets
-        .find((a) => a.bookingAssets.length > 0)
-        ?.bookingAssets.map((ba) => ba.booking) ?? [];
+    /**
+     * Bookings that hold a slice of THIS kit.
+     *
+     * A booking carries this kit exactly when it has a `BookingAsset` whose
+     * `assetKitId` is one of this kit's own `AssetKit` ids. Anything else on a
+     * member asset — a standalone row, or a slice belonging to another kit the
+     * asset also happens to be in — is a different booking's business.
+     *
+     * This used to be `kit.assets.find((a) => a.bookingAssets.length > 0)`,
+     * taking one arbitrary member's ENTIRE booking list (the `bookingAssets`
+     * include carries no `where`). That was wrong in both directions, and a
+     * QUANTITY_TRACKED asset shared between kits triggered both at once:
+     *
+     *  - false positive: the member's row belonged to ANOTHER kit's booking, so
+     *    a newly-added member was written into a booking that never contained
+     *    this kit — surfacing a whole extra kit nobody added, and creating
+     *    reservation conflicts that silently disabled that booking's Reserve
+     *    button;
+     *  - false negative: once `.find()` locked onto that member, bookings which
+     *    genuinely DO hold this kit were skipped, so the kit drifted out of
+     *    sync with its own bookings.
+     *
+     * Deduped by booking id: several members of this kit normally sit in the
+     * same booking, and each would otherwise contribute a duplicate insert.
+     */
+    const thisKitAssetKitIds = new Set(
+      kitWithRelations.assetKits.map((ak) => ak.id)
+    );
+    const kitBookings = [
+      ...new Map(
+        kit.assets
+          .flatMap((asset) => asset.bookingAssets)
+          .filter(
+            (ba) =>
+              ba.assetKitId != null && thisKitAssetKitIds.has(ba.assetKitId)
+          )
+          .map((ba) => [ba.booking.id, ba.booking] as const)
+      ).values(),
+    ];
 
     // The old kit.update({ data: { assets: { connect, disconnect } } })
     // block becomes direct pivot writes inside a single $transaction so
@@ -5837,6 +5877,61 @@ export async function updateKitAssets({
           return ops;
         })
       );
+
+      /**
+       * Reporting events for the rows just propagated above.
+       *
+       * These are `ActivityEvent` rows — reporting data, NOT the booking's
+       * notes feed (that is `BookingNote`, which the Activity tab and its CSV
+       * export read). No note is written here deliberately: nobody acted on
+       * the booking, so there is nothing to tell its watchers.
+       *
+       * Emitting them matters because this insert is the only way a booking
+       * gains an asset without anybody touching the booking. Until now it left
+       * no trace in ANY table, which is what made the cross-kit leak this
+       * scoping fix addresses impossible to reconstruct after the fact.
+       * `BOOKING_ASSETS_ADDED` has no report consumer yet — it is recorded for
+       * the same reason `updateBookingAssets` records it, so the history exists
+       * when one arrives.
+       *
+       * One event per (booking, asset) pair rather than one per booking, so the
+       * data stays aggregable — see `.claude/rules/record-event-payload-shapes.md`.
+       * `kitId` names the kit that pulled the asset in, which is the provenance
+       * needed to explain why the row is there.
+       *
+       * Scoped to assets with a resolved `AssetKit`: those rows are keyed on a
+       * brand-new `assetKitId`, so the `(bookingId, assetKitId)` partial unique
+       * cannot collide and `skipDuplicates` cannot have silently dropped them.
+       * The `ak`-less fallback writes a standalone row that MAY be skipped
+       * against an existing one, and claiming an add that did not happen would
+       * make the trail lie.
+       *
+       * Emitted outside the transaction because the inserts above are too —
+       * they run on `db`, after the membership tx has committed.
+       */
+      const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
+        newlyAddedAssets.flatMap((asset) => {
+          const ak = akByAssetId.get(asset.id);
+          if (!ak) return [];
+          return [
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "BOOKING_ASSETS_ADDED" as const,
+              entityType: "BOOKING" as const,
+              entityId: booking.id,
+              bookingId: booking.id,
+              assetId: asset.id,
+              kitId: kit.id,
+              meta: assetQtyMeta(asset, ak.quantity),
+            },
+          ];
+        })
+      );
+
+      if (propagatedEvents.length > 0) {
+        await recordEvents(propagatedEvents);
+      }
     }
 
     /**
