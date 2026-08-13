@@ -138,6 +138,9 @@ vitest.mock("~/database/db.server", () => ({
       // and `mergeStandaloneCollisionsForKitDetachment` folds a kit-driven
       // row's units into a colliding standalone row via `update`.
       update: vitest.fn().mockResolvedValue({}),
+      // why: `updateKitAssets` propagates a newly-added kit member into the
+      // bookings that already hold this kit, one `createMany` per booking.
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
@@ -5168,6 +5171,238 @@ describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () =>
     expect(err.message).toContain("unavailable assets");
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+/**
+ * Regression cover for "a kit I never added showed up in my booking".
+ *
+ * `updateKitAssets` propagates a newly-added kit member into the bookings that
+ * already hold this kit. It used to derive that booking list from the FIRST kit
+ * member that had ANY `BookingAsset` row at all:
+ *
+ *   kit.assets.find((a) => a.bookingAssets.length > 0)?.bookingAssets
+ *
+ * with the underlying `bookingAssets` include carrying no `where` clause. A
+ * QUANTITY_TRACKED asset can belong to several kits, so that member's rows
+ * could belong to a DIFFERENT kit's booking. The new member was then written
+ * into a booking that never contained this kit, tagged with THIS kit's
+ * `assetKitId` — the booking rendered an extra kit nobody added, and the stray
+ * asset produced reservation conflicts that silently disabled Reserve.
+ *
+ * The rule these tests pin: propagate into exactly the bookings holding a slice
+ * of THIS kit — a `BookingAsset` whose `assetKitId` is one of this kit's
+ * `AssetKit` ids — and into ALL of them, not just the first member's.
+ */
+describe("updateKitAssets - kit-booking propagation scope", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Kit B holds two members:
+   *  - `shared-banner`, a QT asset ALSO in Kit A, whose only booking row is a
+   *    Kit A slice on `booking-foreign` (a booking Kit B is not part of);
+   *  - `kit-b-member`, whose booking row IS a Kit B slice on `booking-own`.
+   *
+   * `shared-banner` sorts first, so the old `.find()` locked onto it and got
+   * exactly the wrong answer in both directions.
+   */
+  function arrangeKitB() {
+    const mockKit = {
+      id: "kit-b",
+      name: "Kit B",
+      status: KitStatus.AVAILABLE,
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-shared-kitb",
+          kitId: "kit-b",
+          quantity: 1,
+          asset: {
+            id: "shared-banner",
+            title: "Shared banner",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+            bookingAssets: [
+              {
+                id: "ba-foreign",
+                bookingId: "booking-foreign",
+                assetId: "shared-banner",
+                // Kit A's membership — this row is NOT Kit B's business.
+                assetKitId: "ak-shared-kita",
+                sourceKitId: "kit-a",
+                quantity: 1,
+                booking: { id: "booking-foreign", status: BookingStatus.DRAFT },
+              },
+            ],
+          },
+        },
+        {
+          id: "ak-member-kitb",
+          kitId: "kit-b",
+          quantity: 1,
+          asset: {
+            id: "kit-b-member",
+            title: "Kit B member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-b" }],
+            bookingAssets: [
+              {
+                id: "ba-own",
+                bookingId: "booking-own",
+                assetId: "kit-b-member",
+                assetKitId: "ak-member-kitb",
+                sourceKitId: "kit-b",
+                quantity: 1,
+                booking: { id: "booking-own", status: BookingStatus.RESERVED },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    /** Full submitted membership: both existing members plus the new one. */
+    const mockAssetsForKit = [
+      {
+        id: "shared-banner",
+        title: "Shared banner",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 10,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "kit-b-member",
+        title: "Kit B member",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-b" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "hp-laserjet",
+        title: "HP LaserJet",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(mockAssetsForKit);
+    // The AssetKit row the pivot insert just created for the new member.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-hp-kitb", assetId: "hp-laserjet", quantity: 1 },
+    ]);
+  }
+
+  /** Booking ids that received a propagated row, across all createMany calls. */
+  function propagatedBookingIds(): string[] {
+    // `mock.calls` is `any[][]`; narrow it to the single argument shape this
+    // delegate is ever called with so the assertions stay type-checked.
+    const calls = (db.bookingAsset.createMany as ReturnType<typeof vitest.fn>)
+      .mock.calls as Array<[{ data: Array<{ bookingId: string }> }]>;
+    return calls.flatMap(([arg]) => arg.data.map((row) => row.bookingId));
+  }
+
+  async function addNewMemberToKitB() {
+    const { updateKitAssets } = await import("./service.server");
+    await updateKitAssets({
+      kitId: "kit-b",
+      assetIds: ["shared-banner", "kit-b-member", "hp-laserjet"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  it("does not add the new member to a booking that holds a different kit", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // `booking-foreign` holds Kit A only. Writing here is the reported bug:
+    // the booking grows an asset AND a whole kit its owner never added.
+    expect(propagatedBookingIds()).not.toContain("booking-foreign");
+  });
+
+  it("adds the new member to a booking holding this kit even when an earlier member only has foreign rows", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // The mirror-image failure of the same `.find()`: locking onto
+    // `shared-banner` meant `booking-own` — which genuinely holds Kit B — was
+    // skipped, so the kit silently drifted out of sync with its own booking.
+    expect(propagatedBookingIds()).toContain("booking-own");
+  });
+
+  it("records a BOOKING_ASSETS_ADDED event for each propagated row", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // `ActivityEvent` is reporting data, not the booking's notes feed — no
+    // note is expected here, since nobody acted on the booking. Before this,
+    // the propagated row landed with no trace in any table, which is why the
+    // cross-kit leak could not be reconstructed after the fact.
+    const addedEvents = (
+      recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_ASSETS_ADDED");
+
+    expect(addedEvents).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "BOOKING_ASSETS_ADDED",
+        entityType: "BOOKING",
+        entityId: "booking-own",
+        bookingId: "booking-own",
+        assetId: "hp-laserjet",
+        // Names the kit that pulled the asset in — the provenance whose
+        // absence made the stray rows untraceable in the booking feed.
+        kitId: "kit-b",
+      }),
+    ]);
+  });
+
+  it("writes the propagated rows and their events on one transaction client", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // A propagated row that commits without its event is unrecoverable, not
+    // merely untidy: the membership transaction has already persisted the
+    // AssetKit row, so a retried call computes `newlyAddedAssets` as empty,
+    // skips propagation entirely and never re-emits the event. Passing the
+    // transaction client to `recordEvents` is what makes the row and its
+    // audit trail commit or roll back together.
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "BOOKING_ASSETS_ADDED" }),
+      ]),
+      expect.anything()
+    );
   });
 });
 
