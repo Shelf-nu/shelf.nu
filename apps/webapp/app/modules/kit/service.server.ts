@@ -18,6 +18,7 @@ import {
   ErrorCorrection,
   KitStatus,
   NoteType,
+  OrganizationRoles,
 } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";
@@ -90,6 +91,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import type { AllowedCustodianFilterIds } from "../asset/utils.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import {
   createSystemBookingNote,
@@ -104,6 +106,7 @@ import {
   createNote,
 } from "../note/service.server";
 import { getQr } from "../qr/service.server";
+import { scopeCustodianFilterIds } from "../team-member/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -1555,11 +1558,21 @@ export async function getPaginatedAndFilterableKits<
   organizationId,
   extraInclude,
   currentBookingId,
+  canSeeAllCustody,
+  userId,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   extraInclude?: T;
   currentBookingId?: Booking["id"];
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required rather
+   * than defaulted so every call site has to state which answer applies —
+   * a default would silently pick one for surfaces added later.
+   */
+  canSeeAllCustody: boolean;
+  /** The caller, whose own custody stays filterable regardless of the flag. */
+  userId: User["id"];
 }) {
   // include. Treat either `assets` (legacy callers passing typed shapes
   // that may still reference the old relation) or `assetKits` as the
@@ -1578,7 +1591,7 @@ export async function getPaginatedAndFilterableKits<
     searchParams.get("status") === "ALL"
       ? null
       : (searchParams.get("status") as KitStatus | null);
-  const teamMember = searchParams.get("teamMember"); // custodian
+  const requestedTeamMember = searchParams.get("teamMember"); // custodian
 
   const {
     page,
@@ -1591,6 +1604,23 @@ export async function getPaginatedAndFilterableKits<
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
+
+  /**
+   * `?teamMember=` is raw request input applied straight to a custody clause.
+   * Redacting the custodian from the response does not close this on its own:
+   * filtering by a colleague's id and reading which kits come back still
+   * reveals what that person holds. So narrow it to the caller's own id first,
+   * and refuse it outright when that leaves nothing — the shared helper returns
+   * an unmatchable id for that case rather than an empty list, which would read
+   * as "no filter" and quietly list every kit.
+   */
+  const [scopedTeamMember] = await scopeCustodianFilterIds({
+    teamMemberIds: requestedTeamMember ? [requestedTeamMember] : [],
+    canSeeAllCustody,
+    userId,
+    organizationId,
+  });
+  const teamMember = scopedTeamMember ?? null;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -2764,7 +2794,14 @@ export async function bulkDeleteKits({
      * If we are selecting all kits in the list then we have to consider filters too
      */
     const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
-      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      ? getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          // `kit: delete` is ADMIN/OWNER-only (SELF_SERVICE holds only
+          // `kit: [read, custody]`), so no restricted viewer can supply
+          // this filter.
+          allowedTeamMemberIds: "all",
+        })
       : { id: { in: kitIds }, organizationId };
 
     const kitRows = await db.kit.findMany({
@@ -2853,6 +2890,7 @@ export async function bulkAssignKitCustody({
   custodianName,
   userId,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
@@ -2860,13 +2898,26 @@ export async function bulkAssignKitCustody({
   custodianName: TeamMember["name"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  /**
+   * Custodian ids the caller may filter a "select all" by.
+   *
+   * NOT `"all"`: this is reached through `kits.bulk-actions` with
+   * `PermissionAction.custody`, which SELF_SERVICE holds. An unscoped filter
+   * turns the "some kits are not available" rejection into an oracle for
+   * "does <teamMemberId> hold any kit".
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     /**
      * If we are selecting all assets in list then we have to consider filters
      */
     const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
-      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      ? getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          allowedTeamMemberIds,
+        })
       : { id: { in: kitIds }, organizationId };
 
     /**
@@ -3143,17 +3194,34 @@ export async function bulkReleaseKitCustody({
   kitIds,
   organizationId,
   userId,
+  role,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
   userId: User["id"];
+  /**
+   * Caller's role. The SELF_SERVICE "release only your own custody" rule is
+   * enforced HERE rather than in the route, because it has to run against the
+   * RESOLVED kits. The route version queried `kitCustody` with the raw
+   * `kitIds`, which is `["all-selected"]` on a select-all — zero rows matched,
+   * so the guard silently passed and every matched kit was released.
+   * Mirrors `bulkCheckInAssets`, where the guard already lives in the service.
+   */
+  role: OrganizationRoles;
   currentSearchParams?: string | null;
+  /** See the twin parameter on `bulkAssignKitCustody`. */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     /** If we are selecting all, then we have to consider filters */
     const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
-      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      ? getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          allowedTeamMemberIds,
+        })
       : { id: { in: kitIds }, organizationId };
 
     /**
@@ -3213,6 +3281,49 @@ export async function bulkReleaseKitCustody({
         kit: { id: kit.id, name: kit.name },
       })),
     }));
+
+    /**
+     * SELF_SERVICE may release only custody they hold themselves.
+     *
+     * This runs on the RESOLVED kits, which is the whole point of it living
+     * here: the route-level version queried `kitCustody` with the raw
+     * `kitIds`, so a select-all (`["all-selected"]`) matched zero rows, the
+     * guard passed, and a self-service user could release custody on kits
+     * held by anyone — targeted precisely by pairing it with `?teamMember=`.
+     */
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const someoneElsesCustody = kits.some(
+        (kit) => kit.custody?.custodian?.userId !== userId
+      );
+
+      if (someoneElsesCustody) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self user can release custody of themselves only.",
+          additionalData: { userId, kitIds },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * Nothing matched — a refused custodian filter, or a selection that no
+     * longer exists. Reading `kits[0]` below would throw a 500 and hand the
+     * caller a binary oracle for "does this custodian hold any kit".
+     */
+    if (kits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "None of the selected kits are available to release. Please refresh and try again.",
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const custodian = kits[0].custody?.custodian;
 
@@ -4125,7 +4236,14 @@ export async function bulkUpdateKitLocation({
 }) {
   try {
     const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
-      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      ? getKitsWhereInput({
+          organizationId,
+          currentSearchParams,
+          // `kit: update` is ADMIN/OWNER-only (SELF_SERVICE holds only
+          // `kit: [read, custody]`), so no restricted viewer can supply
+          // this filter.
+          allowedTeamMemberIds: "all",
+        })
       : { id: { in: kitIds }, organizationId };
 
     // Get kits with their assets before updating. Read each asset's
@@ -4665,6 +4783,9 @@ export async function updateKitAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Reached from `updateKitAssets`, gated on kit write permissions
+        // (ADMIN/OWNER only), so no restricted viewer can supply this filter.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -5807,6 +5928,9 @@ export async function bulkRemoveAssetsFromKits({
       currentSearchParams: searchParams.toString(),
       settings,
       timeZone,
+      // Kit write permissions are ADMIN/OWNER-only, so the custodian filter
+      // here can never come from a restricted viewer.
+      allowedTeamMemberIds: "all",
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through

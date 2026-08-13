@@ -48,10 +48,8 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    const { role, canUseBarcodes } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { role, canUseBarcodes, canSeeAllCustody } =
+      await getMobileUserContext(user.id, organizationId);
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
@@ -72,6 +70,15 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams: "",
       settings,
+      /**
+       * Mobile sends no list filters (`currentSearchParams` is empty above), so
+       * this never narrows anything today — the where-builder returns before it
+       * is read. It still tracks the caller's real visibility so the day mobile
+       * starts forwarding filters, a restricted user does not silently gain a
+       * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
+       * they can still filter by their OWN custody.
+       */
+      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
     });
 
     // Additive: the service silently skips QUANTITY_TRACKED assets on mixed

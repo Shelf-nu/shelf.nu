@@ -10,6 +10,7 @@ import {
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 import {
   createKit,
@@ -1279,6 +1280,7 @@ describe("bulkAssignKitCustody", () => {
     );
 
     await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       custodianId: "custodian-1",
@@ -1308,6 +1310,7 @@ describe("bulkAssignKitCustody", () => {
 
     await expect(
       bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         custodianId: "custodian-1",
@@ -1352,6 +1355,8 @@ describe("bulkReleaseKitCustody", () => {
     );
 
     await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "ADMIN" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -1376,11 +1381,106 @@ describe("bulkReleaseKitCustody", () => {
 
     await expect(
       bulkReleaseKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        role: "ADMIN" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         userId: "user-1",
       })
     ).rejects.toThrow("There are some kits which are not in custody");
+  });
+
+  it("refuses a SELF_SERVICE release of a colleague's custody, even via select-all", async () => {
+    // The exploit this pins: the guard used to live in the route and queried
+    // `kitCustody` with the RAW `kitIds`. On a select-all that is
+    // `["all-selected"]`, which matches zero rows — so the guard passed and
+    // every kit the where-clause resolved was released. Pairing it with
+    // `?teamMember=<colleague>` aimed it at one person's kits, and because
+    // those are all IN_CUSTODY by construction the "all kits in custody"
+    // check passed too. `kit: custody` is a SELF_SERVICE permission.
+    expect.assertions(2);
+
+    // why: models what the where-clause RESOLVES to, which is the input the
+    // guard has to judge — a colleague's kit, not the caller's.
+    const colleaguesKits = [
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "custody-1",
+          custodian: { name: "Colleague", userId: "someone-else" },
+        },
+        assets: [],
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(colleaguesKits);
+
+    await expect(
+      bulkReleaseKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        role: "SELF_SERVICE" as const,
+        kitIds: [ALL_SELECTED_KEY],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow("Self user can release custody of themselves only");
+
+    // Nothing was written.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE release of custody the caller holds", async () => {
+    expect.assertions(1);
+
+    // why: same shape as above but held by the caller — proves the guard
+    // rejects on ownership, not merely on the presence of a role.
+    const ownKits = [
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "custody-1",
+          custodian: { name: "Me", userId: "user-1" },
+        },
+        assets: [],
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(ownKits);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "SELF_SERVICE" as const,
+      kitIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalled();
+  });
+
+  it("rejects an empty resolution instead of throwing a 500", async () => {
+    // why: a refused custodian filter resolves to zero kits. Reading
+    // `kits[0].custody` first turned that into a TypeError → 500, which is a
+    // binary oracle for "does this custodian hold any kit".
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([]);
+
+    await expect(
+      bulkReleaseKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        role: "ADMIN" as const,
+        kitIds: [ALL_SELECTED_KEY],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow("None of the selected kits are available to release");
   });
 });
 
@@ -2103,6 +2203,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     db.$transaction.mockImplementation((callback) => callback(db));
 
     await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       custodianId: "tm-1",
@@ -2225,6 +2326,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     db.$transaction.mockImplementation((callback) => callback(db));
 
     await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       custodianId: "tm-nikolay",
@@ -2314,6 +2416,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     db.$transaction.mockImplementation((callback) => callback(db));
 
     await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       custodianId: "tm-1",
@@ -2404,6 +2507,8 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
     db.$transaction.mockImplementation((callback) => callback(db));
 
     await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "ADMIN" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -5004,6 +5109,7 @@ describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () =>
     let thrown: unknown;
     try {
       await bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         custodianId: "tm-1",
@@ -5046,6 +5152,7 @@ describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () =>
     let thrown: unknown;
     try {
       await bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         custodianId: "tm-1",
