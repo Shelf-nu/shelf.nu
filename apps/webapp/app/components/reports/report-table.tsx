@@ -27,6 +27,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { AssetImage } from "~/components/assets/asset-image";
+import type { AssetModelImage } from "~/components/assets/asset-image/types";
 import KitImage from "~/components/kits/kit-image";
 import { DateS } from "~/components/shared/date";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -503,11 +504,26 @@ export function BooleanCell({
 export function AssetCell({
   name,
   thumbnailImage,
+  mainImage,
   assetId,
+  assetModel,
 }: {
   name: string;
   thumbnailImage: string | null;
+  /**
+   * The asset's OWN full-size image. Load-bearing, not decorative:
+   * `resolveAssetImage` decides the ownership tier from `mainImage` alone, so
+   * omitting it makes an asset that HAS its own image look like one that has
+   * none — it would render its model's cover, or the placeholder.
+   */
+  mainImage: string | null;
   assetId: string;
+  /**
+   * The asset's model cover image, rendered when the asset has none of its
+   * own. Required (not defaulted) so a report that forgets to select it fails
+   * typecheck instead of quietly showing placeholders.
+   */
+  assetModel: AssetModelImage;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -515,6 +531,8 @@ export function AssetCell({
         asset={{
           id: assetId,
           thumbnailImage,
+          mainImage,
+          assetModel,
         }}
         alt="" // Decorative - asset name is displayed in adjacent text
         className="size-8 shrink-0 rounded object-cover"

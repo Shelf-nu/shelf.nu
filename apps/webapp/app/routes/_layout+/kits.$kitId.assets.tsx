@@ -1,5 +1,6 @@
 import {
   data,
+  useLoaderData,
   useParams,
   type LoaderFunctionArgs,
   type MetaFunction,
@@ -12,6 +13,7 @@ import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters"
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
+import type { KitRemovalBookingImpact } from "~/components/kits/booking-removal-notice";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -27,7 +29,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { getAssetsForKits } from "~/modules/kit/service.server";
+import {
+  getAssetsForKits,
+  getBookingImpactForAssetKits,
+} from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -37,6 +42,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -48,7 +54,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.kit,
@@ -75,6 +81,77 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
+    /**
+     * The route only requires `kit`/`read`, which SELF_SERVICE and BASE both
+     * have — but neither has `kit`/`update`, the permission the removal itself
+     * is gated on (`intent2ActionMap.removeAsset` in the parent route). The
+     * reserved-booking warning below names bookings across the WHOLE
+     * organization, which those roles otherwise never see, and it describes an
+     * action they cannot perform — so it is computed only for callers who can
+     * actually remove an asset from the kit.
+     *
+     * Uses the server-side `hasPermission` (the `userHasPermission` validator
+     * has the `.client.` suffix and is stripped from the SSR bundle), passing
+     * `roles` explicitly to avoid its DB fallback lookup — same pattern as the
+     * asset overview loader's `canEditAsset`.
+     */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
+    const canUpdateKit = await hasPermission({
+      userId,
+      organizationId,
+      roles,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.update,
+    });
+
+    /**
+     * Which bookings a removal of one of the rows on THIS page would affect —
+     * RESERVED ones lose the slice, ONGOING/OVERDUE ones keep it flagged as
+     * removed from the kit. The row's Remove dialog names both before
+     * confirming. Second narrow fetch over the page's `AssetKit` ids (same
+     * pattern as `getKitPickerMeta`), deliberately NOT a widening of the
+     * parent route's `bookingAssets` include: that one loads every member of
+     * the kit unpaginated, so we'd pay for the whole kit to serve one page.
+     *
+     * Left `undefined` for callers without kit-update — neither the query nor
+     * the booking names happen at all — and the key is then dropped from the
+     * payload entirely rather than shipped empty. The Remove dialog those
+     * roles never see defaults to no notice.
+     *
+     * `assetId -> impact of removing it from this kit`.
+     */
+    let bookingImpactByAssetId:
+      | Record<string, KitRemovalBookingImpact>
+      | undefined;
+
+    if (canUpdateKit) {
+      const assetKitIdsByAssetId = assets.items.flatMap((asset) =>
+        asset.assetKits
+          .filter((ak) => ak.kitId === kitId)
+          .map((ak) => [asset.id, ak.id] as const)
+      );
+      const impactByAssetKitId = await getBookingImpactForAssetKits({
+        assetKitIds: assetKitIdsByAssetId.map(([, assetKitId]) => assetKitId),
+        organizationId,
+      });
+      bookingImpactByAssetId = Object.fromEntries(
+        assetKitIdsByAssetId
+          .map(
+            ([assetId, assetKitId]) =>
+              [assetId, impactByAssetKitId[assetKitId]] as const
+          )
+          // Memberships with no impact at all are dropped, so the dialog's
+          // `bookingImpact` prop stays absent rather than arriving empty.
+          .filter(
+            (entry): entry is readonly [string, KitRemovalBookingImpact] =>
+              entry[1] !== undefined
+          )
+      );
+    }
+
     const header: HeaderData = {
       title: kit ? `${kit.name}'s assets` : "Kit assets",
     };
@@ -87,6 +164,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       ...assets,
+      ...(bookingImpactByAssetId ? { bookingImpactByAssetId } : {}),
       modelName,
     });
   } catch (cause) {
@@ -172,6 +250,12 @@ export default function KitAssets() {
 
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { category, tags } = item;
+  // Bookings this asset is on THROUGH this kit — reserved ones lose their slice
+  // when it's removed, checked-out ones keep it flagged as removed from the
+  // kit, and the row's Remove dialog names both first. Absent for roles without
+  // kit-update permission (the loader omits it), which is why every read below
+  // is optional — the dialog then shows no notice.
+  const { bookingImpactByAssetId } = useLoaderData<typeof loader>();
   // Render only the single primary-location badge — a qty-tracked asset
   // can sit at multiple locations via AssetLocation.
   const location = getPrimaryLocation(item);
@@ -198,6 +282,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -289,7 +374,10 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
         })}
       >
         <Td className="pr-4 text-right">
-          <AssetRowActionsDropdown asset={item} />
+          <AssetRowActionsDropdown
+            asset={item}
+            bookingImpact={bookingImpactByAssetId?.[item.id]}
+          />
         </Td>
       </When>
     </>

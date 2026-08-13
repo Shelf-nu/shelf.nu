@@ -567,10 +567,9 @@ function ScannerContent() {
    * org won the race, permission revoked) surfaces as an error card.
    *
    * @param claimQrId - The unclaimed QR id (from the resolve error payload).
-   * @param next - Which follow-up to open once the code is claimed.
    */
   const claimQrAndProceed = useCallback(
-    async (claimQrId: string, next: "create" | "link") => {
+    async (claimQrId: string) => {
       // Same lock discipline as handleBarCodeScanned: the result card's two
       // buttons are plain touchables, so a rapid double-tap (or one tap on
       // each) would otherwise start two concurrent claim flows and stack two
@@ -638,8 +637,7 @@ function ScannerContent() {
       // a clean slate (and re-scanning the same label resolves fresh).
       dismissResult();
       pushIntoTab("/(tabs)/assets", {
-        pathname:
-          next === "create" ? "/(tabs)/assets/new" : "/(tabs)/assets/link-qr",
+        pathname: "/(tabs)/assets/new",
         params: { qrId: claimQrId },
       });
     },
@@ -767,14 +765,22 @@ function ScannerContent() {
                   label: "Create New Asset",
                   icon: "add-circle-outline",
                   onPress: () => {
-                    void claimQrAndProceed(unclaimedQrId, "create");
+                    void claimQrAndProceed(unclaimedQrId);
                   },
                 },
                 secondaryAction: {
                   label: "Link Existing Asset",
                   icon: "link-outline",
+                  // No claim step: the link-asset endpoint delegates to
+                  // relinkAssetQrCode, which claims an unclaimed code inline
+                  // as part of the link. Navigating directly also means an
+                  // abandoned picker leaves the label unclaimed for anyone.
                   onPress: () => {
-                    void claimQrAndProceed(unclaimedQrId, "link");
+                    dismissResult();
+                    pushIntoTab("/(tabs)/assets", {
+                      pathname: "/(tabs)/assets/link-qr",
+                      params: { qrId: unclaimedQrId },
+                    });
                   },
                 },
               });

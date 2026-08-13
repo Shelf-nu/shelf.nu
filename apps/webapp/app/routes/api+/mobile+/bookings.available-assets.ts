@@ -5,6 +5,7 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   resolveDisplayCode,
@@ -82,6 +83,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Mobile asset picker: ignores the custodian-filter seed, so scope it
+        // rather than fetch a roster the response never returns.
+        canSeeAllCustody: false,
         filters: pickerParams.toString(),
       });
 
@@ -125,9 +129,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
           id: asset.id,
           title: asset.title,
           status: asset.status,
-          mainImage: asset.mainImage,
+          // Hand-written projection, so typecheck can't catch a dropped
+          // field — resolve the model-image cascade explicitly or an asset
+          // that inherits its image shows blank in the companion's picker.
+          ...(() => {
+            const image = resolveAssetImage({
+              mainImage: asset.mainImage,
+              thumbnailImage: asset.thumbnailImage,
+              assetModel: asset.assetModel,
+            });
+            const isPlaceholder = image.source === "placeholder";
+            return {
+              mainImage: isPlaceholder ? null : image.fullUrl,
+              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+              imageSource: image.source,
+            };
+          })(),
           mainImageExpiration: asset.mainImageExpiration,
-          thumbnailImage: asset.thumbnailImage,
           // Kit linkage moved to the AssetKit pivot (quantities restructure);
           // the pivot row's `kitId` FK is the legacy single-kit id the companion
           // contract expects.

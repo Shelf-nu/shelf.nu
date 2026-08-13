@@ -2157,6 +2157,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",
+      -- Cover image of the asset's model. Rendered by any asset that has no
+      -- image of its own (see resolveAssetImage). The am alias is already
+      -- joined for the name above, and the query groups by am.id, so
+      -- Postgres's functional dependency on the primary key permits these
+      -- without adding them to GROUP BY. AssetModel declares no @map, so the
+      -- column names here match the Prisma field names.
+      am.image AS "assetModelImage",
+      am."thumbnailImage" AS "assetModelThumbnailImage",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -2469,6 +2477,15 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'categoryId', aq."assetCategoryId",
           'assetModelId', aq."assetModelId",
           'assetModelName', aq."assetModelName",
+          -- Shaped as the nested relation the Prisma selects return, so
+          -- resolveAssetImage takes the same input on both index modes.
+          'assetModel', CASE
+            WHEN aq."assetModelId" IS NULL THEN NULL
+            ELSE jsonb_build_object(
+              'image', aq."assetModelImage",
+              'thumbnailImage', aq."assetModelThumbnailImage"
+            )
+          END,
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
           'type', aq."assetType",

@@ -48,6 +48,7 @@ import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -120,6 +121,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Governs `?teamMember=`: a viewer who may not see all custody may
+        // only ever filter this list by their own custody.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
           assetKits: {
@@ -244,7 +249,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: kits,
+        // `TeamMemberBadge` only decides whether to DRAW the custodian; the
+        // name and `user.email` shipped in this payload regardless, so a
+        // restricted viewer read them straight out of `/kits.data` while the
+        // page showed "private". Redact server-side.
+        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
         page,
         totalItems: totalKits,
         totalPages,

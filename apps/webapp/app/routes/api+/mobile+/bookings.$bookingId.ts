@@ -8,6 +8,8 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -122,6 +124,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 unitOfMeasure: true,
                 consumptionType: true,
                 mainImage: true,
+                thumbnailImage: true,
+                // Model cover image; collapsed into the flat image fields by
+                // `serializeAssetImage` below, so an asset inheriting its
+                // model's photo is not blank on the companion booking screen.
+                ...ASSET_MODEL_IMAGE_SELECT,
                 category: {
                   select: { id: true, name: true, color: true },
                 },
@@ -232,6 +239,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const assets = Array.from(byAssetId.values()).map((row) => {
       const { assetKits, ...rest } = row.first.asset;
+      // why: no `sourceKitId` fallback for detached kit residue here. This
+      // response collapses per asset rather than grouping by kit, and the
+      // unanimous rule below deliberately reports `null` rather than guessing
+      // a source. Resolving the snapshot kit would re-introduce exactly the
+      // arbitrary attribution that rule exists to remove.
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't
       // mis-attribute the slice to one of multiple sources.
@@ -246,7 +258,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ? assetKits.find((ak) => ak.id === unanimousAssetKitId)?.kit ?? null
           : null;
       return {
-        ...rest,
+        // Resolves the model-image cascade and drops the nested `assetModel`,
+        // so the companion keeps one source of truth for the image.
+        ...serializeAssetImage(rest),
         kit: mergedKit,
         kitId: mergedKit?.id ?? null,
         // Per-booking quantity (sum of all slices for this asset in

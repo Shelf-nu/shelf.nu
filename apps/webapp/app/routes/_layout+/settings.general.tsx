@@ -579,6 +579,7 @@ export default function GeneralPage() {
     ownerSubscriptionInfo,
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
+    isPersonalWorkspace,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -610,6 +611,7 @@ export default function GeneralPage() {
         ownerSubscriptionInfo={ownerSubscriptionInfo}
         ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
         premiumIsEnabled={premiumEnabled}
+        isPersonalWorkspace={isPersonalWorkspace}
       />
     </div>
   );

@@ -10,6 +10,7 @@ import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -297,6 +298,8 @@ export async function getLocation(
             where: assetsWhereForLocation,
             orderBy: { [orderBy]: orderDirection },
             include: {
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: {
                 select: {
                   id: true,
@@ -1945,6 +1948,9 @@ export async function updateLocationAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -2468,6 +2474,9 @@ export async function updateLocationKits({
       const kitWhere = getKitsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allKits = await db.kit.findMany({

@@ -28,6 +28,9 @@ export async function resolveLocationAssetIds({
   const assetsWhere = getAssetsWhereInput({
     organizationId,
     currentSearchParams: searchParams.toString(),
+    // Location writes are ADMIN/OWNER-only, so the custodian filter
+    // here can never come from a restricted viewer.
+    allowedTeamMemberIds: "all",
   });
 
   const allAssets = await db.asset.findMany({
@@ -65,6 +68,9 @@ export async function resolveLocationKitIds({
   const kitsWhere = getKitsWhereInput({
     organizationId,
     currentSearchParams: searchParams.toString(),
+    // Location writes are ADMIN/OWNER-only, so the custodian filter
+    // here can never come from a restricted viewer.
+    allowedTeamMemberIds: "all",
   });
 
   const allKits = await db.kit.findMany({

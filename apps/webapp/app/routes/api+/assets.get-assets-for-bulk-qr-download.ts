@@ -3,6 +3,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -37,12 +38,13 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.qr,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.qr,
+        action: PermissionAction.read,
+      });
 
     const url = new URL(request.url);
     const searchParams = url.searchParams;
@@ -64,6 +66,19 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       ? getAssetsWhereInput({
           organizationId,
           currentSearchParams: searchParams.toString(),
+          /**
+           * `qr: read` is held by BASE and SELF_SERVICE, so this endpoint is
+           * reachable by roles that may not see other people's custody. With
+           * an unscoped filter, `?assetIds=all-selected&teamMember=<colleague>`
+           * returned exactly that colleague's assets — an enumeration oracle
+           * that ignored `baseUserCanSeeCustody` entirely.
+           */
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: searchParams.getAll("teamMember"),
+            canSeeAllCustody,
+            userId,
+            organizationId,
+          }),
         })
       : { id: { in: assetIds }, organizationId };
 
