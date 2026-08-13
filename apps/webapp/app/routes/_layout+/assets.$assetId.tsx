@@ -115,7 +115,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {
         // Model cover image for an asset with no image of its own
         ...ASSET_MODEL_IMAGE_SELECT,
-        custody: { include: { custodian: true } },
+        // Explicit select rather than `include: { custodian: true }`: the
+        // include returned every `Custody` scalar, `teamMemberId` among them —
+        // a stable per-holder identifier that survives redaction (which only
+        // empties `custodian`) and groups a colleague's items for a restricted
+        // viewer. Mirrors the shape at `modules/asset/fields.ts`. Nothing reads
+        // `custody.teamMemberId` client-side; the release control keys on
+        // `custodian.id`.
+        custody: {
+          select: {
+            createdAt: true,
+            quantity: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                userId: true,
+                user: {
+                  select: {
+                    id: true,
+                    email: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                    profilePicture: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         assetKits: {
           select: {
             id: true,

@@ -75,6 +75,7 @@ export type RowWithCustody = {
 type BookingCustodianCarrier = {
   booking?: {
     custodianUserId?: string | null;
+    custodianTeamMemberId?: string | null;
     custodianTeamMember?: CustodianIdentity;
     custodianUser?: { id?: string | null } | null;
   } | null;
@@ -161,6 +162,27 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
           ? { ...REDACTED_CUSTODIAN }
           : entry.booking.custodianTeamMember,
         custodianUser: entry.booking.custodianUser ? null : undefined,
+        /**
+         * The scalar FKs are identity too, and the spread above preserved them.
+         * An opaque uuid still links rows to a single holder ("these seven kits
+         * are held by the same person, and it isn't me"), and
+         * `ORGANIZATION_SELECT_FIELDS` ships `owner: { id, email }` to every
+         * role through the `_layout` loader — so it resolves outright whenever
+         * the holder is the workspace owner.
+         *
+         * `kits._index` is the one loader selecting `custodianUserId` today;
+         * `custodianTeamMemberId` is cleared on the same principle so it cannot
+         * become the next instance the moment someone selects it.
+         *
+         * Absent stays absent: writing `null` onto a field the caller never
+         * selected would invent one.
+         */
+        ...(entry.booking.custodianUserId === undefined
+          ? {}
+          : { custodianUserId: null }),
+        ...(entry.booking.custodianTeamMemberId === undefined
+          ? {}
+          : { custodianTeamMemberId: null }),
       },
     };
   };

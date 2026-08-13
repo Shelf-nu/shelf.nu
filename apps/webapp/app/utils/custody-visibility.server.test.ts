@@ -234,8 +234,13 @@ describe("redactCustodianForViewer — booking-derived custody", () => {
     // in the same payload under `bookingAssets`.
     expect(row.bookingAssets[0].booking.custodianTeamMember.name).toBe("");
     expect(row.bookingAssets[0].booking.custodianUser).toBeNull();
+    // The scalar FK is identity too: an opaque uuid still links rows to one
+    // holder, and `ORGANIZATION_SELECT_FIELDS` ships `owner: { id, email }` to
+    // every role, so it resolves outright when the holder is the owner.
+    expect(row.bookingAssets[0].booking.custodianUserId).toBeNull();
     expect(JSON.stringify(row)).not.toContain("Colleague Name");
     expect(JSON.stringify(row)).not.toContain("colleague@example.com");
+    expect(JSON.stringify(row)).not.toContain("someone-else");
   });
 
   it("keeps a booking the viewer holds themselves", () => {
@@ -309,6 +314,12 @@ describe("redactCustodianForViewer — booking-derived custody", () => {
     expect(
       row.assetKits[0].asset.bookingAssets[0].booking.custodianTeamMember.name
     ).toBe("");
+    // `kits._index` is the ONE loader that selects this scalar, and it selects
+    // it exactly here — inside the availability nesting.
+    expect(
+      row.assetKits[0].asset.bookingAssets[0].booking.custodianUserId
+    ).toBeNull();
     expect(JSON.stringify(row)).not.toContain("Colleague Name");
+    expect(JSON.stringify(row)).not.toContain("someone-else");
   });
 });
