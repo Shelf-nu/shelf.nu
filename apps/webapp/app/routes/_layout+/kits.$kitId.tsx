@@ -389,8 +389,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               });
 
               if (remainingCustody === 0) {
-                await tx.asset.update({
-                  where: { id: assetId, organizationId },
+                // `status: { not: CHECKED_OUT }` — removing an asset from a
+                // custodied kit must not put it back on the shelf while it is
+                // still out on a booking. `Asset.status` is a single column, so
+                // the unguarded write erased `CHECKED_OUT` and the asset stopped
+                // counting as off the shelf. Precedence
+                // (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+                // `reconcileAssetStatusForBookingExit`.
+                await tx.asset.updateMany({
+                  where: {
+                    id: assetId,
+                    organizationId,
+                    status: { not: AssetStatus.CHECKED_OUT },
+                  },
                   data: { status: AssetStatus.AVAILABLE },
                 });
               }

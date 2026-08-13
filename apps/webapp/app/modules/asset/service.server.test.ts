@@ -1,4 +1,8 @@
-import { OrganizationRoles, type AssetIndexSettings } from "@prisma/client";
+import {
+  AssetStatus,
+  OrganizationRoles,
+  type AssetIndexSettings,
+} from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -105,6 +109,11 @@ vitest.mock("~/database/db.server", () => ({
       // status-flip branch doesn't fire — tests that exercise the
       // "last release" branch override this.
       count: vitest.fn().mockResolvedValue(1),
+      // why: `bulkCheckOutAssets` clears stale rows then bulk-inserts. Without
+      // these the transaction body throws on an undefined stub before it ever
+      // reaches the status guard under test.
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
@@ -993,8 +1002,10 @@ describe("releaseQuantity — activity events", () => {
     });
     // After delete, no rows remain → status should flip.
     (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
-    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
-    mockAssetUpdate.mockResolvedValue({});
+    const mockAssetUpdateMany = db.asset.updateMany as ReturnType<
+      typeof vitest.fn
+    >;
+    mockAssetUpdateMany.mockResolvedValue({ count: 1 });
 
     await releaseQuantity({
       assetId: "asset-1",
@@ -1004,8 +1015,16 @@ describe("releaseQuantity — activity events", () => {
       organizationId: "org-1",
     });
 
-    expect(mockAssetUpdate).toHaveBeenCalledWith({
-      where: { id: "asset-1" },
+    // `updateMany` + a `status: { not: CHECKED_OUT }` guard, so releasing the
+    // last custody row can never advertise an asset that is still physically
+    // out on a booking as AVAILABLE. See the "custody writes must not
+    // overwrite CHECKED_OUT" suite for the behavioural coverage.
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-1",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
       data: { status: "AVAILABLE" },
     });
   });
@@ -1375,8 +1394,14 @@ describe("releaseQuantity — consumptionType disposition", () => {
       organizationId: "org-1",
     });
 
-    expect(mockAssetUpdate).toHaveBeenCalledWith({
-      where: { id: "asset-1" },
+    // Guarded `updateMany` — see the sibling assertion in the
+    // "releaseQuantity — activity events" suite.
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-1",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
       data: { status: "AVAILABLE" },
     });
     expect(mockAssetUpdate).toHaveBeenCalledWith(
@@ -3208,6 +3233,108 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
   });
 });
 
+/**
+ * The guarded status write gates the whole batch.
+ *
+ * `assetsNotAvailable` rejects checked-out assets, but that read happens
+ * OUTSIDE the transaction. If a checkout commits in between, the guard on
+ * `setCustodyDrivenAssetStatus` correctly refuses to overwrite `CHECKED_OUT` —
+ * and pre-fix the batch carried on regardless, writing a custody row, a note
+ * and a CUSTODY_ASSIGNED event for an asset that is physically out on a
+ * booking. The audit trail then asserted a grant that never happened.
+ *
+ * @see {@link file://./custody-status.server.ts}
+ */
+describe("bulkCheckOutAssets — status guard gates the batch", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Custodian",
+        user: {
+          id: "custodian-user",
+          firstName: "Cust",
+          lastName: "Odian",
+          displayName: null,
+        },
+      }
+    );
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+      { id: "asset-2", title: "Saw", status: "AVAILABLE", type: "INDIVIDUAL" },
+    ]);
+  });
+
+  it("aborts without writing custody when an asset was checked out mid-flight", async () => {
+    // why: two assets passed the pre-check, but by write time only one still
+    // matches `status: { not: CHECKED_OUT }`. That shortfall IS the race.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await expect(
+      bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
+        userId: "user-current",
+        assetIds: ["asset-1", "asset-2"],
+        custodianId: "tm-1",
+        custodianName: "Custodian",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(/checked out while this action was in progress/);
+
+    // The whole point: no half-applied custody. The throw rolls the
+    // transaction back, but the rows must not be attempted either.
+    expect(db.custody.createMany).not.toHaveBeenCalled();
+
+    // 409, not the ShelfError default of 500: a valid request that lost a race
+    // is the client's cue to refresh, not a server fault. `shouldBeCaptured`
+    // is false for the same reason — this must not page anyone.
+    const caught = await bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch((err: unknown) => err);
+
+    expect((caught as ShelfError).status).toBe(409);
+    expect((caught as ShelfError).shouldBeCaptured).toBe(false);
+  });
+
+  it("proceeds to write custody when every asset survives the guard", async () => {
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 2,
+    });
+
+    // Downstream note/event stubs may be incomplete; all this asserts is that
+    // the gate itself did not fire and custody insertion was reached.
+    await bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch(() => undefined);
+
+    expect(db.custody.createMany).toHaveBeenCalled();
+  });
+});
+
 describe("renderBulkAssetTitle", () => {
   it("substitutes the {i} token with the index value", () => {
     expect(renderBulkAssetTitle("Dell Latitude {i}", 5)).toBe(
@@ -4075,5 +4202,168 @@ describe("setKitCustodyAfterAssetImport — kit custody + member inheritance", (
     });
 
     expect(mockBulkAssignKitCustody).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Regression guard for the CoSTAR Live Lab report: a quantity-tracked asset
+ * with units out on an ONGOING booking had its `CHECKED_OUT` status silently
+ * overwritten when a custodian was assigned three minutes later. `Asset.status`
+ * is one column describing an asset that is simultaneously part-in-custody,
+ * part-checked-out and part-free, so the last writer used to win. Every reader
+ * of "is this off the shelf" keys on that column, so the checked-out units
+ * stopped counting and `Available` overstated free stock by the booked amount.
+ *
+ * Both custody writes must therefore treat `CHECKED_OUT` as the strongest
+ * commitment, matching `reconcileAssetStatusForBookingExit`'s documented
+ * precedence (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`).
+ *
+ * These tests simulate Postgres rather than assert on Prisma arg shapes: the
+ * `updateMany` mock only applies the write when the row still matches the
+ * `where`, exactly as the real UPDATE ... WHERE would.
+ */
+describe("custody writes must not overwrite CHECKED_OUT", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCustodyAggregate = db.custody.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyCount = db.custody.count as ReturnType<typeof vitest.fn>;
+  const mockBookingAssetAggregate = db.bookingAsset.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "Manfrotto Super Clamp",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 29,
+  };
+
+  /** Stands in for the asset row's committed `status` column. */
+  let currentStatus: AssetStatus;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+
+    // Unguarded `update` — models the PRE-FIX write. Without this the suite
+    // would pass vacuously against the old code: the old service called
+    // `update` (not `updateMany`), so a mock that only watches `updateMany`
+    // never sees the clobber and `currentStatus` stays untouched. Verified by
+    // reverting the fix and confirming these tests go red.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ data }: { data?: { status?: AssetStatus } }) => {
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({});
+      }
+    );
+
+    // Behave like `UPDATE ... WHERE status <> $1`: when the row no longer
+    // matches the guard, zero rows change and the column keeps its value.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where?: { status?: { not?: AssetStatus } };
+        data?: { status?: AssetStatus };
+      }) => {
+        const excluded = where?.status?.not;
+        if (excluded !== undefined && currentStatus === excluded) {
+          return Promise.resolve({ count: 0 });
+        }
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({ count: 1 });
+      }
+    );
+  });
+
+  describe("checkOutQuantity (assigning custody)", () => {
+    beforeEach(() => {
+      mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      // No operator custody row yet → the service takes the `create` branch.
+      mockCustodyFindFirst.mockResolvedValue(null);
+    });
+
+    it("leaves CHECKED_OUT intact when units are already out on a booking", async () => {
+      currentStatus = AssetStatus.CHECKED_OUT;
+
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      // The custody row is still written — only the status is protected.
+      expect(db.custody.create).toHaveBeenCalledTimes(1);
+      expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+    });
+
+    it("still flips an AVAILABLE asset to IN_CUSTODY", async () => {
+      currentStatus = AssetStatus.AVAILABLE;
+
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.IN_CUSTODY);
+    });
+  });
+
+  describe("releaseQuantity (releasing the last custody row)", () => {
+    beforeEach(() => {
+      mockCustodyFindFirst.mockResolvedValue({
+        id: "custody-1",
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+      });
+      // Zero rows left → the flip-to-AVAILABLE branch fires.
+      mockCustodyCount.mockResolvedValue(0);
+    });
+
+    it("does not advertise a checked-out asset as AVAILABLE", async () => {
+      // The dangerous direction: releasing custody while units are physically
+      // out would have put the asset back on every picker and index.
+      currentStatus = AssetStatus.CHECKED_OUT;
+
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+    });
+
+    it("still returns an in-custody asset to AVAILABLE on the last release", async () => {
+      currentStatus = AssetStatus.IN_CUSTODY;
+
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.AVAILABLE);
+    });
   });
 });
