@@ -1,3 +1,16 @@
+/**
+ * ScannedItemsList — the "Scanned" tab of the audit scanner.
+ *
+ * Each row is a tap target that opens the evidence sheet for that scan, so the
+ * trailing element must SAY so: a scan carries an optional condition note and
+ * photos, and when the only affordance was a muted chevron, field workers
+ * finished audits without ever discovering it. Rows therefore end in an
+ * explicit "Add photo/note" action, which becomes the evidence count once
+ * something is attached.
+ *
+ * @see {@link file://./evidence-modal.tsx} what a row opens
+ * @see {@link file://./evidence-coachmark.tsx} the one-time hint above the list
+ */
 import React, { useCallback } from "react";
 import { View, Text, FlatList, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -48,12 +61,6 @@ export function ScannedItemsList({
           <Text style={styles.scannedItemName} numberOfLines={1}>
             {item.name}
           </Text>
-          {hasEvidence && (
-            <View style={styles.evidenceBadge}>
-              <Ionicons name="attach" size={12} color={colors.muted} />
-              <Text style={styles.evidenceCount}>{evidenceCount}</Text>
-            </View>
-          )}
           {syncFailed ? (
             <View style={styles.syncFailedBadge}>
               <Ionicons
@@ -68,7 +75,25 @@ export function ScannedItemsList({
               {item.isExpected ? "Found" : "Unexpected"}
             </Text>
           )}
-          <Ionicons name="chevron-forward" size={16} color={colors.muted} />
+          {/* The row's whole point beyond "found": attach evidence. Say it in
+              words until there is a count to show instead. */}
+          {hasEvidence ? (
+            <View style={styles.evidenceBadge}>
+              <Ionicons name="attach" size={12} color={colors.primaryText} />
+              <Text style={styles.evidenceCount}>{evidenceCount}</Text>
+            </View>
+          ) : (
+            <View style={styles.addEvidenceChip}>
+              <Ionicons
+                name="camera-outline"
+                size={13}
+                color={colors.primaryText}
+              />
+              <Text style={styles.addEvidenceText} numberOfLines={1}>
+                Add photo/note
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       );
     },
@@ -138,28 +163,52 @@ const useStyles = createStyles((colors) => ({
   },
   scannedItemName: {
     flex: 1,
+    // why: the name is the ONLY element allowed to give up width — a squeezed
+    // "Add photo/note" chip would wrap or clip and stop reading as an action
+    flexShrink: 1,
     fontSize: fontSize.sm,
     fontWeight: "500",
     color: colors.foreground,
   },
   scannedItemBadge: {
+    flexShrink: 0,
     fontSize: fontSize.xs,
     fontWeight: "500",
     color: colors.muted,
   },
+  addEvidenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+    gap: spacing.xs,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: borderRadius.sm,
+  },
+  addEvidenceText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.primaryText,
+  },
   evidenceBadge: {
     flexDirection: "row",
     alignItems: "center",
+    flexShrink: 0,
     gap: 2,
-    backgroundColor: colors.borderLight,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
     borderRadius: borderRadius.sm,
   },
   evidenceCount: {
     fontSize: fontSize.xs,
     fontWeight: "600",
-    color: colors.foregroundSecondary,
+    color: colors.primaryText,
   },
   syncFailedBadge: {
     flexDirection: "row",
