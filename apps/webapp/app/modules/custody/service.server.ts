@@ -99,7 +99,16 @@ export async function releaseCustody({
        *
        * @see {@link file://./../asset/custody-status.server.ts}
        */
-      await tx.custody.deleteMany({ where: { assetId } });
+      // `asset: { organizationId }` — `assetId` is request input, so the delete
+      // must prove org ownership itself. Splitting the old org-scoped
+      // `asset.update` (which carried the nested delete) left this statement
+      // unscoped: a cross-org id would delete another tenant's custody rows and
+      // only be undone by the `findUniqueOrThrow` below happening to throw. That
+      // is incidental ordering, not a guard.
+      // @see .claude/rules/org-scope-user-supplied-ids.md
+      await tx.custody.deleteMany({
+        where: { assetId, asset: { organizationId } },
+      });
 
       await releaseAssetsToAvailableUnlessCheckedOut(
         tx,

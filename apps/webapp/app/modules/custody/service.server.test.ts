@@ -128,8 +128,12 @@ describe("releaseCustody status write", () => {
     // Custody and checkout are independent commitments. Refusing the status
     // write must not refuse the release itself — otherwise a checked-out asset
     // is stuck with a custodian it no longer has.
+    //
+    // The `asset: { organizationId }` filter is part of the contract, not
+    // incidental: `assetId` is request input, so this delete proves org
+    // ownership rather than relying on a later read to roll it back.
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1" },
+      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
     });
   });
 });
