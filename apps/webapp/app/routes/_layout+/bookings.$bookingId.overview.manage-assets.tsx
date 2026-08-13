@@ -85,11 +85,14 @@ import {
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -199,13 +202,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     // getPaginatedAndFilterableAssets + getBooking both only need
     // `organizationId` (from requirePermission above). They're
@@ -230,6 +237,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Ignores the custodian-filter seed — scope it rather than fetch a
+        // roster nobody renders.
+        canSeeAllCustody: false,
         extraInclude: {
           assetLocations: {
             select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
@@ -365,7 +375,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       booking,
-      items: assetsWithAvailability,
+      // `assetIndexFields()` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER does not shape the rows, so the identity
+      // has to be redacted here too. The cast mirrors `asset/data.server.ts`:
+      // the declared row type resolves `custody` to the raw Prisma model with
+      // no `custodian`, while the runtime include nests one.
+      items: redactCustodianForViewer(
+        assetsWithAvailability as unknown as Array<
+          (typeof assetsWithAvailability)[number] & RowWithCustody
+        >,
+        { canSeeAllCustody, userId: authSession?.userId }
+      ),
       categories,
       tags,
       search,
@@ -413,12 +435,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     let {
       assetIds,
@@ -497,6 +520,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
+        // ADDS the matched assets to the booking, which then lists them — so an
+        // unscoped custodian filter would hand a restricted user a readable
+        // copy of exactly what a colleague holds.
+        allowedTeamMemberIds: await scopeCustodianFilterIds({
+          teamMemberIds: searchParams.getAll("teamMember"),
+          canSeeAllCustody,
+          userId: authSession?.userId,
+          organizationId,
+        }),
       });
 
       const allAssets = await db.asset.findMany({

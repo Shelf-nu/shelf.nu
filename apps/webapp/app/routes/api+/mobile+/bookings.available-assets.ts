@@ -83,6 +83,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Mobile asset picker: ignores the custodian-filter seed, so scope it
+        // rather than fetch a roster the response never returns.
+        canSeeAllCustody: false,
         filters: pickerParams.toString(),
       });
 

@@ -56,6 +56,9 @@ export const loader = async ({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // Shelf staff route, gated by `requireAdmin` above — and it renders the
+      // custodian filter, so the seed must not be scoped to one person.
+      canSeeAllCustody: true,
     });
 
     // Synchronous — no DB call. Booking custodian data is already included

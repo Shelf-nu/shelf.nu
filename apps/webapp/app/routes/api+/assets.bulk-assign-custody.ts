@@ -3,7 +3,10 @@ import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { getTeamMember } from "~/modules/team-member/service.server";
+import {
+  getTeamMember,
+  scopeCustodianFilterIds,
+} from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -27,12 +30,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -101,6 +105,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currentSearchParams,
       settings,
       timeZone,
+      // `asset: custody` is a SELF_SERVICE permission, so narrow the
+      // select-all custodian filter to the caller's own custody — otherwise a
+      // self-service user could act on exactly the set a colleague holds.
+      allowedTeamMemberIds: await scopeCustodianFilterIds({
+        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+          "teamMember"
+        ),
+        canSeeAllCustody,
+        userId,
+        organizationId,
+      }),
     });
 
     const skippedNote =
