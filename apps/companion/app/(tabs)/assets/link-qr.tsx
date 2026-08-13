@@ -1,9 +1,10 @@
 /**
  * Link-QR asset picker screen.
  *
- * Reached from the scanner after an unclaimed QR code is claimed into the
- * current workspace (or directly for a code the org already claimed but never
- * linked). Presents a searchable, paginated list of the workspace's assets;
+ * Reached from the scanner for a code the org already claimed but never
+ * linked, and directly for an UNCLAIMED code — the link endpoint claims those
+ * inline, so there is no separate claim step before this screen.
+ * Presents a searchable, paginated list of the workspace's assets;
  * selecting one links the scanned QR to it via `POST /api/mobile/qr/link-asset`
  * and navigates to the asset's detail.
  *
@@ -102,9 +103,15 @@ function LinkQrContent() {
   /**
    * Workspace-switch guard (mirrors the scanner's originOrgId pin): the
    * scanned `qrId` belongs to the workspace that was active when the picker
-   * opened. If the user switches workspaces mid-flow, the list would show
-   * the NEW org's assets while the link targets the OLD org's code — the
-   * server would 403 on confirm, a confusing dead end. Leave instead.
+   * opened. If the user switches workspaces mid-flow, the list would show the
+   * NEW org's assets while the link targets the OLD org's code.
+   *
+   * why this guard is load-bearing, not cosmetic: do NOT justify it with "the
+   * server would 403 anyway". For a code the previous org already OWNS that is
+   * true, but for an UNCLAIMED code it is not — `relinkAssetQrCode` claims
+   * inline into whichever org is active, so confirming after a switch would
+   * silently claim the label into the WRONG workspace. There is no unclaim.
+   * This guard is the only thing preventing that; removing it is not safe.
    */
   const originOrgIdRef = useRef(currentOrg?.id);
   useEffect(() => {
