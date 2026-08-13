@@ -1093,9 +1093,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
       paginationClause,
-      // Search reads c.name / l.name, so the slim phase must join Category +
-      // Location even without a category/location sort.
-      hasSearch: Boolean(search),
     });
 
     // Retry the raw read on transient DB failures. The auto-applied client
