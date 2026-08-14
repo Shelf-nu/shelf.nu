@@ -68,7 +68,11 @@ function resendRequest(userFriendlyRole: string) {
 describe("resolveUserAction — resend invite role", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(createInvite).mockResolvedValue({ id: "invite-1" } as any);
+    // Only the fact that it resolved matters here; the assertions are on the
+    // arguments createInvite was called with, not on its return value.
+    vi.mocked(createInvite).mockResolvedValue({ id: "invite-1" } as Awaited<
+      ReturnType<typeof createInvite>
+    >);
   });
 
   it("refuses to resend an invite as Owner", async () => {

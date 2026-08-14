@@ -370,6 +370,32 @@ export async function updateInviteStatus({
     const data = { status };
 
     if (status === "ACCEPTED") {
+      /**
+       * The creation-time guards cannot protect an invite that already exists.
+       * Rows written before those guards landed — or by any future path that
+       * forgets to validate — still carry their stored roles, and they are
+       * handed to `createUserOrAttachOrg` verbatim below, which writes them
+       * straight into `UserOrganization.roles`.
+       *
+       * An invite granting OWNER can only have come from that gap, so it is
+       * refused outright rather than silently downgraded: honouring it in any
+       * form would hand out access the workspace owner never approved through a
+       * supported flow, and quietly rewriting the role would hide that
+       * something anomalous happened.
+       */
+      if (!invite.roles.every(isInvitableRole)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Invite is no longer valid",
+          message:
+            "This invite grants a role that can no longer be assigned. Please ask your administrator to send you a new invite.",
+          additionalData: { inviteId: invite.id, roles: invite.roles },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
 
       const user = await createUserOrAttachOrg({

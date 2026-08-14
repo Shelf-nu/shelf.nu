@@ -13,11 +13,13 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
 import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { action } from "~/routes/api+/settings.import-users";
+import type { CSVData } from "~/utils/csv.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
@@ -47,15 +49,25 @@ const mockContext = {
   commitSession: vi.fn(),
   isAuthenticated: true,
   appVersion: "test",
-} as any;
+} as unknown as AppLoadContext;
+
+/** One CSV row: role, email, teamMemberId — matching IMPORT_USERS_CSV_HEADERS */
+type CsvRow = [string, string, string];
 
 /** Builds the raw CSV grid `csvDataFromRequest` would return */
-function csvRows(rows: Array<[string, string, string]>) {
+function csvRows(rows: CsvRow[]): CSVData {
   return [["role", "email", "teamMemberId"], ...rows];
 }
 
-async function runImport(rows: Array<[string, string, string]>) {
-  vi.mocked(csvDataFromRequest).mockResolvedValue(csvRows(rows) as any);
+/**
+ * The action funnels thrown ShelfErrors through `data(error(reason), { status })`,
+ * which returns a DataWithResponseInit rather than a Response. `data` stays
+ * `unknown` because its shape differs between the success and error branches.
+ */
+type ActionResult = { init?: { status?: number }; data?: unknown };
+
+async function runImport(rows: CsvRow[]): Promise<ActionResult> {
+  vi.mocked(csvDataFromRequest).mockResolvedValue(csvRows(rows));
 
   const request = new Request("http://localhost/api/settings/import-users", {
     method: "POST",
@@ -65,20 +77,23 @@ async function runImport(rows: Array<[string, string, string]>) {
 
   return (await action(
     createActionArgs({ context: mockContext, request, params: {} })
-  )) as { init?: { status?: number }; data?: any };
+  )) as ActionResult;
 }
 
 describe("settings.import-users role validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
+    // The route destructures only organizationId; the rest of the permission
+    // payload is irrelevant here, so it is cast to the real return type rather
+    // than reconstructed field by field.
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-    } as any);
-    vi.mocked(assertUserCanInviteUsersToWorkspace).mockResolvedValue(
-      undefined as any
+    } as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(assertUserCanInviteUsersToWorkspace).mockResolvedValue(undefined);
+    vi.mocked(bulkInviteUsers).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof bulkInviteUsers>>
     );
-    vi.mocked(bulkInviteUsers).mockResolvedValue({} as any);
   });
 
   it("rejects a CSV row granting OWNER", async () => {
