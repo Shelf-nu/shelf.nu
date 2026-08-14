@@ -138,6 +138,9 @@ vitest.mock("~/database/db.server", () => ({
       // and `mergeStandaloneCollisionsForKitDetachment` folds a kit-driven
       // row's units into a colliding standalone row via `update`.
       update: vitest.fn().mockResolvedValue({}),
+      // why: `updateKitAssets` propagates a newly-added kit member into the
+      // bookings that already hold this kit, one `createMany` per booking.
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
@@ -833,8 +836,16 @@ describe("deleteKit", () => {
     expect(db.kit.deleteMany).toHaveBeenCalled();
 
     // Drill flips to AVAILABLE; Pens does not (still has operator custody).
+    // The `status: { not: CHECKED_OUT }` guard is what stops this release
+    // advertising an asset that is still physically out on a booking — see
+    // `releaseAssetsToAvailableUnlessCheckedOut` and the behavioural suite
+    // at the bottom of this file.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["drill-1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["drill-1"] },
+        organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
+      },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -986,11 +997,15 @@ describe("bulkDeleteKits", () => {
       ])
     );
 
-    // Both assets flipped to AVAILABLE (no remaining custody).
+    // Both assets flipped to AVAILABLE (no remaining custody), guarded so a
+    // still-checked-out asset is never dragged back onto the shelf. This path
+    // also gained its org scope from the shared helper — it previously
+    // suppressed the `require-org-scope-on-id-queries` rule instead.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: expect.arrayContaining(["drill-1", "pen-1"]) },
         organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -1591,6 +1606,13 @@ describe("relinkKitQrCode", () => {
     vitest.clearAllMocks();
   });
 
+  const args = {
+    qrId: "qr-1",
+    kitId: "kit-1",
+    organizationId: "org-1",
+    userId: "user-1",
+  };
+
   it("should relink qr code to kit", async () => {
     expect.assertions(3);
     //@ts-expect-error missing vitest type
@@ -1605,15 +1627,17 @@ describe("relinkKitQrCode", () => {
     //@ts-expect-error missing vitest type
     db.kit.update.mockResolvedValue({});
 
-    const result = await relinkKitQrCode({
-      qrId: "qr-1",
-      kitId: "kit-1",
-      organizationId: "org-1",
-      userId: "user-1",
-    });
+    const result = await relinkKitQrCode(args);
 
     expect(db.qr.update).toHaveBeenCalledWith({
-      where: { id: "qr-1" },
+      // why: the WHERE re-asserts the state the guards observed, so a
+      // concurrent writer that changed it loses instead of both winning.
+      where: {
+        id: "qr-1",
+        organizationId: "org-1",
+        assetId: null,
+        kitId: null,
+      },
       data: { organizationId: "org-1", userId: "user-1" },
     });
     expect(db.kit.update).toHaveBeenCalledTimes(2);
@@ -1632,14 +1656,114 @@ describe("relinkKitQrCode", () => {
     //@ts-expect-error missing vitest type
     db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
 
-    await expect(
-      relinkKitQrCode({
-        qrId: "qr-1",
-        kitId: "kit-1",
-        organizationId: "org-1",
-        userId: "user-1",
-      })
-    ).rejects.toBeInstanceOf(ShelfError);
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      // why: user-caused guard, not a server fault — must not surface as 5xx.
+      status: 403,
+      title: "QR already linked.",
+    });
+  });
+
+  it("throws 404 when the kit is missing or not in the caller's org", async () => {
+    // why: this guard existed but omitted `status`, so it resolved to 500 —
+    // `cause: null` is not a P2025, so the ShelfError constructor falls through
+    // to `status || 500`. A missing/cross-org kit is a client error.
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue(null);
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 404,
+      message: "Kit not found.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("throws 403 when the QR belongs to another organization", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-other",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR not valid.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("throws 403 when the QR is already linked to a different kit", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: "kit-other",
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("claims an UNCLAIMED QR inline, pinning the still-unclaimed state", async () => {
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue({});
+
+    await relinkKitQrCode(args);
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1", organizationId: null, assetId: null, kitId: null },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+  });
+
+  it("loses the race safely: 403, and no kit write", async () => {
+    // why: a competing writer makes the conditional update match zero rows
+    // (P2025). The kit's existing code must not be disconnected for a link
+    // that never persisted.
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr-id" }] });
+    //@ts-expect-error missing vitest type
+    db.qr.update.mockRejectedValueOnce(
+      Object.assign(new Error("no rows"), { code: "P2025" })
+    );
+
+    await expect(relinkKitQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.kit.update).not.toHaveBeenCalled();
   });
 });
 
@@ -1994,11 +2118,15 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
       ],
     });
 
-    // Asset status flipped to IN_CUSTODY for the inherited assets.
+    // Asset status flipped to IN_CUSTODY for the inherited assets — guarded
+    // so inheriting kit custody cannot erase CHECKED_OUT on a member that is
+    // still out on a booking. The caller's `assetsToInheritStatus` filter only
+    // excludes assets that already HAVE custody, which is a different question.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["asset-individual", "asset-qty"] },
         organizationId: "org-1",
+        status: { not: AssetStatus.CHECKED_OUT },
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });
@@ -5152,5 +5280,351 @@ describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () =>
     expect(err.message).toContain("unavailable assets");
     expect(err.status).toBe(400);
     expect(err.shouldBeCaptured).toBe(false);
+  });
+});
+
+/**
+ * Regression cover for "a kit I never added showed up in my booking".
+ *
+ * `updateKitAssets` propagates a newly-added kit member into the bookings that
+ * already hold this kit. It used to derive that booking list from the FIRST kit
+ * member that had ANY `BookingAsset` row at all:
+ *
+ *   kit.assets.find((a) => a.bookingAssets.length > 0)?.bookingAssets
+ *
+ * with the underlying `bookingAssets` include carrying no `where` clause. A
+ * QUANTITY_TRACKED asset can belong to several kits, so that member's rows
+ * could belong to a DIFFERENT kit's booking. The new member was then written
+ * into a booking that never contained this kit, tagged with THIS kit's
+ * `assetKitId` — the booking rendered an extra kit nobody added, and the stray
+ * asset produced reservation conflicts that silently disabled Reserve.
+ *
+ * The rule these tests pin: propagate into exactly the bookings holding a slice
+ * of THIS kit — a `BookingAsset` whose `assetKitId` is one of this kit's
+ * `AssetKit` ids — and into ALL of them, not just the first member's.
+ */
+describe("updateKitAssets - kit-booking propagation scope", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Kit B holds two members:
+   *  - `shared-banner`, a QT asset ALSO in Kit A, whose only booking row is a
+   *    Kit A slice on `booking-foreign` (a booking Kit B is not part of);
+   *  - `kit-b-member`, whose booking row IS a Kit B slice on `booking-own`.
+   *
+   * `shared-banner` sorts first, so the old `.find()` locked onto it and got
+   * exactly the wrong answer in both directions.
+   */
+  function arrangeKitB() {
+    const mockKit = {
+      id: "kit-b",
+      name: "Kit B",
+      status: KitStatus.AVAILABLE,
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-shared-kitb",
+          kitId: "kit-b",
+          quantity: 1,
+          asset: {
+            id: "shared-banner",
+            title: "Shared banner",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+            bookingAssets: [
+              {
+                id: "ba-foreign",
+                bookingId: "booking-foreign",
+                assetId: "shared-banner",
+                // Kit A's membership — this row is NOT Kit B's business.
+                assetKitId: "ak-shared-kita",
+                sourceKitId: "kit-a",
+                quantity: 1,
+                booking: { id: "booking-foreign", status: BookingStatus.DRAFT },
+              },
+            ],
+          },
+        },
+        {
+          id: "ak-member-kitb",
+          kitId: "kit-b",
+          quantity: 1,
+          asset: {
+            id: "kit-b-member",
+            title: "Kit B member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-b" }],
+            bookingAssets: [
+              {
+                id: "ba-own",
+                bookingId: "booking-own",
+                assetId: "kit-b-member",
+                assetKitId: "ak-member-kitb",
+                sourceKitId: "kit-b",
+                quantity: 1,
+                booking: { id: "booking-own", status: BookingStatus.RESERVED },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    /** Full submitted membership: both existing members plus the new one. */
+    const mockAssetsForKit = [
+      {
+        id: "shared-banner",
+        title: "Shared banner",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 10,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "kit-b-member",
+        title: "Kit B member",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-b" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "hp-laserjet",
+        title: "HP LaserJet",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(mockAssetsForKit);
+    // The AssetKit row the pivot insert just created for the new member.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-hp-kitb", assetId: "hp-laserjet", quantity: 1 },
+    ]);
+  }
+
+  /** Booking ids that received a propagated row, across all createMany calls. */
+  function propagatedBookingIds(): string[] {
+    // `mock.calls` is `any[][]`; narrow it to the single argument shape this
+    // delegate is ever called with so the assertions stay type-checked.
+    const calls = (db.bookingAsset.createMany as ReturnType<typeof vitest.fn>)
+      .mock.calls as Array<[{ data: Array<{ bookingId: string }> }]>;
+    return calls.flatMap(([arg]) => arg.data.map((row) => row.bookingId));
+  }
+
+  async function addNewMemberToKitB() {
+    const { updateKitAssets } = await import("./service.server");
+    await updateKitAssets({
+      kitId: "kit-b",
+      assetIds: ["shared-banner", "kit-b-member", "hp-laserjet"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  it("does not add the new member to a booking that holds a different kit", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // `booking-foreign` holds Kit A only. Writing here is the reported bug:
+    // the booking grows an asset AND a whole kit its owner never added.
+    expect(propagatedBookingIds()).not.toContain("booking-foreign");
+  });
+
+  it("adds the new member to a booking holding this kit even when an earlier member only has foreign rows", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // The mirror-image failure of the same `.find()`: locking onto
+    // `shared-banner` meant `booking-own` — which genuinely holds Kit B — was
+    // skipped, so the kit silently drifted out of sync with its own booking.
+    expect(propagatedBookingIds()).toContain("booking-own");
+  });
+
+  it("records a BOOKING_ASSETS_ADDED event for each propagated row", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // `ActivityEvent` is reporting data, not the booking's notes feed — no
+    // note is expected here, since nobody acted on the booking. Before this,
+    // the propagated row landed with no trace in any table, which is why the
+    // cross-kit leak could not be reconstructed after the fact.
+    const addedEvents = (
+      recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_ASSETS_ADDED");
+
+    expect(addedEvents).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "BOOKING_ASSETS_ADDED",
+        entityType: "BOOKING",
+        entityId: "booking-own",
+        bookingId: "booking-own",
+        assetId: "hp-laserjet",
+        // Names the kit that pulled the asset in — the provenance whose
+        // absence made the stray rows untraceable in the booking feed.
+        kitId: "kit-b",
+      }),
+    ]);
+  });
+
+  it("writes the propagated rows and their events on one transaction client", async () => {
+    arrangeKitB();
+
+    await addNewMemberToKitB();
+
+    // A propagated row that commits without its event is unrecoverable, not
+    // merely untidy: the membership transaction has already persisted the
+    // AssetKit row, so a retried call computes `newlyAddedAssets` as empty,
+    // skips propagation entirely and never re-emits the event. Passing the
+    // transaction client to `recordEvents` is what makes the row and its
+    // audit trail commit or roll back together.
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "BOOKING_ASSETS_ADDED" }),
+      ]),
+      expect.anything()
+    );
+  });
+});
+
+/**
+ * Custody release must never drag a still-checked-out asset back onto the
+ * shelf.
+ *
+ * Custody and bookings are independent commitments but `Asset.status` is one
+ * column, so an unguarded flip let whoever wrote last win. Releasing kit
+ * custody on an asset with units still out on an ONGOING booking advertised
+ * it as `AVAILABLE` on every picker, index and availability sum while it was
+ * physically gone. All five kit release paths now funnel through
+ * `releaseAssetsToAvailableUnlessCheckedOut`, so this suite drives one of them
+ * end to end rather than asserting Prisma argument shapes.
+ *
+ * The `updateMany` mock below models `UPDATE ... WHERE status <> $1`: drop the
+ * guard from the service and the write lands, turning these tests red.
+ */
+describe("kit custody release must not overwrite CHECKED_OUT", () => {
+  /** Stands in for the asset row's committed `status` column. */
+  let currentStatus: AssetStatus;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where?: { status?: { not?: AssetStatus } };
+        data?: { status?: AssetStatus };
+      }) => {
+        const excluded = where?.status?.not;
+        if (excluded !== undefined && currentStatus === excluded) {
+          return Promise.resolve({ count: 0 });
+        }
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({ count: 1 });
+      }
+    );
+  });
+
+  /** Releases the kit's custody with no custody rows left on the asset. */
+  async function releaseKitCustodyWithNoRemainingCustody() {
+    // `releaseCustody` derives `kit.assets` from the `assetKits` PIVOT rows
+    // (`assets: (kitRow.assetKits ?? []).map((ak) => ak.asset)`), so a fixture
+    // that sets a top-level `assets` array has it overwritten with `[]` and
+    // the flip silently never runs. Seed the pivot.
+    const kitWithCustody = {
+      id: "kit-1",
+      name: "Test Kit",
+      assetKits: [{ asset: { id: "asset-1", title: "Manfrotto Super Clamp" } }],
+      createdBy: { firstName: "John", lastName: "Doe" },
+      custody: {
+        id: "kc-1",
+        custodian: { id: "tm-1", name: "Jane Smith", user: { id: "user-9" } },
+      },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(kitWithCustody);
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue(kitWithCustody);
+    // `clearAllMocks` clears call history but NOT a queued
+    // `mockResolvedValueOnce` chain, so a leftover entry from the previous
+    // test would shift this one's queue and silently skip the flip. Reset the
+    // implementation, then drive both reads off the `select` shape rather
+    // than call order.
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockReset();
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ select }: { select?: Record<string, boolean> }) =>
+        // The still-custodied probe selects ONLY `assetId`; the
+        // cascade-delete read also asks for `teamMemberId`.
+        select?.teamMemberId
+          ? Promise.resolve([
+              {
+                assetId: "asset-1",
+                teamMemberId: "tm-1",
+                kitCustodyId: "kc-1",
+              },
+            ])
+          : // Nothing left, so the flip branch fires.
+            Promise.resolve([])
+    );
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await releaseCustody({
+      kitId: "kit-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  }
+
+  it("leaves a checked-out asset checked out when its kit custody is released", async () => {
+    currentStatus = AssetStatus.CHECKED_OUT;
+
+    await releaseKitCustodyWithNoRemainingCustody();
+
+    // Without this the test would pass vacuously whenever the release path
+    // stops reaching the flip at all (a stale mock, a refactor) — the status
+    // would simply never be touched.
+    expect(db.asset.updateMany).toHaveBeenCalled();
+    expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+  });
+
+  it("still returns an in-custody asset to AVAILABLE", async () => {
+    currentStatus = AssetStatus.IN_CUSTODY;
+
+    await releaseKitCustodyWithNoRemainingCustody();
+
+    expect(db.asset.updateMany).toHaveBeenCalled();
+    expect(currentStatus).toBe(AssetStatus.AVAILABLE);
   });
 });

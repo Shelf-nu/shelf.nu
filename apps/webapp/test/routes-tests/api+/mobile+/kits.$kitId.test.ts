@@ -19,6 +19,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 
 import { loader } from "~/routes/api+/mobile+/kits.$kitId";
@@ -43,12 +44,16 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
+  // why: the route resolves custody visibility from this; each test sets the
+  // flag directly rather than constructing an org whose overrides imply it.
+  getMobileUserContext: vi.fn(),
 }));
 
 const findFirstMock = vi.mocked(db.kit.findFirst);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 const requireMobilePermissionMock = vi.mocked(requireMobilePermission);
+const getMobileUserContextMock = vi.mocked(getMobileUserContext);
 
 const FAKE_USER_ID = "user-abc";
 const FAKE_ORG_ID = "org-xyz";
@@ -81,6 +86,9 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue(FAKE_ORG_ID);
   requireMobilePermissionMock.mockResolvedValue(undefined);
+  getMobileUserContextMock.mockResolvedValue({
+    canSeeAllCustody: true,
+  } as Awaited<ReturnType<typeof getMobileUserContext>>);
 });
 
 describe("GET /api/mobile/kits/:kitId", () => {
@@ -167,5 +175,75 @@ describe("GET /api/mobile/kits/:kitId", () => {
     // 10 × 5 (kit units) + 20 × 1 (individual) = 70.
     // NOT 10 × 100 (workspace stock) + 20 × 1 = 1020.
     expect(body.kit.totalValue).toBe(70);
+  });
+});
+
+describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
+  /** Kit fixture holding custody by a named colleague, with their email. */
+  function kitInColleaguesCustody() {
+    return {
+      ...buildKitFixture([]),
+      custody: {
+        createdAt: new Date("2026-01-01"),
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague",
+          userId: "someone-else",
+          user: {
+            firstName: "Colleague",
+            lastName: "Name",
+            email: "colleague@example.com",
+          },
+        },
+      },
+    };
+  }
+
+  it("nulls a colleague's custody for a viewer who may not see all custody", async () => {
+    // `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
+    // `custodian.user.email` — so without a gate the whole identity shipped.
+    getMobileUserContextMock.mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    findFirstMock.mockResolvedValue(kitInColleaguesCustody() as never);
+
+    const response = await loader(
+      createLoaderArgs({ params: { kitId: "kit-1" } })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as { kit: { custody: any } };
+
+    expect(body.kit.custody).toBeNull();
+    expect(JSON.stringify(body)).not.toContain("colleague@example.com");
+  });
+
+  it("keeps the viewer's OWN custody visible", async () => {
+    getMobileUserContextMock.mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    const own = kitInColleaguesCustody();
+    own.custody.custodian.userId = FAKE_USER_ID;
+    findFirstMock.mockResolvedValue(own as never);
+
+    const response = await loader(
+      createLoaderArgs({ params: { kitId: "kit-1" } })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as { kit: { custody: any } };
+
+    // Over-redacting here would hide a kit from the person actually holding it.
+    expect(body.kit.custody).not.toBeNull();
+  });
+
+  it("keeps custody visible for a viewer who may see all of it", async () => {
+    findFirstMock.mockResolvedValue(kitInColleaguesCustody() as never);
+
+    const response = await loader(
+      createLoaderArgs({ params: { kitId: "kit-1" } })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as { kit: { custody: any } };
+
+    expect(body.kit.custody?.custodian?.name).toBe("Colleague");
   });
 });

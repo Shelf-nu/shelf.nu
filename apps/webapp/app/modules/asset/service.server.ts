@@ -143,6 +143,7 @@ import {
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import type {
   MoveAssetLocationUnitsArgs,
@@ -5971,6 +5972,14 @@ export async function bulkCheckOutAssets({
     }
 
     /**
+     * The ids this call will take custody of. Unique by construction —
+     * `allAssets` comes from a `findMany`, so one row per asset — which is what
+     * lets the guarded status write below compare its updated-row count against
+     * this length to detect a raced checkout.
+     */
+    const assetIdsToCustody = assets.map((asset) => asset.id);
+
+    /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
@@ -5993,19 +6002,56 @@ export async function bulkCheckOutAssets({
         where: { assetId: { in: assets.map((a) => a.id) } },
       });
 
+      /**
+       * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
+       *
+       * Routed through the shared guard so it cannot disturb `CHECKED_OUT`.
+       * The `assetsNotAvailable` pre-check above already rejects checked-out
+       * assets, but that read happens OUTSIDE this transaction — a checkout
+       * committing in between would be silently overwritten. Guarding the
+       * write closes that window and keeps every custody-driven status write
+       * uniform.
+       *
+       * It runs FIRST because its return count gates everything after it. The
+       * guard skipping a row is not a no-op we can absorb: writing the custody
+       * row, note and CUSTODY_ASSIGNED event anyway would assert in the audit
+       * trail that custody was granted over an asset that is physically out on
+       * a booking. A shortfall means the world moved under the pre-check, so
+       * the whole batch rolls back rather than half-applying.
+       *
+       * @see {@link file://./custody-status.server.ts}
+       */
+      const statusUpdatedCount = await setCustodyDrivenAssetStatus(
+        tx,
+        assetIdsToCustody,
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
+
+      // This is the RACE path only — the common case is caught by the
+      // `assetsNotAvailable` pre-check, which names the offending assets and
+      // reads better. 409 rather than the ShelfError default of 500: the world
+      // moved under a valid request, which is the client's cue to refresh, not
+      // a server fault worth capturing.
+      if (statusUpdatedCount !== assetIdsToCustody.length) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset is checked out",
+          message:
+            "Some of the selected assets were checked out while this action was in progress. No custody was assigned. Please refresh and try again.",
+          additionalData: { userId, custodianId, assetIds: assetIdsToCustody },
+          label: "Assets",
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({
           assetId: asset.id,
           teamMemberId: custodianId,
         })),
-      });
-
-      /** Updating status of assets to IN_CUSTODY */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
       });
 
       /** Creating notes for the assets */
@@ -6218,10 +6264,24 @@ export async function bulkCheckInAssets({
         },
       });
 
-      /** Updating status of assets to AVAILABLE */
+      /**
+       * Updating status of assets to AVAILABLE.
+       *
+       * `status: { not: CHECKED_OUT }` — releasing custody must never put an
+       * asset that is still out on a booking back onto the shelf. `Asset.status`
+       * is a single column, so without the guard this bulk release advertised
+       * physically-absent assets as free on every picker, index and
+       * availability sum. Precedence
+       * (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+       * `reconcileAssetStatusForBookingExit`; the booking flows own the exit
+       * from `CHECKED_OUT`.
+       */
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
+        where: {
+          id: { in: assets.map((asset) => asset.id) },
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -7218,6 +7278,30 @@ export async function relinkAssetQrCode({
     }),
   ]);
 
+  /**
+   * why: `asset` is scoped to the caller's org, so null means "missing or not
+   * yours". Without this the null falls through to `tx.asset.update` and
+   * surfaces as a generic "The requested resource could not be found." from
+   * makeShelfError's P2025 branch, which tells the user nothing.
+   *
+   * `status: 404` is explicit and load-bearing: `cause: null` is not a P2025,
+   * so the ShelfError constructor would otherwise resolve this to 500 (see
+   * `status || 500` in utils/error.ts). The `relinkKitQrCode` sibling omits it
+   * and returns 500 for exactly this reason — fixed there in the same commit.
+   */
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      title: "Asset not found.",
+      message:
+        "The asset you are trying to link this code to does not exist in your workspace. Please reload and try again.",
+      additionalData: { assetId, organizationId, qrId },
+      label: "QR",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
   /** User cannot link qr code of other organization */
   if (qr.organizationId && qr.organizationId !== organizationId) {
     throw new ShelfError({
@@ -7237,6 +7321,7 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -7248,19 +7333,58 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
 
-  const oldQrCode = asset?.qrCodes[0];
+  const oldQrCode = asset.qrCodes[0];
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    db.asset.update({
+  /**
+   * why: the guards above read `qr` once and then act on it, so they are
+   * check-then-act. Two callers can pass them concurrently for the same code —
+   * including two ADMINs in DIFFERENT orgs racing on the same UNCLAIMED label,
+   * since a null `organizationId` satisfies the org guard for everyone.
+   *
+   * The QR write therefore re-asserts the exact state the guards observed. A
+   * competing writer that changed it makes this update match zero rows (P2025)
+   * and that caller loses, mirroring `claimQrCode`'s atomic claim. Running it
+   * first, inside a transaction, is what stops a loser from still clearing the
+   * asset's existing code (`set: []`) or writing a "changed QR code" note for a
+   * link that never persisted.
+   */
+  await db.$transaction(async (tx) => {
+    try {
+      await tx.qr.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the guards above reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId. The WHERE additionally pins that observed state so a concurrent claim cannot interleave.
+        where: {
+          id: qr.id,
+          organizationId: qr.organizationId,
+          kitId: null,
+          assetId: qr.assetId,
+        },
+        data: { organizationId, userId },
+      });
+    } catch (updateCause) {
+      if (isNotFoundError(updateCause)) {
+        throw new ShelfError({
+          // why: cause deliberately null — makeShelfError collapses any P2025
+          // anywhere in the cause chain to a 404, which would misreport this
+          // lost race as not-found.
+          cause: null,
+          title: "QR already linked.",
+          message:
+            "This QR code was claimed or linked by someone else while you were linking it. Refresh and try again.",
+          additionalData: { qrId, assetId, organizationId },
+          label: "QR",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+      throw updateCause;
+    }
+
+    await tx.asset.update({
       where: { id: assetId, organizationId },
       data: {
         qrCodes: {
@@ -7268,21 +7392,25 @@ export async function relinkAssetQrCode({
           connect: { id: qr.id },
         },
       },
-    }),
-    createNote({
-      assetId,
-      userId,
-      organizationId,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      })} changed QR code ${
-        oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**.`,
-    }),
-  ]);
+    });
+
+    await createNote(
+      {
+        assetId,
+        userId,
+        organizationId,
+        type: "UPDATE",
+        content: `${wrapUserLinkForNote({
+          id: userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        })} changed QR code ${
+          oldQrCode ? `from **${oldQrCode.id}**` : ""
+        } to **${qrId}**.`,
+      },
+      tx
+    );
+  });
 }
 
 /**
@@ -7849,14 +7977,31 @@ export async function checkOutQuantity({
        * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
        * the asset as available even though it has units in custody, which
        * (e.g.) lets the kit-assign route bypass its
-       * `someUnavailableAsset` guard. Always a write because the asset
-       * status is no longer guaranteed to be `AVAILABLE` (could be a
-       * second checkout into the same asset), but the value is constant
-       * so it's a no-op in the already-`IN_CUSTODY` case.
+       * `someUnavailableAsset` guard.
+       *
+       * `CHECKED_OUT` WINS. A quantity-tracked asset can hold custody units
+       * and booking units at the same time, but `Asset.status` is a single
+       * column — so whoever writes last used to win, and assigning custody
+       * to an asset with units already out on an ONGOING booking silently
+       * erased `CHECKED_OUT`. That is not cosmetic: every reader of the
+       * "is this asset off the shelf" signal keys on this column, so the
+       * checked-out units stopped being counted and `Available` overstated
+       * free stock by exactly the booked quantity.
+       *
+       * The precedence is the one already documented on
+       * `reconcileAssetStatusForBookingExit` (`booking/service.server.ts`):
+       * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`. Constraining the UPDATE
+       * itself keeps the read-and-write atomic under the row lock rather
+       * than racing a concurrent checkout between a read and a write. The
+       * booking flows restore the correct terminal status on check-in /
+       * cancel, at which point the custody row (untouched here) takes over.
        */
-      await tx.asset.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-        where: { id: assetId },
+      await tx.asset.updateMany({
+        where: {
+          id: assetId,
+          organizationId,
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
@@ -8140,14 +8285,25 @@ export async function releaseQuantity({
        * `updateKitAssets` removal). We only flip when zero rows remain so
        * an asset that still has other operator or kit-allocated custody
        * keeps its IN_CUSTODY status.
+       *
+       * `CHECKED_OUT` WINS here too, and this direction is the more
+       * dangerous of the pair: releasing the last custody row while units
+       * are still out on an ONGOING booking would advertise the asset as
+       * `AVAILABLE` on every picker and index while it is physically gone.
+       * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
+       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
         where: { assetId },
       });
       if (remainingCustodyCount === 0) {
-        await tx.asset.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-          where: { id: assetId },
+        await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
       }
