@@ -1304,47 +1304,69 @@ export async function recordAuditScan(
     // Record the scan in a transaction
     const result = await db.$transaction(
       async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it.
-        // `startedAt` is only stamped the FIRST time: an audit that returns to
-        // PENDING and is scanned again must keep the moment it actually began,
-        // otherwise the audit's own history moves. Seen in production data as
-        // three "started the audit" entries on one audit, with both the web and
-        // the companion "Started" field showing only the latest.
-        const isFirstStart = session.startedAt === null;
-        if (session.status === AuditStatus.PENDING) {
-          await tx.auditSession.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
-            where: { id: auditSessionId },
-            data: {
-              status: AuditStatus.ACTIVE,
-              ...(isFirstStart ? { startedAt: new Date() } : {}),
-            },
+        // Activate a PENDING audit on its first scan.
+        //
+        // The claim is a guarded updateMany INSIDE the transaction, not a read
+        // from the pre-transaction `session` snapshot: two scanners hitting a
+        // fresh audit at the same moment would both see PENDING/startedAt null
+        // and both write a start note and an AUDIT_STARTED event. Only the row
+        // that actually matches `startedAt: null` can win, so exactly one of
+        // them records the first start.
+        //
+        // Scoping the update to `status: PENDING` also stops a scan in flight
+        // from resurrecting an audit someone cancelled or completed a moment
+        // earlier — an unconditional update would have overwritten that.
+        //
+        // `startedAt` is stamped only by this claim, so an audit that returns
+        // to PENDING and is scanned again keeps the moment it truly began.
+        // Production data showed one audit carrying three "started the audit"
+        // entries, with both surfaces reporting only the latest as "Started".
+        const firstStartClaim = await tx.auditSession.updateMany({
+          where: {
+            id: auditSessionId,
+            organizationId,
+            status: AuditStatus.PENDING,
+            startedAt: null,
+          },
+          data: {
+            status: AuditStatus.ACTIVE,
+            startedAt: new Date(),
+          },
+        });
+
+        if (firstStartClaim.count === 1) {
+          // Automatic note for the audit being started. Guarded by the claim,
+          // so the activity feed cannot show one audit starting several times.
+          await createAuditStartedNote({
+            auditSessionId,
+            userId,
+            tx,
+            prefetchedUser: scannerUser,
           });
 
-          // Create automatic note for audit being started — only on the real
-          // first start, so the activity feed cannot claim one audit began
-          // several times.
-          if (isFirstStart) {
-            await createAuditStartedNote({
+          // Activity event — AUDIT_STARTED.
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "AUDIT_STARTED",
+              entityType: "AUDIT",
+              entityId: auditSessionId,
               auditSessionId,
-              userId,
-              tx,
-              prefetchedUser: scannerUser,
-            });
-
-            // Activity event — AUDIT_STARTED.
-            await recordEvent(
-              {
-                organizationId,
-                actorUserId: userId,
-                action: "AUDIT_STARTED",
-                entityType: "AUDIT",
-                entityId: auditSessionId,
-                auditSessionId,
-              },
-              tx
-            );
-          }
+            },
+            tx
+          );
+        } else {
+          // Still PENDING but already carrying a startedAt: it was started
+          // before. Bring it back to ACTIVE without restamping or re-noting.
+          await tx.auditSession.updateMany({
+            where: {
+              id: auditSessionId,
+              organizationId,
+              status: AuditStatus.PENDING,
+            },
+            data: { status: AuditStatus.ACTIVE },
+          });
         }
 
         // Create the scan record

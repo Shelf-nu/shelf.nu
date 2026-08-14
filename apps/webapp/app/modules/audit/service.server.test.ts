@@ -74,6 +74,7 @@ vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
       create: vi.fn(),
+      // why: the first-start claim is a guarded updateMany inside the tx.
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
@@ -100,6 +101,12 @@ vi.mock("~/database/db.server", () => {
       createMany: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      // why: recordAuditScan marks the expected asset FOUND and then reads it
+      // back. Without these the transaction rejects partway, and a test that
+      // only inspects earlier calls would still pass.
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -149,6 +156,9 @@ const mockDb = db as unknown as {
   };
   auditAsset: {
     createMany: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
@@ -2172,13 +2182,20 @@ describe("audit service", () => {
       organizationId: "org-1",
     };
 
-    /** A PENDING session whose startedAt is whatever the test needs. */
-    function mockPendingSession(startedAt: Date | null) {
+    /**
+     * Wires the FULL transaction path so `recordAuditScan` resolves. Awaiting
+     * a rejected call and asserting on writes that happened before the failure
+     * would let these tests pass on a broken scan.
+     *
+     * @param claimWins - whether the guarded first-start updateMany matches a
+     *   row, i.e. whether this scan is the audit's genuine first start
+     */
+    function mockPendingSession(claimWins: boolean) {
       mockDb.auditSession.findFirst.mockResolvedValue({
         id: "audit-1",
         organizationId: "org-1",
         status: AuditStatus.PENDING,
-        startedAt,
+        startedAt: claimWins ? null : new Date("2026-06-15T09:19:00.000Z"),
         foundAssetCount: 0,
         unexpectedAssetCount: 0,
         missingAssetCount: 0,
@@ -2195,8 +2212,24 @@ describe("audit service", () => {
         title: "Camera",
         organizationId: "org-1",
       });
+      // The claim itself: count 1 only when this scan really is the first.
+      mockDb.auditSession.updateMany.mockResolvedValue({
+        count: claimWins ? 1 : 0,
+      });
       mockDb.auditScan.create.mockResolvedValue({ id: "scan-1" });
-      mockDb.auditAsset.findUnique.mockResolvedValue({ id: "audit-asset-1" });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+      mockDb.auditAsset.findFirst.mockResolvedValue({ id: "audit-asset-1" });
+      mockDb.auditSession.update.mockResolvedValue({
+        foundAssetCount: 1,
+        unexpectedAssetCount: 0,
+      });
+    }
+
+    /** The guarded claim — the update that decides the first start. */
+    function firstStartClaim() {
+      return mockDb.auditSession.updateMany.mock.calls.find(
+        (call: any) => call[0]?.data?.status === AuditStatus.ACTIVE
+      );
     }
 
     beforeEach(() => {
@@ -2204,16 +2237,21 @@ describe("audit service", () => {
       mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
     });
 
-    it("stamps startedAt on the genuine first start", async () => {
-      mockPendingSession(null);
+    it("stamps startedAt and records the start once, on a genuine first scan", async () => {
+      mockPendingSession(true);
 
-      await recordAuditScan(scanInput).catch(() => {});
+      // Not caught: a rejection here must fail the test.
+      const result = await recordAuditScan(scanInput);
 
-      const update = mockDb.auditSession.update.mock.calls.find(
-        (c: any) => c[0]?.data?.status === AuditStatus.ACTIVE
-      );
-      expect(update).toBeDefined();
-      expect(update?.[0].data.startedAt).toBeInstanceOf(Date);
+      expect(result.scanId).toBe("scan-1");
+      const claim = firstStartClaim();
+      expect(claim?.[0].data.startedAt).toBeInstanceOf(Date);
+      // The claim can only match an audit that has never been started.
+      expect(claim?.[0].where).toMatchObject({
+        status: AuditStatus.PENDING,
+        startedAt: null,
+        organizationId: "org-1",
+      });
       expect(createAuditStartedNote).toHaveBeenCalledTimes(1);
     });
 
@@ -2221,16 +2259,30 @@ describe("audit service", () => {
       // why: production data showed one audit with three "started the audit"
       // entries, its Started field moving to the latest each time. The moment
       // an audit actually began must not be rewritten.
-      const original = new Date("2026-06-15T09:19:00.000Z");
-      mockPendingSession(original);
+      mockPendingSession(false);
 
-      await recordAuditScan(scanInput).catch(() => {});
+      const result = await recordAuditScan(scanInput);
 
-      const update = mockDb.auditSession.update.mock.calls.find(
-        (c: any) => c[0]?.data?.status === AuditStatus.ACTIVE
+      expect(result.scanId).toBe("scan-1");
+      // It is still re-activated, but without a timestamp or a start record.
+      const reactivation = mockDb.auditSession.updateMany.mock.calls.find(
+        (call: any) =>
+          call[0]?.data?.status === AuditStatus.ACTIVE &&
+          call[0]?.data?.startedAt === undefined
       );
-      expect(update).toBeDefined();
-      expect(update?.[0].data).not.toHaveProperty("startedAt");
+      expect(reactivation).toBeDefined();
+      expect(createAuditStartedNote).not.toHaveBeenCalled();
+    });
+
+    it("does not record a first start when another scanner won the claim", async () => {
+      // why: two scanners hitting a fresh audit at once both saw PENDING in the
+      // pre-transaction snapshot. Only the one whose guarded update matches a
+      // row may write the note and the AUDIT_STARTED event.
+      mockPendingSession(true);
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 0 });
+
+      await recordAuditScan(scanInput);
+
       expect(createAuditStartedNote).not.toHaveBeenCalled();
     });
   });
