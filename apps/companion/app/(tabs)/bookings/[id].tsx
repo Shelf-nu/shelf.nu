@@ -919,6 +919,11 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  const creatorName =
+    [booking?.creator?.firstName, booking?.creator?.lastName]
+      .filter(Boolean)
+      .join(" ") || null;
+
   const custodianName =
     booking.custodianTeamMember?.name ||
     [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
@@ -1102,7 +1107,34 @@ export default function BookingDetailScreen() {
                     <Text style={styles.infoValue}>{custodianName}</Text>
                   </View>
                 )}
+
+                {/* why: web shows who created the booking on this same screen,
+                    and the field was already in the payload — fetched, then
+                    dropped. Custodian and creator are different people often
+                    enough that showing only one is misleading. */}
+                {creatorName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons
+                      name="create-outline"
+                      size={15}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.infoLabel}>Created by</Text>
+                    <Text style={styles.infoValue}>{creatorName}</Text>
+                  </View>
+                ) : null}
               </View>
+
+              {/* Tags were also already in the payload and shown by web. */}
+              {booking.tags.length > 0 && (
+                <View style={styles.tagRow}>
+                  {booking.tags.map((tag) => (
+                    <View key={tag.id} style={styles.tagChip}>
+                      <Text style={styles.tagChipText}>{tag.name}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
@@ -1965,6 +1997,24 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     color: colors.muted,
     lineHeight: 20,
+  },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  tagChip: {
+    backgroundColor: colors.backgroundTertiary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  tagChipText: {
+    fontSize: fontSize.xs,
+    color: colors.foregroundSecondary,
   },
   infoRows: {
     gap: spacing.sm,

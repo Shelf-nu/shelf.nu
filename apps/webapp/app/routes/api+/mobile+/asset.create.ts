@@ -27,10 +27,13 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
@@ -214,6 +217,47 @@ export async function action({ request }: ActionFunctionArgs) {
       customFieldsValues,
       qrId: qrId || undefined,
     });
+
+    // why: the same two notes the web create route writes. `createAsset` emits
+    // the ASSET_CREATED activity event on its own, so reports were already in
+    // step, but the human-readable feed on the asset page was not: an asset
+    // created from the phone opened with an empty history while the identical
+    // asset created on the website said who made it and where they put it.
+    const actor = wrapUserLinkForNote({
+      id: user.id,
+      firstName: asset.user.firstName,
+      lastName: asset.user.lastName,
+    });
+
+    const notes: Promise<unknown>[] = [
+      createNote({
+        content: `Asset was created by ${actor}.`,
+        type: "UPDATE",
+        userId: user.id,
+        assetId: asset.id,
+        organizationId,
+      }),
+    ];
+
+    // Mirrors web: only the single primary location is named, since a
+    // quantity-tracked asset can hold several AssetLocation rows.
+    const primaryLocation = getPrimaryLocation(asset);
+    if (primaryLocation) {
+      notes.push(
+        createNote({
+          content: `${actor} set the location to ${wrapLinkForNote(
+            `/locations/${primaryLocation.id}`,
+            primaryLocation.name.trim()
+          )}.`,
+          type: "UPDATE",
+          userId: user.id,
+          assetId: asset.id,
+          organizationId,
+        })
+      );
+    }
+
+    await Promise.all(notes);
 
     return data({
       asset: {
