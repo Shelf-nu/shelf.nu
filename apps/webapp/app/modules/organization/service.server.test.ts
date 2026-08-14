@@ -65,6 +65,8 @@ vi.mock("~/utils/stripe.server", () => ({
   customerHasPaymentMethod: vi.fn(),
 }));
 
+// why: tier writes are a subscription-transfer side effect, and these tests run
+// with premiumIsEnabled false to assert only the authorization branch
 vi.mock("../tier/service.server", () => ({ updateUserTierId: vi.fn() }));
 
 const currentOrganization = {
