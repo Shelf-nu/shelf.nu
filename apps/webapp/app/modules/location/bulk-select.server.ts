@@ -1,7 +1,7 @@
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
-import { getKitsWhereInput } from "~/modules/kit/utils.server";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getLocationKitsWhereInput } from "./utils.server";
 
 /**
  * The filters the user had applied, taken from the submitted form.
@@ -72,19 +72,29 @@ export async function resolveLocationKitIds({
     return ids;
   }
 
-  const kitsWhere = getKitsWhereInput({
-    organizationId,
-    currentSearchParams,
-    // Location writes are ADMIN/OWNER-only, so the custodian filter
-    // here can never come from a restricted viewer.
-    allowedTeamMemberIds: "all",
-  });
+  /**
+   * Uses the location kit list's own builder, not `getKitsWhereInput`.
+   *
+   * The two disagree: this page's custodian dropdown offers "Without custody"
+   * and matches custody-by-user and running-booking custody, none of which the
+   * kits-index builder knows. Sending `teamMember=without-custody` through that
+   * builder produced `custody.custodianId = "without-custody"` — an id nobody
+   * holds — so select-all resolved zero kits and reported success while the
+   * user was looking at rows.
+   *
+   * Widening the shared kits-index builder was the wrong fix: `bulkDeleteKits`
+   * uses it too, and the kits index does not offer these options.
+   */
+  const searchParams = new URLSearchParams(currentSearchParams ?? "");
+  const { search, teamMemberIds } = getParamsValues(searchParams);
 
   const allKits = await db.kit.findMany({
-    where: {
-      ...kitsWhere,
+    where: getLocationKitsWhereInput({
+      organizationId,
       locationId,
-    },
+      search,
+      teamMemberIds,
+    }),
     select: { id: true },
   });
 
