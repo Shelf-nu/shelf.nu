@@ -198,18 +198,28 @@ describe("GET /api/mobile/bookings/calendar", () => {
       ]);
     });
 
-    it("never returns CANCELLED or ARCHIVED bookings", async () => {
-      // why: they are absent from web's calendar too; a cancelled job is not a
-      // commitment and must not make a week look busy.
+    it("leaves CANCELLED and ARCHIVED out until they are asked for", async () => {
+      // A cancelled job is not a commitment and must not make a week look busy,
+      // so it is absent by default - which is also what web's getBookings does.
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      const statuses = lastWhere().status.in;
+      expect(statuses).not.toContain("CANCELLED");
+      expect(statuses).not.toContain("ARCHIVED");
+    });
+
+    it("returns them when the filter explicitly asks", async () => {
+      // The "All" pill asks for all seven and the list answers with all seven.
+      // Dropping two of them here made one pill mean two different things
+      // depending on which lens you were looking through. Web honours an
+      // explicit status filter on its calendar too.
       await loader(
         createLoaderArgs({
           request: calendarRequest(`${RANGE}&statuses=CANCELLED,ARCHIVED`),
         })
       );
 
-      const statuses = lastWhere().status.in;
-      expect(statuses).not.toContain("CANCELLED");
-      expect(statuses).not.toContain("ARCHIVED");
+      expect(lastWhere().status).toEqual({ in: ["CANCELLED", "ARCHIVED"] });
     });
 
     it("ignores an unknown status instead of failing the request", async () => {

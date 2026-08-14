@@ -122,7 +122,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * Unknown status values are ignored rather than rejected: the client sends
      * a comma-joined pill value, and a stale app build must not hard-fail.
      */
+    /**
+     * Askable statuses. Archived and cancelled are in here because the "All"
+     * pill asks for them and the list answers with them: dropping them here
+     * silently made one pill mean two different things depending on which lens
+     * you were in. Web behaves the same way - its calendar excludes them by
+     * DEFAULT but honours an explicit status filter.
+     */
     const ALLOWED = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+    ];
+
+    /**
+     * What you get when nothing is asked for, matching web's `getBookings`:
+     * archived and cancelled are noise until you go looking for them.
+     */
+    const DEFAULT_STATUSES = [
       BookingStatus.DRAFT,
       BookingStatus.RESERVED,
       BookingStatus.ONGOING,
@@ -135,7 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .filter((v): v is (typeof ALLOWED)[number] =>
         ALLOWED.includes(v as (typeof ALLOWED)[number])
       );
-    const statuses = requested.length > 0 ? requested : ALLOWED;
+    const statuses = requested.length > 0 ? requested : DEFAULT_STATUSES;
 
     const search = url.searchParams.get("search")?.trim() || undefined;
 
