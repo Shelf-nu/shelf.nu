@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { useAssetBookings } from "@/hooks/use-asset-bookings";
+import type { AssetBookingRow } from "@/lib/api/types";
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -121,6 +124,10 @@ export default function AssetDetailScreen() {
     performAssignQuantity,
     performReleaseQuantity,
   } = useCustodyActions({ asset, currentOrg, fetchAsset });
+
+  // Bookings this asset appears in — lazy, only once the section is opened.
+  const assetBookings = useAssetBookings(asset?.id, currentOrg?.id);
+  const [showBookings, setShowBookings] = useState(false);
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -668,6 +675,89 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
+          {/* ── Bookings ────────────────────────────────── */}
+          {/* why: "when is this out, and where has it been" is the question
+              people ask holding the asset. Web answers it on a Bookings tab of
+              the asset page; the phone could not ask it at all. Collapsed by
+              default and fetched on expand, so the screen's usual load is
+              unchanged for the visits that never open it. */}
+          <View style={styles.sectionContainer}>
+            <TouchableOpacity
+              style={styles.bookingsHeader}
+              onPress={() => {
+                const next = !showBookings;
+                setShowBookings(next);
+                if (next && !assetBookings.hasLoaded) {
+                  void assetBookings.load();
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showBookings }}
+              accessibilityLabel={
+                showBookings ? "Hide bookings" : "Show bookings for this asset"
+              }
+            >
+              <Text style={styles.sectionTitle}>Bookings</Text>
+              <View style={styles.bookingsHeaderRight}>
+                {assetBookings.hasLoaded && (
+                  <Text style={styles.bookingsCount}>
+                    {assetBookings.totalCount}
+                  </Text>
+                )}
+                <Ionicons
+                  name={showBookings ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={colors.muted}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {showBookings && (
+              <View style={styles.bookingsBody}>
+                {assetBookings.isLoading && !assetBookings.hasLoaded ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : assetBookings.error ? (
+                  <Text style={styles.bookingsEmpty}>
+                    {assetBookings.error}
+                  </Text>
+                ) : assetBookings.bookings.length === 0 ? (
+                  <Text style={styles.bookingsEmpty}>
+                    This asset has never been booked.
+                  </Text>
+                ) : (
+                  assetBookings.bookings.map((b: AssetBookingRow) => (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={styles.bookingRow}
+                      onPress={() => router.push(`/bookings/${b.id}`)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${b.name}, ${formatStatus(
+                        b.status
+                      )}, ${formatDate(b.from)} to ${formatDate(b.to)}`}
+                    >
+                      <View style={styles.bookingRowMain}>
+                        <Text style={styles.bookingName} numberOfLines={1}>
+                          {b.name}
+                        </Text>
+                        <Text style={styles.bookingDates}>
+                          {formatDate(b.from)} → {formatDate(b.to)}
+                        </Text>
+                        {b.custodianName ? (
+                          <Text style={styles.bookingCustodian}>
+                            {b.custodianName}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text style={styles.bookingStatus}>
+                        {formatStatus(b.status)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+
           {/* ── QR Code ─────────────────────────────────── */}
           {asset.qrCodes.length > 0 && (
             <View style={styles.sectionContainer}>
@@ -1076,6 +1166,69 @@ const useStyles = createStyles((colors, shadows) => ({
 
   // Section containers (tags, QR)
   sectionContainer: { paddingHorizontal: spacing.lg, marginTop: spacing.xl },
+  bookingsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 44,
+  },
+  bookingsHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  bookingsCount: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    overflow: "hidden",
+  },
+  bookingsBody: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  bookingsEmpty: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  bookingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  bookingRowMain: {
+    flex: 1,
+    gap: 2,
+  },
+  bookingName: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  bookingDates: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  bookingCustodian: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+  },
+  bookingStatus: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+  },
   sectionTitle: {
     fontSize: fontSize.sm,
     fontWeight: "600",
