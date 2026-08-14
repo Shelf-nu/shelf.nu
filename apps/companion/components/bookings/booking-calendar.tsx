@@ -24,6 +24,7 @@ import {
   View,
   Text,
   ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -101,6 +102,22 @@ function resolveFirstDay(): number {
  * where the full list lives anyway.
  */
 const MAX_BANDS_PER_DAY = 3;
+
+/**
+ * Which statuses earn one of the few bands a cell can show.
+ *
+ * why: bands used to be kept in start-date order, so a day holding three long
+ * reserved runs and one overdue job showed three calm blue bars and hid the
+ * overdue behind "+1". The grid is read to judge risk, so when it must hide
+ * something it has to hide the routine thing, never the alarming one.
+ */
+const STATUS_PRIORITY: Record<string, number> = {
+  OVERDUE: 0,
+  ONGOING: 1,
+  RESERVED: 2,
+  DRAFT: 3,
+  COMPLETE: 4,
+};
 
 /** What our `markedDates` payload carries into the custom cell. */
 type DayMarking = {
@@ -301,7 +318,12 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
     const marks: Record<
       string,
       {
-        periods: { startingDay: boolean; endingDay: boolean; color: string }[];
+        periods: {
+          startingDay: boolean;
+          endingDay: boolean;
+          color: string;
+          priority: number;
+        }[];
         /** EVERY booking touching the day, not just the bands we draw. */
         total: number;
       }
@@ -315,18 +337,29 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         (byDay[key] ??= []).push(b);
         const mark = (marks[key] ??= { periods: [], total: 0 });
         mark.total += 1;
-        // Cap the stack: more than a few bands in one cell is unreadable. The
-        // count above is what the cell reports, so a capped day still tells
-        // the truth about how busy it is.
-        if (mark.periods.length < MAX_BANDS_PER_DAY) {
-          mark.periods.push({
-            startingDay: idx === 0,
-            endingDay: idx === keys.length - 1,
-            color,
-          });
-        }
+        // Collect every band; the cap is applied after sorting, below.
+        mark.periods.push({
+          startingDay: idx === 0,
+          endingDay: idx === keys.length - 1,
+          color,
+          priority: STATUS_PRIORITY[b.status] ?? 9,
+        });
       });
     }
+    // Most urgent first, then cap. `total` still counts everything, so the
+    // cell's "+N" stays truthful about what it is not showing.
+    for (const mark of Object.values(marks)) {
+      mark.periods.sort((a, b) => a.priority - b.priority);
+      mark.periods = mark.periods.slice(0, MAX_BANDS_PER_DAY);
+    }
+    // The day panel reads the same way: what needs attention at the top.
+    for (const list of Object.values(byDay)) {
+      list.sort(
+        (a, b) =>
+          (STATUS_PRIORITY[a.status] ?? 9) - (STATUS_PRIORITY[b.status] ?? 9)
+      );
+    }
+
     return { marks, byDay };
   }, [bookings, bookingStatusBadge, colors.primary]);
 
@@ -427,6 +460,17 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         style={styles.dayPanel}
         contentContainerStyle={styles.dayPanelContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          /* why: the calendar only refetched when the month changed, so a
+             booking made anywhere else — the web app, a colleague's phone —
+             stayed invisible until you swiped away and back. The list has
+             pull to refresh; this had no way at all. */
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={() => void load(visibleMonth)}
+            tintColor={colors.muted}
+          />
+        }
       >
         <Text style={styles.dayTitle}>{formatDate(selectedDay)}</Text>
 
