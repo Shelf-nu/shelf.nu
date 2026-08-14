@@ -2173,6 +2173,21 @@ describe("audit service", () => {
   });
 
   describe("recordAuditScan start stamping", () => {
+    /** The shape of an `auditSession.updateMany` call this block asserts on. */
+    type AuditSessionUpdateManyCall = [
+      {
+        where?: {
+          status?: AuditStatus;
+          startedAt?: Date | null;
+          organizationId?: string;
+        };
+        data?: { status?: AuditStatus; startedAt?: Date };
+      },
+    ];
+
+    /** Runs the callback straight against the mock db, as $transaction would. */
+    type TransactionCallback = (tx: typeof mockDb) => unknown;
+
     const scanInput = {
       auditSessionId: "audit-1",
       qrId: "qr-1",
@@ -2227,14 +2242,17 @@ describe("audit service", () => {
 
     /** The guarded claim — the update that decides the first start. */
     function firstStartClaim() {
-      return mockDb.auditSession.updateMany.mock.calls.find(
-        (call: any) => call[0]?.data?.status === AuditStatus.ACTIVE
-      );
+      return (
+        mockDb.auditSession.updateMany.mock
+          .calls as AuditSessionUpdateManyCall[]
+      ).find((call) => call[0]?.data?.status === AuditStatus.ACTIVE);
     }
 
     beforeEach(() => {
       vi.clearAllMocks();
-      mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
+      mockDb.$transaction.mockImplementation((cb: TransactionCallback) =>
+        cb(mockDb)
+      );
     });
 
     it("stamps startedAt and records the start once, on a genuine first scan", async () => {
@@ -2245,7 +2263,7 @@ describe("audit service", () => {
 
       expect(result.scanId).toBe("scan-1");
       const claim = firstStartClaim();
-      expect(claim?.[0].data.startedAt).toBeInstanceOf(Date);
+      expect(claim?.[0].data?.startedAt).toBeInstanceOf(Date);
       // The claim can only match an audit that has never been started.
       expect(claim?.[0].where).toMatchObject({
         status: AuditStatus.PENDING,
@@ -2265,8 +2283,11 @@ describe("audit service", () => {
 
       expect(result.scanId).toBe("scan-1");
       // It is still re-activated, but without a timestamp or a start record.
-      const reactivation = mockDb.auditSession.updateMany.mock.calls.find(
-        (call: any) =>
+      const reactivation = (
+        mockDb.auditSession.updateMany.mock
+          .calls as AuditSessionUpdateManyCall[]
+      ).find(
+        (call) =>
           call[0]?.data?.status === AuditStatus.ACTIVE &&
           call[0]?.data?.startedAt === undefined
       );
