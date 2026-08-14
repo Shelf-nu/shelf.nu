@@ -179,6 +179,13 @@ vitest.mock("~/database/db.server", () => ({
 
 // why: lockAssetForQuantityUpdate runs a raw SELECT ... FOR UPDATE that we
 // cannot execute against a mocked tx — stub it to return a controlled asset
+// why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
+// the guard's own behaviour is what these suites assert on.
+vitest.mock("~/modules/asset/archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
+}));
+
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
 }));

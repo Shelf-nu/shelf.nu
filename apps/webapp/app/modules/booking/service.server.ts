@@ -30,6 +30,7 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
@@ -797,10 +798,10 @@ export async function createBooking({
      * walk one straight into a booking that can then be reserved and checked
      * out. Every "create a booking with assets" route lands here.
      */
-    await assertAssetsAreNotArchived({
-      assetIds: [...new Set([...dedupedAssetIds, ...kitSliceAssetIds])],
-      organizationId: booking.organizationId,
-    });
+    /** Locked and re-checked inside the transaction below. */
+    const archiveGuardAssetIds = [
+      ...new Set([...dedupedAssetIds, ...kitSliceAssetIds]),
+    ];
 
     const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
@@ -851,6 +852,25 @@ export async function createBooking({
 
     // Use transaction to ensure booking creation and activity events are atomic
     const createdBooking = await db.$transaction(async (tx) => {
+      /**
+       * Archived assets can't be booked (issue #382). Both the lock and the
+       * check live INSIDE the transaction: a check before it could pass and
+       * then have an archive commit before this booking's rows are written.
+       * The archive services take the same lock, so the two serialize.
+       */
+      await lockAssetsForArchiveGuard(
+        tx,
+        archiveGuardAssetIds,
+        booking.organizationId
+      );
+      await assertAssetsAreNotArchived(
+        {
+          assetIds: archiveGuardAssetIds,
+          organizationId: booking.organizationId,
+        },
+        tx
+      );
+
       // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
       // member ID all originate from request/form input. Before connecting
       // them to the new booking we must prove they belong to the booking's
@@ -8184,6 +8204,7 @@ export async function updateBookingAssets({
        * carry an archived asset into the booking. Read on `tx` so it sees the
        * same snapshot as the write.
        */
+      await lockAssetsForArchiveGuard(tx, uniqueAssetIds, organizationId);
       await assertAssetsAreNotArchived(
         { assetIds: uniqueAssetIds, organizationId },
         tx

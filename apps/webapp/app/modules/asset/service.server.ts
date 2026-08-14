@@ -148,6 +148,7 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -3453,6 +3454,11 @@ export async function archiveAsset({
     const archivedAt = new Date();
 
     await db.$transaction(async (tx) => {
+      // Serialize against concurrent booking writes. The booking services take
+      // this same lock before their archived check, so an archive and a
+      // booking-add can no longer both pass their own read and then commit.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+
       // Atomic guard: the WHERE re-asserts every precondition so a concurrent
       // checkout/custody-assign can't slip an active asset into the archive.
       const { count } = await tx.asset.updateMany({
@@ -3694,6 +3700,11 @@ export async function bulkArchiveAssets({
     let archivedIds: string[] = [];
 
     await db.$transaction(async (tx) => {
+      // Same lock the single-asset path and the booking services take, so a
+      // booking-add cannot land between this batch's eligibility read and its
+      // write. Sorted inside the helper, so overlapping batches can't deadlock.
+      await lockAssetsForArchiveGuard(tx, eligibleIds, organizationId);
+
       await tx.asset.updateMany({
         where: {
           id: { in: eligibleIds },
