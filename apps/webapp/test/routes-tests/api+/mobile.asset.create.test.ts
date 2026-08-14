@@ -146,16 +146,34 @@ function createRequest(
  * route read an undefined field and still pass. Keep this in step with the
  * `include` in createAsset.
  */
-function createdAsset(
-  overrides: Record<string, unknown> = {}
-): Record<string, unknown> {
+type CreatedAsset = Awaited<ReturnType<typeof createAsset>>;
+
+/**
+ * One `assetLocations` row. The route only reads `location.id` and
+ * `location.name` (via getPrimaryLocation), so the cast is confined here
+ * rather than repeated at every call site.
+ */
+function assetLocationRow(
+  id: string,
+  name: string
+): CreatedAsset["assetLocations"][number] {
+  return {
+    location: { id, name },
+  } as unknown as CreatedAsset["assetLocations"][number];
+}
+
+function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
   return {
     id: "asset-1",
     title: "New Laptop",
     user: { id: "user-1", firstName: "Carlos", lastName: "Virreira" },
     assetLocations: [],
     ...overrides,
-  };
+    // The fixture carries only the fields this route reads. The single cast
+    // lives here so call sites stay typed: a typo in `overrides` is a compile
+    // error, which is what would have caught the missing `user` in the first
+    // place.
+  } as unknown as CreatedAsset;
 }
 
 describe("POST /api/mobile/asset/create", () => {
@@ -175,7 +193,7 @@ describe("POST /api/mobile/asset/create", () => {
   });
 
   it("should create an asset and return its id and title", async () => {
-    (createAsset as any).mockResolvedValue(createdAsset());
+    vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
     const request = createRequest({ title: "New Laptop" });
     const result = await action(createActionArgs({ request }));
@@ -199,7 +217,7 @@ describe("POST /api/mobile/asset/create", () => {
   // said who made it and where they put it.
   describe("creation notes (parity with the web create route)", () => {
     it("writes the creation note naming the actor", async () => {
-      (createAsset as any).mockResolvedValue(createdAsset());
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
       await action(
         createActionArgs({ request: createRequest({ title: "New Laptop" }) })
@@ -218,11 +236,9 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("names the location when the asset was placed", async () => {
-      (createAsset as any).mockResolvedValue(
+      vi.mocked(createAsset).mockResolvedValue(
         createdAsset({
-          assetLocations: [
-            { location: { id: "loc-1", name: " Warehouse A " } },
-          ],
+          assetLocations: [assetLocationRow("loc-1", " Warehouse A ")],
         })
       );
 
@@ -246,8 +262,8 @@ describe("POST /api/mobile/asset/create", () => {
       // The asset and its activity event are committed before the notes run.
       // Answering "failed" here made the create screen offer a retry for an
       // asset that already existed - and a scanned qrId went to the retry.
-      (createAsset as any).mockResolvedValue(createdAsset());
-      (createNote as any).mockRejectedValueOnce(
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
+      vi.mocked(createNote).mockRejectedValueOnce(
         new Error("note insert failed")
       );
 
@@ -262,7 +278,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("writes only the creation note when the asset has no location", async () => {
-      (createAsset as any).mockResolvedValue(createdAsset());
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
       await action(
         createActionArgs({ request: createRequest({ title: "New Laptop" }) })
@@ -273,7 +289,7 @@ describe("POST /api/mobile/asset/create", () => {
   });
 
   it("org-validates submitted tags and connects them to the new asset", async () => {
-    (createAsset as any).mockResolvedValue(createdAsset({ title: "Tagged" }));
+    vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "Tagged" }));
 
     const request = createRequest({
       title: "Tagged",
@@ -368,7 +384,7 @@ describe("POST /api/mobile/asset/create", () => {
       (extractCustomFieldValuesFromPayload as any).mockReturnValue([
         { id: "cf-serial", value: { raw: "SN-123" } },
       ]);
-      (createAsset as any).mockResolvedValue(createdAsset());
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
       const request = createRequest({
         title: "New Laptop",
@@ -448,7 +464,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with category: null when no categoryId is provided", async () => {
-      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({ title: "Test Asset" });
       await action(createActionArgs({ request }));
@@ -460,7 +476,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with the provided categoryId", async () => {
-      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
       (db.category.findFirst as any).mockResolvedValue({ id: "cat-42" });
 
       const request = createRequest({
@@ -511,7 +527,7 @@ describe("POST /api/mobile/asset/create", () => {
           return [{ id: "cf-active", value: { raw: true } }];
         }
       );
-      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({
         title: "New Laptop",

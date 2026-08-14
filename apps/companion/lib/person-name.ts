@@ -11,5 +11,10 @@ export function formatPersonName(
   firstName?: string | null,
   lastName?: string | null
 ): string | null {
-  return [firstName, lastName].filter(Boolean).join(" ").trim() || null;
+  return (
+    [firstName, lastName]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(" ") || null
+  );
 }
