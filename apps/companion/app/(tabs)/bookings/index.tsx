@@ -614,6 +614,7 @@ function BookingsListContent() {
           statuses={STATUS_FILTERS[activeFilter].value}
           search={debouncedSearch}
           refreshToken={calendarRefreshToken}
+          canCreate={currentOrg?.type === "TEAM"}
         />
       ) : (
         <>
@@ -698,8 +699,11 @@ function BookingsListContent() {
       )}
 
       {/* Create booking — only TEAM workspaces can use bookings (matches the
-          server premium gate; personal workspaces 403 on create). */}
-      {currentOrg?.type === "TEAM" && (
+          server premium gate; personal workspaces 403 on create).
+          Not in the calendar: anchored bottom right it lands in the middle of
+          the day panel and covers the first row's status pill, so that view
+          carries the same action in its panel header instead. */}
+      {currentOrg?.type === "TEAM" && view === "list" && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => {

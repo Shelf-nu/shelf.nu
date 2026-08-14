@@ -251,6 +251,11 @@ type Props = {
    */
   refreshToken?: number;
   /**
+   * Whether this workspace may create bookings. The parent's floating button
+   * is hidden in this view, so the action lives in the day panel header.
+   */
+  canCreate?: boolean;
+  /**
    * Comma-joined statuses from the pills above, so the lens and the filter
    * compose: the switch decides HOW you look, the pills decide WHAT at.
    * Without this a filter set in list mode was silently dropped on switching.
@@ -271,6 +276,7 @@ export function BookingCalendar({
   statuses,
   search,
   refreshToken = 0,
+  canCreate = false,
 }: Props) {
   const router = useRouter();
   const { colors, bookingStatusBadge, isDark } = useTheme();
@@ -385,6 +391,28 @@ export function BookingCalendar({
   useEffect(() => {
     void load(visibleMonth);
   }, [load, visibleMonth]);
+
+  /**
+   * Keep the selected day inside the month on screen.
+   *
+   * Paging months left the panel describing a day from the month you left, and
+   * because only the visible month's bookings are loaded it answered "Nothing
+   * booked on this day" for days that were fully booked. A panel that is
+   * confidently wrong is worse than no panel. There was also nothing marked in
+   * the grid, so nothing said which day it meant.
+   *
+   * Lands on today when today is in view, since that is the day a dispatcher
+   * wants, and the first of the month otherwise.
+   */
+  useEffect(() => {
+    if (selectedDay.slice(0, 7) === visibleMonth.slice(0, 7)) return;
+    const today = toKey(new Date());
+    setSelectedDay(
+      today.slice(0, 7) === visibleMonth.slice(0, 7)
+        ? today
+        : `${visibleMonth.slice(0, 7)}-01`
+    );
+  }, [visibleMonth, selectedDay]);
   /**
    * A booking changed on another screen - checked out, checked in, cancelled,
    * archived, deleted. Every cached month is suspect, not just this one, since
@@ -586,7 +614,26 @@ export function BookingCalendar({
           />
         }
       >
-        <Text style={styles.dayTitle}>{formatDate(selectedDay)}</Text>
+        {/* why the create action sits here and not in the parent's floating
+            button: that button is anchored to the bottom right of the screen,
+            which in this view is the middle of the day panel, so it covered the
+            status pill on the first row and half of the second. Here it cannot
+            collide with anything, and it reads as "add something to this day"
+            rather than floating free. */}
+        <View style={styles.dayHeader}>
+          <Text style={styles.dayTitle}>{formatDate(selectedDay)}</Text>
+          {canCreate ? (
+            <TouchableOpacity
+              style={styles.newBooking}
+              onPress={() => router.push("/(tabs)/bookings/new")}
+              accessibilityRole="button"
+              accessibilityLabel="Create booking"
+            >
+              <Ionicons name="add" size={16} color={colors.primaryText} />
+              <Text style={styles.newBookingText}>New booking</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         {isLoading && bookings.length === 0 ? (
           <ActivityIndicator color={colors.primary} />
@@ -672,8 +719,29 @@ const useStyles = createStyles((colors) => ({
   dayPanelContent: {
     padding: spacing.lg,
     gap: spacing.sm,
-    // Clears the floating create button so the last row is readable.
-    paddingBottom: 96,
+    // Breathing room at the end of the list; the floating create button is
+    // hidden in this view, so this no longer has to clear it.
+    paddingBottom: spacing.xl,
+  },
+  dayHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  newBooking: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.backgroundTertiary,
+  },
+  newBookingText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
   },
   dayTitle: {
     fontSize: fontSize.sm,
