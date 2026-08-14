@@ -33,6 +33,7 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 // consumption-log`, which corrupts Vitest partial-mock bindings on
 // `createConsumptionLog` in the booking suite. See the leaf's header doc.
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import { assertStockNotBelowManualPlacements } from "~/modules/asset/placement-reconcile.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
@@ -566,6 +567,24 @@ export async function adjustQuantity({
          * row-locked above, so the read-then-decide is race-safe.
          */
         await assertAssetQuantityNotBelowReservations({
+          assetId,
+          organizationId,
+          tx,
+          newTotal: currentQuantity - quantity,
+          assetTitle: asset.title,
+          unitOfMeasure: asset.unitOfMeasure,
+        });
+
+        /**
+         * Placement guard, the orthogonal axis the reservations guard does not
+         * cover. `asset_location_sum_within_total` only fires on an
+         * `AssetLocation` write, so lowering the total here would otherwise
+         * leave locations claiming more units than the asset owns — invisible
+         * until a later, legitimate placement edit is refused. Refused rather
+         * than auto-trimmed: nothing has physically moved yet, so the operator
+         * can unplace the right location first.
+         */
+        await assertStockNotBelowManualPlacements({
           assetId,
           organizationId,
           tx,

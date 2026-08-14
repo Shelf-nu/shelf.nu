@@ -2029,7 +2029,6 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                         'id', ctmu.id,
                         'firstName', ctmu."firstName",
                         'lastName', ctmu."lastName",
-                        'email', ctmu.email,
                         'profilePicture', ctmu."profilePicture"
                       )
                     ELSE NULL
@@ -2043,7 +2042,6 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cu.id,
                   'firstName', cu."firstName",
                   'lastName', cu."lastName",
-                  'email', cu.email,
                   'profilePicture', cu."profilePicture"
                 )
               ELSE NULL
@@ -2250,8 +2248,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
-                      'profilePicture', bu."profilePicture",
-                      'email', bu.email
+                      'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
                 END
@@ -2413,8 +2410,7 @@ export const assetQueryJoins = Prisma.sql`
                   'id', u.id,
                   'firstName', u."firstName",
                   'lastName', u."lastName",
-                  'profilePicture', u."profilePicture",
-                  'email', u.email
+                  'profilePicture', u."profilePicture"
                 )
               ELSE NULL
             END
@@ -2619,8 +2615,7 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
-                      'profilePicture', bu."profilePicture",
-                      'email', bu.email
+                      'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
                 END
@@ -2690,8 +2685,7 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
                     'id', u.id,
                     'firstName', u."firstName",
                     'lastName', u."lastName",
-                    'profilePicture', u."profilePicture",
-                    'email', u.email
+                    'profilePicture', u."profilePicture"
                   )
                 ELSE NULL
               END
@@ -2953,7 +2947,7 @@ export function buildAdvancedAssetsQuery({
         })}
         ${assetQueryJoins}
         WHERE a.id = saq."assetId"
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", btm.id, btm.name, am.id, am.name
       ) aq ON TRUE;
     `;
 }

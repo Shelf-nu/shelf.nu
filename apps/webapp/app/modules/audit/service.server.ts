@@ -2043,41 +2043,63 @@ export async function getAuditsForOrganization(params: {
 }
 
 /**
- * Validates that the user is assigned to the audit session.
- * Throws a 403 ShelfError if the user is not an assignee.
+ * Validates that the user may act on the audit session.
  *
- * When isSelfServiceOrBase is false (admin/owner), allows the user to perform
- * actions if the audit has no assignees.
+ * ADMIN/OWNER users (isSelfServiceOrBase = false) always pass: they manage
+ * every audit in their workspace, mirroring both
+ * requireAuditAssigneeForBaseSelfService and the ADMIN/OWNER allow-all
+ * short-circuit in @shelf/permissions. BASE/SELF_SERVICE users must be
+ * assignees of the audit.
  *
- * @throws {ShelfError} 403 error if user is not an assignee
+ * @throws {ShelfError} 403 error if a BASE/SELF_SERVICE user is not an assignee
  */
 export async function requireAuditAssignee({
   auditSessionId,
   organizationId,
   userId,
-  request,
   isSelfServiceOrBase = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  request?: Request;
-  /** When true, always require assignee. When false (admin/owner), allow if no assignees. */
+  /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
   isSelfServiceOrBase?: boolean;
 }): Promise<void> {
-  const { session } = await getAuditSessionDetails({
-    id: auditSessionId,
-    organizationId,
-    userOrganizations: [],
-    request,
-  });
-
-  const hasNoAssignees = session.assignments.length === 0;
-  const isAdminOrOwner = !isSelfServiceOrBase;
-
-  // Allow admin/owner to perform actions if audit has no assignees
-  if (isAdminOrOwner && hasNoAssignees) {
+  // ADMIN/OWNER act on any audit in their workspace. Returning before the
+  // session fetch is safe: every caller's downstream service re-verifies the
+  // session against organizationId (recordAuditScan, completeAuditSession,
+  // requireAuditAssetInSession all 404 on cross-org ids).
+  if (!isSelfServiceOrBase) {
     return;
+  }
+
+  // why: this guard runs on the per-scan hot path, so it fetches only the
+  // assignment user ids — not the full session details with every expected
+  // asset (that would make an N-asset audit O(N²) in transferred data).
+  let session: { assignments: { userId: string }[] } | null;
+  try {
+    session = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { assignments: { select: { userId: true } } },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while validating audit access. Please try again or contact support.",
+      additionalData: { auditSessionId, organizationId },
+      label,
+    });
+  }
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit session not found",
+      additionalData: { auditSessionId, organizationId },
+      status: 404,
+      label,
+    });
   }
 
   const isAssignee = session.assignments.some(

@@ -258,8 +258,23 @@ export async function simpleModeLoader({
                       from: true,
                       to: true,
                       description: true,
-                      custodianTeamMember: true,
-                      custodianUser: true,
+                      // Narrowed from `true` on both: that shipped the whole
+                      // TeamMember row and the ENTIRE User row — email,
+                      // Stripe `customerId`, billing flags — to render a name
+                      // and an avatar. `userId` stays so the redaction can
+                      // tell the viewer's own booking from a colleague's.
+                      custodianTeamMember: {
+                        select: { id: true, name: true, userId: true },
+                      },
+                      custodianUser: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
+                      },
                       tags: TAG_WITH_COLOR_SELECT,
                       creator: {
                         select: {

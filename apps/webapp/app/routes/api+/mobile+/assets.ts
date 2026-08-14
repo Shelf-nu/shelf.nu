@@ -3,10 +3,15 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { buildMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import {
+  filterMobileCustodyListForViewer,
+  viewerCanSeeLegacyCustody,
+} from "~/modules/api/mobile-custody-visibility.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -33,6 +38,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    const { canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const url = new URL(request.url);
 
@@ -208,8 +217,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // overwrite an inherited thumbnail with null.
     const shapedAssets = assets.map((asset) => {
       const { mainImageExpiration, ...assetForHelper } = asset;
+      const shaped = shapeMobileAssetResponse(assetForHelper);
+
+      /**
+       * Same custody gate the mobile asset DETAIL route applies
+       * (`assets.$assetId.ts`) — this list had none, so a restricted viewer
+       * read every holder's name straight out of the list response while the
+       * detail page for the same asset withheld it.
+       */
+      const { custodyList, custodyListOthersCount } =
+        filterMobileCustodyListForViewer({
+          custodyList: shaped.custodyList,
+          custodyRows: asset.custody,
+          viewerUserId: user.id,
+          canSeeAllCustody,
+        });
+
+      const primaryCustody = asset.custody[0] ?? null;
+      const visibleCustody =
+        primaryCustody &&
+        viewerCanSeeLegacyCustody({
+          custodianUserId: primaryCustody.custodian.userId,
+          viewerUserId: user.id,
+          canSeeAllCustody,
+        })
+          ? shaped.custody
+          : null;
+
       return {
-        ...shapeMobileAssetResponse(assetForHelper),
+        ...shaped,
+        custody: visibleCustody,
+        custodyList,
+        custodyListOthersCount,
         mainImageExpiration,
       };
     });
