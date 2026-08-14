@@ -1,6 +1,9 @@
 import { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { getPrimaryKit } from "~/modules/asset/utils";
+import {
+  getPrimaryKit,
+  isDirectBookingBlockedByKit,
+} from "~/modules/asset/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isPersonalOrg } from "~/utils/organization";
 import { Button } from "../shared/button";
@@ -15,20 +18,33 @@ export default function BookingActionsDropdown() {
   if (isPersonalOrg(organization)) return null;
 
   const assetKit = getPrimaryKit<{ id: string; name: string }>(asset);
-  const disabled = assetKit
-    ? {
-        reason: (
-          <>
-            Cannot book this asset directly because it's part of a kit. Please
-            book the{" "}
-            <Button to={`/kits/${assetKit.id}`} target="_blank" variant="link">
-              kit
-            </Button>{" "}
-            instead.
-          </>
-        ),
-      }
-    : false;
+
+  /**
+   * Kit membership only blocks INDIVIDUAL assets — a QUANTITY_TRACKED asset
+   * allocates a slice of its pool to each kit and keeps the rest free for
+   * direct bookings (see `isDirectBookingBlockedByKit`). Blocking on mere
+   * membership hid the Book action from customers whose qty-tracked asset had
+   * standalone units left, even though the booking page's picker accepted it.
+   */
+  const disabled =
+    isDirectBookingBlockedByKit(asset) && assetKit
+      ? {
+          reason: (
+            <>
+              Cannot book this asset directly because it's part of a kit. Please
+              book the{" "}
+              <Button
+                to={`/kits/${assetKit.id}`}
+                target="_blank"
+                variant="link"
+              >
+                kit
+              </Button>{" "}
+              instead.
+            </>
+          ),
+        }
+      : false;
 
   const disabledTrigger = availableToBook
     ? false
