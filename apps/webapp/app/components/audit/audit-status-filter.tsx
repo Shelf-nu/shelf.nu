@@ -10,6 +10,14 @@ import {
 } from "../forms/select";
 
 type AuditStatusFilterProps = {
+  /**
+   * Filter value -> the words shown for it. The KEY is what goes in the URL,
+   * so it must stay the enum name; the VALUE is display text only.
+   *
+   * why: this used to be a value->value map rendered by de-underscoring the
+   * enum, which meant the dropdown could only ever say "Missing" while the
+   * statistics tile beside it said "Not scanned" for the same rows.
+   */
   statusItems: Record<string, string>;
   name?: string;
 };
@@ -58,17 +66,19 @@ export function AuditStatusFilter(props: AuditStatusFilterProps) {
           align="start"
         >
           <div className="max-h-[320px] overflow-auto">
-            {["ALL", ...Object.values(statusItems)].map((value) => (
-              <SelectItem
-                value={value}
-                key={value}
-                className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
-              >
-                <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
-                  {value.split("_").join(" ")}
-                </span>
-              </SelectItem>
-            ))}
+            {[["ALL", "All"] as const, ...Object.entries(statusItems)].map(
+              ([value, itemLabel]) => (
+                <SelectItem
+                  value={value}
+                  key={value}
+                  className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+                >
+                  <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
+                    {itemLabel}
+                  </span>
+                </SelectItem>
+              )
+            )}
           </div>
         </SelectContent>
       </Select>

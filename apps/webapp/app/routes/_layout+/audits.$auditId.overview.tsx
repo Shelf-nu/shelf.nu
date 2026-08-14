@@ -56,12 +56,21 @@ import { resolveUserDisplayName } from "~/utils/user";
 
 const label = "Audit";
 
-const AUDIT_STATUS_ITEMS = {
-  EXPECTED: "EXPECTED",
-  FOUND: "FOUND",
-  MISSING: "MISSING",
-  UNEXPECTED: "UNEXPECTED",
-};
+/**
+ * Audit-status filter options: URL value -> the words the user reads.
+ *
+ * MISSING is completion-aware for the same reason the statistics tile is —
+ * an expected asset is only "missing" once the audit is closed. Keys stay the
+ * enum names so existing filtered links keep working.
+ */
+function buildAuditStatusItems(isAuditCompleted: boolean) {
+  return {
+    EXPECTED: "Expected",
+    FOUND: AUDIT_ASSET_STATUS_LABELS.FOUND,
+    MISSING: auditAssetStatusLabel("PENDING", isAuditCompleted),
+    UNEXPECTED: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED,
+  };
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "Audit Overview" },
@@ -310,7 +319,10 @@ export default function AuditOverview() {
   const unscannedLabel = auditAssetStatusLabel("PENDING", isAuditCompleted);
   const unexpectedCount = session.unexpectedAssetCount || 0;
 
-  const filterMetadata = getAuditFilterMetadata(currentFilter);
+  const filterMetadata = getAuditFilterMetadata(
+    currentFilter,
+    isAuditCompleted
+  );
 
   return (
     <div className="mt-8 flex flex-col gap-6">
@@ -573,7 +585,9 @@ export default function AuditOverview() {
           className="responsive-filters mb-2"
           slots={{
             "left-of-search": (
-              <AuditStatusFilter statusItems={AUDIT_STATUS_ITEMS} />
+              <AuditStatusFilter
+                statusItems={buildAuditStatusItems(isAuditCompleted)}
+              />
             ),
           }}
         />

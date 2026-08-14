@@ -48,8 +48,10 @@ describe("audit filter utils", () => {
       });
     });
 
-    it("returns correct metadata for MISSING filter", () => {
-      const metadata = getAuditFilterMetadata("MISSING");
+    it("returns correct metadata for MISSING filter on a completed audit", () => {
+      // why: the MISSING filter only means "missing" once the audit is closed.
+      // The open-audit wording is covered in its own describe block below.
+      const metadata = getAuditFilterMetadata("MISSING", true);
 
       expect(metadata).toEqual({
         label: "Missing Assets",
@@ -230,6 +232,34 @@ describe("auditAssetStatusLabel (shared with the companion app)", () => {
       expect(auditAssetStatusLabel("FOUND", completed)).toBe("Found");
       expect(auditAssetStatusLabel("MISSING", completed)).toBe("Missing");
       expect(auditAssetStatusLabel("UNEXPECTED", completed)).toBe("Unexpected");
+    }
+  });
+});
+
+describe("getAuditFilterMetadata — MISSING heading follows the audit state", () => {
+  it("reads 'Not scanned Assets' while the audit is still open", () => {
+    // why: this list is reached by clicking the statistics tile, which reads
+    // "Not scanned" on an open audit. A "Missing Assets" heading would
+    // contradict the control the user just clicked.
+    const metadata = getAuditFilterMetadata("MISSING", false);
+    expect(metadata.label).toBe("Not scanned Assets");
+    expect(metadata.emptyState.title).toBe("Nothing left to scan");
+  });
+
+  it("reads 'Missing Assets' once the audit is completed", () => {
+    const metadata = getAuditFilterMetadata("MISSING", true);
+    expect(metadata.label).toBe("Missing Assets");
+  });
+
+  it("leaves the other filters alone in both states", () => {
+    for (const completed of [false, true]) {
+      expect(getAuditFilterMetadata("FOUND", completed).label).toBe(
+        "Found Assets"
+      );
+      expect(getAuditFilterMetadata("EXPECTED", completed).label).toBe(
+        "Expected Assets"
+      );
+      expect(getAuditFilterMetadata("ALL", completed).label).toBe("All Assets");
     }
   });
 });

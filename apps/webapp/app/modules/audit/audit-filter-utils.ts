@@ -45,7 +45,7 @@ const FILTER_METADATA: Record<AuditFilterType, AuditFilterMetadata> = {
     },
   },
   MISSING: {
-    label: "Missing Assets",
+    label: `${AUDIT_ASSET_STATUS_LABELS.MISSING} Assets`,
     emptyState: {
       title: "No missing assets",
       text: "All expected assets have been found. Great job!",
@@ -65,11 +65,30 @@ const FILTER_METADATA: Record<AuditFilterType, AuditFilterMetadata> = {
  * Falls back to ALL metadata if invalid filter type is provided.
  */
 export function getAuditFilterMetadata(
-  filterType: string | null
+  filterType: string | null,
+  isAuditCompleted: boolean = false
 ): AuditFilterMetadata {
   // If no filter is provided, default to "ALL" (show all assets)
   const normalizedFilter = (filterType || "ALL") as AuditFilterType;
-  return FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
+  const metadata = FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
+
+  // why: the MISSING filter is reached by clicking the statistics tile, and
+  // that tile reads "Not scanned" until the audit is completed. Leaving this
+  // heading as "Missing Assets" would contradict the control the user just
+  // clicked, and would re-assert the very claim this rule removes: nothing is
+  // missing until the audit closes. The URL key stays MISSING so existing
+  // links keep working.
+  if (normalizedFilter === "MISSING" && !isAuditCompleted) {
+    return {
+      label: `${AUDIT_ASSET_STATUS_LABELS.PENDING} Assets`,
+      emptyState: {
+        title: "Nothing left to scan",
+        text: "Every expected asset has been found. Great job!",
+      },
+    };
+  }
+
+  return metadata;
 }
 
 /**
