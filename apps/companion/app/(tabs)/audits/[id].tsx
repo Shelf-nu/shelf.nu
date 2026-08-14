@@ -662,11 +662,14 @@ function AuditDetailContent() {
                         { color: colors.primaryText, fontWeight: "600" },
                       ]}
                       // why: the ownership line is the one place that states
-                      // WHO may act on an unassigned audit; truncating it to
-                      // "admins and owners c…" defeats the point.
+                      // WHO may act on an unassigned audit, so let it wrap
+                      // rather than truncate. "Admin" is the product's word for
+                      // this: the workspace OWNER passes the same server check
+                      // but is never shown as a role (the invite dialog offers
+                      // Administrator / Base / Self service only).
                       numberOfLines={2}
                     >
-                      Unassigned · admins and owners can scan
+                      Unassigned · admins can scan
                     </Text>
                   )}
                 </View>

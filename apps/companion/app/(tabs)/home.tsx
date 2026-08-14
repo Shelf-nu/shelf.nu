@@ -673,7 +673,7 @@ const AuditCard = memo(function AuditCard({
               ]}
             >
               {ownership === "open"
-                ? "Unassigned · admins and owners can scan"
+                ? "Unassigned · admins can scan"
                 : ownership === "mine"
                 ? audit.assigneeCount === 1
                   ? "Assigned to you"
