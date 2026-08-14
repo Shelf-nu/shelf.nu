@@ -77,6 +77,13 @@ vi.mock("~/modules/tag/service.server", () => ({
   })),
 }));
 
+// why: the route writes the two creation notes web writes. Mock the module so
+// tests assert the note contract itself rather than exercising Prisma; the
+// db mock below deliberately has no `note` model.
+vi.mock("~/modules/note/service.server", () => ({
+  createNote: vi.fn().mockResolvedValue({ id: "note-1" }),
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -98,6 +105,7 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { createAsset } from "~/modules/asset/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
@@ -127,6 +135,24 @@ function createRequest(
   });
 }
 
+/**
+ * The shape `createAsset` actually resolves to. It includes `user` and the
+ * `assetLocations` pivot, so a bare `{ id, title }` mock is a lie that lets a
+ * route read an undefined field and still pass. Keep this in step with the
+ * `include` in createAsset.
+ */
+function createdAsset(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    id: "asset-1",
+    title: "New Laptop",
+    user: { id: "user-1", firstName: "Carlos", lastName: "Virreira" },
+    assetLocations: [],
+    ...overrides,
+  };
+}
+
 describe("POST /api/mobile/asset/create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,10 +170,7 @@ describe("POST /api/mobile/asset/create", () => {
   });
 
   it("should create an asset and return its id and title", async () => {
-    (createAsset as any).mockResolvedValue({
-      id: "asset-1",
-      title: "New Laptop",
-    });
+    (createAsset as any).mockResolvedValue(createdAsset());
 
     const request = createRequest({ title: "New Laptop" });
     const result = await action(createActionArgs({ request }));
@@ -166,8 +189,67 @@ describe("POST /api/mobile/asset/create", () => {
     );
   });
 
+  // The point of this route change: an asset created from the phone used to
+  // open with an empty history, while the same asset created on the website
+  // said who made it and where they put it.
+  describe("creation notes (parity with the web create route)", () => {
+    it("writes the creation note naming the actor", async () => {
+      (createAsset as any).mockResolvedValue(createdAsset());
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            'Asset was created by {% link to="/settings/team/users/user-1" text="Carlos Virreira" /%}.',
+          type: "UPDATE",
+          userId: "user-1",
+          assetId: "asset-1",
+          organizationId: "org-1",
+        })
+      );
+    });
+
+    it("names the location when the asset was placed", async () => {
+      (createAsset as any).mockResolvedValue(
+        createdAsset({
+          assetLocations: [
+            { location: { id: "loc-1", name: " Warehouse A " } },
+          ],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect(createNote).toHaveBeenCalledTimes(2);
+      expect(createNote).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          content:
+            '{% link to="/settings/team/users/user-1" text="Carlos Virreira" /%} set the location to {% link to="/locations/loc-1" text="Warehouse A" /%}.',
+          assetId: "asset-1",
+        })
+      );
+    });
+
+    it("writes only the creation note when the asset has no location", async () => {
+      (createAsset as any).mockResolvedValue(createdAsset());
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("org-validates submitted tags and connects them to the new asset", async () => {
-    (createAsset as any).mockResolvedValue({ id: "asset-1", title: "Tagged" });
+    (createAsset as any).mockResolvedValue(createdAsset({ title: "Tagged" }));
 
     const request = createRequest({
       title: "Tagged",
@@ -262,10 +344,7 @@ describe("POST /api/mobile/asset/create", () => {
       (extractCustomFieldValuesFromPayload as any).mockReturnValue([
         { id: "cf-serial", value: { raw: "SN-123" } },
       ]);
-      (createAsset as any).mockResolvedValue({
-        id: "asset-1",
-        title: "New Laptop",
-      });
+      (createAsset as any).mockResolvedValue(createdAsset());
 
       const request = createRequest({
         title: "New Laptop",
@@ -345,7 +424,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with category: null when no categoryId is provided", async () => {
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({ title: "Test Asset" });
       await action(createActionArgs({ request }));
@@ -357,7 +436,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with the provided categoryId", async () => {
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
       (db.category.findFirst as any).mockResolvedValue({ id: "cat-42" });
 
       const request = createRequest({
@@ -408,7 +487,7 @@ describe("POST /api/mobile/asset/create", () => {
           return [{ id: "cf-active", value: { raw: true } }];
         }
       );
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      (createAsset as any).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({
         title: "New Laptop",
