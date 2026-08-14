@@ -70,6 +70,18 @@ describe("buildAssetSearchUnion", () => {
     }
   });
 
+  it("prefilters the custom-field branch with the indexed COALESCE concat + keeps the exact OR", () => {
+    const text = sqlText(
+      buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
+    );
+    // Indexed prefilter must match AssetCustomFieldValue_searchable_trgm_idx:
+    // COALESCE(acfv."value"#>>'{...}', '') || ' ' || COALESCE(...) || ...
+    expect(text).toContain(`COALESCE(acfv."value"#>>'{valueText}', '')`);
+    expect(text).toContain(`|| ' ' ||`);
+    // The exact per-path OR is retained as the correctness filter (parity).
+    expect(text).toContain(`acfv."value"#>>'{valueText}' ILIKE`);
+  });
+
   it("binds organizationId and every %term% pattern as parameters", () => {
     const sql = buildAssetSearchUnion({
       organizationId: orgId,

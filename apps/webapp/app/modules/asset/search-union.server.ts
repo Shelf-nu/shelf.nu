@@ -7,17 +7,18 @@
  * multi-table `OR`, which forced cross-org sequential scans (Category 156k
  * rows, Custody/TeamMember/User seq scans) — ~1.5s mean, 36s max on a 14k-asset
  * org. This module replaces that with an org-scoped `UNION` of one branch per
- * source, producing the set of matching asset ids. Eight of the ten branches
+ * source, producing the set of matching asset ids. Nine of the ten branches
  * are served by trigram (GIN) indexes — Asset title/description/sequentialId,
- * Category.name, Location.name, Tag.name, Qr.id, Barcode.value, TeamMember.name.
- * The remaining two — `User.firstName`/`lastName` and the custom-field
- * `value #>>` JSON paths — have no trigram index and instead rely on
- * org-scoping to bound their scan (the user-name branch is gated by
- * `tm.organizationId` before the ILIKE; the custom-field branch is
- * Asset-org-scoped). A GIN index on `AssetCustomFieldValue.value` is a tracked,
- * measure-later follow-up, not an oversight. Measured ~165ms on the 14k-asset
- * org that surfaced this — a measurement, not a guarantee for orgs with very
- * large custom-field data.
+ * Category.name, Location.name, Tag.name, Qr.id, Barcode.value, TeamMember.name,
+ * and the custom-field values (via `AssetCustomFieldValue_searchable_trgm_idx`,
+ * a functional GIN trigram index over the concatenated searchable JSON paths;
+ * the custom-field branch queries that same `COALESCE(...) || ...` expression as
+ * an indexed prefilter and keeps the per-path OR as the exact filter). The one
+ * remaining branch — `User.firstName`/`lastName` — has no trigram index and
+ * relies on org-scoping (`tm.organizationId` gates the scan before the ILIKE, so
+ * it only touches the org's team members). Measured on the 14k-asset org that
+ * surfaced this: searched COUNT ~2.6s -> ~0.3s (custom-field branch 2.3s ->
+ * ~15ms warm) — a measurement, not a guarantee for every term/data shape.
  *
  * The advanced index inlines this as `a.id IN (<union>)`; the simple index
  * executes it via `$queryRaw` and feeds the ids into its Prisma `where`.
@@ -54,6 +55,24 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
         )} ILIKE ${like}`
     ),
     " OR "
+  );
+  // Indexed prefilter: the concatenated searchable paths, matching
+  // AssetCustomFieldValue_searchable_trgm_idx (a functional GIN trigram index on
+  // this EXACT `COALESCE(...) || ' ' || ...` expression — see the migration
+  // 20260814171814_add_asset_custom_field_value_searchable_trgm_idx). The concat
+  // is a strict superset of `customFieldPredicate`, so it narrows via the index
+  // while the per-path OR stays as the exact filter (which also guards a
+  // multi-word term from falsely matching across a value boundary). `concat_ws`
+  // can't be used here — it is STABLE, not IMMUTABLE, so Postgres rejects it in
+  // an index expression; COALESCE + || are IMMUTABLE.
+  const customFieldSearchable = Prisma.join(
+    CUSTOM_FIELD_SEARCH_PATHS.map(
+      (jsonPath) =>
+        Prisma.sql`COALESCE(acfv."value"#>>${Prisma.raw(
+          `'{${jsonPath}}'`
+        )}, '')`
+    ),
+    " || ' ' || "
   );
 
   // Each branch selects the matching asset id, org-scoped via a literal param.
@@ -110,7 +129,9 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
     UNION
     SELECT acfv."assetId" FROM public."AssetCustomFieldValue" acfv
       JOIN public."Asset" a ON a."id" = acfv."assetId"
-      WHERE a."organizationId" = ${organizationId} AND (${customFieldPredicate})`;
+      WHERE a."organizationId" = ${organizationId}
+        AND (${customFieldSearchable}) ILIKE ${like}
+        AND (${customFieldPredicate})`;
 }
 
 /**
