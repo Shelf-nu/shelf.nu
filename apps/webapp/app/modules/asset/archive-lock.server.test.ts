@@ -20,6 +20,9 @@ function makeTx() {
   const calls: { sql: string; values: unknown[] }[] = [];
   return {
     calls,
+    // why: `$queryRaw` is the one thing this helper calls, and a raw
+    // FOR UPDATE cannot run against a mocked client. Capturing the tagged
+    // template's parts is the only way to assert on the SQL it emits.
     $queryRaw: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
       calls.push({ sql: strings.join("?"), values });
       return Promise.resolve([]);

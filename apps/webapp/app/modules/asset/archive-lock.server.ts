@@ -13,6 +13,23 @@
 import type { Asset } from "@prisma/client";
 
 /**
+ * The only capability this helper needs from a transaction client: a
+ * tagged-template `$queryRaw`.
+ *
+ * Structural rather than Prisma's own tx type because that type is generated
+ * from the extended client and drags the whole model surface in — which is
+ * both unnecessary here and awkward for a test double to satisfy. Prisma's
+ * `$queryRaw` accepts a wider first parameter (`TemplateStringsArray | Sql`)
+ * and returns a `PrismaPromise`, so the real client satisfies this.
+ */
+type ArchiveLockTx = {
+  $queryRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+};
+
+/**
  * Takes a row-level lock on the given assets so an archive and a booking write
  * cannot interleave (issue #382).
  *
@@ -37,8 +54,7 @@ import type { Asset } from "@prisma/client";
  * @param organizationId - The caller's validated organization id.
  */
 export async function lockAssetsForArchiveGuard(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any,
+  tx: ArchiveLockTx,
   assetIds: Asset["id"][],
   organizationId: string
 ): Promise<void> {
