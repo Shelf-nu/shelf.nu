@@ -6,7 +6,11 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -80,10 +84,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
+    /**
+     * Custodian scope (web parity). Web matches a self-service or base user's
+     * bookings through their user link OR any of their team-member links -
+     * `custodianScopeClause`, fed by `resolveCustodianScope`. Mobile matched
+     * only the user link, so a booking whose custodian was assigned by picking
+     * a TEAM MEMBER rather than a user was visible on the website and missing
+     * from the phone, for the very user it belonged to.
+     */
+    const custodianScope = isSelfServiceOrBase
+      ? await resolveCustodianScope({ userId: user.id, organizationId })
+      : null;
+
     const where = {
       organizationId,
       status: { in: statusFilter },
-      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
       /**
        * Draft privacy (web parity). A DRAFT booking is private to whoever
        * created it — web enforces this in `getBookings`, the slim picker list
@@ -93,7 +108,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
        * AND-ed rather than merged into the search `OR` below: an OR at this
        * level would widen the search clause instead of restricting it.
        */
-      AND: [bookingDraftVisibilityClause(user.id)],
+      AND: [
+        bookingDraftVisibilityClause(user.id),
+        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
+      ],
       // Keyword search over booking name + description (the field-tech "find my
       // booking" case). Web also searches tags/custodian/asset names; name +
       // description covers the common case without a heavier query.

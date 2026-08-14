@@ -8,7 +8,11 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -140,6 +144,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
+    const custodianScope = isSelfServiceOrBase
+      ? await resolveCustodianScope({ userId: user.id, organizationId })
+      : null;
+
     /**
      * Everything except the date window, so the same filter can also answer the
      * opposite question: what matches but falls OUTSIDE the month on screen.
@@ -166,8 +174,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ],
           }
         : {}),
-      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
-      AND: [bookingDraftVisibilityClause(user.id)],
+      /**
+       * Custodian scope (web parity). Web matches a self-service or base user's
+       * bookings through their user link OR any of their team-member links -
+       * `custodianScopeClause`, fed by `resolveCustodianScope`. Mobile matched
+       * only the user link, so a booking whose custodian was assigned by
+       * picking a TEAM MEMBER rather than a user was visible on the website and
+       * missing from the phone, for the very user it belonged to.
+       */
+      AND: [
+        bookingDraftVisibilityClause(user.id),
+        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
+      ],
     };
 
     // Overlap, not containment: a job running 28 Jul to 3 Aug belongs in August.

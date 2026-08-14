@@ -35,6 +35,16 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 // APPLIED, not what it contains — that belongs to the service's own tests.
 vi.mock("~/modules/booking/service.server", () => ({
   bookingDraftVisibilityClause: vi.fn(() => ({ __draftClause: true })),
+  // Sentinels, not reimplementations. Which bookings a self-service user may
+  // see is decided by these two shared helpers, and web uses the same pair;
+  // the route's job is to delegate to them with the right arguments, so that
+  // is what is asserted. Copying their logic into the mock would only test the
+  // copy.
+  resolveCustodianScope: vi.fn(async () => ({
+    userId: "user-1",
+    teamMemberIds: ["tm-1"],
+  })),
+  custodianScopeClause: vi.fn(() => ({ __custodianClause: true })),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -45,6 +55,12 @@ vi.mock("~/database/db.server", () => ({
       // month, so the calendar can say "9 more" rather than looking empty.
       count: vi.fn(),
       findFirst: vi.fn(),
+    },
+    // The custodian scope resolves a user's team-member records, so a
+    // self-service user is matched through those links too, not only their
+    // user link.
+    teamMember: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   },
 }));
@@ -64,6 +80,10 @@ vi.mock("~/utils/error", () => ({
 }));
 
 import { db } from "~/database/db.server";
+import {
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -207,12 +227,25 @@ describe("GET /api/mobile/bookings/calendar", () => {
   });
 
   describe("who can see what", () => {
-    it("scopes a SELF_SERVICE user to bookings they hold", async () => {
+    it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
       (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
-      expect(lastWhere().custodianUserId).toBe("user-1");
+      // Resolved for THIS user in THIS org...
+      expect(resolveCustodianScope).toHaveBeenCalledWith({
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+      // ...and the resolved scope, including the team-member links, is what
+      // builds the clause. Matching only `custodianUserId` hid bookings from
+      // the person they belong to whenever the custodian was assigned by
+      // picking a team member rather than a user.
+      expect(custodianScopeClause).toHaveBeenCalledWith({
+        userId: "user-1",
+        teamMemberIds: ["tm-1"],
+      });
+      expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
     });
 
     it("scopes a BASE user the same way", async () => {
@@ -220,13 +253,15 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
-      expect(lastWhere().custodianUserId).toBe("user-1");
+      expect(custodianScopeClause).toHaveBeenCalled();
+      expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
     });
 
     it("does not narrow an ADMIN to their own bookings", async () => {
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
-      expect(lastWhere().custodianUserId).toBeUndefined();
+      expect(resolveCustodianScope).not.toHaveBeenCalled();
+      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
     });
 
     it("always applies the draft-privacy clause", async () => {
