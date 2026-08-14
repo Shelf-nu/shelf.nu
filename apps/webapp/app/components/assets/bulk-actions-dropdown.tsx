@@ -392,7 +392,7 @@ function ConditionalDropdown() {
                   type="asset-model"
                   label="Update asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
@@ -400,7 +400,7 @@ function ConditionalDropdown() {
                   type="asset-model-remove"
                   label="Remove from asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">

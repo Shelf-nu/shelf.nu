@@ -6907,6 +6907,9 @@ export async function bulkUpdateAssetLocation({
       timeZone,
     });
 
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
@@ -7412,6 +7415,9 @@ export async function bulkUpdateAssetModel({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
     });
+
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     /** An empty `assetModelId` is the "remove from asset model" request. */
     const newAssetModelId = assetModelId || null;
