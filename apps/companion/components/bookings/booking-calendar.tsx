@@ -119,10 +119,18 @@ const MAX_BANDS_PER_DAY = 3;
 type Props = {
   /** Active workspace. Nothing is fetched without it. */
   orgId: string | undefined;
+  /**
+   * Comma-joined statuses from the pills above, so the lens and the filter
+   * compose: the switch decides HOW you look, the pills decide WHAT at.
+   * Without this a filter set in list mode was silently dropped on switching.
+   */
+  statuses?: string;
+  /** Same keyword search the list uses. Web filters its calendar too. */
+  search?: string;
 };
 
 /** Month calendar with a day panel underneath. */
-export function BookingCalendar({ orgId }: Props) {
+export function BookingCalendar({ orgId, statuses, search }: Props) {
   const router = useRouter();
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
@@ -152,13 +160,14 @@ export function BookingCalendar({ orgId }: Props) {
       const res = await api.bookingsCalendar(
         orgId,
         start.toISOString(),
-        end.toISOString()
+        end.toISOString(),
+        { statuses, search }
       );
       if (res.error) setError(res.error);
       else if (res.data) setBookings(res.data.bookings);
       setIsLoading(false);
     },
-    [orgId]
+    [orgId, statuses, search]
   );
 
   useEffect(() => {

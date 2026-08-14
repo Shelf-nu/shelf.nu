@@ -110,6 +110,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     }
 
+    /**
+     * Status + search come from the same controls the list uses, so the lens
+     * and the filter compose. Web applies its whole filter set to the calendar
+     * too; without this, a filter set in list mode was silently dropped the
+     * moment the user switched lens, and the two views disagreed by default.
+     *
+     * Unknown status values are ignored rather than rejected: the client sends
+     * a comma-joined pill value, and a stale app build must not hard-fail.
+     */
+    const ALLOWED = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+    ];
+    const requested = (url.searchParams.get("statuses") ?? "")
+      .split(",")
+      .map((v) => v.trim().toUpperCase())
+      .filter((v): v is (typeof ALLOWED)[number] =>
+        ALLOWED.includes(v as (typeof ALLOWED)[number])
+      );
+    const statuses = requested.length > 0 ? requested : ALLOWED;
+
+    const search = url.searchParams.get("search")?.trim() || undefined;
+
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
@@ -118,15 +144,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const bookings = await db.booking.findMany({
       where: {
         organizationId,
-        status: {
-          in: [
-            BookingStatus.DRAFT,
-            BookingStatus.RESERVED,
-            BookingStatus.ONGOING,
-            BookingStatus.OVERDUE,
-            BookingStatus.COMPLETE,
-          ],
-        },
+        status: { in: statuses },
+        // Same name/description keyword match the mobile list applies.
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" as const } },
+                {
+                  description: {
+                    contains: search,
+                    mode: "insensitive" as const,
+                  },
+                },
+              ],
+            }
+          : {}),
         // Overlap test: starts on or before the window ends, and ends on or
         // after it begins.
         from: { lte: end },

@@ -24,12 +24,19 @@ export const bookingsApi = {
    * Bookings overlapping a date window, for the calendar view. Ranges are
    * inclusive on both ends; the server caps the window it will answer.
    */
-  bookingsCalendar: (orgId: string, start: string, end: string) =>
-    apiFetch<CalendarBookingsResponse>(
-      `/api/mobile/bookings/calendar?orgId=${orgId}&start=${encodeURIComponent(
-        start
-      )}&end=${encodeURIComponent(end)}`
-    ),
+  bookingsCalendar: (
+    orgId: string,
+    start: string,
+    end: string,
+    filters: { statuses?: string; search?: string } = {}
+  ) => {
+    const qs = new URLSearchParams({ orgId, start, end });
+    if (filters.statuses) qs.set("statuses", filters.statuses);
+    if (filters.search) qs.set("search", filters.search);
+    return apiFetch<CalendarBookingsResponse>(
+      `/api/mobile/bookings/calendar?${qs.toString()}`
+    );
+  },
   /** Get paginated bookings for an organization */
   bookings: (
     orgId: string,

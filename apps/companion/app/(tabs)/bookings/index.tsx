@@ -511,86 +511,101 @@ function BookingsListContent() {
 
   return (
     <View style={styles.container}>
-      {view === "calendar" ? (
-        <BookingCalendar orgId={currentOrg?.id} />
-      ) : (
-        <>
-          {/* Keyword search + sort */}
-          <View style={styles.searchRow}>
-            <View style={styles.searchContainer}>
-              <Ionicons name="search" size={18} color={colors.mutedLight} />
-              <TextInput
-                style={styles.searchInput}
-                value={searchInput}
-                onChangeText={setSearchInput}
-                placeholder="Search bookings..."
-                placeholderTextColor={colors.mutedLight}
-                autoCorrect={false}
-                autoCapitalize="none"
-                returnKeyType="search"
-                accessibilityLabel="Search bookings"
-              />
-              {searchInput.length > 0 ? (
-                <TouchableOpacity
-                  onPress={() => setSearchInput("")}
-                  hitSlop={hitSlop.sm}
-                  accessibilityLabel="Clear search"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="close-circle"
-                    size={18}
-                    color={colors.mutedLight}
-                  />
-                </TouchableOpacity>
-              ) : null}
-            </View>
+      {/* Keyword search + sort.
+          why here rather than inside the list branch: search and the status
+          pills say WHAT you are looking at, and the header switch says HOW.
+          They compose. Hiding them in calendar mode meant a filter you had
+          set was silently ignored the moment you switched lens, and the two
+          views disagreed by default — the list opens on Active (four
+          statuses) while the calendar was drawing five. Web applies the same
+          filter set to its calendar; this now matches. */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color={colors.mutedLight} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="Search bookings..."
+            placeholderTextColor={colors.mutedLight}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search bookings"
+          />
+          {searchInput.length > 0 ? (
             <TouchableOpacity
-              style={styles.sortButton}
-              onPress={openSortMenu}
-              accessibilityLabel="Sort bookings"
+              onPress={() => setSearchInput("")}
+              hitSlop={hitSlop.sm}
+              accessibilityLabel="Clear search"
               accessibilityRole="button"
             >
-              <Ionicons name="swap-vertical" size={20} color={colors.muted} />
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={colors.mutedLight}
+              />
             </TouchableOpacity>
-          </View>
-
-          {/* Status filter pills — scrollable: more statuses than fit one row */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterScroll}
-            contentContainerStyle={styles.filterRow}
-            accessibilityRole="tablist"
+          ) : null}
+        </View>
+        {/* why list-only: sort orders rows. A calendar is positioned by
+                date, so there is nothing for it to order. */}
+        {view === "list" && (
+          <TouchableOpacity
+            style={styles.sortButton}
+            onPress={openSortMenu}
+            accessibilityLabel="Sort bookings"
+            accessibilityRole="button"
           >
-            {STATUS_FILTERS.map((f, i) => (
-              <TouchableOpacity
-                key={f.value}
-                style={[
-                  styles.filterPill,
-                  activeFilter === i && styles.filterPillActive,
-                ]}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setActiveFilter(i);
-                }}
-                hitSlop={hitSlop.sm}
-                accessibilityLabel={`Filter: ${f.label}`}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeFilter === i }}
-              >
-                <Text
-                  style={[
-                    styles.filterPillText,
-                    activeFilter === i && styles.filterPillTextActive,
-                  ]}
-                >
-                  {f.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+            <Ionicons name="swap-vertical" size={20} color={colors.muted} />
+          </TouchableOpacity>
+        )}
+      </View>
 
+      {/* Status filter pills — scrollable: more statuses than fit one row */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+        accessibilityRole="tablist"
+      >
+        {STATUS_FILTERS.map((f, i) => (
+          <TouchableOpacity
+            key={f.value}
+            style={[
+              styles.filterPill,
+              activeFilter === i && styles.filterPillActive,
+            ]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setActiveFilter(i);
+            }}
+            hitSlop={hitSlop.sm}
+            accessibilityLabel={`Filter: ${f.label}`}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeFilter === i }}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === i && styles.filterPillTextActive,
+              ]}
+            >
+              {f.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {view === "calendar" ? (
+        <BookingCalendar
+          orgId={currentOrg?.id}
+          statuses={STATUS_FILTERS[activeFilter].value}
+          search={debouncedSearch}
+        />
+      ) : (
+        <>
           {/* Swipeable content area — swipe left/right to cycle filter pills */}
           <View style={styles.flexFill} {...swipePanHandlers}>
             <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
