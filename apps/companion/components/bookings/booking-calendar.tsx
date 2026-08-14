@@ -46,58 +46,6 @@ import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
 /**
- * Regions that start the week on Sunday. Used only when the JS engine cannot
- * answer for itself: Hermes ships a reduced Intl and may not carry `weekInfo`.
- */
-const SUNDAY_FIRST = new Set([
-  "US",
-  "CA",
-  "MX",
-  "BR",
-  "CO",
-  "PE",
-  "VE",
-  "AR",
-  "CL",
-  "JP",
-  "KR",
-  "TW",
-  "CN",
-  "HK",
-  "IL",
-  "IN",
-  "ID",
-  "PH",
-  "TH",
-  "ZA",
-]);
-
-/**
- * First day of the week for this device, as react-native-calendars wants it
- * (0 = Sunday, 1 = Monday).
- *
- * why: this was hardcoded to Monday, which is simply wrong for every customer
- * in the US and much of Asia — the calendar would silently show them a week
- * shape they do not use.
- */
-function resolveFirstDay(): number {
-  try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-    const info = (
-      new Intl.Locale(locale) as unknown as {
-        weekInfo?: { firstDay?: number };
-      }
-    ).weekInfo;
-    // Intl counts 1 = Monday ... 7 = Sunday; the calendar wants 0 for Sunday.
-    if (info?.firstDay) return info.firstDay === 7 ? 0 : info.firstDay;
-    const region = locale.split("-").pop()?.toUpperCase() ?? "";
-    return SUNDAY_FIRST.has(region) ? 0 : 1;
-  } catch {
-    return 1;
-  }
-}
-
-/**
  * Most bands we will stack in one day cell. Beyond this the cell stops being
  * readable and starts pushing the row height around; the day panel below is
  * where the full list lives anyway.
@@ -281,10 +229,17 @@ export function BookingCalendar({
   const router = useRouter();
   const { colors, bookingStatusBadge, isDark } = useTheme();
   const styles = useStyles();
-  const { formatDate } = useDateFormatter();
+  const { formatDate, prefs } = useDateFormatter();
 
-  const [visibleMonth, setVisibleMonth] = useState(() => toKey(new Date()));
-  const [selectedDay, setSelectedDay] = useState(() => toKey(new Date()));
+  // Keys are built in the user's saved zone, not the device's. The rows below
+  // print their dates in that zone, so keying by device time marked a booking
+  // on one square and printed another date on its row.
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    toKey(new Date(), prefs.timeZone)
+  );
+  const [selectedDay, setSelectedDay] = useState(() =>
+    toKey(new Date(), prefs.timeZone)
+  );
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);
   const [outside, setOutside] = useState<{
     count: number;
@@ -310,9 +265,17 @@ export function BookingCalendar({
    */
   const pendingKey = useRef<string>("");
 
+  /**
+   * The workspace is part of the request's identity, not just the month and
+   * filters. Without it, a request in flight when the user switches workspaces
+   * carries the same key as the new one, so the old workspace's response passes
+   * the staleness check and repaints the grid with bookings from a workspace
+   * the user has left.
+   */
   const cacheKey = useCallback(
-    (monthKey: string) => `${monthKey}|${statuses ?? ""}|${search ?? ""}`,
-    [statuses, search]
+    (monthKey: string) =>
+      `${orgId ?? ""}|${monthKey}|${statuses ?? ""}|${search ?? ""}`,
+    [orgId, statuses, search]
   );
 
   /**
@@ -406,13 +369,13 @@ export function BookingCalendar({
    */
   useEffect(() => {
     if (selectedDay.slice(0, 7) === visibleMonth.slice(0, 7)) return;
-    const today = toKey(new Date());
+    const today = toKey(new Date(), prefs.timeZone);
     setSelectedDay(
       today.slice(0, 7) === visibleMonth.slice(0, 7)
         ? today
         : `${visibleMonth.slice(0, 7)}-01`
     );
-  }, [visibleMonth, selectedDay]);
+  }, [visibleMonth, selectedDay, prefs.timeZone]);
   /**
    * A booking changed on another screen - checked out, checked in, cancelled,
    * archived, deleted. Every cached month is suspect, not just this one, since
@@ -464,8 +427,8 @@ export function BookingCalendar({
       // The caps still come from the booking's real dates, so a band running
       // in from before the window is drawn open rather than looking like it
       // starts at the edge of the screen.
-      const trueStart = toKey(new Date(b.from));
-      const trueEnd = toKey(new Date(b.to));
+      const trueStart = toKey(new Date(b.from), prefs.timeZone);
+      const trueEnd = toKey(new Date(b.to), prefs.timeZone);
       const color = bookingStatusBadge[b.status]?.text ?? colors.primary;
       keys.forEach((key) => {
         (byDay[key] ??= []).push(b);
@@ -495,7 +458,13 @@ export function BookingCalendar({
     }
 
     return { marks, byDay };
-  }, [bookings, bookingStatusBadge, colors.primary, visibleMonth]);
+  }, [
+    bookings,
+    bookingStatusBadge,
+    colors.primary,
+    visibleMonth,
+    prefs.timeZone,
+  ]);
 
   /**
    * Marks plus the selected day.
@@ -537,7 +506,11 @@ export function BookingCalendar({
             onPress={setSelectedDay}
           />
         )}
-        firstDay={resolveFirstDay()}
+        /* The account's saved week start, which web's calendar also uses.
+           Re-deriving it from the device locale showed the two surfaces
+           different week columns for the same account, and ignored anyone who
+           had deliberately chosen Saturday. */
+        firstDay={prefs.weekStartsOn}
         enableSwipeMonths
         /**
          * why the key: react-native-calendars computes its stylesheet once and
@@ -571,7 +544,10 @@ export function BookingCalendar({
         <TouchableOpacity
           style={styles.outsideRow}
           onPress={() => {
-            const target = toKey(new Date(outside.jumpTo as string));
+            const target = toKey(
+              new Date(outside.jumpTo as string),
+              prefs.timeZone
+            );
             setVisibleMonth(target);
             setSelectedDay(target);
           }}

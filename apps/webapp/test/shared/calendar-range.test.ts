@@ -190,3 +190,37 @@ describe("calendarMonthWindow", () => {
     expect(calendarDayKey(start)).toBe("2026-08-25"); // 1 Sep minus 7
   });
 });
+
+describe("day keys in a preferred timezone", () => {
+  // The app renders booking dates in the user's saved timezone, which is not
+  // always the device's. Keying by device time then marks a booking on one day
+  // and prints another on its row, for the same booking.
+  const lateEveningUtc = "2026-08-07T22:30:00.000Z";
+
+  it("keys an instant by the preferred zone, not the device", () => {
+    // 22:30 UTC is still the 7th in London and already the 8th in Auckland.
+    expect(calendarDayKey(new Date(lateEveningUtc), "Europe/London")).toBe(
+      "2026-08-07"
+    );
+    expect(calendarDayKey(new Date(lateEveningUtc), "Pacific/Auckland")).toBe(
+      "2026-08-08"
+    );
+  });
+
+  it("falls back to the device zone when no zone is given", () => {
+    const local = new Date(2026, 7, 7, 23, 30);
+    expect(calendarDayKey(local)).toBe("2026-08-07");
+  });
+
+  it("covers the days a booking touches in the preferred zone", () => {
+    // A booking ending at 22:30 UTC on the 7th runs to the 8th in Auckland, so
+    // its band has to reach one square further there than in London.
+    const from = "2026-08-06T09:00:00.000Z";
+    expect(
+      calendarDaysCovered(from, lateEveningUtc, undefined, "Europe/London")
+    ).toEqual(["2026-08-06", "2026-08-07"]);
+    expect(
+      calendarDaysCovered(from, lateEveningUtc, undefined, "Pacific/Auckland")
+    ).toEqual(["2026-08-06", "2026-08-07", "2026-08-08"]);
+  });
+});

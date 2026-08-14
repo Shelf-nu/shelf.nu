@@ -813,9 +813,26 @@ export function formatDate(
  * would be drawn on the wrong day.
  *
  * @param date - the instant to key
- * @returns the local calendar day, zero padded
+ * @param timeZone - IANA zone to measure the calendar day in. Pass the user's
+ *   preferred zone whenever the key will be shown next to a date rendered in
+ *   that zone: with the device on a different zone, a booking near midnight
+ *   otherwise gets marked on one day and displays as another.
+ * @returns the calendar day in `timeZone` (or the device zone), zero padded
  */
-export function calendarDayKey(date: Date): string {
+export function calendarDayKey(date: Date, timeZone?: string): string {
+  if (timeZone) {
+    // Same mechanism as calendarDayIndex: the only way to ask what calendar
+    // date an instant falls on in a zone that is not the device's.
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const get = (type: string) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
@@ -866,6 +883,16 @@ export function calendarMonthWindow(monthKey: string): {
   return { start, end };
 }
 
+/**
+ * A `YYYY-MM-DD` key as an instant at UTC midnight, purely so day ranges can be
+ * walked without the device's zone or its DST jumps entering into it. This is
+ * NOT the same as {@link calendarDayKeyToDate}, which deliberately returns a
+ * LOCAL date for callers that read month and day off it.
+ */
+function keyToUtcMidnight(key: string): Date {
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
 /** Upper bound on the days one range may enumerate. */
 const MAX_RANGE_DAYS = 400;
 
@@ -883,18 +910,18 @@ const MAX_RANGE_DAYS = 400;
 export function calendarDaysCovered(
   from: string,
   to: string,
-  clip?: { from: Date; to: Date }
+  clip?: { from: Date; to: Date },
+  timeZone?: string
 ): string[] {
   const start = new Date(from);
   const end = new Date(to);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
 
-  const cursor = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  );
-  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  // Iterate pure calendar dates, anchored to UTC midnight so the walk cannot
+  // drift across a DST boundary. Which date each instant belongs to is decided
+  // by calendarDayKey, in `timeZone` when one is given.
+  const cursor = keyToUtcMidnight(calendarDayKey(start, timeZone));
+  const last = keyToUtcMidnight(calendarDayKey(end, timeZone));
 
   /**
    * With a clip, only the days inside it are enumerated. A caller drawing one
@@ -904,24 +931,16 @@ export function calendarDaysCovered(
    * screen, and simply vanished from it.
    */
   if (clip) {
-    const clipFrom = new Date(
-      clip.from.getFullYear(),
-      clip.from.getMonth(),
-      clip.from.getDate()
-    );
-    const clipTo = new Date(
-      clip.to.getFullYear(),
-      clip.to.getMonth(),
-      clip.to.getDate()
-    );
+    const clipFrom = keyToUtcMidnight(calendarDayKey(clip.from, timeZone));
+    const clipTo = keyToUtcMidnight(calendarDayKey(clip.to, timeZone));
     if (cursor < clipFrom) cursor.setTime(clipFrom.getTime());
     if (last > clipTo) last.setTime(clipTo.getTime());
   }
 
   const keys: string[] = [];
   while (cursor <= last && keys.length < MAX_RANGE_DAYS) {
-    keys.push(calendarDayKey(cursor));
-    cursor.setDate(cursor.getDate() + 1);
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return keys;
 }

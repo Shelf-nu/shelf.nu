@@ -23,17 +23,23 @@ const createDataMock = vi.hoisted(
     )
 );
 
+// why: React Router v7 single fetch returns bare objects; this makes `data()`
+// hand back a real Response so the tests can read status and JSON body.
 vi.mock("react-router", async () => ({
   ...(await vi.importActual("react-router")),
   data: createDataMock(),
 }));
 
+// why: external auth — the tests must not reach Supabase, and the role is the
+// input that decides which scoping branch runs.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
   getMobileUserContext: vi.fn().mockResolvedValue({ role: "ADMIN" }),
 }));
 
+// why: the shared visibility helpers. Stubbed to sentinels so the assertions
+// are about what the route delegates, not about a copy of their logic.
 vi.mock("~/modules/booking/service.server", () => ({
   bookingDraftVisibilityClause: vi.fn(() => ({ __draftClause: true })),
   // Sentinels, not reimplementations - see the calendar route's tests.
@@ -44,6 +50,8 @@ vi.mock("~/modules/booking/service.server", () => ({
   custodianScopeClause: vi.fn(() => ({ __custodianClause: true })),
 }));
 
+// why: no Postgres in unit tests; the mock also lets the assertions read the
+// exact `where` the list query was built with.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: {
@@ -53,11 +61,13 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: keeps ShelfError status codes observable in the response without the
+// real error pipeline logging through them.
 vi.mock("~/utils/error", () => ({
-  makeShelfError: vi.fn((cause: any) => ({
-    message: cause?.message ?? "error",
-    status: cause?.status ?? 500,
-  })),
+  makeShelfError: vi.fn((cause: unknown) => {
+    const err = cause as { message?: string; status?: number } | null;
+    return { message: err?.message ?? "error", status: err?.status ?? 500 };
+  }),
 }));
 
 import { db } from "~/database/db.server";

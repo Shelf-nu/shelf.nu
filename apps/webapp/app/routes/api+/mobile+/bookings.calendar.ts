@@ -251,10 +251,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         orderBy: { from: "asc" },
         select: { from: true },
       }),
+      // `to`, not `from`: this is ordered by the nearest END behind the window,
+      // so returning its start sent the calendar to whenever that booking began
+      // - which for a long booking can be years before the month it was chosen
+      // for.
       db.booking.findFirst({
         where: { ...baseWhere, to: { lt: start } },
         orderBy: { to: "desc" },
-        select: { from: true },
+        select: { to: true },
       }),
     ]);
 
@@ -281,7 +285,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
        */
       outsideWindow: {
         count: outsideCount,
-        jumpTo: nextUp?.from ?? previous?.from ?? null,
+        jumpTo: nextUp?.from ?? previous?.to ?? null,
       },
     });
   } catch (cause) {

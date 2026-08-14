@@ -65,6 +65,8 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: keeps ShelfError status codes observable in the response without the
+// real error pipeline logging through them.
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
     message: cause?.message ?? "error",
