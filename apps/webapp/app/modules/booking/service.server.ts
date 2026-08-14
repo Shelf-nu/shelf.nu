@@ -1551,6 +1551,11 @@ export async function reserveBooking({
                   ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
                     .asset.select,
                   status: true,
+                  // Needed by the race-safe availability guard below: the
+                  // route-level check happens before the working-hours and
+                  // settings reads, so an asset can be marked unavailable in
+                  // between. This read is the one immediately before the write.
+                  availableToBook: true,
                   // Needed for the QUANTITY_TRACKED windowed-availability
                   // guard's shortfall message (see the DRAFT → RESERVED
                   // transaction below).
@@ -1627,6 +1632,45 @@ export async function reserveBooking({
           shouldBeCaptured: false,
         });
       }
+    }
+
+    /**
+     * Race-safe twin of the checks the callers make before they get here: the
+     * web overview disables its Reserve button from loader flags, and the
+     * mobile route refuses up front with a friendlier message. Both read the
+     * booking earlier in the request, so a concurrent edit that empties the
+     * booking or marks an asset unavailable would still land in RESERVED.
+     * This re-read is the last one before the write, so the window closes here.
+     */
+    if (
+      bookingFound.bookingAssets.length === 0 &&
+      bookingFound.modelRequests.length === 0
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Nothing to reserve",
+        message:
+          "Add assets or reserve at least one model on this booking before you reserve it.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const unavailableAssets = bookingFound.bookingAssets
+      .map((ba) => ba.asset)
+      .filter((asset) => !asset.availableToBook);
+
+    if (unavailableAssets.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Unavailable assets",
+        message:
+          "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
     }
 
     /** Validate the booking dates */

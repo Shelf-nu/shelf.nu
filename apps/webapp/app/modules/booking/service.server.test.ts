@@ -2574,6 +2574,85 @@ describe("reserveBooking", () => {
     tags: [],
   };
 
+  /**
+   * Race-safe twin of the caller-side checks. The web overview only disables
+   * its Reserve button from loader flags and the mobile route checks before it
+   * reads working hours and settings, so both leave a window in which a
+   * concurrent edit can empty the booking or mark an asset unavailable.
+   */
+  describe("eligibility re-check on the read immediately before the write", () => {
+    it("refuses a booking that lost its last asset and holds no model request", async () => {
+      expect.assertions(1);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.DRAFT,
+        from: mockReserveParams.from,
+        to: mockReserveParams.to,
+        bookingAssets: [],
+        modelRequests: [],
+      });
+
+      await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+        "Add assets or reserve at least one model on this booking before you reserve it."
+      );
+    });
+
+    it("reserves a booking that holds only a model request", async () => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.DRAFT,
+        from: mockReserveParams.from,
+        to: mockReserveParams.to,
+        bookingAssets: [],
+        modelRequests: [{ id: "mr-1", assetModelId: "model-1", quantity: 2 }],
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [],
+        modelRequests: [],
+      });
+
+      await expect(reserveBooking(mockReserveParams)).resolves.toBeDefined();
+    });
+
+    it("refuses when an asset was marked unavailable after the caller checked", async () => {
+      expect.assertions(1);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.DRAFT,
+        from: mockReserveParams.from,
+        to: mockReserveParams.to,
+        modelRequests: [],
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              title: "Asset 1",
+              status: "AVAILABLE",
+              // flipped by another request between the caller's read and here
+              availableToBook: false,
+              bookingAssets: [],
+            },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-unavail-1",
+          },
+        ],
+      });
+
+      await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+        "This booking holds assets marked as unavailable."
+      );
+    });
+  });
+
   it("should reserve booking successfully with no conflicts", async () => {
     expect.assertions(2);
 
@@ -2588,6 +2667,7 @@ describe("reserveBooking", () => {
             id: "asset-1",
             title: "Asset 1",
             status: "AVAILABLE",
+            availableToBook: true,
             bookingAssets: [], // No conflicting bookings
           },
           assetId: "asset-1",
@@ -2599,6 +2679,7 @@ describe("reserveBooking", () => {
             id: "asset-2",
             title: "Asset 2",
             status: "AVAILABLE",
+            availableToBook: true,
             bookingAssets: [], // No conflicting bookings
           },
           assetId: "asset-2",
@@ -2645,6 +2726,7 @@ describe("reserveBooking", () => {
             id: "asset-1",
             title: "Asset 1",
             status: "CHECKED_OUT",
+            availableToBook: true,
             bookingAssets: [
               {
                 booking: {
@@ -2725,6 +2807,7 @@ describe("reserveBooking", () => {
               id: QT_ASSET_ID,
               title: "Folding Chairs",
               type: AssetType.QUANTITY_TRACKED,
+              availableToBook: true,
               status: "AVAILABLE",
               unitOfMeasure: "chairs",
               // QUANTITY_TRACKED assets are exempt from the whole-asset
@@ -2959,7 +3042,6 @@ describe("reserveBooking", () => {
     });
   });
 });
-
 describe("checkoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
