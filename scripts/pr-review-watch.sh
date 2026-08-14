@@ -45,13 +45,28 @@ COLLECT_THREADS_MAX_PAGES="${PR_REVIEW_MAX_THREAD_PAGES:-20}"
 # suffix that REST's user.login includes ("coderabbitai" vs
 # "coderabbitai[bot]") — verified against PR #2770. Normalize before matching
 # or every bot thread is misclassified as a human comment.
-BOT_LOGINS="coderabbitai chatgpt-codex-connector copilot-pull-request-reviewer github-actions"
+#
+# `parameterai` was missing until 2026-08-13, so every Parameter finding was
+# classified `kind: "human"` — which the loop never triages, replies to, or
+# resolves. They accumulated unanswered on every PR (seen on #2844, where it
+# filed a correct cross-tenant finding that sat untouched). Its login is
+# `parameterai[bot]`; note the product was formerly branded "hex sentinel" and
+# its finding bodies STILL carry a `<!-- hex-sentinel-finding-head:… -->`
+# marker, so matching on body text rather than login will mislead you.
+BOT_LOGINS="coderabbitai chatgpt-codex-connector copilot-pull-request-reviewer parameterai github-actions"
 
 # The subset of BOT_LOGINS that actually posts a PR REVIEW (as opposed to a
 # thread comment or, for github-actions, React Doctor's sticky ISSUE
 # comment). Quiescence condition #1 needs to know which bots to wait on for
 # `.reviewedHead` — including github-actions there would make that condition
 # permanently unsatisfiable, since it never appears in the reviews endpoint.
+# NOTE: `parameterai` is deliberately NOT here yet, though it does post real
+# reviews. Adding it makes quiescence wait on it, which is arguably more
+# correct — but the QUIESCENT integration test runs against a real captured
+# fixture from PR #2770, which predates the bot, so it would sit blocked until
+# the 20-minute stale-bot waiver. That needs a fresh fixture, not a doctored
+# one. Leaving it out only costs an occasional early "clean" announcement: its
+# findings are still triaged and still block condition #2 once they arrive.
 REVIEW_BOT_LOGINS="coderabbitai chatgpt-codex-connector copilot-pull-request-reviewer"
 
 # --- state -----------------------------------------------------------------
