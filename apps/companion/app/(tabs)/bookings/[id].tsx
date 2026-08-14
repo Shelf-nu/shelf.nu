@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
+import { formatPersonName } from "@/lib/person-name";
 import {
   consumeBookingDirty,
   markBookingsListDirty,
@@ -919,17 +920,17 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
-  const creatorName =
-    [booking?.creator?.firstName, booking?.creator?.lastName]
-      .filter(Boolean)
-      .join(" ") || null;
+  const creatorName = formatPersonName(
+    booking?.creator?.firstName,
+    booking?.creator?.lastName
+  );
 
   const custodianName =
     booking.custodianTeamMember?.name ||
-    [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
-      .filter(Boolean)
-      .join(" ") ||
-    null;
+    formatPersonName(
+      booking.custodianUser?.firstName,
+      booking.custodianUser?.lastName
+    );
 
   // Lifecycle counts for the progress bar: every asset is in exactly one of three
   // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned

@@ -84,6 +84,11 @@ vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn().mockResolvedValue({ id: "note-1" }),
 }));
 
+// why: the route logs a swallowed note failure; keep it off the test output.
+vi.mock("~/utils/logger", () => ({
+  Logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -235,6 +240,25 @@ describe("POST /api/mobile/asset/create", () => {
           assetId: "asset-1",
         })
       );
+    });
+
+    it("still reports success when a note fails, so the phone cannot create a duplicate", async () => {
+      // The asset and its activity event are committed before the notes run.
+      // Answering "failed" here made the create screen offer a retry for an
+      // asset that already existed - and a scanned qrId went to the retry.
+      (createAsset as any).mockResolvedValue(createdAsset());
+      (createNote as any).mockRejectedValueOnce(
+        new Error("note insert failed")
+      );
+
+      const result = await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect((result as unknown as Response).status).toBe(200);
+      const body = await (result as unknown as Response).json();
+      expect(body.asset.id).toBe("asset-1");
+      expect(createAsset).toHaveBeenCalledTimes(1);
     });
 
     it("writes only the creation note when the asset has no location", async () => {

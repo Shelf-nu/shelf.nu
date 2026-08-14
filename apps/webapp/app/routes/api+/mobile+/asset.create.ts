@@ -32,7 +32,8 @@ import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
@@ -257,7 +258,26 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    await Promise.all(notes);
+    // why: the asset and its ASSET_CREATED event are already committed by the
+    // time we get here, so a failed note must not be reported as a failed
+    // creation. It made the companion create screen offer a retry for an asset
+    // that already existed - and with a scanned `qrId` the retry took a fresh
+    // QR while the first asset kept the scanned one, so the label in the user's
+    // hand pointed at the wrong row. A missing note costs far less than that.
+    // Same shape as the sibling mobile routes (asset.adjust-quantity.ts).
+    const noteResults = await Promise.allSettled(notes);
+    for (const result of noteResults) {
+      if (result.status === "rejected") {
+        Logger.error(
+          new ShelfError({
+            cause: result.reason,
+            message: "Failed to write the creation note for a new asset",
+            label: "Assets",
+            additionalData: { assetId: asset.id, userId: user.id },
+          })
+        );
+      }
+    }
 
     return data({
       asset: {
