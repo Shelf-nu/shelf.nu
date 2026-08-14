@@ -379,7 +379,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         selected: true,
       },
     }),
-    [marks, selectedDay, colors.primary]
+    [marks, selectedDay]
   );
 
   const dayBookings = byDay[selectedDay] ?? [];
