@@ -308,27 +308,39 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // Location distribution (top 5)
-      db.location
-        .findMany({
-          where: { organizationId },
-          select: {
-            id: true,
-            name: true,
-            // Count pivot rows (one per asset placed at this location).
-            _count: { select: { assetLocations: true } },
-          },
-          orderBy: { assetLocations: { _count: "desc" } },
+      //
+      // Grouped on the pivot rather than counted through `location._count`
+      // because archived assets must not be counted here (issue #382) and
+      // Prisma cannot order by a FILTERED relation count — the old shape
+      // could only either count archived assets or rank by a number it was
+      // not displaying. Grouping keeps the count and the ranking honest.
+      // One pivot row per (asset, location), so counting rows still counts
+      // assets. Names come from a second, id-keyed read.
+      db.assetLocation
+        .groupBy({
+          by: ["locationId"],
+          where: { organizationId, asset: { archivedAt: null } },
+          _count: { assetId: true },
+          orderBy: { _count: { assetId: "desc" } },
           take: 5,
         })
-        .then((locs) =>
-          locs
-            .filter((l) => l._count.assetLocations > 0)
-            .map((l) => ({
-              locationId: l.id,
-              locationName: l.name,
-              assetCount: l._count.assetLocations,
-            }))
-        ),
+        .then(async (rows) => {
+          if (rows.length === 0) return [];
+
+          const locations = await db.location.findMany({
+            where: { id: { in: rows.map((r) => r.locationId) } },
+            select: { id: true, name: true },
+          });
+          const nameById = new Map(locations.map((l) => [l.id, l.name]));
+
+          return rows
+            .filter((r) => r._count.assetId > 0 && nameById.has(r.locationId))
+            .map((r) => ({
+              locationId: r.locationId,
+              locationName: nameById.get(r.locationId) as string,
+              assetCount: r._count.assetId,
+            }));
+        }),
 
       // KPI: total locations
       db.location.count({

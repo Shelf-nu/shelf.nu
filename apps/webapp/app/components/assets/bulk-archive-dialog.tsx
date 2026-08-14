@@ -42,7 +42,7 @@ export default function BulkArchiveDialog({
       title={isArchive ? "Archive assets" : "Reinstate assets"}
       description={
         isArchive
-          ? "Archive all selected assets. They will be hidden from your lists and can't be booked or assigned custody. Assets that are checked out, in custody, quantity-tracked, or already archived are skipped. You can reinstate them at any time."
+          ? "Archive all selected assets. They will be hidden from your lists and can't be booked or assigned custody. Assets that are checked out, in custody, in an unfinished booking, quantity-tracked, or already archived are skipped. You can reinstate them at any time."
           : "Reinstate all selected assets. They will be active and bookable again. Assets that aren't archived are skipped."
       }
       actionUrl="/api/assets/bulk-archive"

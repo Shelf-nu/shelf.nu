@@ -3225,6 +3225,23 @@ export async function deleteAsset({
  * @returns The archived asset id and the archive timestamp.
  * @throws {ShelfError} On a failed guard or a database error.
  */
+/**
+ * Booking states in which an asset is still spoken for. Terminal states
+ * (COMPLETE / CANCELLED / ARCHIVED) are history and don't block anything.
+ *
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: the AVAILABLE
+ * status check alone does NOT cover this, because an asset sitting in a DRAFT
+ * or RESERVED booking is still AVAILABLE. Without this guard an asset could be
+ * archived and then reserved and checked out from the booking it was already
+ * in, which contradicts "archived assets can't be booked" (issue #382).
+ */
+const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
 export async function archiveAsset({
   id,
   organizationId,
@@ -3281,6 +3298,25 @@ export async function archiveAsset({
         title: "Can't archive this asset",
         message:
           "Assets that are checked out or in custody can't be archived. Check the asset back in first, then archive it.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const activeBookingCount = await db.bookingAsset.count({
+      where: {
+        assetId: id,
+        booking: { status: { in: ACTIVE_BOOKING_STATUSES } },
+      },
+    });
+
+    if (activeBookingCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "This asset is in a booking that hasn't finished yet. Remove it from that booking, then archive it.",
         status: 400,
         label,
         shouldBeCaptured: false,
@@ -3493,6 +3529,14 @@ export async function bulkArchiveAssets({
         type: AssetType.INDIVIDUAL,
         status: AssetStatus.AVAILABLE,
         archivedAt: null,
+        // Same rule the single-asset path enforces: an asset still sitting in
+        // an unfinished booking is spoken for, and AVAILABLE alone does not
+        // say so (a DRAFT/RESERVED booking leaves the status untouched).
+        // Skipped rather than thrown — bulk reports counts, it doesn't fail
+        // the batch on one ineligible row.
+        bookingAssets: {
+          none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+        },
       },
       select: { id: true },
     });

@@ -123,6 +123,10 @@ vitest.mock("~/database/db.server", () => ({
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: archiveAsset refuses an asset still sitting in an unfinished
+      // booking (issue #382). Default 0 = not booked, so the happy-path
+      // archive tests reach the write.
+      count: vitest.fn().mockResolvedValue(0),
     },
     // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
     // AssetLocation pivot for the manual placement rows. `findFirst` is
@@ -4283,6 +4287,9 @@ describe("archiveAsset", () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
+    // clearAllMocks wipes recorded calls but keeps implementations, so restore
+    // the "not in any booking" default each test.
+    (db.bookingAsset.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
   });
 
   it("archives an available individual asset and emits ASSET_ARCHIVED in the tx", async () => {
@@ -4345,6 +4352,24 @@ describe("archiveAsset", () => {
     await expect(
       archiveAsset({ id: "a1", organizationId: "org-1" })
     ).rejects.toMatchObject({ status: 409 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks an asset that is still in an unfinished booking", async () => {
+    // why: a DRAFT or RESERVED booking leaves Asset.status AVAILABLE, so the
+    // status check above cannot see it. Without this the asset could be
+    // archived and then checked out from the booking it was already in.
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    (db.bookingAsset.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 400 });
     expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
