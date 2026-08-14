@@ -56,6 +56,7 @@ import {
   type ListTab,
 } from "@/components/audit/segmented-control";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
+import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // ── Main Export ──────────────────────────────────────────
@@ -242,12 +243,16 @@ function AuditScannerContent() {
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
+  // Opening the sheet once proves the user found evidence capture, which
+  // retires the coachmark for good.
+  const [hasOpenedEvidence, setHasOpenedEvidence] = useState(false);
   // Wire up setSelectedItem for the scan sync callback
   setSelectedItemRef.current = setSelectedItem;
 
   const handleItemPress = useCallback((item: ScannedItem) => {
     setSelectedItem(item);
     setEvidenceModalVisible(true);
+    setHasOpenedEvidence(true);
   }, []);
 
   const handleCloseEvidenceModal = useCallback(() => {
@@ -1146,6 +1151,15 @@ function AuditScannerContent() {
             scannedCount={scannedItems.length}
             remainingCount={remainingCount}
           />
+
+          {/* why: the evidence sheet lives behind a row tap, so name it once
+              the first row exists — on the Scanned tab, where the rows are. */}
+          {activeTab === "scanned" && (
+            <EvidenceCoachmark
+              enabled={scannedItems.length > 0}
+              hasOpenedEvidence={hasOpenedEvidence}
+            />
+          )}
 
           {/* List content */}
           {activeTab === "scanned" ? (
