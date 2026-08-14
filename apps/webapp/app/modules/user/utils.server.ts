@@ -25,6 +25,7 @@ import {
   transferEntitiesToNewOwner,
 } from "./service.server";
 import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
 /**
@@ -220,12 +221,21 @@ export async function resolveUserAction(
         (key) => organizationRolesMap[key] === userFriendlyRole
       ) as OrganizationRoles | undefined;
 
-      if (!role) {
+      /**
+       * `userFriendlyRole` is free text from the form and `organizationRolesMap`
+       * contains an OWNER entry (it doubles as the display map for the team
+       * list), so "Owner" would resolve here and mint an OWNER invite —
+       * the same escalation the invite dialog and CSV import both refuse.
+       * Ownership moves only through `transferOwnership`.
+       */
+      if (!role || !isInvitableRole(role)) {
         throw new ShelfError({
           cause: null,
           message: "Invalid role",
           additionalData: { userFriendlyRole },
           label: "Team",
+          status: 400,
+          shouldBeCaptured: false,
         });
       }
 

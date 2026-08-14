@@ -29,6 +29,7 @@ import { getParamsValues } from "~/utils/list";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import { generateRandomCode, inviteEmailText, splitName } from "./helpers";
 import { processInvitationMessage } from "./message-validator.server";
+import { isInvitableRole } from "./roles";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
@@ -634,6 +635,31 @@ export async function bulkInviteUsers({
         user.email.trim() !== "" &&
         user.role.trim() !== ""
     );
+
+    /**
+     * Defense in depth: `users` is typed as `InviteUserSchema[]`, but that type
+     * comes from `z.infer` and is never enforced at runtime — the CSV import
+     * hands over raw strings parsed out of an uploaded file. The route
+     * validates them, and so must this, because `payload.role` is written
+     * straight into `Invite.roles` below and permissions resolve from
+     * `UserOrganization.roles` after acceptance.
+     */
+    const disallowedRoles = validUsers
+      .map((user) => user.role)
+      .filter((role) => !isInvitableRole(role));
+
+    if (disallowedRoles.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        message: `Invites cannot grant these roles: ${[
+          ...new Set(disallowedRoles),
+        ].join(", ")}. Ownership moves only through ownership transfer.`,
+        additionalData: { organizationId, disallowedRoles },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     // Filter out duplicate emails
     const uniquePayloads = lodash.uniqBy(validUsers, (user) => user.email);
