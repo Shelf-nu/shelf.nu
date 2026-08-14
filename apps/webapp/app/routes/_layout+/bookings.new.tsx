@@ -16,7 +16,9 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
+  buildKitSlicesForBooking,
   createBooking,
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
@@ -37,6 +39,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -110,6 +113,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // For consistency, also provide teamMembersForForm
         teamMembersForForm: teamMembersData.teamMembers,
         assetIds: assetIds.length ? assetIds : undefined,
+        // Plain /bookings/new has no originating kit. The kit-create route
+        // (kits.$kitId.assets.create-new-booking) reuses this default export
+        // but overrides the loader, supplying a real kitId. Typing it here as
+        // string | undefined lets the shared component read kitId for both
+        // routes without a separate loader type.
+        kitId: undefined as string | undefined,
         ...tagsData,
         ...notifyData,
       }),
@@ -162,6 +171,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
     const hints = getHints(request);
+    // TIMEZONE FIX: parse the submitted wall-clock date in the acting user's
+    // RESOLVED timezone preference (the same one date DISPLAY uses), not the
+    // browser hint. When the two differ (e.g. pref Europe/London, browser
+    // UTC+3) the browser hint interprets the typed wall-clock in the wrong
+    // zone and stores the wrong UTC instant. Locale still comes from `hints`.
+    const prefTimeZone = (
+      await resolveUserFormatPrefsById(userId, getClientHint(request))
+    ).timeZone;
+    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
@@ -172,7 +190,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const payload = parseData(
       formData,
       BookingFormSchema({
-        hints,
+        hints: hintsWithPrefTz,
         action: "new",
         workingHours,
         bookingSettings,
@@ -227,7 +245,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       formData.get("startDate")!.toString()!,
       DATE_TIME_FORMAT,
       {
-        zone: hints.timeZone,
+        zone: prefTimeZone,
       }
     ).toJSDate();
 
@@ -235,11 +253,60 @@ export async function action({ context, request }: ActionFunctionArgs) {
       formData.get("endDate")!.toString()!,
       DATE_TIME_FORMAT,
       {
-        zone: hints.timeZone,
+        zone: prefTimeZone,
       }
     ).toJSDate();
 
     const tags = buildTagsSet(commaSeparatedTags).set;
+
+    /**
+     * Kit ids submitted by the form when the booking is created FROM a kit
+     * (kit detail → "Create new booking"). Read straight from the form rather
+     * than via {@link BookingFormSchema} — the schema doesn't model `kitId`,
+     * and we only need the raw ids to resolve kit memberships into slices.
+     *
+     * SECURITY (cross-org IDOR): these ids are user-supplied. We do NOT trust
+     * them — `buildKitSlicesForBooking` resolves memberships scoped to
+     * `organizationId`, and `createBooking` additionally re-validates every
+     * slice's asset id and `AssetKit` id against the org before writing. So no
+     * extra guard is needed here.
+     */
+    const kitIds = formData.getAll("kitId").map(String).filter(Boolean);
+
+    // Resolve kit memberships into kit-driven slices and split the form's
+    // asset ids into the two buckets `createBooking` expects:
+    // - kit members → `kitSlices` (kit-grouped `BookingAsset` rows)
+    // - everything else → `standaloneAssetIds` (loose rows, `assetKitId` NULL)
+    // When no kit is involved, `standaloneAssetIds` is just the form's
+    // `assetIds` and `kitSlices` stays empty (behavior unchanged).
+    let kitSlices: KitSliceSpec[] = [];
+    let standaloneAssetIds = assetIds?.length ? assetIds : [];
+
+    if (kitIds.length > 0) {
+      kitSlices = await buildKitSlicesForBooking({ kitIds, organizationId });
+      // Fail fast when a kit-originated submission resolves to no slices (stale
+      // page, deleted/emptied kit, or tampered input). The form pre-filled
+      // `assetIds` with the kit's members, so silently falling through would
+      // write them as loose standalone rows (assetKitId NULL) — breaking the
+      // kit-slice invariant and re-opening the duplicate/count bugs this fixes.
+      if (kitSlices.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Kit not found",
+          message:
+            "The selected kit could not be resolved. Please reload and try again.",
+          label: "Booking",
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+      const kitMemberIds = new Set(kitSlices.map((s) => s.assetId));
+      // Subtract kit members so a kit member is never written as BOTH a kit
+      // slice and a standalone row (which would duplicate it on the booking).
+      standaloneAssetIds = standaloneAssetIds.filter(
+        (id) => !kitMemberIds.has(id)
+      );
+    }
 
     const booking = await createBooking({
       booking: {
@@ -253,7 +320,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         creatorId: authSession.userId,
         tags,
       },
-      assetIds: assetIds?.length ? assetIds : [],
+      assetIds: standaloneAssetIds,
+      // Only pass slices when a kit was involved; the no-kit path stays
+      // exactly as before.
+      kitSlices: kitIds.length > 0 ? kitSlices : undefined,
       hints: getClientHint(request),
     });
 
@@ -284,23 +354,31 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    const hasAssetIds = Boolean(assetIds);
+    // The booking has assets if EITHER bucket is non-empty. A kit-only
+    // creation (no standalone ids, but kit slices) still "has assets" and must
+    // land on the overview — not the empty-booking manage-assets flow.
+    const bookingHasAssets =
+      standaloneAssetIds.length > 0 || kitSlices.length > 0;
 
     if (intent === "scan") {
       return redirect(`/bookings/${booking.id}/overview/scan-assets`);
     }
 
-    if (hasAssetIds) {
+    if (bookingHasAssets) {
       /**
-       * If the booking was created from a single QUANTITY_TRACKED asset
-       * (e.g. via the asset page's "Create new booking" dropdown), append
-       * an ?adjustQty=<assetId> search param so the overview route can
+       * If the booking was created from a single STANDALONE QUANTITY_TRACKED
+       * asset (e.g. via the asset page's "Create new booking" dropdown),
+       * append an ?adjustQty=<assetId> search param so the overview route can
        * auto-open the quantity adjust dialog. This avoids the user being
        * silently stuck with quantity=1 when they meant to book more.
+       *
+       * Gated on `standaloneAssetIds` (not kit members): a kit-only booking
+       * has zero standalone ids, so it never triggers this single-asset
+       * shortcut and just lands on the overview.
        */
       let redirectUrl = `/bookings/${booking.id}/overview`;
-      if (assetIds && assetIds.length === 1) {
-        const [singleAssetId] = assetIds;
+      if (standaloneAssetIds.length === 1) {
+        const [singleAssetId] = standaloneAssetIds;
         const addedAsset = await db.asset.findFirst({
           where: { id: singleAssetId, organizationId },
           select: { id: true, type: true },
@@ -335,8 +413,14 @@ export const handle = {
 };
 
 export default function NewBooking() {
-  const { header, isSelfServiceOrBase, teamMembers, assetIds, showModal } =
-    useLoaderData<typeof loader>();
+  const {
+    header,
+    isSelfServiceOrBase,
+    teamMembers,
+    assetIds,
+    kitId,
+    showModal,
+  } = useLoaderData<typeof loader>();
   const user = useUserData();
   const dynamicTitle = useAtomValue(dynamicTitleAtom);
 
@@ -362,6 +446,9 @@ export default function NewBooking() {
           booking={{
             assetIds,
             custodianRef,
+            // Undefined on plain /bookings/new; set by the kit-create route so
+            // the kit grouping is preserved in the new booking.
+            kitId,
           }}
         />
       </div>

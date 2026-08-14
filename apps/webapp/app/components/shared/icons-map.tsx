@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
+  Boxes,
   CalendarCheck,
   ClipboardList,
   MapPinIcon,
@@ -11,6 +12,7 @@ import {
   PackagePlus,
   QrCode,
   SlidersHorizontal,
+  Ungroup,
 } from "lucide-react";
 import { Spinner } from "./spinner";
 
@@ -94,6 +96,8 @@ export type IconType =
   | "tag-add"
   | "category"
   | "location"
+  | "asset-model"
+  | "asset-model-remove"
   | "gps"
   | "duplicate"
   | "asset"
@@ -170,6 +174,8 @@ export const iconsMap: IconsMap = {
   "tag-remove": <RemoveTagsIcon />,
   category: <CategoriesIcon />,
   location: <MapPinIcon />,
+  "asset-model": <Boxes />,
+  "asset-model-remove": <Ungroup />,
   gps: <GpsMarkerIcon />,
   duplicate: <DuplicateIcon />,
   asset: <AssetsIcon />,

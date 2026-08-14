@@ -12,6 +12,7 @@ import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
+import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -47,6 +48,7 @@ import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -99,6 +101,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/kits?${cookieParams.toString()}`);
     }
 
+    /**
+     * Custody scope for the custodian picker, shared by its rows AND its count
+     * so the two cannot disagree — the same rule `custody-filter` resolves on
+     * the search endpoint.
+     */
+    const custodianFilterWhere = {
+      deletedAt: null,
+      organizationId,
+      userId: !canSeeAllCustody ? userId : undefined,
+    };
+
     let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
@@ -108,29 +121,74 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Governs `?teamMember=`: a viewer who may not see all custody may
+        // only ever filter this list by their own custody.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
           assetKits: {
             select: {
+              // AssetKit.id surfaces the kit-slice discriminator. The
+              // consumer filters `bookingAssets[].assetKitId === ak.id`
+              // so a QT asset shared between Kit A and Kit B only emits
+              // each booking on its own kit's calendar — without this,
+              // every kit containing the pooled asset would show every
+              // booking of it (Codex review #2676 P2).
+              id: true,
               asset: {
                 select: {
                   id: true,
                   availableToBook: true,
                   status: true,
+                  // Post-Phase-3a: bookings reach assets through the
+                  // BookingAsset pivot (Asset.bookings was removed).
+                  // useKitAvailabilityData reads
+                  // asset.bookingAssets[].booking — see
+                  // components/assets/assets-index/use-kit-availability-data.ts.
+                  // The pre-pivot `bookings: { ... }` select here threw a
+                  // PrismaClientValidationError on every kit search with
+                  // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
-                    bookings: {
+                    bookingAssets: {
                       where: {
-                        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        booking: {
+                          status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        },
                       },
                       select: {
-                        id: true,
-                        name: true,
-                        status: true,
-                        from: true,
-                        to: true,
-                        description: true,
-                        custodianTeamMember: true,
-                        custodianUser: true,
+                        // Discriminator for per-kit attribution in the
+                        // consumer. NULL = standalone slice (not bound
+                        // to a kit) — those are filtered out so they
+                        // don't pollute any kit's availability calendar.
+                        assetKitId: true,
+                        booking: {
+                          select: {
+                            id: true,
+                            name: true,
+                            status: true,
+                            from: true,
+                            to: true,
+                            description: true,
+                            // FK column the consumer reads directly
+                            // (bookingWithRelations.custodianUserId in the
+                            // useKitAvailabilityData hook). Without it the
+                            // field was undefined at runtime — CodeRabbit
+                            // review #2676.
+                            //
+                            // NOTE: do NOT select `kitId` here — `Booking`
+                            // has no `kitId` scalar (a booking spans kits via
+                            // BookingAsset, not a direct FK). Selecting it
+                            // throws PrismaClientValidationError and 500s the
+                            // whole kits index (Sentry SHELF-WEBAPP-1P1). The
+                            // hook derives the resource id from the kit it's
+                            // iterating (`kitId: kit.id`), so the DB never
+                            // needs to supply it.
+                            custodianUserId: true,
+                            custodianTeamMember: true,
+                            custodianUser: true,
+                          },
+                        },
                       },
                     },
                   }),
@@ -144,11 +202,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       db.teamMember
         .findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-            userId: !canSeeAllCustody ? userId : undefined,
-          },
+          where: custodianFilterWhere,
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -162,7 +216,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             label: "Assets",
           });
         }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      // Same `where` as the rows above: counting unscoped while the rows are
+      // scoped puts the workspace's team-member total in a restricted user's
+      // loader payload, and makes the picker's "showing N out of M" disagree
+      // with what the search endpoint returns.
+      db.teamMember.count({ where: custodianFilterWhere }),
       getLocationsForCreateAndEdit({
         organizationId,
         request,
@@ -191,7 +249,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: kits,
+        // `TeamMemberBadge` only decides whether to DRAW the custodian; the
+        // name and `user.email` shipped in this payload regardless, so a
+        // restricted viewer read them straight out of `/kits.data` while the
+        // page showed "private". Redact server-side.
+        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
         page,
         totalItems: totalKits,
         totalPages,
@@ -279,15 +341,27 @@ export default function KitsIndexPage() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"
               initialDataKey="teamMembers"
-              transformItem={(item) => ({
-                ...item,
-                id: item.metadata?.userId ? item.metadata.userId : item.id,
-              })}
+              /*
+               * No `transformItem`: the value this filter submits must stay the
+               * TeamMember id, because `getPaginatedAndFilterableKits` applies it
+               * as `custody: { custodianId }` — a TeamMember FK. Rewriting it to
+               * `metadata.userId` only took effect once the user typed (the
+               * loader's records carry no `metadata`, the search endpoint's do),
+               * so picking from the list filtered correctly while searching first
+               * returned nothing. Matches the assets advanced filter, which
+               * passes the item through unchanged.
+               */
               renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           )}
@@ -308,21 +382,14 @@ export default function KitsIndexPage() {
                       alt: resource.title,
                     }}
                     alt={resource.title}
-                    className="size-14 rounded border object-cover"
+                    className="size-14 shrink-0 rounded border object-cover"
                     withPreview
                   />
-                  <div className="flex flex-col gap-1">
-                    <div className="min-w-0 flex-1 truncate">
-                      <Button
-                        to={`/kits/${resource.id}/assets`}
-                        variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
-                        target={"_blank"}
-                        onlyNewTabIconOnHover={true}
-                      >
-                        {resource.title}
-                      </Button>
-                    </div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <ResourceTitleLink
+                      to={`/kits/${resource.id}/assets`}
+                      title={resource.title}
+                    />
                     <div className="flex items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
@@ -453,8 +520,13 @@ function ListContent({
               <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
+                  // why: undefined assetKits ≠ empty kit — we don't know what's in it,
+                  // so default to not-available (matches the calendar view's semantic
+                  // in use-kit-availability-data.ts).
                   availableToBook={
-                    !item.assetKits.some((ak) => !ak.asset.availableToBook)
+                    item.assetKits == null
+                      ? false
+                      : !item.assetKits.some((ak) => !ak.asset.availableToBook)
                   }
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

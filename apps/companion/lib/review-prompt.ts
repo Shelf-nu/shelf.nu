@@ -15,7 +15,18 @@
  * theme-context.tsx.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as StoreReview from "expo-store-review";
+
+// Lazy-load expo-store-review so a build whose native binary predates the module
+// (e.g. an older dev client), or a platform without it, degrades gracefully
+// instead of crashing at import time. The prompt is best-effort and must never
+// block — or crash — the user's flow.
+let StoreReview: typeof import("expo-store-review") | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  StoreReview = require("expo-store-review");
+} catch {
+  StoreReview = null;
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -55,7 +66,7 @@ export async function maybeAskForReview(): Promise<void> {
 
     // hasAction() resolves true only when requestReview() can actually present
     // the native sheet (platform supports it, store URL resolved, quota left).
-    if (!(await StoreReview.hasAction())) return;
+    if (!StoreReview || !(await StoreReview.hasAction())) return;
 
     await StoreReview.requestReview();
     await AsyncStorage.setItem(LAST_PROMPT_KEY, String(Date.now()));

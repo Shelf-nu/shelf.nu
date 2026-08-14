@@ -10,7 +10,8 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { BookingStatus, Currency } from "@prisma/client";
+import type { AssetType, BookingStatus, Currency } from "@prisma/client";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -305,6 +306,14 @@ export interface IdleAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Date of last booking checkout, null if never booked */
@@ -313,8 +322,17 @@ export interface IdleAssetRow {
   daysSinceLastUse: number;
   /** Current asset status */
   status: string;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Idle Assets report */
@@ -335,6 +353,14 @@ export interface CustodySnapshotRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   custodianId: string;
@@ -343,8 +369,19 @@ export interface CustodySnapshotRow {
   assignedAt: Date;
   /** Days in custody */
   daysInCustody: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity-in-custody) for QT; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** **Units held in this custody** (`Custody.quantity`), NOT workspace
+   * stock. Drives the per-row Value cell multiplier — a custodian holding
+   * 5 of a 100-unit QT pool reports value-for-5, not 100. Typed as
+   * `number | null` for `CurrencyCell` compatibility; `Custody.quantity`
+   * is non-null at the DB layer (Int @default(1)). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Custody Snapshot report */
@@ -365,6 +402,14 @@ export interface TopBookedAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Number of times booked in the timeframe */
@@ -461,12 +506,29 @@ export interface AssetInventoryRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   status: string;
   custodian: string | null;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
   /** Date asset was created */
   createdAt: Date;
   /** QR code ID if assigned */
@@ -519,6 +581,14 @@ export interface AssetUtilizationRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Total days in the period */
@@ -529,8 +599,17 @@ export interface AssetUtilizationRow {
   utilizationRate: number;
   /** Number of bookings in the period */
   bookingCount: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Asset Utilization report */
@@ -562,6 +641,14 @@ export interface AssetActivityRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   /** Type of activity */
   activityType: AssetActivityType;
   /** Human-readable description */

@@ -6,6 +6,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -83,6 +84,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       organizationId,
       status: { in: statusFilter },
       ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+      /**
+       * Draft privacy (web parity). A DRAFT booking is private to whoever
+       * created it — web enforces this in `getBookings`, the slim picker list
+       * and the CSV export via this same shared clause. Mobile applied it
+       * nowhere, so every user saw every colleague's unfinished drafts.
+       *
+       * AND-ed rather than merged into the search `OR` below: an OR at this
+       * level would widen the search clause instead of restricting it.
+       */
+      AND: [bookingDraftVisibilityClause(user.id)],
       // Keyword search over booking name + description (the field-tech "find my
       // booking" case). Web also searches tags/custodian/asset names; name +
       // description covers the common case without a heavier query.
@@ -122,7 +133,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: { name: true },
           },
           _count: {
-            select: { bookingAssets: true },
+            select: {
+              bookingAssets: true,
+              // Outstanding book-by-model reservations (units reserved but not
+              // yet assigned to concrete assets). Lets the list card tell a
+              // "reserved but nothing physical to check out yet" booking apart
+              // from a genuinely check-out-ready one, so it never mislabels a
+              // model-only reservation as "Ready to check out".
+              modelRequests: { where: { fulfilledAt: null } },
+            },
+          },
+          // The outstanding rows themselves, so the card can report UNITS
+          // reserved rather than how many model rows hold them. `_count` above
+          // answers "is anything outstanding?"; this answers "how much?", which
+          // is what the fulfil banner already shows ("Tablecloth x2") and what
+          // the operator is actually going to carry. Two scalars per row, and
+          // most bookings have none.
+          modelRequests: {
+            where: { fulfilledAt: null },
+            select: { quantity: true, fulfilledQuantity: true },
           },
         },
         orderBy: [{ [sortBy]: sortOrder }],
@@ -148,6 +177,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
         assetCount: b._count.bookingAssets,
+        // Outstanding book-by-model reservations still to assign. > 0 means the
+        // booking holds reserved units with no concrete assets behind them yet.
+        outstandingModelCount: b._count.modelRequests,
+        // Units still to assign across those reservations. Mirrors
+        // `outstandingModelUnitCount` on the booking detail endpoint so both
+        // surfaces name and count the same thing.
+        outstandingModelUnitCount: b.modelRequests.reduce(
+          (sum, mr) => sum + Math.max(0, mr.quantity - mr.fulfilledQuantity),
+          0
+        ),
       })),
       page,
       perPage,

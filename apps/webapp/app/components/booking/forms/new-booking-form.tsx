@@ -6,6 +6,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -31,6 +32,14 @@ type NewBookingFormData = {
   booking: {
     custodianRef?: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     assetIds?: string[] | null;
+    /**
+     * Optional originating kit id. Present only when the booking is being
+     * created FROM a kit (kit detail → "Create new booking"). Submitted as a
+     * hidden `kitId` input so the action resolves the kit's memberships into
+     * kit-driven slices, keeping the kit grouped in the new booking instead of
+     * its members landing as loose standalone rows.
+     */
+    kitId?: string;
   };
 
   /**
@@ -42,7 +51,7 @@ type NewBookingFormData = {
 
 export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
-  const { custodianRef, assetIds } = booking;
+  const { custodianRef, assetIds, kitId } = booking;
 
   const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
@@ -54,6 +63,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const disabled = useDisabled(fetcher);
   const hints = useHints();
+  // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
+  // timezone preference (the same one display uses), not the browser hint, so
+  // it agrees with the server parse. Locale still comes from `hints`.
+  const prefs = useFormatPrefs();
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours();
@@ -76,7 +89,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints,
+      hints: { ...hints, timeZone: prefs.timeZone },
       action: "new",
       workingHours: workingHours,
       bookingSettings,
@@ -204,6 +217,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               value={item}
             />
           ))}
+          {/* Submitted only when creating a booking FROM a kit, so the action
+              can resolve the kit's memberships into kit-driven slices. */}
+          {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
           <div className={tw("actions-wrapper flex flex-col gap-2")}>
             {!assetIds ? (
               <Button

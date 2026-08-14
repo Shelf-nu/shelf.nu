@@ -42,6 +42,21 @@ vi.mock("@radix-ui/react-popover", () => ({
   ),
 }));
 
+// why: Radix Tooltip doesn't render content in JSDOM; render it inline so the
+// hint text is queryable.
+vi.mock("~/components/shared/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  TooltipProvider: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+}));
+
 describe("SortBy", () => {
   const defaultProps = {
     sortingOptions: {
@@ -276,6 +291,20 @@ describe("SortBy", () => {
       expect(
         screen.getByRole("button", { name: /sorted by/i })
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("hint tooltip", () => {
+    it("renders the hint content when a hint is provided", () => {
+      render(
+        <SortBy {...defaultProps} hint={<span>How sorting works</span>} />
+      );
+      expect(screen.getByText("How sorting works")).toBeInTheDocument();
+    });
+
+    it("does not render hint content when no hint is provided", () => {
+      render(<SortBy {...defaultProps} />);
+      expect(screen.queryByText("How sorting works")).not.toBeInTheDocument();
     });
   });
 });

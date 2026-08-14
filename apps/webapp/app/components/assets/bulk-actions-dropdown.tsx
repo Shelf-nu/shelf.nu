@@ -19,6 +19,8 @@ import { tw } from "~/utils/tw";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
 import BulkArchiveDialog from "./bulk-archive-dialog";
+import BulkAssetModelRemoveDialog from "./bulk-asset-model-remove-dialog";
+import BulkAssetModelUpdateDialog from "./bulk-asset-model-update-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
@@ -170,6 +172,8 @@ function ConditionalDropdown() {
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
+        <BulkAssetModelUpdateDialog />
+        <BulkAssetModelRemoveDialog />
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
@@ -381,6 +385,22 @@ function ConditionalDropdown() {
                   type="category"
                   onClick={closeMenu}
                   disabled={archivedBulkDisabled || isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="asset-model"
+                  label="Update asset model"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="asset-model-remove"
+                  label="Remove from asset model"
+                  onClick={closeMenu}
+                  disabled={isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">

@@ -30,6 +30,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
+import { TagUseFor } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -57,7 +58,13 @@ export type OrgValidationTxClient = {
   };
   tag: {
     findMany: (args: {
-      where: { id: { in: string[] }; organizationId: string };
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        // Optional asset-assignability filter used by
+        // `assertTagsAssignableToAssets` (useFor empty or includes ASSET).
+        OR?: Array<{ useFor: { isEmpty: true } | { has: TagUseFor } }>;
+      };
       select: { id: true };
     }) => Promise<{ id: string }[]>;
   };
@@ -102,16 +109,21 @@ export type OrgValidationTxClient = {
     }) => Promise<{ id: string } | null>;
   };
   assetKit: {
+    // `kitId` rides along so `assertAssetKitsBelongToOrg` can hand callers an
+    // org-proven `assetKitId -> kitId` map without a second round-trip.
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string }[]>;
+      select: { id: true; kitId: true };
+    }) => Promise<{ id: string; kitId: string }[]>;
   };
   assetModel: {
+    // `name` is selected (not just `id`) because the guard hands the row back —
+    // see `assertAssetModelBelongsToOrg`, whose callers need the label and would
+    // otherwise repeat the same query.
     findFirst: (args: {
       where: { id: string; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string } | null>;
+      select: { id: true; name: true };
+    }) => Promise<{ id: string; name: string } | null>;
   };
 };
 
@@ -214,9 +226,20 @@ export async function assertAssetsAreNotArchived(
  * could attach Org B's `AssetKit.id` to their own booking row (cross-org
  * reference). Dedupes first; a no-op for an empty list.
  *
+ * Also RETURNS the org-proven `assetKitId -> kitId` mapping the same query
+ * already had to load. Booking write paths persist that kit id to
+ * `BookingAsset.sourceKitId`, a column whose FK accepts any `Kit` row in any
+ * organization — so deriving it from this map (rather than from the
+ * request-supplied `kitSlices[].kitId`) is what keeps a caller in Org A from
+ * stamping Org B's kit onto its own booking row. It also enforces the
+ * schema's stated invariant that `sourceKitId` AGREES with `assetKitId`,
+ * which no separate lookup could guarantee.
+ *
  * @param params.assetKitIds - AssetKit IDs sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns Map of `AssetKit.id` → owning `Kit.id`, one entry per validated ID
+ *   (empty for an empty input list)
  * @throws {ShelfError} 400 if any ID is missing or belongs to another org
  */
 export async function assertAssetKitsBelongToOrg(
@@ -225,15 +248,15 @@ export async function assertAssetKitsBelongToOrg(
     organizationId,
   }: { assetKitIds: string[]; organizationId: string },
   tx?: OrgValidationTxClient
-): Promise<void> {
-  if (assetKitIds.length === 0) return;
+): Promise<Map<string, string>> {
+  if (assetKitIds.length === 0) return new Map();
 
   const client = tx ?? db;
   const uniqueIds = [...new Set(assetKitIds)];
 
   const found = await client.assetKit.findMany({
     where: { id: { in: uniqueIds }, organizationId },
-    select: { id: true },
+    select: { id: true, kitId: true },
   });
 
   if (found.length !== uniqueIds.length) {
@@ -248,6 +271,10 @@ export async function assertAssetKitsBelongToOrg(
       additionalData: { organizationId },
     });
   }
+
+  // Every requested id is present (the count check above proves it), so the
+  // map is total over `uniqueIds` — callers can treat a miss as impossible.
+  return new Map(found.map((ak) => [ak.id, ak.kitId]));
 }
 
 /**
@@ -417,6 +444,56 @@ export async function assertTagsBelongToOrg(
 }
 
 /**
+ * Asserts that every tag id is BOTH owned by `organizationId` AND assignable to
+ * assets (its `useFor` is empty or includes `ASSET`).
+ *
+ * Use this on asset create/update paths. {@link assertTagsBelongToOrg} only
+ * proves org ownership, so on its own it would let a crafted request connect a
+ * booking-only tag to an asset and break the asset-tag contract. Booking paths
+ * keep using {@link assertTagsBelongToOrg}. The predicate mirrors
+ * `getTagsForAssetTagsFilter` (the source the mobile picker reads from), so the
+ * picker and the write path agree on what "asset-assignable" means.
+ *
+ * @param params.tagIds - Tag IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing, in another org, or not
+ *   assignable to assets
+ */
+export async function assertTagsAssignableToAssets(
+  { tagIds, organizationId }: { tagIds: Tag["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (tagIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(tagIds)];
+
+  const found = await client.tag.findMany({
+    where: {
+      id: { in: uniqueIds },
+      organizationId,
+      // Asset-assignable = useFor empty (applies to every entity) or ASSET.
+      OR: [{ useFor: { isEmpty: true } }, { useFor: { has: TagUseFor.ASSET } }],
+    },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid tags",
+      message:
+        "Some of the selected tags can't be assigned to assets in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
  * Asserts that a single team member belongs to `organizationId`.
  *
  * @param params.teamMemberId - Team member ID sourced from request/form input
@@ -534,6 +611,9 @@ export async function assertLocationBelongsToOrg(
  * @param params.assetModelId - AssetModel ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns The org-scoped model row. `name` is selected so callers that need a
+ *   label for a note or toast (e.g. `bulkUpdateAssetModel`) do not have to issue
+ *   a second query with the same `{ id, organizationId }` predicate.
  * @throws {ShelfError} 404 if the model is missing or in another org
  */
 export async function assertAssetModelBelongsToOrg(
@@ -542,12 +622,12 @@ export async function assertAssetModelBelongsToOrg(
     organizationId,
   }: { assetModelId: AssetModel["id"]; organizationId: string },
   tx?: OrgValidationTxClient
-): Promise<void> {
+): Promise<Pick<AssetModel, "id" | "name">> {
   const client = tx ?? db;
 
   const found = await client.assetModel.findFirst({
     where: { id: assetModelId, organizationId },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
   if (!found) {
@@ -562,6 +642,8 @@ export async function assertAssetModelBelongsToOrg(
       additionalData: { organizationId, assetModelId },
     });
   }
+
+  return found;
 }
 
 /**

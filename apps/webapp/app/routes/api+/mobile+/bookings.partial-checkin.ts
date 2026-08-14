@@ -3,6 +3,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  assertMobileCanUseBookings,
   getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
@@ -47,11 +48,33 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.checkin,
     });
 
+    await assertMobileCanUseBookings(organizationId);
+
     const body = await request.json();
-    const { bookingId, assetIds, timeZone } = z
+    const { bookingId, assetIds, checkins, timeZone } = z
       .object({
         bookingId: z.string().min(1),
-        assetIds: z.array(z.string().min(1)).min(1),
+        // Legacy / INDIVIDUAL: bare asset ids. For a QUANTITY_TRACKED asset a
+        // bare id still means "check in all remaining" (simple case); explicit
+        // per-unit dispositions go in `checkins`. Optional so the picker can
+        // send a QT-only, checkins-only payload.
+        assetIds: z.array(z.string().min(1)).optional(),
+        // Per-asset dispositions for QUANTITY_TRACKED assets — how many units
+        // were returned / consumed / lost / damaged. Powers the mobile
+        // check-in picker; mirrors the web drawer payload the service already
+        // accepts.
+        checkins: z
+          .array(
+            z.object({
+              assetId: z.string().min(1),
+              bookingAssetId: z.string().nullish(),
+              returned: z.number().int().min(0).optional(),
+              consumed: z.number().int().min(0).optional(),
+              lost: z.number().int().min(0).optional(),
+              damaged: z.number().int().min(0).optional(),
+            })
+          )
+          .optional(),
         timeZone: z.string().optional(),
       })
       .parse(body);
@@ -112,6 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: bookingId,
       organizationId,
       assetIds,
+      checkins,
       userId: user.id,
       hints,
     });

@@ -354,12 +354,15 @@ export async function resolveUserAction(
         }
 
         await db.$transaction(async (tx) => {
+          // The demoted user keeps their org membership (only their role
+          // rank drops), so only OWNERSHIP columns move — see
+          // EntityTransferReason's JSDoc in service.server.ts.
           await transferEntitiesToNewOwner({
             tx,
             id: targetUserId,
             newOwnerId: recipientId,
             organizationId,
-            skipInvites: true,
+            reason: "demotion",
           });
 
           await changeUserRole({

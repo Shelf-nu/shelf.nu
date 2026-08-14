@@ -211,12 +211,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       customFieldDef: customFields,
     });
 
-    await updateAssetMainImage({
+    const uploadedNewImage = await updateAssetMainImage({
       request,
       assetId: id,
       userId: authSession.userId,
       organizationId,
     });
+
+    /**
+     * "Use the model's image instead" / "Remove image" — drops the asset's own
+     * image so `resolveAssetImage` falls through to its model's cover image,
+     * or to the placeholder when it has no model.
+     *
+     * Applied as part of the `updateAsset` payload below rather than as its own
+     * committed write: `updateAsset` can still reject (kit-managed location,
+     * quantity over pool, barcode gating, preferred-barcode membership), and a
+     * standalone clear would already have nulled the image while the action
+     * reports failure. The URL is a signed one-way pointer, so the user could
+     * not restore it — the edit must be all-or-nothing.
+     *
+     * Suppressed when this same submit uploaded a replacement, so "clear +
+     * upload" keeps the upload.
+     */
+    const shouldClearImage =
+      formData.get("clearMainImage") === "true" && !uploadedNewImage;
 
     const {
       title,
@@ -265,6 +283,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       minQuantity,
       consumptionType,
       unitOfMeasure,
+      // Nulled inside updateAsset's transaction — see `shouldClearImage`.
+      ...(shouldClearImage && {
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+      }),
     });
 
     sendNotification({

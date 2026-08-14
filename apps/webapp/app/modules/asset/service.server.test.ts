@@ -1,4 +1,8 @@
-import { OrganizationRoles, type AssetIndexSettings } from "@prisma/client";
+import {
+  AssetStatus,
+  OrganizationRoles,
+  type AssetIndexSettings,
+} from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -7,13 +11,18 @@ import {
   recordEvent,
   recordEvents,
 } from "~/modules/activity-event/service.server";
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { bulkAssignKitCustody } from "~/modules/kit/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import {
   BULK_CREATE_MAX,
   archiveAsset,
@@ -25,8 +34,11 @@ import {
   bulkCreateAssetsFromModel,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
+  bulkUpdateAssetModel,
+  buildAssetKitCreateData,
   checkOutQuantity,
   createAsset,
+  setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
   getAssets,
@@ -69,6 +81,13 @@ vitest.mock("~/database/db.server", () => ({
     category: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
+    // why: `~/utils/org-validation.server` is NOT mocked in this file, so
+    // `assertAssetModelBelongsToOrg` runs for real inside
+    // `bulkUpdateAssetModel` and hits this stub. Without the key the guard
+    // throws a TypeError instead of exercising the org check.
+    assetModel: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
     location: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
@@ -95,6 +114,11 @@ vitest.mock("~/database/db.server", () => ({
       // status-flip branch doesn't fire — tests that exercise the
       // "last release" branch override this.
       count: vitest.fn().mockResolvedValue(1),
+      // why: `bulkCheckOutAssets` clears stale rows then bulk-inserts. Without
+      // these the transaction body throws on an undefined stub before it ever
+      // reaches the status guard under test.
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
@@ -140,9 +164,29 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
 }));
 
+// why: the stock-lowering guard's own committed-peak math (custody + kits +
+// peak-concurrent bookings) is exhaustively unit-tested in
+// `availability.server.test.ts`. Here we only verify updateAsset's WIRING —
+// that it's called with the right args when quantity is lowered on a
+// QUANTITY_TRACKED asset, and that its rejection propagates — so stubbing it
+// avoids re-deriving custody/kit/booking fixtures in this already-large file.
+// `updateAsset` imports the guard from the dependency-free leaf (not
+// `availability.server`) to avoid the heavy transitive import chain — mock the
+// leaf so the stub intercepts.
+vitest.mock("~/modules/asset/availability-primitives.server", () => ({
+  assertAssetQuantityNotBelowReservations: vitest.fn(),
+}));
+
 // why: avoid touching real consumption log writes during checkOutQuantity tests
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: wiring-only — assert that updateAsset invokes the low-stock notifier on
+// a quantity DROP without running the real debounce/email logic (that logic is
+// exhaustively tested in low-stock.server.test.ts).
+vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -177,6 +221,13 @@ vitest.mock("~/modules/category/service.server", async () => {
 // why: avoid real QR lookup during relink tests
 vitest.mock("~/modules/qr/service.server", () => ({
   getQr: vitest.fn(),
+}));
+
+// why: setKitCustodyAfterAssetImport delegates to the canonical bulkAssignKitCustody
+// flow (kit/service). Mock it so we can assert the delegation (grouping by
+// custodian) without running the full kit-custody transaction.
+vitest.mock("~/modules/kit/service.server", () => ({
+  bulkAssignKitCustody: vitest.fn(),
 }));
 
 // why: avoid hitting Supabase storage during uploadDuplicateAssetMainImage tests
@@ -262,6 +313,55 @@ describe("relinkAssetQrCode (asset)", () => {
     vitest.clearAllMocks();
   });
 
+  /** Shared happy-path args; individual tests vary only the QR state. */
+  const args = {
+    qrId: "qr-1",
+    assetId: "asset-1",
+    organizationId: "org-1",
+    userId: "user-1",
+  };
+
+  it("throws 403 when the QR belongs to another organization", async () => {
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-other",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR not valid.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("throws 404 when the asset is missing or not in the caller's org", async () => {
+    // why: `db.asset.findFirst` is org-scoped, so null means missing OR another
+    // tenant's. Explicitly 404 and uncaptured — not the generic
+    // "requested resource could not be found" a bare P2025 would produce, and
+    // not the 500 a statusless ShelfError would resolve to.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue(null);
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 404,
+      title: "Asset not found.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+  });
+
   it("throws when QR is already linked to a kit", async () => {
     //@ts-expect-error mock setup
     getQr.mockResolvedValue({
@@ -273,14 +373,52 @@ describe("relinkAssetQrCode (asset)", () => {
     //@ts-expect-error mock setup
     db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
 
-    await expect(
-      relinkAssetQrCode({
-        qrId: "qr-1",
-        assetId: "asset-1",
-        organizationId: "org-1",
-        userId: "user-1",
-      })
-    ).rejects.toBeInstanceOf(ShelfError);
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      // why: user-caused guard, not a server fault — the mobile route
+      // documents 403 for it and clients must not retry it as a 5xx.
+      status: 403,
+      title: "QR already linked.",
+    });
+  });
+
+  it("throws 403 when the QR is already linked to a different asset", async () => {
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-other",
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.qr.update).not.toHaveBeenCalled();
+  });
+
+  it("claims an UNCLAIMED QR inline, pinning the still-unclaimed state", async () => {
+    // why: this is the branch the mobile link flow now depends on — the
+    // separate claimQrCode step was removed, so an unclaimed code is claimed
+    // as part of the link. Nothing covered it before.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await relinkAssetQrCode(args);
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1", organizationId: null, kitId: null, assetId: null },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
   });
 
   it("relinks when QR is available", async () => {
@@ -294,15 +432,17 @@ describe("relinkAssetQrCode (asset)", () => {
     //@ts-expect-error mock setup
     db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
 
-    await relinkAssetQrCode({
-      qrId: "qr-1",
-      assetId: "asset-1",
-      organizationId: "org-1",
-      userId: "user-1",
-    });
+    await relinkAssetQrCode(args);
 
     expect(db.qr.update).toHaveBeenCalledWith({
-      where: { id: "qr-1" },
+      // why: the WHERE re-asserts the state the guards observed, so a
+      // concurrent writer that changed it loses instead of both winning.
+      where: {
+        id: "qr-1",
+        organizationId: "org-1",
+        kitId: null,
+        assetId: null,
+      },
       data: { organizationId: "org-1", userId: "user-1" },
     });
     expect(db.asset.update).toHaveBeenCalledWith({
@@ -314,6 +454,33 @@ describe("relinkAssetQrCode (asset)", () => {
         },
       },
     });
+  });
+
+  it("loses the race safely: 403, and no asset or note write", async () => {
+    // why: the conditional WHERE means a competing writer makes this update
+    // match zero rows (P2025). The asset's existing code must NOT be cleared
+    // and no "changed QR code" note may be written for a link that never
+    // happened — that would falsify the audit trail.
+    //@ts-expect-error mock setup
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: null,
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error mock setup
+    db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
+    //@ts-expect-error mock setup
+    db.qr.update.mockRejectedValueOnce(
+      Object.assign(new Error("no rows"), { code: "P2025" })
+    );
+
+    await expect(relinkAssetQrCode(args)).rejects.toMatchObject({
+      status: 403,
+      title: "QR already linked.",
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
   });
 });
 
@@ -427,7 +594,9 @@ describe("uploadDuplicateAssetMainImage", () => {
 });
 
 describe("refreshExpiredAssetImages", () => {
-  const mockUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+  // The background flush persists via a guarded updateMany (on the original
+  // mainImage), not update — assert on updateMany here.
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
   const mockCreateSignedUrl = createSignedUrl as ReturnType<typeof vitest.fn>;
   const mockExtractStoragePath = extractStoragePath as ReturnType<
     typeof vitest.fn
@@ -437,7 +606,8 @@ describe("refreshExpiredAssetImages", () => {
     vitest.clearAllMocks();
     mockExtractStoragePath.mockReturnValue("org/asset/image.jpg");
     mockCreateSignedUrl.mockResolvedValue("https://new-signed-url.com");
-    mockUpdate.mockResolvedValue({});
+    // Default: the guarded write matches one row (image unchanged since read).
+    mockUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   const makeAsset = (
@@ -468,7 +638,7 @@ describe("refreshExpiredAssetImages", () => {
 
     expect(result).toEqual(assets);
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
   it("refreshes mainImage and thumbnailImage when expired", async () => {
@@ -484,16 +654,31 @@ describe("refreshExpiredAssetImages", () => {
 
     const result = await refreshExpiredAssetImages(assets);
 
+    // The return value carries the fresh URLs synchronously — re-signing stays
+    // awaited, only the DB persist is deferred.
     expect(result[0].mainImage).toBe("https://new-main-url.com");
     expect(result[0].thumbnailImage).toBe("https://new-thumbnail-url.com");
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImage: "https://new-main-url.com",
-          thumbnailImage: "https://new-thumbnail-url.com",
-        }),
-      })
+
+    // The persist now runs in a fire-and-forget background batch, so wait for
+    // the flush before asserting the write happened.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // Guarded on the original mainImage AND thumbnailImage (a thumbnail is
+          // written here) so a concurrent replace of either can't be clobbered
+          // by this deferred write.
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+            thumbnailImage: "https://old-thumbnail-url.com",
+          },
+          data: expect.objectContaining({
+            mainImage: "https://new-main-url.com",
+            thumbnailImage: "https://new-thumbnail-url.com",
+          }),
+        })
+      )
     );
   });
 
@@ -505,16 +690,24 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (no refresh)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Should bump expiration to prevent retry storm
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "asset-1", organizationId: "org-1" },
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
-    );
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+
+    // The backoff bump is now persisted in the deferred background batch —
+    // wait for the flush before asserting the write.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "asset-1",
+            organizationId: "org-1",
+            mainImage: "https://old-signed-url.com",
+          },
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
+    );
   });
 
   it("logs error and applies backoff when createSignedUrl fails", async () => {
@@ -532,30 +725,47 @@ describe("refreshExpiredAssetImages", () => {
 
     // Asset should be returned unchanged
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
-    // Backoff update should have been called
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          mainImageExpiration: expect.any(Date),
-        }),
-      })
+
+    // Backoff update is deferred to the background batch — wait for the flush.
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mainImageExpiration: expect.any(Date),
+          }),
+        })
+      )
     );
   });
 
-  it("handles deleted asset (P2025) gracefully without logging error", async () => {
-    const { Prisma: ActualPrisma } = await import("@prisma/client");
-    mockUpdate.mockRejectedValue(
-      new ActualPrisma.PrismaClientKnownRequestError(
-        "Record to update not found",
-        { code: "P2025", clientVersion: "5.0.0" }
-      )
-    );
+  it("returns fresh URLs when the row was deleted or its image changed (updateMany count 0)", async () => {
+    // Regression guard for the deferred-write refactor: the persist is a guarded
+    // updateMany that runs fire-and-forget AFTER the response value is built. If
+    // the asset was deleted OR its image was replaced between the read and the
+    // flush, the guard matches no rows and updateMany resolves { count: 0 }
+    // (never throws P2025). The returned URLs must still be the freshly
+    // re-signed ones — the next load simply re-signs (idempotent).
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+    const assets = [makeAsset()];
+
+    // Resolves (no throw) with the freshly re-signed URL.
+    const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
+
+    // The guarded write was still attempted in the background.
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
+  });
+
+  it("returns fresh URLs even when the background persist throws unexpectedly", async () => {
+    // A non-expected write failure (e.g. a pool timeout) is swallowed + logged
+    // in the background and must not affect the returned URLs or throw.
+    mockUpdateMany.mockRejectedValue(new Error("connection pool timeout"));
     const assets = [makeAsset()];
 
     const result = await refreshExpiredAssetImages(assets);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
 
-    // Should return original asset (refresh failed gracefully)
-    expect(result[0].mainImage).toBe("https://old-signed-url.com");
+    await vi.waitFor(() => expect(mockUpdateMany).toHaveBeenCalled());
   });
 });
 
@@ -662,12 +872,14 @@ describe("checkOutQuantity — availability accounting", () => {
     mockAssetFindUniqueOrThrow.mockResolvedValue({
       ...lockedAsset,
     });
-    // why: the `refreshExpiredAssetImages` suite earlier in this file
-    // sets `db.asset.update.mockRejectedValue(P2025)`. `clearAllMocks`
-    // only resets call history — the rejection implementation persists
-    // and breaks the new symmetric `tx.asset.update` step inside
-    // `checkOutQuantity`. Restore the resolve.
+    // why: the `refreshExpiredAssetImages` suite earlier in this file leaves
+    // `db.asset.updateMany.mockRejectedValue(...)` set (its last test).
+    // `clearAllMocks` only resets call history — the rejection implementation
+    // persists across suites — so restore both write mocks to a resolve.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {
@@ -776,9 +988,12 @@ describe("checkOutQuantity — activity events", () => {
     vitest.clearAllMocks();
     mockLock.mockResolvedValue(lockedAsset);
     // See note on the sibling availability-accounting suite — the
-    // `refreshExpiredAssetImages` test earlier rejects `asset.update`
-    // and that implementation survives `clearAllMocks`.
+    // `refreshExpiredAssetImages` test earlier leaves `asset.updateMany`
+    // rejected, and that implementation survives `clearAllMocks`.
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
   });
 
   it("emits CUSTODY_ASSIGNED with quantity + viaQuantity meta on successful checkout", async () => {
@@ -889,7 +1104,9 @@ describe("releaseQuantity — activity events", () => {
         assetId: "asset-1",
         teamMemberId: "tm-1",
         targetUserId: "user-42",
-        meta: { quantity: 4, viaQuantity: true },
+        // The split is recorded on the event so reports can tell a return
+        // from a consume without re-deriving it from the asset row.
+        meta: { quantity: 4, viaQuantity: true, consumed: 0, returned: 4 },
       }),
       expect.anything()
     );
@@ -906,8 +1123,10 @@ describe("releaseQuantity — activity events", () => {
     });
     // After delete, no rows remain → status should flip.
     (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
-    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
-    mockAssetUpdate.mockResolvedValue({});
+    const mockAssetUpdateMany = db.asset.updateMany as ReturnType<
+      typeof vitest.fn
+    >;
+    mockAssetUpdateMany.mockResolvedValue({ count: 1 });
 
     await releaseQuantity({
       assetId: "asset-1",
@@ -917,8 +1136,16 @@ describe("releaseQuantity — activity events", () => {
       organizationId: "org-1",
     });
 
-    expect(mockAssetUpdate).toHaveBeenCalledWith({
-      where: { id: "asset-1" },
+    // `updateMany` + a `status: { not: CHECKED_OUT }` guard, so releasing the
+    // last custody row can never advertise an asset that is still physically
+    // out on a booking as AVAILABLE. See the "custody writes must not
+    // overwrite CHECKED_OUT" suite for the behavioural coverage.
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-1",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
       data: { status: "AVAILABLE" },
     });
   });
@@ -947,6 +1174,360 @@ describe("releaseQuantity — activity events", () => {
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "AVAILABLE" }),
+      })
+    );
+  });
+});
+
+/**
+ * Ending a custodian's hold means something different per `consumptionType`:
+ * a TWO_WAY asset's units go back in the pool, a ONE_WAY consumable's units
+ * are gone. Before this suite nothing on the direct-custody path exercised
+ * `consumptionType` at all, which is how the consumable case shipped writing
+ * RETURN and handing the stock back.
+ */
+describe("releaseQuantity — consumptionType disposition", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockTeamMemberFindUnique = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+  const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+
+  /** Base locked-asset row; each test sets the `consumptionType` under test. */
+  const baseLockedAsset = {
+    id: "asset-1",
+    title: "Nitrile Gloves",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 500,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    // Custodian holds 40 units; every test releases 10 of them (partial), so
+    // the status-flip branch stays out of the way of the quantity assertions.
+    mockCustodyFindFirst.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+    });
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+    // why: the `refreshExpiredAssetImages` suite earlier in this file leaves a
+    // rejection implementation on the asset write mocks that `clearAllMocks`
+    // does not undo (it only clears call history).
+    mockAssetUpdate.mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+  });
+
+  it("consumes the whole release for a ONE_WAY consumable by default", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Exactly one log, classified as consumption. Writing RETURN here is the
+    // shipped bug: consumption reporting counts the units as back on the shelf.
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        category: "CONSUME",
+        quantity: 10,
+        custodianId: "tm-1",
+      })
+    );
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1" },
+        data: { quantity: { decrement: 10 } },
+      })
+    );
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(0);
+  });
+
+  it("splits a partial consume: two logs, and only the consumed units leave stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      consumed: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // 10 gloves used up, 30 handed back in good condition. Destroying all 40
+    // is the over-correction this split exists to prevent.
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    );
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 30 })
+    );
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "asset-1" },
+        data: { quantity: { decrement: 10 } },
+      })
+    );
+    expect(result.consumed).toBe(10);
+    expect(result.returned).toBe(30);
+  });
+
+  it("emits ASSET_QUANTITY_CHANGED for the consumed units only", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      consumed: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // One event per field that changed: stock dropped by the consumed
+    // amount, not by the full release.
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_QUANTITY_CHANGED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        assetId: "asset-1",
+        field: "quantity",
+        fromValue: 500,
+        toValue: 490,
+      }),
+      // Second arg is the tx client — the event must commit with the write.
+      expect.anything()
+    );
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "CUSTODY_RELEASED",
+        meta: { quantity: 40, viaQuantity: true, consumed: 10, returned: 30 },
+      }),
+      expect.anything()
+    );
+    expect(mockRecordEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("an explicit consumed of 0 on a consumable returns everything and never touches stock", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      consumed: 0,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    // No quantity write at all — the returnable path stays byte-identical.
+    // Match ANY `quantity` payload rather than `decrement: 0`: the service
+    // gates the whole decrement block on `consumedUnits > 0`, so asserting
+    // the zero case alone could never fail even if it wrongly decremented.
+    // (The status-flip write carries no `quantity` key, so it can't match.)
+    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+    expect(mockRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("leaves TWO_WAY behaviour untouched: RETURN log, no stock decrement", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "TWO_WAY",
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    expect(mockRecordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_QUANTITY_CHANGED" }),
+      expect.anything()
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("treats a legacy null consumptionType as returnable", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: null,
+    });
+
+    const result = await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 10 })
+    );
+    expect(result.consumed).toBe(0);
+    expect(result.returned).toBe(10);
+  });
+
+  it("rejects consuming a returnable asset", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "TWO_WAY",
+    });
+
+    // A client must never be able to destroy stock that is meant to come back.
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(/consumable/i);
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects a consumed amount larger than the release", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await expect(
+      releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 10,
+        consumed: 11,
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("does not touch AssetLocation on consume (documented deferral, matches booking check-in)", async () => {
+    // A CONSUME lowers `Asset.quantity` and deliberately leaves placements
+    // alone, so `SUM(AssetLocation.quantity)` can end up above the total. This
+    // is pre-existing, not introduced by the consumable branch: the booking
+    // service makes no `assetLocation` write at all, and the manual
+    // stock-lowering guard (`assertAssetQuantityNotBelowReservations`) queries
+    // custody / assetKit / bookingAsset / consumptionLog, never assetLocation.
+    // Custody carries no location, so there is nothing here to identify WHICH
+    // placement the used-up units came off.
+    //
+    // This test pins the deferral rather than the desired end state: when the
+    // location axis is reconciled across every path that lowers
+    // `Asset.quantity`, this is the assertion that should fail and be rewritten.
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // The three write methods the mocked client exposes — the same set
+    // `moveAssetLocationUnits` / `placeUnplacedUnits` drive when they DO
+    // adjust placements.
+    expect(db.assetLocation.create).not.toHaveBeenCalled();
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+    expect(db.assetLocation.delete).not.toHaveBeenCalled();
+  });
+
+  it("still flips Asset.status to AVAILABLE when a consume empties the last custody row", async () => {
+    mockLock.mockResolvedValue({
+      ...baseLockedAsset,
+      consumptionType: "ONE_WAY",
+    });
+    // Full release of the 40-unit row → no custody rows remain.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 40,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Guarded `updateMany` — see the sibling assertion in the
+    // "releaseQuantity — activity events" suite.
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-1",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
+      data: { status: "AVAILABLE" },
+    });
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { quantity: { decrement: 40 } },
       })
     );
   });
@@ -1385,6 +1966,525 @@ describe("updateAsset newLocationQuantity", () => {
 });
 
 /**
+ * Wiring for the STOCK-LOWERING guard: `updateAsset` must not let a
+ * QUANTITY_TRACKED asset's total `quantity` drop below what's already
+ * committed to custody, kits, or bookings. The guard's own committed-peak
+ * math is unit-tested in `availability.server.test.ts` — these tests only
+ * verify updateAsset calls it (with the right args, at the right time) and
+ * correctly propagates its rejection. `db.asset.findUnique` (the
+ * `assetBeforeUpdate` snapshot) is left at its default `null` resolve so the
+ * unrelated note/event-emission block — gated on `assetBeforeUpdate` being
+ * non-null — never runs, keeping each test focused on the guard wiring.
+ */
+describe("updateAsset stock-lowering guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      quantity: 5,
+    });
+  });
+
+  it("locks the asset then calls the guard when lowering quantity on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 5, // 5 < 10 (current) — a genuine reduction
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset-1",
+      "org-1"
+    );
+    expect(assertAssetQuantityNotBelowReservations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        newTotal: 5,
+        assetTitle: "Widget",
+        unitOfMeasure: "boards",
+      })
+    );
+    // The guard must run BEFORE the write.
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("propagates the guard's 400 and never writes when the reduction is below commitments", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          'Cannot reduce "Widget" to 5 boards — 8 boards are committed ' +
+          "(custody, kits, or overlapping bookings). Release or reduce those first.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 5,
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("committed"),
+    });
+
+    // The rejection must land before the write.
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("allows a safe reduction (down to or above what's committed)", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        quantity: 8,
+      } as any)
+    ).resolves.toMatchObject({ id: "asset-1" });
+
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the lock and the guard entirely when quantity is not being changed", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "Renamed",
+    } as any);
+
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+
+  it("skips the guard when quantity is being INCREASED, even on a QUANTITY_TRACKED asset", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 15, // 15 > 10 — an increase, never a stock-lowering concern
+    } as any);
+
+    // The lock still runs (it's how the guard learns the fresh current
+    // total), but the guard itself is never invoked for an increase.
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalled();
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+  });
+
+  it("skips the guard for an INDIVIDUAL asset even if a lower quantity is submitted", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      title: "Drill",
+      unitOfMeasure: null,
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 0,
+    } as any);
+
+    expect(assertAssetQuantityNotBelowReservations).not.toHaveBeenCalled();
+    expect(db.asset.update).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring for the low-stock notifier trigger on the asset-edit path. ANY quantity
+ * change on a QUANTITY_TRACKED asset — a DROP or a RAISE — must run
+ * `checkAndNotifyLowStock` AFTER the write commits: a drop may cross INTO the
+ * low-stock band, and a raise (restock) may cross back OUT and must clear the
+ * debounce marker / send the recovery notice. Only a non-quantity edit (or a
+ * no-op) must not. The notifier's own debounce/recipient logic lives in
+ * low-stock.server.test.ts — here we only assert the call is made (with which args).
+ */
+describe("updateAsset low-stock notifier wiring", () => {
+  const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+    });
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+  });
+
+  it("runs checkAndNotifyLowStock when a QUANTITY_TRACKED asset's quantity is lowered", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 5, // 5 < 10 → a genuine reduction
+    } as any);
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("runs checkAndNotifyLowStock when a QUANTITY_TRACKED asset's quantity is RAISED (restock → clears the debounce marker / recovery notice)", async () => {
+    (
+      lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 15, // 15 > 10 → a raise; must still run so a recovery clears
+    } as any); // the stale lowStockNotifiedAt marker (else the next alert is suppressed)
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("does NOT run checkAndNotifyLowStock when quantity is not part of the patch", async () => {
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "Renamed",
+    } as any);
+
+    expect(mockLowStock).not.toHaveBeenCalled();
+  });
+
+  it("runs checkAndNotifyLowStock when only the min-quantity threshold changes (so a stale marker is cleared)", async () => {
+    // No `quantity` in the patch → no row lock; the QT check falls back to the
+    // returned asset's `type`, and the change is detected from the before-snapshot.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 5,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      minQuantity: 8,
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      minQuantity: 8, // threshold 2 → 8; quantity is NOT part of the patch
+      request: new Request("http://localhost"),
+    } as any);
+
+    expect(mockLowStock).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+  });
+});
+
+/**
+ * Audit trail for quantity / min-quantity edits made through the asset-edit
+ * form (`updateAsset`). A real stock change writes an immutable
+ * `ConsumptionLog` ADJUSTMENT *and* an `ASSET_QUANTITY_CHANGED` activity
+ * event; a min-quantity (threshold) change emits only
+ * `ASSET_MIN_QUANTITY_CHANGED` and writes NO ConsumptionLog; a no-op change
+ * writes neither. `db.asset.findUnique` returns the before-snapshot so the
+ * event block (gated on a non-null `assetBeforeUpdate`) runs; `db.asset.update`
+ * returns the post-update row the event reads its `toValue` from.
+ */
+describe("updateAsset quantity audit trail", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Reset any leftover *Once queue so the single before-snapshot resolve
+    // below can't be shadowed by a prior test's queued value.
+    vi.mocked(db.asset.findUnique).mockReset();
+    (
+      assertAssetQuantityNotBelowReservations as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(undefined);
+  });
+
+  it("writes a ConsumptionLog ADJUSTMENT (positive delta) and emits ASSET_QUANTITY_CHANGED with the true direction on a QT quantity edit", async () => {
+    mockLock.mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    // Before-snapshot: quantity 10, so a write down to 4 is a real change.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 4,
+      minQuantity: 2,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 4, // 10 → 4 (a reduction; delta 6)
+      // The valuation-note builder reads `getLocale(request)`; a bare Request
+      // is enough (no accept-language header → default locale).
+      request: new Request("http://localhost"),
+    } as any);
+
+    // ConsumptionLog stores the positive delta (|4 − 10| = 6) as an ADJUSTMENT,
+    // written inside the quantity tx (tx threaded through).
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        category: "ADJUSTMENT",
+        quantity: 6,
+        userId: "user-1",
+      })
+    );
+    // The direction the log can't carry is captured by the event's from/to.
+    expect(mockRecordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: "asset-1",
+          assetId: "asset-1",
+          field: "quantity",
+          fromValue: 10,
+          toValue: 4,
+        }),
+      ])
+    );
+  });
+
+  it("emits ASSET_MIN_QUANTITY_CHANGED and writes NO ConsumptionLog for a min-quantity (threshold) edit", async () => {
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 5,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      minQuantity: 5, // threshold 2 → 5; no stock movement
+      request: new Request("http://localhost"),
+    } as any);
+
+    // minQuantity is a threshold, not stock — never a ConsumptionLog.
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // The lock is only taken when a `quantity` write is part of the patch.
+    expect(mockLock).not.toHaveBeenCalled();
+    expect(mockRecordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: "asset-1",
+          assetId: "asset-1",
+          field: "minQuantity",
+          fromValue: 2,
+          toValue: 5,
+        }),
+      ])
+    );
+  });
+
+  it("writes neither a ConsumptionLog nor an ASSET_QUANTITY_CHANGED event when the submitted quantity is unchanged", async () => {
+    mockLock.mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      title: "Widget",
+      unitOfMeasure: "boards",
+    });
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      consumptionType: "REUSABLE",
+      unitOfMeasure: "boards",
+      organization: { currency: "USD" },
+      tags: [],
+    });
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Widget",
+      description: null,
+      category: null,
+      valuation: null,
+      quantity: 10,
+      minQuantity: 2,
+      tags: [],
+    });
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      quantity: 10, // 10 → 10, delta 0
+      request: new Request("http://localhost"),
+    } as any);
+
+    // delta 0 → no stock-movement audit (createConsumptionLog rejects qty 0).
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // No field actually changed, so no quantity event is recorded.
+    const emittedQuantityEvent = mockRecordEvents.mock.calls.some(([events]) =>
+      (events as Array<{ action: string }>).some(
+        (e) => e.action === "ASSET_QUANTITY_CHANGED"
+      )
+    );
+    expect(emittedQuantityEvent).toBe(false);
+  });
+});
+
+/**
  * Centralised SELF_SERVICE guards for the bulk custody flows.
  *
  * Both web and mobile bulk-assign / bulk-release routes funnel through
@@ -1426,6 +2526,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let caught: unknown;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-other",
@@ -1471,6 +2572,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-self",
@@ -1509,6 +2611,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
         custodianId: "tm-anyone",
@@ -1547,6 +2650,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
         // caller passes through the SELF_SERVICE guard. Pass ADMIN here to
@@ -1778,6 +2882,253 @@ describe("bulkUpdateAssetCategory", () => {
   });
 });
 
+describe("bulkUpdateAssetModel", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: this file pins shared db mocks with sticky `mockReturnValue` in
+    // other suites and `clearAllMocks` does not undo those. Re-arm the two
+    // stubs this suite drives so it never reads a leaked value.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([]);
+    //@ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue({
+      id: "model-1",
+      name: "Panasonic PT-VZ580",
+    });
+  });
+
+  it("links the individually tracked assets and skips quantity-tracked ones", async () => {
+    expect.assertions(5);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "QUANTITY_TRACKED", assetModelId: null },
+      { id: "asset-3", type: "INDIVIDUAL", assetModelId: null },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      currentSearchParams: "assetModel=is:without-model",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "ADVANCED" },
+    });
+
+    expect(result).toEqual({
+      linked: true,
+      resolved: 3,
+      updated: 2,
+      moved: 0,
+      skippedQuantityTracked: 1,
+      modelName: "Panasonic PT-VZ580",
+    });
+    // The model is read ONCE. `assertAssetModelBelongsToOrg` returns the row it
+    // already had to fetch, so the toast label costs no second round trip —
+    // pinned here because re-adding a `findFirst` for the name is the easy
+    // regression.
+    expect(db.assetModel.findFirst).toHaveBeenCalledTimes(1);
+    // The active filters and index mode must reach the resolver, or a
+    // cross-page "select all" silently operates on the wrong set.
+    expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      currentSearchParams: "assetModel=is:without-model",
+      settings: { mode: "ADVANCED" },
+      // `asset: update` is ADMIN/OWNER-only, so this bulk path declares that
+      // the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+    });
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
+      data: { assetModelId: "model-1" },
+    });
+    // The qty-tracked asset must never reach the write.
+    expect(
+      (db.asset.updateMany as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+        .where.id.in
+    ).not.toContain("asset-2");
+  });
+
+  it("counts assets moved off another model separately from first-time grouping", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: null },
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: "model-other" },
+      // already on the target model → not a change at all
+      { id: "asset-3", type: "INDIVIDUAL", assetModelId: "model-1" },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({ updated: 2, moved: 1 });
+  });
+
+  it("removes the link when no model is given, without touching the model table", async () => {
+    expect.assertions(3);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "INDIVIDUAL", assetModelId: "model-1" },
+      // already unlinked → no write
+      { id: "asset-2", type: "INDIVIDUAL", assetModelId: null },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      // why: the dialog posts an EMPTY STRING for "remove from asset model",
+      // never null — this is the shape the route actually parses.
+      assetModelId: "",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({
+      linked: false,
+      updated: 1,
+      moved: 0,
+      modelName: null,
+    });
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+      data: { assetModelId: null },
+    });
+  });
+
+  it("does not error when unlinking a selection that is entirely quantity-tracked", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "QUANTITY_TRACKED", assetModelId: null },
+    ]);
+
+    // Removing a model from assets that can never have had one is a no-op,
+    // not a rule violation. Only the LINK direction rejects.
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      assetModelId: "",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({
+      linked: false,
+      updated: 0,
+      skippedQuantityTracked: 0,
+    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws a 400 when every selected asset is quantity-tracked", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", type: "QUANTITY_TRACKED", assetModelId: null },
+    ]);
+
+    await expect(
+      bulkUpdateAssetModel({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        assetModelId: "model-1",
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+      // The status AND the message must survive the catch-all wrapper, or the
+      // dialog shows "Something went wrong" instead of the eligibility rule.
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("quantity-tracked"),
+    });
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws when the asset model belongs to a different organization", async () => {
+    expect.assertions(2);
+    // why: emulate a foreign-org model — the org-scoped guard finds nothing
+    //@ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      bulkUpdateAssetModel({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        assetModelId: "foreign-model",
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+      // Same reason as above: the guard's own 404 message has to reach the UI.
+    ).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining("workspace"),
+    });
+
+    // The guard must run before the assets are read or written.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reports resolved 0 when the ids are not in this organization", async () => {
+    expect.assertions(2);
+    // why: the resolver returns a caller-supplied id list verbatim, so the
+    // org check is the org-scoped read. Foreign ids resolve to a non-empty
+    // list but match no rows, and the caller must be able to tell that apart
+    // from "these are already on the model".
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["foreign-asset-1", "foreign-asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toMatchObject({ resolved: 0, updated: 0 });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the selection resolves to no assets", async () => {
+    expect.assertions(2);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: [],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(result).toEqual({
+      linked: true,
+      resolved: 0,
+      updated: 0,
+      moved: 0,
+      skippedQuantityTracked: 0,
+      modelName: null,
+    });
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("bulkAssignAssetTags", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -1978,6 +3329,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
 
     await expect(
       bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
         userId: "me",
         role: OrganizationRoles.SELF_SERVICE,
         assetIds: ["asset-1"],
@@ -1999,6 +3351,108 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
   // route's own integration tests cover the behaviour today.
   it.skip("blocks a SELF_SERVICE user from releasing someone else's custody (centralised in service)", async () => {
     // intentionally empty — see comment above.
+  });
+});
+
+/**
+ * The guarded status write gates the whole batch.
+ *
+ * `assetsNotAvailable` rejects checked-out assets, but that read happens
+ * OUTSIDE the transaction. If a checkout commits in between, the guard on
+ * `setCustodyDrivenAssetStatus` correctly refuses to overwrite `CHECKED_OUT` —
+ * and pre-fix the batch carried on regardless, writing a custody row, a note
+ * and a CUSTODY_ASSIGNED event for an asset that is physically out on a
+ * booking. The audit trail then asserted a grant that never happened.
+ *
+ * @see {@link file://./custody-status.server.ts}
+ */
+describe("bulkCheckOutAssets — status guard gates the batch", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Custodian",
+        user: {
+          id: "custodian-user",
+          firstName: "Cust",
+          lastName: "Odian",
+          displayName: null,
+        },
+      }
+    );
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+      { id: "asset-2", title: "Saw", status: "AVAILABLE", type: "INDIVIDUAL" },
+    ]);
+  });
+
+  it("aborts without writing custody when an asset was checked out mid-flight", async () => {
+    // why: two assets passed the pre-check, but by write time only one still
+    // matches `status: { not: CHECKED_OUT }`. That shortfall IS the race.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await expect(
+      bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
+        userId: "user-current",
+        assetIds: ["asset-1", "asset-2"],
+        custodianId: "tm-1",
+        custodianName: "Custodian",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(/checked out while this action was in progress/);
+
+    // The whole point: no half-applied custody. The throw rolls the
+    // transaction back, but the rows must not be attempted either.
+    expect(db.custody.createMany).not.toHaveBeenCalled();
+
+    // 409, not the ShelfError default of 500: a valid request that lost a race
+    // is the client's cue to refresh, not a server fault. `shouldBeCaptured`
+    // is false for the same reason — this must not page anyone.
+    const caught = await bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch((err: unknown) => err);
+
+    expect((caught as ShelfError).status).toBe(409);
+    expect((caught as ShelfError).shouldBeCaptured).toBe(false);
+  });
+
+  it("proceeds to write custody when every asset survives the guard", async () => {
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 2,
+    });
+
+    // Downstream note/event stubs may be incomplete; all this asserts is that
+    // the gate itself did not fire and custody insertion was reached.
+    await bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-current",
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: {} as any,
+      role: OrganizationRoles.ADMIN,
+    }).catch(() => undefined);
+
+    expect(db.custody.createMany).toHaveBeenCalled();
   });
 });
 
@@ -2596,7 +4050,12 @@ describe("getAssets search fallback", () => {
     orderDirection: "desc" as const,
   };
 
-  /** The title branch only exists in the full search clause, never the narrow one. */
+  /**
+   * Title contains-clause used to assert the full (post-fallback) search clause
+   * surfaces title matches. Note: title now ALSO appears in the narrow fast-path
+   * clause (see the first test below) so bare-numeric substrings embedded in a
+   * title are matched without needing the zero-row fallback.
+   */
   const titleClause = {
     title: { contains: "103468", mode: "insensitive" },
   };
@@ -2604,6 +4063,19 @@ describe("getAssets search fallback", () => {
   beforeEach(() => {
     findManyMock.mockReset();
     countMock.mockReset();
+  });
+
+  it("matches nothing for typed input that yields zero terms", async () => {
+    // why: whitespace / bare-comma input must not return the full list —
+    // mirrors the mobile composer's fail-closed guard.
+    findManyMock.mockResolvedValueOnce([] as never);
+    countMock.mockResolvedValueOnce(0 as never);
+
+    await getAssets({ ...baseParams, search: " , " });
+
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(where.id).toEqual({ in: [] });
+    expect(where.OR).toBeUndefined();
   });
 
   it("runs only the narrow indexed clause when an ID-shaped query matches", async () => {
@@ -2615,12 +4087,47 @@ describe("getAssets search fallback", () => {
 
     expect(findManyMock).toHaveBeenCalledTimes(1);
     const where = (findManyMock.mock.calls[0][0] as any).where;
-    // Narrow clause: sequentialId / barcode / qr only — no title branch.
-    expect(JSON.stringify(where.OR)).not.toContain("title");
+    // Narrow clause covers the indexed ID columns: sequentialId / barcode / qr.
     expect(where.OR).toContainEqual({
       sequentialId: { contains: "103468", mode: "insensitive" },
     });
+    expect(where.OR).toContainEqual({
+      barcodes: {
+        some: { value: { contains: "103468", mode: "insensitive" } },
+      },
+    });
+    expect(where.OR).toContainEqual({
+      qrCodes: { some: { id: { contains: "103468", mode: "insensitive" } } },
+    });
+    // ...and ALSO title + description (both trigram-indexed), so a bare-numeric
+    // substring embedded in a title is matched directly in the fast path
+    // instead of relying on the zero-row fallback.
+    expect(where.OR).toContainEqual({
+      title: { contains: "103468", mode: "insensitive" },
+    });
+    expect(where.OR).toContainEqual({
+      description: { contains: "103468", mode: "insensitive" },
+    });
     expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("matches a title-embedded number in the fast path without falling back", async () => {
+    // why: regression guard for the dropped "451" → "KCI-451 Kids Resources Box"
+    // match. "451" is ID-shaped (bare digits) so it takes the narrow path, but
+    // the number lives only inside the title. The narrow clause must carry a
+    // `title` contains-clause so the row surfaces on the FIRST query — otherwise
+    // an unrelated ID-column match returns rows, suppresses the zero-row
+    // fallback, and the title-only asset is silently dropped.
+    findManyMock.mockResolvedValueOnce([{ id: "kci-451" }] as never);
+    countMock.mockResolvedValueOnce(1 as never);
+
+    await getAssets({ ...baseParams, search: "451" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(where.OR).toContainEqual({
+      title: { contains: "451", mode: "insensitive" },
+    });
   });
 
   it("falls back to the full search when the narrow clause matches nothing", async () => {
@@ -2806,7 +4313,6 @@ describe("unarchiveAsset", () => {
   const mockFindFirst = db.asset.findFirst as ReturnType<typeof vitest.fn>;
   const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
   const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
-
   beforeEach(() => {
     vitest.clearAllMocks();
   });
@@ -2918,5 +4424,295 @@ describe("bulkUnarchiveAssets", () => {
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a1" }),
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
     ]);
+
+describe("buildAssetKitCreateData — AssetKit pivot for create-with-kit", () => {
+  it("builds the AssetKit pivot nested-create and never emits a `kit` relation", () => {
+    // why: `Asset.kit` was replaced by the `assetKits` pivot; a `kit: { connect }`
+    // throws `Unknown argument kit` at runtime (the import-crash bug). This guards
+    // against that regression.
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: null,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 1,
+        },
+      },
+    });
+    expect("kit" in result).toBe(false);
+  });
+
+  it("uses the full tracked pool for QUANTITY_TRACKED assets", () => {
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 50,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 50,
+        },
+      },
+    });
+  });
+
+  it("defaults quantity to 1 for a QUANTITY_TRACKED asset with no quantity", () => {
+    const result = buildAssetKitCreateData({
+      kitId: "kit-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: null,
+    });
+
+    expect(result).toEqual({
+      assetKits: {
+        create: {
+          kit: { connect: { id: "kit-1" } },
+          organization: { connect: { id: "org-1" } },
+          quantity: 1,
+        },
+      },
+    });
+  });
+});
+
+describe("setKitCustodyAfterAssetImport — kit custody + member inheritance", () => {
+  const mockBulkAssignKitCustody = vi.mocked(bulkAssignKitCustody);
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("assigns each kit to its row custodian via bulkAssignKitCustody, grouped by custodian", async () => {
+    // why: custody lives on the kit; members inherit through the canonical flow.
+    const kits = {
+      "Camera Kit": { id: "kit-1", name: "Camera Kit" },
+      "Audio Kit": { id: "kit-2", name: "Audio Kit" },
+    } as never;
+    const teamMembers = {
+      Alice: { id: "tm-1", name: "Alice" },
+      Bob: { id: "tm-2", name: "Bob" },
+    } as never;
+    const data = [
+      { title: "A", key: "1", kit: "Camera Kit", custodian: "Alice" },
+      { title: "B", key: "2", kit: "Camera Kit", custodian: "Alice" },
+      { title: "C", key: "3", kit: "Audio Kit", custodian: "Bob" },
+      { title: "D", key: "4" }, // no kit / custodian -> ignored
+    ] as never;
+
+    await setKitCustodyAfterAssetImport({
+      data,
+      kits,
+      teamMembers,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledTimes(2);
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitIds: ["kit-1"],
+        custodianId: "tm-1",
+        custodianName: "Alice",
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    );
+    expect(mockBulkAssignKitCustody).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitIds: ["kit-2"],
+        custodianId: "tm-2",
+        custodianName: "Bob",
+      })
+    );
+  });
+
+  it("does nothing when no row carries both a kit and a custodian", async () => {
+    await setKitCustodyAfterAssetImport({
+      data: [
+        { title: "A", key: "1", kit: "Camera Kit" },
+        { title: "B", key: "2", custodian: "Alice" },
+      ] as never,
+      kits: {} as never,
+      teamMembers: {} as never,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockBulkAssignKitCustody).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Regression guard for the CoSTAR Live Lab report: a quantity-tracked asset
+ * with units out on an ONGOING booking had its `CHECKED_OUT` status silently
+ * overwritten when a custodian was assigned three minutes later. `Asset.status`
+ * is one column describing an asset that is simultaneously part-in-custody,
+ * part-checked-out and part-free, so the last writer used to win. Every reader
+ * of "is this off the shelf" keys on that column, so the checked-out units
+ * stopped counting and `Available` overstated free stock by the booked amount.
+ *
+ * Both custody writes must therefore treat `CHECKED_OUT` as the strongest
+ * commitment, matching `reconcileAssetStatusForBookingExit`'s documented
+ * precedence (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`).
+ *
+ * These tests simulate Postgres rather than assert on Prisma arg shapes: the
+ * `updateMany` mock only applies the write when the row still matches the
+ * `where`, exactly as the real UPDATE ... WHERE would.
+ */
+describe("custody writes must not overwrite CHECKED_OUT", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCustodyAggregate = db.custody.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyCount = db.custody.count as ReturnType<typeof vitest.fn>;
+  const mockBookingAssetAggregate = db.bookingAsset.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "Manfrotto Super Clamp",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 29,
+  };
+
+  /** Stands in for the asset row's committed `status` column. */
+  let currentStatus: AssetStatus;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+
+    // Unguarded `update` — models the PRE-FIX write. Without this the suite
+    // would pass vacuously against the old code: the old service called
+    // `update` (not `updateMany`), so a mock that only watches `updateMany`
+    // never sees the clobber and `currentStatus` stays untouched. Verified by
+    // reverting the fix and confirming these tests go red.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ data }: { data?: { status?: AssetStatus } }) => {
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({});
+      }
+    );
+
+    // Behave like `UPDATE ... WHERE status <> $1`: when the row no longer
+    // matches the guard, zero rows change and the column keeps its value.
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where?: { status?: { not?: AssetStatus } };
+        data?: { status?: AssetStatus };
+      }) => {
+        const excluded = where?.status?.not;
+        if (excluded !== undefined && currentStatus === excluded) {
+          return Promise.resolve({ count: 0 });
+        }
+        if (data?.status) currentStatus = data.status;
+        return Promise.resolve({ count: 1 });
+      }
+    );
+  });
+
+  describe("checkOutQuantity (assigning custody)", () => {
+    beforeEach(() => {
+      mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      // No operator custody row yet → the service takes the `create` branch.
+      mockCustodyFindFirst.mockResolvedValue(null);
+    });
+
+    it("leaves CHECKED_OUT intact when units are already out on a booking", async () => {
+      currentStatus = AssetStatus.CHECKED_OUT;
+
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      // The custody row is still written — only the status is protected.
+      expect(db.custody.create).toHaveBeenCalledTimes(1);
+      expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+    });
+
+    it("still flips an AVAILABLE asset to IN_CUSTODY", async () => {
+      currentStatus = AssetStatus.AVAILABLE;
+
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.IN_CUSTODY);
+    });
+  });
+
+  describe("releaseQuantity (releasing the last custody row)", () => {
+    beforeEach(() => {
+      mockCustodyFindFirst.mockResolvedValue({
+        id: "custody-1",
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+      });
+      // Zero rows left → the flip-to-AVAILABLE branch fires.
+      mockCustodyCount.mockResolvedValue(0);
+    });
+
+    it("does not advertise a checked-out asset as AVAILABLE", async () => {
+      // The dangerous direction: releasing custody while units are physically
+      // out would have put the asset back on every picker and index.
+      currentStatus = AssetStatus.CHECKED_OUT;
+
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
+    });
+
+    it("still returns an in-custody asset to AVAILABLE on the last release", async () => {
+      currentStatus = AssetStatus.IN_CUSTODY;
+
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 20,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(currentStatus).toBe(AssetStatus.AVAILABLE);
+    });
   });
 });

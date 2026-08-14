@@ -85,6 +85,7 @@ export type FailureReason = {
     | "User"
     | "User Contact"
     | "Scanner"
+    | "SCIM"
     | "SSO"
     | "Kit"
     | "Note"
@@ -336,6 +337,228 @@ export function isPrismaTransientError(cause: unknown): boolean {
 }
 
 /**
+ * Substring shared by BOTH quantity over-allocation trigger exceptions.
+ *
+ * Two DB triggers enforce `sum(pivot.quantity) <= Asset.quantity` for
+ * QUANTITY_TRACKED assets and raise (via `RAISE EXCEPTION`) when the invariant
+ * is violated:
+ *
+ *   - `AssetKit total % exceeds Asset.quantity % for asset %`
+ *     ({@link file://./../../../../packages/database/prisma/migrations/20260514100000_drop_asset_kit_unique_add_triggers/migration.sql})
+ *   - `AssetLocation total % exceeds Asset.quantity % for asset %`
+ *     ({@link file://./../../../../packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql})
+ *
+ * Both surface at runtime as a `PrismaClientUnknownRequestError` whose message
+ * contains this substring. It is intentionally NARROW — it appears only in
+ * these two trigger messages, so matching on it never swallows unrelated
+ * `PrismaClientUnknownRequestError`s.
+ */
+export const ASSET_QUANTITY_OVER_ALLOCATION_MARKER = "exceeds Asset.quantity";
+
+/**
+ * Detects the "assigning more of a QUANTITY_TRACKED asset than `Asset.quantity`
+ * allows" DB-trigger violation anywhere in an error's `cause` chain.
+ *
+ * The raw trigger error is a `PrismaClientUnknownRequestError`, but a
+ * service-layer `try/catch` may already have re-wrapped it inside a
+ * `ShelfError` (with the original as `.cause`) by the time we inspect it — so
+ * we walk the chain, mirroring {@link hasTransientCause} / {@link hasNotFoundCause}.
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @returns `true` when the over-allocation trigger message is present in the
+ * error or any nested `cause`; otherwise `false`.
+ */
+export function isAssetQuantityOverAllocationError(cause: unknown): boolean {
+  return causeChainIncludesMessage(
+    cause,
+    ASSET_QUANTITY_OVER_ALLOCATION_MARKER
+  );
+}
+
+/**
+ * Cycle-safe walk of an error's `cause` chain, returning `true` when any node's
+ * `message` contains `marker`. A DB-trigger error is frequently nested inside a
+ * service-layer `ShelfError` wrapper by the time we inspect it, so we walk the
+ * chain (mirroring {@link hasTransientCause} / {@link hasNotFoundCause}). A
+ * `visited` set makes the walk cycle-safe: a self- or mutually-referential
+ * `.cause` graph terminates and returns `false` instead of recursing into a
+ * stack overflow.
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @param marker - Narrow substring to look for in each node's `message`.
+ * @returns `true` when `marker` is present on any node of the cause chain.
+ */
+function causeChainIncludesMessage(cause: unknown, marker: string): boolean {
+  const visited = new Set<object>();
+  let current = cause;
+  while (typeof current === "object" && current !== null) {
+    if (visited.has(current)) {
+      return false;
+    }
+    visited.add(current);
+    const error = current as { message?: unknown; cause?: unknown };
+    if (typeof error.message === "string" && error.message.includes(marker)) {
+      return true;
+    }
+    current = error.cause;
+  }
+  return false;
+}
+
+/**
+ * Translates the quantity over-allocation DB-trigger violation into a
+ * user-facing `ShelfError` and throws it. No-ops (returns) for every other
+ * error so the caller's existing error wrapping runs unchanged.
+ *
+ * This is a user-input validation failure (the user asked to assign more units
+ * than exist), so the thrown error is a **400** with `shouldBeCaptured: false`:
+ * per repo convention (see {@link isHandledClientError}) these are recorded as
+ * low-severity Sentry LOGS, not paged as Sentry ISSUES.
+ *
+ * Wire this in as the FIRST line of a `catch (cause)` block at any service path
+ * that writes `AssetKit` / `AssetLocation` rows and can trip the triggers.
+ *
+ * @param cause - The caught error to inspect.
+ * @param options.label - The `ShelfError` label for the throwing surface
+ * (e.g. `"Kit"`, `"Location"`, `"Assets"`).
+ * @param options.additionalData - Debugging context (asset/kit/location ids)
+ * preserved on the thrown error.
+ * @throws {ShelfError} A 400, non-captured error when `cause` is the
+ * over-allocation trigger violation.
+ */
+export function throwIfAssetQuantityOverAllocation(
+  cause: unknown,
+  {
+    label,
+    additionalData,
+  }: { label: ErrorLabel; additionalData?: AdditionalData }
+): void {
+  if (!isAssetQuantityOverAllocationError(cause)) {
+    return;
+  }
+  throw new ShelfError({
+    cause,
+    label,
+    message:
+      "You're trying to assign more of this asset than are available. Lower the quantity and try again.",
+    status: 400,
+    shouldBeCaptured: false,
+    additionalData,
+  });
+}
+
+/**
+ * Substring unique to the "INDIVIDUAL asset already placed at a location"
+ * DB-trigger exception.
+ *
+ * `enforce_individual_asset_single_location` caps an INDIVIDUAL asset at one
+ * `AssetLocation` row and raises (via `RAISE EXCEPTION … USING ERRCODE =
+ * 'check_violation'`) when a second placement is attempted — e.g. adding a kit
+ * (or asset) to a location while one of its INDIVIDUAL members is still placed
+ * at another location.
+ * ({@link file://./../../../../packages/database/prisma/migrations/20260519143054_add_asset_location_pivot/migration.sql})
+ *
+ * Surfaces at runtime as a `PrismaClientUnknownRequestError` whose message
+ * contains this substring. Intentionally NARROW so it never swallows unrelated
+ * errors (the sibling single-kit trigger uses different wording).
+ */
+export const INDIVIDUAL_ASSET_ALREADY_PLACED_MARKER =
+  "already placed at a location";
+
+/**
+ * Detects the "INDIVIDUAL asset already placed at a location" DB-trigger
+ * violation anywhere in an error's `cause` chain (the raw trigger error is
+ * frequently re-wrapped inside a service-layer `ShelfError` before we inspect
+ * it).
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @returns `true` when the trigger message is present in the error or any
+ * nested `cause`; otherwise `false`.
+ */
+export function isIndividualAssetAlreadyPlacedError(cause: unknown): boolean {
+  return causeChainIncludesMessage(
+    cause,
+    INDIVIDUAL_ASSET_ALREADY_PLACED_MARKER
+  );
+}
+
+/**
+ * Translates the "INDIVIDUAL asset already placed at a location" DB-trigger
+ * violation into a user-facing `ShelfError` and throws it. No-ops (returns) for
+ * every other error so the caller's existing error wrapping runs unchanged.
+ *
+ * Like {@link throwIfAssetQuantityOverAllocation}, this is a user-input
+ * validation failure (an individual asset can only be in one location at a
+ * time), so the thrown error is a **400** with `shouldBeCaptured: false` —
+ * recorded as a low-severity Sentry LOG, not paged as an ISSUE. Wire it in
+ * alongside `throwIfAssetQuantityOverAllocation` at any service path that writes
+ * `AssetLocation` rows and can trip the single-location trigger. See
+ * SHELF-WEBAPP-1P4.
+ *
+ * @param cause - The caught error to inspect.
+ * @param options.label - The `ShelfError` label for the throwing surface
+ * (e.g. `"Location"`).
+ * @param options.additionalData - Debugging context (asset/kit/location ids)
+ * preserved on the thrown error.
+ * @throws {ShelfError} A 400, non-captured error when `cause` is the
+ * single-location trigger violation.
+ */
+export function throwIfIndividualAssetAlreadyPlaced(
+  cause: unknown,
+  {
+    label,
+    additionalData,
+  }: { label: ErrorLabel; additionalData?: AdditionalData }
+): void {
+  if (!isIndividualAssetAlreadyPlacedError(cause)) {
+    return;
+  }
+  throw new ShelfError({
+    cause,
+    label,
+    message:
+      "An individual asset can only be in one location at a time, and one of these assets is already placed at another location. Remove it from its current location first, then try again.",
+    status: 400,
+    shouldBeCaptured: false,
+    additionalData,
+  });
+}
+
+/**
+ * Substring embedded verbatim in the Prisma error message when Postgres raises
+ * SQLSTATE `53200` (`out_of_memory`) because its **cluster-wide shared lock
+ * table is full** — the "You might need to increase max_locks_per_transaction"
+ * hint. Prisma surfaces this as a `P2010` (raw query failed), a code far too
+ * broad to key off (a genuinely broken raw query is *also* `P2010`), so we
+ * match NARROWLY on this hint text, which appears only in this one condition.
+ *
+ * @see SHELF-WEBAPP-227 — the `/assets` advanced-filter raw query trips this on
+ * large workspaces under the per-request query fan-out.
+ */
+export const DB_LOCK_EXHAUSTION_MARKER = "max_locks_per_transaction";
+
+/**
+ * Detects Postgres shared-lock-table exhaustion (SQLSTATE `53200` /
+ * `max_locks_per_transaction`) anywhere in an error's `cause` chain — even when
+ * a service-layer `try/catch` already re-wrapped the raw Prisma error inside a
+ * generic `ShelfError` (as the assets query does before it reaches the route
+ * boundary). Mirrors the cause-chain walk used by the DB-trigger detectors.
+ *
+ * This is a **transient, load-dependent** resource exhaustion, not a bug in the
+ * query and not a connectivity failure: the statement failed while acquiring
+ * its locks under contention, before touching any row. It is therefore safe to
+ * present as a retryable 503 (see {@link makeShelfError}) and safe to re-run a
+ * READ against (see `withPrismaRetry` in `@shelf/database`).
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @returns `true` when the lock-exhaustion hint is present on any node of the
+ * cause chain; otherwise `false`.
+ */
+export function isDbResourceExhaustionError(cause: unknown): boolean {
+  return causeChainIncludesMessage(cause, DB_LOCK_EXHAUSTION_MARKER);
+}
+
+/**
  * Walks the cause chain of an error to detect if a transient
  * Prisma error is buried inside ShelfError wrappers.
  */
@@ -392,12 +615,47 @@ export function makeShelfError(
   // This prevents misleading messages like "User not found" when the
   // real issue is a connection pool timeout (P2024).
   if (hasTransientCause(cause)) {
+    // Merge the wrapper's additionalData (a service catch may have attached
+    // context like organizationId before re-throwing) so it survives into the
+    // logged/Sentry payload, mirroring the not-found + generic branches below.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
     return new ShelfError({
       cause,
       message:
         "We're experiencing temporary database connectivity issues. Please try again in a moment.",
       label: "DB",
-      additionalData,
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
+      shouldBeCaptured: true,
+      status: 503,
+    });
+  }
+
+  // Detect Postgres shared-lock-table exhaustion (SQLSTATE 53200 /
+  // max_locks_per_transaction) anywhere in the cause chain — even when a
+  // service catch block already re-wrapped it as a generic 5xx ShelfError
+  // (the assets advanced-filter query does exactly that). This is a transient,
+  // load-dependent overload on a READ, so it collapses to a friendly retryable
+  // 503 instead of a hard 500 crash screen. Kept captured (503 ≥ 500 so it
+  // stays in the Sentry error pipeline) so we can watch it recede as the
+  // durable per-request fan-out fix lands. See SHELF-WEBAPP-227.
+  if (isDbResourceExhaustionError(cause)) {
+    // Merge the wrapper's additionalData: on the assets path the cause is the
+    // "Failed to fetch…" ShelfError carrying { organizationId, paramsValues },
+    // which is exactly the load-dependent context (which workspace / which
+    // filters) needed to watch this recede. Mirrors the not-found branch.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
+    return new ShelfError({
+      cause,
+      message:
+        "The server is temporarily overloaded and couldn't load this. Please try again in a moment.",
+      label: "DB",
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
       shouldBeCaptured: true,
       status: 503,
     });

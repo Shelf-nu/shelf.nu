@@ -1,0 +1,144 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Duplicate action (mobile)"
+tags:
+  - bookings
+  - duplicate
+  - actions
+
+---
+# Verifies the booking-detail overflow "Duplicate booking" action. Creates a
+# disposable source booking, duplicates it (-> "<name> (Copy)" DRAFT), confirms
+# the new draft's EDIT screen opens with the copied name, then deletes BOTH the
+# copy and the source (idempotent + self-cleaning).
+#
+# Requires GRANULAR WORKSPACE (TEAM) + team member "Dr. Sarah Mitchell".
+# Action steps verified live on-device 2026-06-23; preamble copied from 06.
+
+- runFlow: ../../shared/login.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# Create the disposable source booking.
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Dup Source"
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "QA Dup Source"
+    timeout: 20000
+
+# Duplicate -> confirm -> lands on the new draft's EDIT screen.
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Duplicate booking"
+    timeout: 10000
+- tapOn: "Duplicate booking"
+- extendedWaitUntil:
+    visible: "Duplicate Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Duplicate$"
+- extendedWaitUntil:
+    visible: "Save changes"
+    timeout: 30000
+# NOTE: "(Copy)" parens are regex metacharacters — match it with .*Copy.* (a
+# literal "(Copy)" in a Maestro selector is parsed as a regex group and misses).
+- assertVisible: "QA Dup Source.*Copy.*"
+- takeScreenshot: duplicate-action-editor
+
+# Cleanup: delete the copy, then the source. Relaunch first so the list reflects
+# the new copy from a FRESH fetch — navigating straight from the editor can show
+# a stale list that doesn't include the just-created copy yet.
+- launchApp
+- tapOn:
+    text: "http://localhost:8081"
+    optional: true
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 90000
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+# Delete the copy.
+- scrollUntilVisible:
+    element:
+      text: "Booking: QA Dup Source.*Copy.*"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    text: "Booking: QA Dup Source.*Copy.*"
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Delete booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete booking$"
+- extendedWaitUntil:
+    visible: "Delete Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete$"
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 20000
+# Delete the source.
+- scrollUntilVisible:
+    element:
+      text: "Booking: QA Dup Source,.*"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    text: "Booking: QA Dup Source,.*"
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Delete booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete booking$"
+- extendedWaitUntil:
+    visible: "Delete Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Delete$"
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 20000

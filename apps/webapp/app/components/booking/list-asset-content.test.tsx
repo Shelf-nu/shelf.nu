@@ -127,15 +127,27 @@ vi.mock("~/hooks/use-current-organization", () => ({
   }),
 }));
 
-// why: controlling asset status logic to test returned badge vs status badge behavior
-vi.mock("~/utils/booking-assets", () => ({
-  getBookingContextAssetStatus: (
-    ...args: Parameters<typeof getBookingContextAssetStatusMock>
-  ) => getBookingContextAssetStatusMock(...args),
-  isAssetPartiallyCheckedIn: (
-    ...args: Parameters<typeof isAssetPartiallyCheckedInMock>
-  ) => isAssetPartiallyCheckedInMock(...args),
-}));
+// why: controlling asset status logic to test returned badge vs status badge
+// behavior. Only the two status resolvers are stubbed; the rest of the module
+// (notably the pure per-slice `isBookingRowQtyFullyCheckedOut`) uses the REAL
+// implementation via importActual so the per-slice checkout badge is exercised
+// for real, not mocked away. (The `import type` of service.server in the real
+// module is erased at runtime, so no server code is pulled in.)
+vi.mock("~/utils/booking-assets", async () => {
+  const actual = (await vi.importActual("~/utils/booking-assets")) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...actual,
+    getBookingContextAssetStatus: (
+      ...args: Parameters<typeof getBookingContextAssetStatusMock>
+    ) => getBookingContextAssetStatusMock(...args),
+    isAssetPartiallyCheckedIn: (
+      ...args: Parameters<typeof isAssetPartiallyCheckedInMock>
+    ) => isAssetPartiallyCheckedInMock(...args),
+  };
+});
 
 describe("ListAssetContent", () => {
   const basePartialDetails = {} as PartialCheckinDetailsType;
@@ -504,7 +516,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 3 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 3, physicalNow: 3 } },
       });
 
       render(
@@ -593,7 +605,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 5 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 5, physicalNow: 5 } },
       });
 
       render(
@@ -613,6 +625,295 @@ describe("ListAssetContent", () => {
       );
 
       expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+    });
+
+    it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow", async () => {
+      // (b) — "Boards" real case: 10 total, 7 needed for this RESERVED
+      // booking. The 7 currently out on another booking return before this
+      // booking's window opens, so bookable=10 (no in-window conflict) but
+      // physicalNow=3 (7 are literally off the shelf right now). Soft amber
+      // warning, NOT the red blocker.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 7,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 10, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      // No red hard-blocker — the row fits within the booking's window.
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+
+      const trigger = screen.getByText("Checked out elsewhere");
+      expect(trigger).toBeInTheDocument();
+      // Amber (default `AvailabilityBadge` variant) — NOT the red variant.
+      expect(trigger).toHaveClass("bg-warning-50");
+      expect(trigger).toHaveClass("text-warning-700");
+
+      // Tooltip explains the "expected back before this booking starts" logic.
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/7 units/);
+      expect(tooltip.textContent).toMatch(/only 3/);
+      expect(tooltip.textContent).toMatch(
+        /expected back before this booking starts/i
+      );
+    });
+
+    it("does NOT render any stock badge for a row that is already checked out, even though bookedQuantity exceeds bookable", () => {
+      // (d) — Regression guard for the "checked-out row showed Insufficient
+      // stock" bug: this slice's own 22 booked units are all checked out
+      // already (nothing returned yet), so `contextStatus` resolves to
+      // CHECKED_OUT via the real `isBookingRowQtyFullyCheckedOut` branch.
+      // Even though the workspace pool is critically low (bookable: 3), the
+      // row's own checkout already happened — nothing to warn about for it.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 22,
+        checkedOutQuantity: 22,
+        dispositionedQuantity: 0,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-checked-out",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 3, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
+      // Confirms the row really did resolve to CHECKED_OUT (not silently
+      // skipped for an unrelated reason).
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "CHECKED_OUT" })
+      );
+    });
+  });
+
+  // Per-slice QT checkout status. A QUANTITY_TRACKED asset can have multiple
+  // BookingAsset slices on one booking (e.g. a kit-driven slice + a standalone
+  // free-pool slice). Each row's badge must reflect THIS slice's own checkout
+  // progress (`checkedOutQuantity` vs `bookedQuantity`), NOT the global
+  // `Asset.status` — which only flips to CHECKED_OUT when EVERY slice is fully
+  // out, so a single fully-checked-out slice would otherwise wrongly read
+  // "Available". Mirrors the existing per-row check-IN completion handling.
+  describe("QT per-slice checkout status", () => {
+    const qtKitSliceRow = {
+      ...baseAsset,
+      id: "asset-qt-pencils",
+      type: "QUANTITY_TRACKED",
+      // Global status stays AVAILABLE: the parallel standalone slice is still
+      // booked, so the asset-wide flip never fires. Mocked resolver returns
+      // AVAILABLE (default) to model exactly that.
+      status: "AVAILABLE",
+      bookingAssetId: "ba-kit-slice",
+      bookedQuantity: 22,
+      dispositionedQuantity: 0,
+    } as unknown as AssetWithBooking;
+
+    it("shows CHECKED_OUT for a slice whose own units are all checked out, even though the global asset status is AVAILABLE", () => {
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-qt",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtKitSliceRow.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={
+                  {
+                    ...qtKitSliceRow,
+                    // This slice's 22 booked units are all checked out; nothing
+                    // returned yet.
+                    checkedOutQuantity: 22,
+                  } as unknown as AssetWithBooking
+                }
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "CHECKED_OUT" })
+      );
+    });
+
+    it("still shows the pending-return badge (not CHECKED_OUT) when only SOME of the slice's units are checked out", () => {
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-qt-partial",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtKitSliceRow.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={
+                  {
+                    ...qtKitSliceRow,
+                    // 10 of 22 out → partial, must NOT read as fully CHECKED_OUT.
+                    checkedOutQuantity: 10,
+                  } as unknown as AssetWithBooking
+                }
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN",
+        })
+      );
+    });
+  });
+
+  // Detached kit residue. Removing an asset from a kit nulls
+  // `BookingAsset.assetKitId` (ON DELETE SET NULL) but a non-planning booking
+  // KEEPS the slice, which then renders grouped under its original kit via
+  // `sourceKitId`. The loader flags those rows with `isRemovedFromKit` so the
+  // row can say so — otherwise it is indistinguishable from a live member.
+  describe("removed-from-kit badge", () => {
+    const finishedBooking = {
+      booking: {
+        id: "booking-complete",
+        status: "COMPLETE",
+        bookingAssets: [{ assetId: "asset-1" }],
+        custodianUser: null,
+      },
+    };
+
+    function renderRow(item: AssetWithBooking) {
+      return render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={item}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    }
+
+    it("labels a detached slice and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // Membership is gone (`assetKits: []`) but the loader resolved the
+        // snapshot kit off `sourceKitId` and flagged the row.
+        assetKits: [],
+        isRemovedFromKit: true,
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Removed from kit");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/removed from the kit/i);
+      expect(tooltip.textContent).toMatch(/record of what was booked/i);
+    });
+
+    it("does NOT label a live kit member", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [{ kitId: "kit-1", kit: { id: "kit-1", name: "Kit One" } }],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+
+    it("does NOT label a genuinely standalone asset", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
     });
   });
 });

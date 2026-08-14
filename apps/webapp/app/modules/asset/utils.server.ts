@@ -10,9 +10,12 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
@@ -172,17 +175,22 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
+  // Custom field NAMES and VALUES are both free-form user input and render
+  // as literal text in this Markdoc note.
+  const fieldName = stripMarkdocDelimiters(customFieldName);
+  const safeNew = stripMarkdocDelimiters(newValue);
+  const safePrevious = stripMarkdocDelimiters(previousValue);
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${customFieldName}** to **${newValue}**.`;
+    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${customFieldName}** from **${previousValue}** to **${newValue}**.`;
+    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${customFieldName}** value **${previousValue}**.`;
+    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
   }
 
   return message;
@@ -556,12 +564,59 @@ export function applyArchivedFilter(
   return where;
 }
 
+/**
+ * Which custodian ids a caller may filter a "select all" query by.
+ *
+ * `"all"` means the caller has already been proven allowed to see everyone's
+ * custody — either by `canSeeAllCustody`, or because the surface is reachable
+ * only with a permission that restricted roles do not hold. Anything else is a
+ * concrete allow-list, normally from `scopeCustodianFilterIds`.
+ *
+ * @see {@link file://./../team-member/service.server.ts} — `scopeCustodianFilterIds`
+ */
+export type AllowedCustodianFilterIds = string[] | "all";
+
+/**
+ * Applies a custodian allow-list to ids taken from the query string.
+ *
+ * `"all"` passes them through. Otherwise only ids on the list survive, and a
+ * request that asked ONLY for others collapses to a single unmatchable id so
+ * the filter returns nothing — dropping it instead would widen the query to
+ * every row, which is the opposite of what a refusal should do.
+ */
+function applyCustodianAllowList(
+  requestedIds: string[],
+  allowedTeamMemberIds: AllowedCustodianFilterIds
+): string[] {
+  if (allowedTeamMemberIds === "all") {
+    return requestedIds;
+  }
+
+  const allowed = new Set(allowedTeamMemberIds);
+  const kept = requestedIds.filter((id) => allowed.has(id));
+
+  return requestedIds.length > 0 && kept.length === 0
+    ? [CUSTODY_FILTER_REFUSED]
+    : kept;
+}
+
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Required, with no default, so every call site states an answer.
+   *
+   * `?teamMember=` rides in on `currentSearchParams`, which is raw request
+   * input. A "select all" caller who may not see all custody could otherwise
+   * filter by a colleague's id and read back exactly which rows that person
+   * holds — verified live against `/api/assets/get-assets-for-bulk-qr-download`,
+   * which a BASE user can reach with `qr: read`.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
@@ -577,8 +632,12 @@ export function getAssetsWhereInput({
   // Active/Archived/All dimension (defaults to active = hide archived).
   applyArchivedFilter(where, getArchivedFilterFromParams(searchParams));
 
-  const { categoriesIds, locationIds, tagsIds, search, teamMemberIds } =
-    paramsValues;
+  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+
+  const teamMemberIds = applyCustodianAllowList(
+    paramsValues.teamMemberIds ?? [],
+    allowedTeamMemberIds
+  );
 
   const status =
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
@@ -597,18 +656,15 @@ export function getAssetsWhereInput({
     // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
+      // QT-aware fragment shared with getAssets and the mobile assets
+      // endpoint — see buildAssetStatusWhere for the rationale.
       where.AND = [
         ...(Array.isArray(where.AND)
           ? where.AND
           : where.AND
           ? [where.AND]
           : []),
-        {
-          OR: [
-            { type: "INDIVIDUAL", status: "AVAILABLE" },
-            { type: "QUANTITY_TRACKED" },
-          ],
-        },
+        buildAssetStatusWhere(status),
       ];
     } else {
       where.status = status;
@@ -760,6 +816,12 @@ export function validateAdvancedFilterParams(
 }
 
 export const ASSET_CSV_HEADERS = [
+  // Row matcher for the update importer (`/assets/import-update`) — the
+  // asset's cuid. The create importer accepts this header (so a re-exported
+  // file round-trips) but never reads it: createAssetsFromContentImport
+  // always generates a fresh id, so a caller-supplied id can't be used to
+  // set/connect/upsert onto another workspace's asset.
+  "id",
   "title",
   "description",
   "category",

@@ -30,11 +30,18 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
+  assertMobileCanUseBookings: vi.fn(),
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: external service — we mock the booking checkin to avoid database calls
 vi.mock("~/modules/booking/service.server", () => ({
   checkinBooking: vi.fn(),
+}));
+
+// why: workspace settings drive the explicit-check-in gate — mock to avoid DB
+vi.mock("~/modules/booking-settings/service.server", () => ({
+  getBookingSettingsForOrganization: vi.fn(),
 }));
 
 // why: we need to control error formatting in the catch block
@@ -53,7 +60,10 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -89,6 +99,13 @@ describe("POST /api/mobile/bookings/checkin", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
+    // Default: admin role + explicit check-in NOT required (quick check-in OK).
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getBookingSettingsForOrganization as any).mockResolvedValue({
+      requireExplicitCheckinForAdmin: false,
+      requireExplicitCheckinForSelfService: false,
+    });
   });
 
   it("should checkin a booking and return booking data", async () => {
@@ -135,6 +152,27 @@ describe("POST /api/mobile/bookings/checkin", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
 
+    expect(checkinBooking).not.toHaveBeenCalled();
+  });
+
+  it("blocks quick check-in (403) when the workspace requires explicit check-in for the role", async () => {
+    // Admin in a workspace that mandates explicit (scan/select) check-in for
+    // admins — quick "check in all" must be refused, mirroring the web policy.
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getBookingSettingsForOrganization as any).mockResolvedValue({
+      requireExplicitCheckinForAdmin: true,
+      requireExplicitCheckinForSelfService: false,
+    });
+    (makeShelfError as any).mockReturnValue({
+      message: "This workspace requires explicit check-in.",
+      status: 403,
+    });
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    // The quick check-in must NOT run — the user is forced to scan/select.
     expect(checkinBooking).not.toHaveBeenCalled();
   });
 });

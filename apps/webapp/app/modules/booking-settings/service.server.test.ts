@@ -2,6 +2,9 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
 import {
+  BOOKING_NOTIFICATION_SETTINGS_SELECT,
+  BOOKING_SETTINGS_SELECT,
+  getBookingNotificationSettingsForOrg,
   getBookingSettingsForOrganization,
   updateBookingSettings,
 } from "./service.server";
@@ -13,6 +16,8 @@ import {
 vitest.mock("~/database/db.server", () => ({
   db: {
     bookingSettings: {
+      findUnique: vitest.fn(),
+      findUniqueOrThrow: vitest.fn(),
       upsert: vitest.fn(),
       update: vitest.fn(),
     },
@@ -34,69 +39,36 @@ const mockOrganizationId = "org-1";
 describe("getBookingSettingsForOrganization", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: keep each test self-contained — default the read-first lookup to
+    // "not found" so tests that only care about the upsert fallback don't
+    // have to know about the new findUnique call. Tests exercising the
+    // existing-row path override this explicitly.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
   });
 
-  it("should get existing booking settings successfully", async () => {
-    expect.assertions(2);
+  it("should return the existing row without writing when one is found", async () => {
+    expect.assertions(3);
     //@ts-expect-error missing vitest type
-    db.bookingSettings.upsert.mockResolvedValue(mockBookingSettingsData);
+    db.bookingSettings.findUnique.mockResolvedValue(mockBookingSettingsData);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
-    expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
-      where: {
-        organizationId: mockOrganizationId,
-      },
-      update: {},
-      create: {
-        bufferStartTime: 0,
-        tagsRequired: false,
-        maxBookingLength: null,
-        maxBookingLengthSkipClosedDays: false,
-        autoArchiveBookings: false,
-        autoArchiveDays: 2,
-        requireExplicitCheckinForAdmin: false,
-        requireExplicitCheckinForSelfService: false,
-        countKitsAsSingleUnit: false,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        organizationId: mockOrganizationId,
-      },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+    expect(db.bookingSettings.findUnique).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      // Reuse the production projection so this assertion can't silently
+      // drift from what `getBookingSettingsForOrganization` actually selects.
+      select: BOOKING_SETTINGS_SELECT,
     });
+    // why: the whole point of the read-first change is that an existing row
+    // never triggers a write — this is the regression guard for the
+    // connection-pool-exhaustion incident this task fixes.
+    expect(db.bookingSettings.upsert).not.toHaveBeenCalled();
     expect(result).toEqual(mockBookingSettingsData);
   });
 
   it("should create new booking settings with default values when none exist", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     const defaultSettings = {
       id: "booking-settings-new",
       bufferStartTime: 0,
@@ -105,10 +77,13 @@ describe("getBookingSettingsForOrganization", () => {
       organizationId: mockOrganizationId,
     };
     //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
     db.bookingSettings.upsert.mockResolvedValue(defaultSettings);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
+    expect(db.bookingSettings.upsert).toHaveBeenCalledTimes(1);
     expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
       where: {
         organizationId: mockOrganizationId,
@@ -121,6 +96,7 @@ describe("getBookingSettingsForOrganization", () => {
         maxBookingLengthSkipClosedDays: false,
         autoArchiveBookings: false,
         autoArchiveDays: 2,
+        autoArchiveExpiredReservations: false,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
         countKitsAsSingleUnit: false,
@@ -128,42 +104,63 @@ describe("getBookingSettingsForOrganization", () => {
         notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      // Reuse the production projection so this assertion can't silently
+      // drift from what `getBookingSettingsForOrganization` actually selects.
+      select: BOOKING_SETTINGS_SELECT,
     });
     expect(result).toEqual(defaultSettings);
   });
 
-  it("should throw ShelfError when database operation fails", async () => {
+  it("should throw ShelfError when the read-first lookup fails", async () => {
     expect.assertions(2);
     const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockRejectedValue(dbError);
+
+    await expect(
+      getBookingSettingsForOrganization(mockOrganizationId)
+    ).rejects.toThrow(ShelfError);
+
+    await expect(
+      getBookingSettingsForOrganization(mockOrganizationId)
+    ).rejects.toMatchObject({
+      message: "Failed to retrieve booking settings configuration",
+      additionalData: { organizationId: mockOrganizationId },
+    });
+  });
+
+  it("recovers from a concurrent-create P2002 by re-reading the row", async () => {
+    expect.assertions(2);
+    // BOOKING_SETTINGS_SELECT returns a nested relation, so Prisma emulates the
+    // upsert (read + create) and a concurrent first-hit can lose the race and
+    // throw P2002. The function must then re-read the row the winner created,
+    // not surface the unique-constraint error.
+    const p2002 = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(p2002);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUniqueOrThrow.mockResolvedValue(
+      mockBookingSettingsData
+    );
+
+    const result = await getBookingSettingsForOrganization(mockOrganizationId);
+
+    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      select: BOOKING_SETTINGS_SELECT,
+    });
+    expect(result).toEqual(mockBookingSettingsData);
+  });
+
+  it("should throw ShelfError when the upsert fallback fails", async () => {
+    expect.assertions(2);
+    const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
     db.bookingSettings.upsert.mockRejectedValue(dbError);
 
@@ -179,8 +176,11 @@ describe("getBookingSettingsForOrganization", () => {
     });
   });
 
-  it("should handle missing organization id", async () => {
+  it("wraps a findUnique failure in a ShelfError", async () => {
     expect.assertions(1);
+    const dbError = new Error("Database connection failed");
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockRejectedValue(dbError);
 
     await expect(getBookingSettingsForOrganization("")).rejects.toThrow(
       ShelfError
@@ -218,6 +218,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -268,6 +269,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -366,6 +368,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -416,6 +419,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -474,6 +478,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -526,6 +531,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -581,6 +587,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -631,6 +638,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -754,6 +762,7 @@ describe("updateBookingSettings", () => {
         maxBookingLengthSkipClosedDays: true,
         autoArchiveBookings: true,
         autoArchiveDays: true,
+        autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
         countKitsAsSingleUnit: true,
@@ -801,5 +810,66 @@ describe("updateBookingSettings", () => {
         maxBookingLength: 168,
       },
     });
+  });
+});
+
+describe("getBookingNotificationSettingsForOrg", () => {
+  const mockNotificationSettings = {
+    notifyBookingCreator: true,
+    notifyAdminsOnNewBooking: true,
+    alwaysNotifyTeamMembers: [],
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("upserts and returns the notification settings", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockResolvedValue(mockNotificationSettings);
+
+    const result =
+      await getBookingNotificationSettingsForOrg(mockOrganizationId);
+
+    expect(db.bookingSettings.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(mockNotificationSettings);
+  });
+
+  it("recovers from a concurrent-create P2002 by re-reading the row", async () => {
+    expect.assertions(2);
+    // The notification select returns a nested relation (alwaysNotifyTeamMembers),
+    // so Prisma emulates the upsert and a concurrent first-hit can throw P2002.
+    const p2002 = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(p2002);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUniqueOrThrow.mockResolvedValue(
+      mockNotificationSettings
+    );
+
+    const result =
+      await getBookingNotificationSettingsForOrg(mockOrganizationId);
+
+    // Exact-match the re-read args (where + select) so the "single source of
+    // truth" select can't drift between the upsert and the P2002 recovery.
+    expect(db.bookingSettings.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { organizationId: mockOrganizationId },
+      select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+    });
+    expect(result).toEqual(mockNotificationSettings);
+  });
+
+  it("wraps a non-P2002 failure in a ShelfError", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.upsert.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      getBookingNotificationSettingsForOrg(mockOrganizationId)
+    ).rejects.toBeInstanceOf(ShelfError);
+    expect(db.bookingSettings.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 });

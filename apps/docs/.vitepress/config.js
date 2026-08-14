@@ -118,6 +118,10 @@ export default {
             text: "Security Review Agent",
             link: "/security-review-agent",
           },
+          {
+            text: "PR Review Loop",
+            link: "/pr-review-loop",
+          },
         ],
       },
       {
@@ -165,6 +169,10 @@ export default {
           {
             text: "Microsoft Entra",
             link: "/sso/providers/microsoft-entra",
+          },
+          {
+            text: "Shibboleth",
+            link: "/sso/providers/shibboleth",
           },
         ],
       },

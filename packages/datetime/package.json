@@ -1,0 +1,17 @@
+{
+  "name": "@shelf/datetime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, preference-aware date/time formatter shared by the webapp and the companion app so their date rendering never drifts.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "devDependencies": {
+    "@shelf/typescript-config": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -55,6 +55,20 @@ type Props = ModelFilterProps & {
 
   /** Is this input required. Used to show a required star */
   required?: boolean;
+
+  /**
+   * Validation message for the current selection.
+   *
+   * Pass this instead of rendering your own paragraph next to the picker: a
+   * hand-rolled one is invisible to assistive tech, so a screen-reader user who
+   * submits an empty required picker gets nothing at all — the form just
+   * silently refuses to submit. Rendering it here lets the component announce
+   * the message (`role="alert"`) and point `aria-describedby` at it, which only
+   * the component can do because it owns the trigger element.
+   *
+   * Naming matches `~/components/forms/input.tsx`, which takes the same prop.
+   */
+  error?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -68,6 +82,13 @@ type Props = ModelFilterProps & {
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
+  /**
+   * When true, clears the internal search query (and resets the
+   * model-filters fetcher) whenever the popover closes — so reopening the
+   * picker starts fresh. Default false to preserve behavior for the ~20
+   * other consumers that rely on persisted search across reopen.
+   */
+  resetSearchOnClose?: boolean;
   excludeItems?: string[];
   /** Allow undefined for deselection cases */
   onChange?: ((value: string | undefined) => void) | null /**
@@ -108,6 +129,7 @@ export default function DynamicSelect({
   label,
   hideLabel,
   required,
+  error,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -117,6 +139,7 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
+  resetSearchOnClose = false,
   excludeItems,
   onChange = null,
   allowClear,
@@ -131,6 +154,8 @@ export default function DynamicSelect({
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  /** Stable id linking the trigger to its error text via `aria-describedby`. */
+  const errorId = useId();
   /**
    * Focus the search input when the popover opens — replaces a bare
    * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
@@ -176,6 +201,45 @@ export default function DynamicSelect({
     getAllEntries,
   } = useModelFilters({ model, selectionMode, ...hookProps });
 
+  /**
+   * Cache of the last-selected item so the trigger can still render its label
+   * after the model-filters fetcher is reset (see `resetSearchOnClose`). A
+   * model picked from typeahead only exists in the fetcher results, not in the
+   * loader's seed list — resetting the fetcher would otherwise drop it from
+   * `allItemsToRender`, and the trigger would fall back to the placeholder even
+   * though the hidden input still posts the selected id.
+   */
+  const [selectedItemCache, setSelectedItemCache] = useState<
+    ModelFilterItem | undefined
+  >(undefined);
+
+  /**
+   * Hold the latest `resetModelFiltersFetcher` in a ref so the close-reset
+   * effect can call it without listing it as a dependency — it's recreated on
+   * every `useModelFilters` call, so depending on it directly would refire the
+   * effect on every render.
+   */
+  const resetFetcherRef = useRef(resetModelFiltersFetcher);
+  resetFetcherRef.current = resetModelFiltersFetcher;
+
+  /**
+   * Reset the search on the open→closed transition when opted in. This covers
+   * BOTH the programmatic close from `closeOnSelect` (handleItemChange calls
+   * `setIsPopoverOpen(false)` directly, so Radix's `onOpenChange` never fires)
+   * and Radix-driven closes (Escape, outside click). The `wasOpen` ref gates on
+   * the transition so it does not fire on the initial closed mount.
+   * `resetModelFiltersFetcher` already clears `searchQuery`, so we don't call
+   * `setSearchQuery` separately.
+   */
+  const wasPopoverOpenRef = useRef(false);
+  useEffect(() => {
+    const justClosed = wasPopoverOpenRef.current && !isPopoverOpen;
+    wasPopoverOpenRef.current = isPopoverOpen;
+    if (resetSearchOnClose && justClosed) {
+      resetFetcherRef.current();
+    }
+  }, [isPopoverOpen, resetSearchOnClose]);
+
   const itemsWithCreated = useMemo(
     () => dedupeItems([...createdItems, ...items]),
     [createdItems, items]
@@ -214,11 +278,23 @@ export default function DynamicSelect({
     return [...specialItems, ...itemsToRender];
   }, [withValueItem, withoutValueItem, itemsToRender]);
 
-  function handleItemChange(id: string) {
+  function handleItemChange(id: string, knownItem?: ModelFilterItem) {
     const isDeselecting = allowClear && selectedValue === id;
 
     // Update local state
     setSelectedValue(isDeselecting ? undefined : id);
+
+    // Cache the picked item so the trigger can render its label even after the
+    // fetcher is reset — a typeahead-only or just-created selection is
+    // otherwise dropped by resetSearchOnClose. Callers that already hold the
+    // item object (e.g. inline creation) pass it as `knownItem`; the freshly
+    // created item is not yet in `allItemsToRender` in this tick, so the
+    // lookup would miss it.
+    setSelectedItemCache(
+      isDeselecting
+        ? undefined
+        : knownItem ?? allItemsToRender.find((i) => i.id === id)
+    );
 
     // Always update URL params and parent state
     handleSelectItemChange(id);
@@ -231,8 +307,16 @@ export default function DynamicSelect({
     }
   }
 
-  /** This is needed so we know what to show on the trigger */
-  const selectedItem = allItemsToRender.find((i) => i.id === selectedValue);
+  /**
+   * This is needed so we know what to show on the trigger. Falls back to the
+   * cached selected item when the current render list no longer contains it
+   * (e.g. a typeahead selection after the fetcher was reset). The id guard
+   * avoids showing a stale cache once `selectedValue` changes (e.g. a
+   * `defaultValue`-driven reset).
+   */
+  const selectedItem =
+    allItemsToRender.find((i) => i.id === selectedValue) ??
+    (selectedItemCache?.id === selectedValue ? selectedItemCache : undefined);
   const triggerValue = selectedItem
     ? typeof renderItem === "function"
       ? renderItem({ ...selectedItem, metadata: selectedItem })
@@ -252,7 +336,10 @@ export default function DynamicSelect({
 
   const handleItemCreated = (item: ModelFilterItem) => {
     setCreatedItems((prev) => dedupeItems([item, ...prev]));
-    handleItemChange(item.id);
+    // Pass the created item so the selected-item cache holds it directly — it
+    // is not yet in `allItemsToRender` in this render, and the following
+    // `resetModelFiltersFetcher()` clears the fetcher results.
+    handleItemChange(item.id, item);
     setSearchQuery("");
     resetModelFiltersFetcher();
     setIsPopoverOpen(false);
@@ -291,6 +378,17 @@ export default function DynamicSelect({
                 "w-full",
                 disabled && "cursor-not-allowed opacity-60"
               )}
+              // Radix's `asChild` trigger injects aria-expanded/haspopup/controls
+              // onto this element but never this one, so there is no collision.
+              //
+              // No `aria-invalid`: ARIA only allows it on input widgets, and
+              // this trigger's implicit role is `button` (jsx-a11y flags it as
+              // an error). Re-roling it to `combobox` would satisfy the
+              // attribute but lie about the popup — Radix Popover advertises
+              // `aria-haspopup="dialog"`, not a listbox. The announcement comes
+              // from the message's `role="alert"` and the association from
+              // `aria-describedby`; the red border carries the visual half.
+              aria-describedby={error ? errorId : undefined}
             >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
@@ -300,7 +398,11 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50"
+                className={tw(
+                  "flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50",
+                  // Same visual error signal as `Input`, so the two read alike.
+                  error && "border-error-300"
+                )}
               >
                 <span
                   className={tw(
@@ -520,6 +622,14 @@ export default function DynamicSelect({
             </PopoverContent>
           </PopoverPortal>
         </Popover>
+
+        {/* Inserting a role="alert" node announces it, which is the whole point:
+            submit-time validation on a picker is otherwise silent. */}
+        {error ? (
+          <p id={errorId} role="alert" className="text-sm text-error-500">
+            {error}
+          </p>
+        ) : null}
       </div>
     </>
   );

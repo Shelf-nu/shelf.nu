@@ -13,6 +13,7 @@ import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
   customerHasPaymentMethod,
@@ -493,7 +494,10 @@ export async function getOrganizationAdminsEmails({
 
 /**
  * Returns admin and owner users for an organization with their full
- * notification-relevant fields: `id`, `email`, `firstName`, `lastName`.
+ * notification-relevant fields: `id`, `email`, `firstName`, `lastName`, plus
+ * the four raw date/time format-preference columns (`dateFormat`,
+ * `timeFormat`, `weekStart`, `timeZone`) so recipient-specific email
+ * formatting resolves from the loaded row.
  *
  * This differs from `getOrganizationAdminsEmails()` (which returns only
  * email strings) because the notification recipient resolver needs the
@@ -525,6 +529,14 @@ export async function getOrganizationAdminsForNotification({
             email: true,
             firstName: true,
             lastName: true,
+            // Format-preference columns so the booking notification resolver
+            // can carry them onto each recipient and resolve recipient-specific
+            // email date/time formatting from the loaded row (no per-recipient
+            // DB fetch). See `NotificationRecipient`.
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
       },
@@ -642,33 +654,6 @@ export async function toggleAuditEnabled({
       label,
     });
   }
-}
-
-/**
- * Utility function to parse and validate domains from a comma-separated string
- * @param domainsString - Comma-separated string of domains
- * @returns Array of cleaned domain strings
- */
-export function parseDomains(domainsString: string): string[] {
-  return domainsString
-    .split(",")
-    .map((domain) => domain.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-/**
- * Checks if a given email matches any of the provided comma-separated domains
- * @param email - Email address to check
- * @param domainsString - Comma-separated string of domains
- * @returns boolean indicating if email matches any domain
- */
-export function emailMatchesDomains(
-  emailDomain: string,
-  domainsString: string | null
-): boolean {
-  if (!emailDomain || !domainsString) return false;
-  const domains = parseDomains(domainsString);
-  return domains.includes(emailDomain.toLowerCase());
 }
 
 /** Permissions functions */

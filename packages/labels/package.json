@@ -1,0 +1,15 @@
+{
+  "name": "@shelf/labels",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Canonical user-facing label strings shared by the webapp and the companion app so their terminology never drifts.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

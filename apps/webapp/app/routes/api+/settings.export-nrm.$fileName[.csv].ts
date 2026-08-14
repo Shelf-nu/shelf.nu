@@ -34,6 +34,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const csvString = await exportNRMsToCsv({
       organizationId,
       nrmIds: nrmIds.split(","),
+      // The export button forwards the index's current search params, so
+      // "select all" exports exactly the filtered set the user can see.
+      search: searchParams.get("s"),
     });
 
     return new Response(csvString, {

@@ -5,6 +5,9 @@ import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -21,12 +24,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -74,6 +78,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     }
 
+    // Acting user's timezone: when "select all" is active the affected set is
+    // resolved from the current date filters, which must truncate the day in
+    // the user's tz (avoids an off-by-one for non-UTC users).
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId,
       role,
@@ -81,6 +93,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       settings,
+      timeZone,
+      // `asset: custody` is a SELF_SERVICE permission, so narrow the
+      // select-all custodian filter to the caller's own custody — otherwise a
+      // self-service user could act on exactly the set a colleague holds.
+      allowedTeamMemberIds: await scopeCustodianFilterIds({
+        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+          "teamMember"
+        ),
+        canSeeAllCustody,
+        userId,
+        organizationId,
+      }),
     });
 
     const skippedNote =

@@ -28,6 +28,11 @@ vi.mock("~/database/db.server", () => ({
     note: {
       findMany: vi.fn(),
     },
+    // why: exportNotesToCsv now resolves the acting user's format prefs via
+    // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS.
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -142,10 +147,8 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(
-      '"formatted-2024-01-02T10:00:00.000Z","Carlos Virreira","COMMENT","Line with ""quotes"" and newline"'
+      '"01/02/2024, 10:00 AM","Carlos Virreira","COMMENT","Line with ""quotes"" and newline"'
     );
-    expect(rows[2]).toBe(
-      '"formatted-2024-01-01T09:30:00.000Z","","UPDATE","System note"'
-    );
+    expect(rows[2]).toBe('"01/01/2024, 9:30 AM","","UPDATE","System note"');
   });
 });

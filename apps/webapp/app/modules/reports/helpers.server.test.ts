@@ -115,6 +115,30 @@ describe("bookingComplianceReport — complianceData hero", () => {
     expect(result.complianceData!.rate).toBe(50);
   });
 
+  it("excludes never-returned archives (archivedWithoutCheckin) from every booking query", async () => {
+    // why: A booking archived straight from RESERVED was never checked in, so
+    // it must not be measured for on-time-return compliance. The exclusion is
+    // enforced at the query layer — every booking read in the compliance flow
+    // filters on `archivedWithoutCheckin: false`, so archived-from-reserved
+    // rows never reach the count, rows, rate, trend, or custodian breakdown.
+    await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    const findManyCalls = vi.mocked(db.booking.findMany).mock.calls;
+    expect(findManyCalls.length).toBeGreaterThan(0);
+    for (const [args] of findManyCalls) {
+      expect((args as any).where.archivedWithoutCheckin).toBe(false);
+    }
+
+    const countCalls = vi.mocked(db.booking.count).mock.calls;
+    expect(countCalls.length).toBeGreaterThan(0);
+    for (const [args] of countCalls) {
+      expect((args as any).where.archivedWithoutCheckin).toBe(false);
+    }
+  });
+
   it("falls back to updatedAt for COMPLETE bookings missing a check-in event", async () => {
     // why: The partial-check-in completion path historically wrote a custom
     // system note instead of calling `createStatusTransitionNote`, so no
@@ -306,5 +330,63 @@ describe("bookingComplianceReport — row builder", () => {
 
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].status).toBe(BookingStatus.ARCHIVED);
+  });
+});
+
+describe("bookingComplianceReport — trend axis labels (timezone)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.booking.findMany).mockResolvedValue([] as any);
+    vi.mocked(db.booking.count).mockResolvedValue(0 as any);
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([] as any);
+    vi.mocked(db.$queryRaw).mockResolvedValue([] as any);
+  });
+
+  it("labels daily trend buckets in the acting user's timezone, not UTC", async () => {
+    // why: The trend buckets are anchored to `timeframe.from`, which is
+    // midnight in the user's pref timezone. For a Tokyo (UTC+9) user, the
+    // first bucket starts at 2026-07-17T00:00 Tokyo = 2026-07-16T15:00Z.
+    // Reading the bucket day in UTC yields "Thu 16" (off-by-one); reading it
+    // in Asia/Tokyo yields the correct "Fri 17". A <=14-day span forces daily
+    // granularity so `formatDayLabel` is exercised. Fixed UTC instants +
+    // explicit timeZone keep the assertion machine-timezone independent.
+    const timeframe: ResolvedTimeframe = {
+      preset: "last_7d",
+      label: "Last 7 days",
+      // Tokyo midnight on 2026-07-17 and 2026-07-19 respectively.
+      from: new Date("2026-07-16T15:00:00Z"),
+      to: new Date("2026-07-18T14:59:59Z"),
+    };
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe,
+      timeZone: "Asia/Tokyo",
+    });
+
+    const labels = result.complianceTrend!.map((point) => point.label);
+    expect(labels).toEqual(["Fri 17", "Sat 18"]);
+    // Guard against the UTC off-by-one regression explicitly.
+    expect(labels).not.toContain("Thu 16");
+  });
+
+  it("falls back to UTC labels when no timezone is provided", async () => {
+    // why: With no resolved prefs the helper defaults to UTC, preserving the
+    // historical behavior — the same Tokyo-anchored instants read one day
+    // earlier in UTC.
+    const timeframe: ResolvedTimeframe = {
+      preset: "last_7d",
+      label: "Last 7 days",
+      from: new Date("2026-07-16T15:00:00Z"),
+      to: new Date("2026-07-18T14:59:59Z"),
+    };
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe,
+    });
+
+    const labels = result.complianceTrend!.map((point) => point.label);
+    expect(labels).toEqual(["Thu 16", "Fri 17"]);
   });
 });

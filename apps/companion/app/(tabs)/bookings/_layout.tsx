@@ -28,6 +28,12 @@ export default function BookingsLayout() {
     >
       <Stack.Screen name="index" options={{ title: "Bookings" }} />
       <Stack.Screen name="[id]" options={{ title: "Booking Details" }} />
+      <Stack.Screen name="new" options={{ title: "New Booking" }} />
+      <Stack.Screen name="edit" options={{ title: "Edit Booking" }} />
+      <Stack.Screen
+        name="add-assets"
+        options={{ title: "Add to Booking", presentation: "modal" }}
+      />
     </Stack>
   );
 }

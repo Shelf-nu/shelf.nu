@@ -1,13 +1,33 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { shapeMobileAssetResponse } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  requireMobileAuth,
+  shapeMobileAssetResponse,
+} from "~/modules/api/mobile-auth.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
-// Mocking the db module to an empty object short-circuits the connection.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+// Mocking the db module short-circuits the connection; `user.findUnique` is a
+// spy so the `requireMobileAuth` test can assert the select shape.
+vi.mock("~/database/db.server", () => ({
+  db: { user: { findUnique: vi.fn() } },
+}));
+
+// why: `requireMobileAuth` validates the Bearer JWT via Supabase Admin — an
+// external network call with no service available under `pnpm test:run`.
+vi.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: vi.fn(),
+}));
+
+// why: fire-and-forget usage recorder that would touch the mocked db; it is
+// irrelevant to the auth/format-prefs contract, so stub it to a no-op.
+vi.mock("./mobile-usage.server", () => ({
+  recordMobileActivity: vi.fn(),
+}));
 
 /**
  * Tests for `shapeMobileAssetResponse` — the back-compat helper that flattens
@@ -25,18 +45,51 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 
 // why: a minimal valid `MOBILE_ASSET_SELECT` row used as the baseline for
 // every test. Individual tests override only the fields they care about so
-// the asserted output diffs stay readable.
+// the asserted output diffs stay readable. Quantity scalars default to the
+// INDIVIDUAL-asset shape (`type: "INDIVIDUAL"`, null quantity columns).
 const baseAsset = {
   id: "asset-123",
   title: "Test Asset",
   status: "AVAILABLE",
   mainImage: null,
+  thumbnailImage: null,
+  assetModel: null as {
+    image: string | null;
+    thumbnailImage: string | null;
+  } | null,
   availableToBook: true,
   category: null,
+  type: "INDIVIDUAL" as const,
+  quantity: null,
+  minQuantity: null,
+  unitOfMeasure: null,
+  consumptionType: null,
   assetKits: [],
   assetLocations: [],
-  custody: [],
+  custody: [] as Array<{
+    quantity: number;
+    kitCustodyId: string | null;
+    custodian: { id: string; name: string; userId: string | null };
+  }>,
 };
+
+/**
+ * Builds a custody row in the widened `MOBILE_ASSET_SELECT` shape. Operator
+ * rows by default (`kitCustodyId: null`); pass `kitCustodyId` for
+ * kit-allocated rows, `userId` for custodians linked to an auth user.
+ */
+function custodyRow(
+  id: string,
+  name: string,
+  quantity: number,
+  opts: { kitCustodyId?: string | null; userId?: string | null } = {}
+) {
+  return {
+    quantity,
+    kitCustodyId: opts.kitCustodyId ?? null,
+    custodian: { id, name, userId: opts.userId ?? null },
+  };
+}
 
 describe("shapeMobileAssetResponse", () => {
   it("returns null for kit, kitId, location, and custody when all pivots are empty", () => {
@@ -64,11 +117,11 @@ describe("shapeMobileAssetResponse", () => {
   it("flattens custody[0] to a single-or-null object", () => {
     const result = shapeMobileAssetResponse({
       ...baseAsset,
-      custody: [{ custodian: { id: "tm-789", name: "Alice Example" } }],
+      custody: [custodyRow("tm-789", "Alice Example", 1)],
     });
 
     expect(result.custody).toEqual({
-      custodian: { id: "tm-789", name: "Alice Example" },
+      custodian: { id: "tm-789", name: "Alice Example", userId: null },
     });
     expect(result.kit).toBeNull();
     expect(result.location).toBeNull();
@@ -90,14 +143,14 @@ describe("shapeMobileAssetResponse", () => {
       ...baseAsset,
       assetKits: [{ kit: { id: "kit-1", name: "Audio Kit" } }],
       assetLocations: [{ location: { id: "loc-1", name: "Warehouse" } }],
-      custody: [{ custodian: { id: "tm-1", name: "Bob Custodian" } }],
+      custody: [custodyRow("tm-1", "Bob Custodian", 1)],
     });
 
     expect(result.kit).toEqual({ id: "kit-1", name: "Audio Kit" });
     expect(result.kitId).toBe("kit-1");
     expect(result.location).toEqual({ id: "loc-1", name: "Warehouse" });
     expect(result.custody).toEqual({
-      custodian: { id: "tm-1", name: "Bob Custodian" },
+      custodian: { id: "tm-1", name: "Bob Custodian", userId: null },
     });
 
     // Raw pivot arrays must not leak through — companion reads the flat
@@ -106,6 +159,52 @@ describe("shapeMobileAssetResponse", () => {
     expect(result).not.toHaveProperty("assetLocations");
     // `custody` IS a key on the output but as a single object, not an array.
     expect(Array.isArray(result.custody)).toBe(false);
+  });
+
+  // why: the companion reads `mainImage`/`thumbnailImage` directly and ships as
+  // a native binary, so it cannot be updated in lockstep with the API. The
+  // cascade therefore has to be resolved server-side or inherited images never
+  // reach the app.
+  it("resolves an inherited model image into mainImage/thumbnailImage", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: null,
+      thumbnailImage: null,
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/model-main.jpg");
+    expect(result.thumbnailImage).toBe("https://cdn/model-thumb.jpg");
+    expect(result.imageSource).toBe("model");
+    expect(result).not.toHaveProperty("assetModel");
+  });
+
+  it("keeps the asset's own image when it has one", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: "https://cdn/asset-main.jpg",
+      thumbnailImage: "https://cdn/asset-thumb.jpg",
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/asset-main.jpg");
+    expect(result.imageSource).toBe("asset");
+  });
+
+  // why: the companion renders its own placeholder on a null mainImage, so the
+  // placeholder PATH must not leak into the response.
+  it("leaves the image fields null when neither asset nor model has one", () => {
+    const result = shapeMobileAssetResponse(baseAsset);
+
+    expect(result.mainImage).toBeNull();
+    expect(result.thumbnailImage).toBeNull();
+    expect(result.imageSource).toBe("placeholder");
   });
 
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {
@@ -122,5 +221,171 @@ describe("shapeMobileAssetResponse", () => {
     expect(result.mainImage).toBe("https://example.com/img.jpg");
     expect(result.availableToBook).toBe(false);
     expect(result.category).toEqual({ name: "Cameras" });
+  });
+
+  it("keeps legacy fields null AND surfaces the new quantity fields for an INDIVIDUAL asset with empty pivots", () => {
+    // The new additive fields must coexist with the legacy back-compat
+    // contract: a bare INDIVIDUAL asset still reports null kit/location/
+    // custody, plus the quantity scalars pass through and `custodyList` is
+    // an empty array (never undefined).
+    const result = shapeMobileAssetResponse(baseAsset);
+
+    // Legacy fields unchanged.
+    expect(result.kit).toBeNull();
+    expect(result.kitId).toBeNull();
+    expect(result.location).toBeNull();
+    expect(result.custody).toBeNull();
+
+    // New additive fields.
+    expect(result.type).toBe("INDIVIDUAL");
+    expect(result.quantity).toBeNull();
+    expect(result.minQuantity).toBeNull();
+    expect(result.unitOfMeasure).toBeNull();
+    expect(result.consumptionType).toBeNull();
+    expect(result.custodyList).toEqual([]);
+  });
+
+  it("surfaces the many-aware custodyList for a QUANTITY_TRACKED asset with multiple custody rows", () => {
+    // QUANTITY_TRACKED assets can have multiple holders. `custodyList` must
+    // carry every row with its quantity, while the legacy single `custody`
+    // collapses to the first row's custodian (no leaked `quantity`).
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      unitOfMeasure: "pcs",
+      custody: [
+        custodyRow("tm-1", "Alice", 3, { userId: "user-alice" }),
+        custodyRow("tm-2", "Bob", 2),
+      ],
+    });
+
+    // Many-aware list keeps both entries with their quantities. Operator-only
+    // rows are fully releasable; `userId` passes through for own-row checks.
+    expect(result.custodyList).toEqual([
+      {
+        custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
+        quantity: 3,
+        releasableQuantity: 3,
+      },
+      {
+        custodian: { id: "tm-2", name: "Bob", userId: null },
+        quantity: 2,
+        releasableQuantity: 2,
+      },
+    ]);
+
+    // Legacy single custody = first row's custodian only (quantity stripped).
+    expect(result.custody).toEqual({
+      custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
+    });
+
+    // Quantity scalar passes through.
+    expect(result.quantity).toBe(10);
+    expect(result.type).toBe("QUANTITY_TRACKED");
+  });
+
+  it("sums kit-allocated rows into quantity but excludes them from releasableQuantity", () => {
+    // A holder with an operator row (3) AND a kit-allocated row (2) shows once
+    // with quantity 5, but only the operator portion is releasable via the
+    // release-quantity endpoint — kit-allocated units are released by
+    // releasing the kit's custody.
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      custody: [
+        custodyRow("tm-1", "Alice", 3, { userId: "user-alice" }),
+        custodyRow("tm-1", "Alice", 2, {
+          userId: "user-alice",
+          kitCustodyId: "kc-1",
+        }),
+      ],
+    });
+
+    expect(result.custodyList).toEqual([
+      {
+        custodian: { id: "tm-1", name: "Alice", userId: "user-alice" },
+        quantity: 5,
+        releasableQuantity: 3,
+      },
+    ]);
+  });
+});
+
+/**
+ * Tests for `requireMobileAuth`'s user contract — specifically that the four
+ * date/time format-preference columns (`dateFormat`, `timeFormat`, `weekStart`,
+ * `timeZone`) are both SELECTED and RETURNED, since `/api/mobile/me` hands the
+ * returned `user` straight to the companion. If a refactor drops them from the
+ * select, the companion silently falls back to device-local formatting — a
+ * regression with no other automated guard.
+ *
+ * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
+ */
+describe("requireMobileAuth", () => {
+  // Reset the module-scoped `findUnique` spy before each test so this suite's
+  // assertions read only its own call, not calls accumulated by earlier suites.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
+    // why: stub the Supabase JWT validation to yield a valid auth user.
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: { email: "ada@example.com" } },
+      error: null,
+    });
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      auth: { getUser },
+    } as unknown as ReturnType<typeof getSupabaseAdmin>);
+
+    // A full DB row as selected by requireMobileAuth: the 4 pref columns plus
+    // the two internal-only fields that must be stripped from the response.
+    const dbRow = {
+      id: "user-1",
+      email: "ada@example.com",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      profilePicture: null,
+      onboarded: true,
+      dateFormat: "YYYY_MM_DD",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Asia/Tokyo",
+      deletedAt: null,
+      lastMobileActiveAt: null,
+    };
+    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+
+    const request = new Request("https://shelf.test/api/mobile/me", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+
+    const { user } = await requireMobileAuth(request);
+
+    // The 4 format-pref columns are part of the select (regression guard). Read
+    // the LATEST call so a future test that reaches requireMobileAuth first
+    // can't shift the call this assertion inspects.
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    const select = lastCall?.[0].select;
+    expect(select).toMatchObject({
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
+    });
+
+    // ...and they survive into the returned (safe) user.
+    expect(user).toMatchObject({
+      dateFormat: "YYYY_MM_DD",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "Asia/Tokyo",
+    });
+
+    // Internal-only fields are stripped by the `safeUser` destructure.
+    expect(user).not.toHaveProperty("deletedAt");
+    expect(user).not.toHaveProperty("lastMobileActiveAt");
   });
 });

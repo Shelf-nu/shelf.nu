@@ -40,7 +40,9 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },
@@ -87,9 +89,9 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) => (
-      <CurrencyCell value={row.original.valuation} treatZeroAsEmpty />
-    ),
+    // Asset-aware: shows TOTAL (valuation × quantity) for QT assets, with
+    // a "<unit price> × N <unit>" subtext. See {@link CurrencyCell}.
+    cell: ({ row }) => <CurrencyCell asset={row.original} treatZeroAsEmpty />,
   },
 ];
 

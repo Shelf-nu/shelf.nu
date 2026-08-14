@@ -20,6 +20,7 @@ import {
   deleteBookingNote,
 } from "~/modules/booking-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -51,20 +52,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Parent route already enforces booking.read permission
     // Only check bookingNote.read permission here
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
       action: PermissionAction.read,
     });
 
-    const [booking, bookingNotes] = await Promise.all([
-      getBooking({ id, organizationId, request }),
-      getBookingNotes({
-        bookingId: id,
-        organizationId,
-      }),
-    ]);
+    const booking = await getBooking({ id, organizationId, request });
+
+    /**
+     * For self service & base users, we only allow them to read their own
+     * bookings. Neither the `bookingNote.read` permission above nor the parent
+     * route's `booking.read` gate provides this: both are granted to BASE and
+     * SELF_SERVICE, and `getBooking` is org-scoped only. Without this check any
+     * booking's activity feed is readable by id. Mirrors the gate the overview
+     * route applies.
+     *
+     * Gate BEFORE fetching notes so an unauthorized request never reads another
+     * user's activity rows — the custody check is a precondition, not a filter
+     * applied after the data is already in memory.
+     */
+    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        status: 403,
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
+    const bookingNotes = await getBookingNotes({
+      bookingId: id,
+      organizationId,
+    });
 
     const header: HeaderData = {
       title: `${booking.name}'s activity`,
@@ -101,7 +123,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const requiredAction =
       method === "DELETE" ? PermissionAction.delete : PermissionAction.create;
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllBookings } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -119,7 +141,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true },
+      select: {
+        id: true,
+        custodianUserId: true,
+        // Custody can be recorded on the team-member link alone; the gate
+        // below matches on either link, so both must be selected.
+        custodianTeamMember: { select: { userId: true } },
+      },
     });
 
     if (!booking) {
@@ -129,6 +157,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         additionalData: { userId, bookingId, organizationId },
         label: "Booking",
         status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Same-org is not sufficient: `bookingNote.create` is granted to BASE and
+     * SELF_SERVICE, so without this check either role could write notes onto
+     * any booking in the workspace by id. The loader gates reading another
+     * user's activity feed for these roles; gating the mutation here keeps the
+     * write path from being a way around that.
+     */
+    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not authorized to modify notes on this booking",
+        additionalData: { userId, bookingId, organizationId },
+        label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }

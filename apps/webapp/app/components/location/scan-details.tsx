@@ -63,11 +63,13 @@ export function ScanDetails({
             </div>
             <div className="flex justify-between py-2">
               <p>Browser</p>
-              <p>{lastScan.ua.browser.name}</p>
+              {/* why: ua-parser-js can return empty sub-objects for malformed UA */}
+              {/* strings; fall back to "Unknown" instead of crashing the page. */}
+              <p>{lastScan.ua.browser?.name ?? "Unknown"}</p>
             </div>
             <div className="flex justify-between py-2">
               <p>OS</p>
-              <p>{lastScan.ua.os.name}</p>
+              <p>{lastScan.ua.os?.name ?? "Unknown"}</p>
             </div>
             <div className="flex justify-between py-2">
               <p>Scanned By</p>

@@ -624,6 +624,7 @@ function AddRequestRow({
             countKey="totalAssetModels"
             selectionMode="none"
             closeOnSelect
+            resetSearchOnClose
             showSearch
             excludeItems={excludeModelIds}
             defaultValue={assetModelId}

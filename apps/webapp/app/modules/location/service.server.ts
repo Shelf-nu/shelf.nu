@@ -1,5 +1,4 @@
 import type {
-  Prisma,
   User,
   Location,
   Organization,
@@ -7,10 +6,11 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -22,12 +22,15 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
@@ -299,6 +302,8 @@ export async function getLocation(
             where: assetsWhereForLocation,
             orderBy: { [orderBy]: orderDirection },
             include: {
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: {
                 select: {
                   id: true,
@@ -684,13 +689,24 @@ export async function getLocationTotalValuation({
 }: {
   locationId: Location["id"];
 }) {
+  // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
   // Filter via the `AssetLocation` pivot — there is no `Asset.locationId`.
-  const result = await db.asset.aggregate({
-    _sum: { valuation: true },
-    where: { assetLocations: { some: { locationId } } },
-  });
+  // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
+  // to `$queryRaw` and keep the same scope (assets joined to the pivot).
+  // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
+  // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+  const rows = await db.$queryRaw<{ total: number | null }[]>(
+    Prisma.sql`
+      SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
+      FROM "Asset" a
+      WHERE a.id IN (
+        SELECT al."assetId" FROM "AssetLocation" al
+        WHERE al."locationId" = ${locationId}
+      )
+    `
+  );
 
-  return result._sum.valuation ?? 0;
+  return Number(rows[0]?.total ?? 0);
 }
 
 /**
@@ -1035,7 +1051,11 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  const escape = (v: string) => `**${v.replace(/([*_`~])/g, "\\$1")}**`;
+  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
+  // and address are free-form user input rendered through Markdoc, so escaping
+  // `*_~` alone still lets `{% … %}` through as a live tag.
+  const escape = (v: string) =>
+    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
   const changes: string[] = [];
 
   // Name change
@@ -1932,6 +1952,9 @@ export async function updateLocationAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -2373,6 +2396,21 @@ export async function updateLocationAssets({
       assetQuantities,
     });
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400 (user tried to place more units across
+    // locations than the asset has). No-ops for every other error. See
+    // SHELF-WEBAPP-21N.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+    // Likewise translate the single-location trigger: an INDIVIDUAL asset added
+    // here while it's still placed at another location. See SHELF-WEBAPP-1P4.
+    throwIfIndividualAssetAlreadyPlaced(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }
@@ -2440,6 +2478,9 @@ export async function updateLocationKits({
       const kitWhere = getKitsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allKits = await db.kit.findMany({
@@ -2582,12 +2623,26 @@ export async function updateLocationKits({
           }
         })
         .catch((cause) => {
+          // Adding kit-driven `AssetLocation` rows can trip two DB triggers.
+          // Translate both into friendly 400s (no-op for any other error):
+          // - a QUANTITY_TRACKED member exceeding Asset.quantity across
+          //   locations, and
+          // - an INDIVIDUAL member still placed at another location.
+          // See SHELF-WEBAPP-1P4.
+          throwIfAssetQuantityOverAllocation(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
+          throwIfIndividualAssetAlreadyPlaced(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
           throw new ShelfError({
             cause,
             message:
               "Something went wrong while adding the kits to the location. Please try again or contact support.",
             additionalData: { kitIds, userId, locationId },
-            label: "Location",
+            label,
           });
         });
 

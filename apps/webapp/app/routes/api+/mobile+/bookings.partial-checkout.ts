@@ -4,6 +4,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -45,11 +46,17 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.checkout,
     });
 
+    await assertMobileCanUseBookings(organizationId);
+
     const body = await request.json();
     const { bookingId, assetIds, checkouts, timeZone } = z
       .object({
         bookingId: z.string().min(1),
-        assetIds: z.array(z.string().cuid()).min(1),
+        // Optional: a QT-only check-out sends its quantities in `checkouts` with
+        // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
+        // service 400s if BOTH are empty, so we don't require a minimum here
+        // (mirrors the partial-checkin route).
+        assetIds: z.array(z.string().cuid()).optional(),
         /**
          * Optional per-asset checkout payload mirroring the webapp check-in
          * JSON shape. When present, the service uses it to perform partial

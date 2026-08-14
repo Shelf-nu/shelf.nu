@@ -88,8 +88,11 @@ export const handle = {
 export default function KitOverview() {
   const { kit, currentOrganization, locale } = useLoaderData<typeof loader>();
   const { canUseBarcodes } = useBarcodePermissions();
+  // Multiplies per-unit `valuation` by `AssetKit.quantity` — units of
+  // this asset *in this kit*, not workspace stock. A QT asset stocked
+  // at 100 with 5 in this kit contributes `valuation × 5`, not × 100.
   const totalValue = kit.assetKits.reduce(
-    (total, ak) => total + (ak.asset.valuation ?? 0),
+    (total, ak) => total + (ak.asset.valuation ?? 0) * (ak.quantity ?? 1),
     0
   );
 

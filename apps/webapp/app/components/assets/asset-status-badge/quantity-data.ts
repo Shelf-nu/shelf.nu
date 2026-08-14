@@ -16,6 +16,7 @@
  */
 
 import type { AssetType } from "@prisma/client";
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 
@@ -158,26 +159,38 @@ export function getQuantityBadgeLabelAndColor(data: QuantityBreakdown): {
 
   if (checkedOut > 0) {
     return {
-      label: available <= 0 ? "Checked out" : "Partially checked out",
+      label:
+        available <= 0
+          ? ASSET_QTY_STATUS_LABELS.CHECKED_OUT
+          : ASSET_QTY_STATUS_LABELS.PARTIALLY_CHECKED_OUT,
       colors: BADGE_COLORS.violet,
     };
   }
 
   if (inCustody > 0) {
     return {
-      label: available <= 0 ? "In custody" : "Partial custody",
+      label:
+        available <= 0
+          ? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+          : ASSET_QTY_STATUS_LABELS.PARTIAL_CUSTODY,
       colors: BADGE_COLORS.blue,
     };
   }
 
   if (reserved > 0) {
     return {
-      label: available <= 0 ? "Reserved" : "Partially reserved",
+      label:
+        available <= 0
+          ? ASSET_QTY_STATUS_LABELS.RESERVED
+          : ASSET_QTY_STATUS_LABELS.PARTIALLY_RESERVED,
       colors: BADGE_COLORS.blue,
     };
   }
 
   /* Fallback — shouldn't be reached because getQuantityData returns
    * null when all counts are zero, but be defensive */
-  return { label: "Available", colors: BADGE_COLORS.green };
+  return {
+    label: ASSET_QTY_STATUS_LABELS.AVAILABLE,
+    colors: BADGE_COLORS.green,
+  };
 }

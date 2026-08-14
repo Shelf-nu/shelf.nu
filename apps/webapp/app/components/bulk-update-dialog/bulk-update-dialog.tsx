@@ -8,6 +8,7 @@ import {
   openBulkDialogAtom,
 } from "~/atoms/bulk-update-dialog";
 import {
+  bulkSelectionKey,
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
@@ -31,6 +32,8 @@ import {
 type BulkDialogType =
   | "location"
   | "category"
+  | "asset-model"
+  | "asset-model-remove"
   | "assign-custody"
   | "release-custody"
   | "trash"
@@ -345,9 +348,15 @@ const BulkUpdateDialogContent = forwardRef<
             value={searchParams.toString()}
           />
 
+          {/* Keyed by `bulkSelectionKey`, not `item.id`: on a booking, two
+              rows of the SAME asset can be selected (a standalone slice and a
+              kit-driven one), which collides on `id` and makes React warn and
+              risk mispairing inputs across re-renders. Everywhere else the
+              helper falls back to `id`, so keys are unchanged. The submitted
+              VALUE stays `item.id` — handlers resolve assets by asset id. */}
           {selectedItems.map((item, i) => (
             <input
-              key={item.id}
+              key={bulkSelectionKey(item)}
               type="hidden"
               name={`${arrayFieldId}[${i}]`}
               value={item.id}

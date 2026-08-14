@@ -1,0 +1,129 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Create, add, reserve, edit, remove (mobile)"
+tags:
+  - bookings
+  - create
+  - high-impact
+
+---
+# Full lifecycle of the new mobile booking create/edit feature:
+# create (DRAFT) -> add an asset via the availability picker -> reserve
+# (conflict-checked) -> edit the name -> remove the asset.
+#
+# Requires GRANULAR WORKSPACE (TEAM) with team member "Dr. Sarah Mitchell"
+# and an available bookable asset "3B Scientific Advanced Suturing Practice Pad".
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Create a DRAFT ──
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Lifecycle Booking"
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "QA Lifecycle Booking"
+    timeout: 20000
+
+# ── Add an asset via the availability picker ──
+- extendedWaitUntil:
+    visible: "Browse available assets and kits to add"
+    timeout: 15000
+- tapOn: "Browse available assets and kits to add"
+- extendedWaitUntil:
+    visible: "Search available assets"
+    timeout: 15000
+# Browse (no search → no keyboard/autofill callout covering the rows); scroll
+# to the asset and select it.
+- scrollUntilVisible:
+    element:
+      text: ".*3B Scientific.*"
+    direction: DOWN
+    timeout: 20000
+- tapOn: ".*3B Scientific.*"
+- extendedWaitUntil:
+    visible: ".*selected to booking.*"
+    timeout: 10000
+- tapOn: ".*selected to booking.*"
+# Back on detail — the asset is now in the booking
+- extendedWaitUntil:
+    visible: ".*3B Scientific.*"
+    timeout: 20000
+- takeScreenshot: booking-asset-added
+
+# ── Reserve (DRAFT -> RESERVED, conflict-checked server-side) ──
+- tapOn: "Reserve this booking"
+- extendedWaitUntil:
+    visible: "Reserve Booking"
+    timeout: 10000
+- tapOn: "Reserve"
+- extendedWaitUntil:
+    visible: "Reserved"
+    timeout: 20000
+- tapOn: "OK"
+# RESERVED → "Check Out All Assets" becomes available
+- extendedWaitUntil:
+    visible: "Check out all assets in this booking"
+    timeout: 20000
+- takeScreenshot: booking-reserved
+
+# ── Edit the name (RESERVED: name editable; dates/custodian locked) ──
+- tapOn: "Edit booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- eraseText: 60
+- inputText: "QA Edited Booking"
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "QA Edited Booking"
+    timeout: 20000
+- takeScreenshot: booking-edited
+
+# ── Remove the asset ──
+- extendedWaitUntil:
+    visible: "Select assets to remove"
+    timeout: 15000
+- tapOn: "Select assets to remove"
+- tapOn: ".*3B Scientific.*"
+- extendedWaitUntil:
+    visible: ".*Remove 1 selected.*"
+    timeout: 10000
+- tapOn: ".*Remove 1 selected.*"
+- extendedWaitUntil:
+    visible: "Remove Selected"
+    timeout: 10000
+- tapOn: "Remove"
+- extendedWaitUntil:
+    visible: "Assets (0)"
+    timeout: 20000
+- takeScreenshot: booking-asset-removed

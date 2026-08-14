@@ -17,6 +17,11 @@ const KIT_OVERVIEW_BARCODES_FIELDS = {
 const KIT_OVERVIEW_BASE_FIELDS = {
   assetKits: {
     select: {
+      // `AssetKit.quantity` = units of this asset *inside this kit* (not
+      // workspace stock). The overview's totalValue reducer multiplies
+      // per-unit valuation × this number, so a QT asset stocked at 100
+      // with 5 of those in this kit contributes value-for-5, not 100.
+      quantity: true,
       asset: { select: { valuation: true } },
     },
   },

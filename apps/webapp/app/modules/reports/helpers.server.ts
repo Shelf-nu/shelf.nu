@@ -16,8 +16,9 @@ import type {
   ActivityAction,
   AssetStatus,
   BookingStatus,
-  Prisma,
 } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { DateTime } from "luxon";
 
 import { db } from "~/database/db.server";
 import {
@@ -26,6 +27,7 @@ import {
   isOnTime,
   resolveCheckInAt,
 } from "~/modules/booking/lateness";
+import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
@@ -54,6 +56,8 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
@@ -100,6 +104,17 @@ interface BookingComplianceArgs {
   sortBy?: BookingComplianceSortColumn;
   /** Sort direction */
   sortOrder?: "asc" | "desc";
+  /**
+   * IANA timezone of the acting user (from their resolved format prefs).
+   *
+   * The compliance-trend chart's day/week axis buckets are anchored to
+   * `timeframe.from`, which is itself midnight in this same zone. The axis tick
+   * labels must therefore read each bucket's day IN THIS ZONE — reading them in
+   * UTC renders them off-by-one for east-of-UTC users (a Tokyo "Fri 17" bucket
+   * labels as "Thu 16"). Defaults to `"UTC"` when the caller has no resolved
+   * prefs, preserving the historical behavior.
+   */
+  timeZone?: string;
 }
 
 /**
@@ -128,6 +143,9 @@ export async function bookingComplianceReport(
     pageSize = 50,
     sortBy = "scheduledEnd",
     sortOrder = "desc",
+    // Pref timezone drives the trend axis day/week labels; UTC keeps parity
+    // with the pre-prefs behavior when the caller doesn't resolve prefs.
+    timeZone = "UTC",
   } = args;
 
   const startTime = performance.now();
@@ -145,6 +163,9 @@ export async function bookingComplianceReport(
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
+      // Exclude bookings archived straight from RESERVED (never checked in):
+      // they were never returned, so they must not count toward compliance.
+      archivedWithoutCheckin: false,
     };
 
     // Allow further status filtering within the measurable statuses
@@ -189,7 +210,7 @@ export async function bookingComplianceReport(
       // Compliance rate calculation with prior period comparison
       computeComplianceRate(organizationId, timeframe),
       // Weekly compliance trend
-      computeComplianceTrend(organizationId, timeframe),
+      computeComplianceTrend(organizationId, timeframe, timeZone),
       // Custodian performance breakdown
       computeCustodianPerformance(organizationId, timeframe),
     ]);
@@ -511,6 +532,8 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Bookings scheduled to end within the timeframe
       to: { gte: timeframe.from, lte: timeframe.to },
     },
@@ -546,6 +569,8 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Filter by scheduled end date for consistency with main query
       to: { gte: priorFrom, lte: priorTo },
     },
@@ -656,20 +681,49 @@ function getPriorPeriodLabel(preset: string): string {
  *
  * Breaks the timeframe into weeks and calculates compliance rate for each.
  * This enables the trend visualization showing improvement/decline over time.
+ *
+ * @param organizationId - Organization whose bookings are measured
+ * @param timeframe - Resolved timeframe; its `from` is midnight in `timeZone`
+ * @param timeZone - IANA timezone of the acting user. Each bucket start instant
+ *   is derived from `timeframe.from` (pref-tz midnight), so the axis labels are
+ *   resolved in this same zone to avoid an off-by-one day for east-of-UTC
+ *   users. Defaults to `"UTC"`.
  */
 async function computeComplianceTrend(
   organizationId: string,
-  timeframe: ResolvedTimeframe
+  timeframe: ResolvedTimeframe,
+  timeZone: string = "UTC"
 ): Promise<ComplianceTrendPoint[]> {
   const periodMs = timeframe.to.getTime() - timeframe.from.getTime();
   const msPerDay = 24 * 60 * 60 * 1000;
-  const msPerWeek = 7 * msPerDay;
   const periodDays = periodMs / msPerDay;
 
-  // Adaptive granularity: daily for short periods, weekly for longer
+  // Adaptive granularity: daily for short periods, weekly for longer. A ±1h DST
+  // drift never flips this threshold, so an ms-based day count is fine HERE.
   const useDailyGranularity = periodDays <= 14;
-  const bucketMs = useDailyGranularity ? msPerDay : msPerWeek;
-  const numBuckets = Math.max(1, Math.ceil(periodMs / bucketMs));
+
+  // Bucket boundaries are stepped by CALENDAR days/weeks in the acting user's
+  // timezone (via Luxon), NOT fixed 24h/7d millisecond intervals. On a DST
+  // transition a calendar day is 23h or 25h long; fixed-ms stepping would drift
+  // every subsequent boundary off pref-tz midnight (to 23:00 / 01:00) and
+  // misclassify due dates near a boundary. Calendar stepping keeps every bucket
+  // anchored to pref-tz midnight regardless of DST.
+  const fromZoned = DateTime.fromJSDate(timeframe.from).setZone(timeZone);
+  const toZoned = DateTime.fromJSDate(timeframe.to).setZone(timeZone);
+  /** Start of bucket `n` as a zoned DateTime, calendar-stepped from `from`. */
+  const bucketStartAt = (n: number): DateTime =>
+    useDailyGranularity
+      ? fromZoned.plus({ days: n })
+      : fromZoned.plus({ weeks: n });
+  // Calendar-aware span → bucket count (DST-correct, unlike periodMs / bucketMs).
+  const numBuckets = Math.max(
+    1,
+    Math.ceil(
+      useDailyGranularity
+        ? toZoned.diff(fromZoned, "days").days
+        : toZoned.diff(fromZoned, "weeks").weeks
+    )
+  );
 
   // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
@@ -678,6 +732,8 @@ async function computeComplianceTrend(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
+      archivedWithoutCheckin: false,
       to: { gte: timeframe.from, lte: timeframe.to },
     },
     select: {
@@ -702,9 +758,13 @@ async function computeComplianceTrend(
   const trend: ComplianceTrendPoint[] = [];
 
   for (let i = 0; i < numBuckets; i++) {
-    const bucketStart = new Date(timeframe.from.getTime() + i * bucketMs);
+    // Calendar-stepped boundaries (see bucketStartAt): bucket i spans
+    // [from + i units, from + (i+1) units) in the pref tz, so DST-transition
+    // days don't shift the boundary off midnight. End = the instant just before
+    // the next bucket start, clamped to the timeframe end.
+    const bucketStart = bucketStartAt(i).toJSDate();
     const bucketEnd = new Date(
-      Math.min(bucketStart.getTime() + bucketMs - 1, timeframe.to.getTime())
+      Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
     // Filter bookings with due date in this bucket
@@ -738,12 +798,13 @@ async function computeComplianceTrend(
     // null rate for empty buckets (no data, not 0% compliance)
     const rate = total > 0 ? Math.round((onTime / total) * 100) : null;
 
-    // Format label based on granularity
+    // Format label based on granularity. The bucket instants are anchored to
+    // the pref-tz `timeframe.from`, so the labels are derived in `timeZone`.
     const label = useDailyGranularity
-      ? formatDayLabel(bucketStart)
+      ? formatDayLabel(bucketStart, timeZone)
       : numBuckets <= 4
       ? `Week ${i + 1}`
-      : formatWeekLabel(bucketStart, bucketEnd);
+      : formatWeekLabel(bucketStart, bucketEnd, timeZone);
 
     trend.push({
       label,
@@ -760,24 +821,60 @@ async function computeComplianceTrend(
 
 /**
  * Format day as "Mon 21" style label.
+ *
+ * The bucket instant is midnight in the acting user's timezone, so both the
+ * weekday name and the day number are resolved in that same `timeZone`. Reading
+ * them in UTC would render the tick off-by-one for east-of-UTC users (a Tokyo
+ * "Fri 17" bucket labeling as "Thu 16"). Only the ZONE used to pick the day
+ * changes — the weekday NAME stays English by design.
+ *
+ * @param date - The bucket start instant
+ * @param timeZone - IANA timezone the bucket day is read in
+ * @returns the assembled day label (e.g. "Fri 17")
  */
-function formatDayLabel(date: Date): string {
-  const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
-  const dayNum = date.getDate();
+function formatDayLabel(date: Date, timeZone: string): string {
+  // why: weekday NAME kept English on purpose — chart-axis labels read
+  // consistently regardless of the viewer's locale or date-format preference;
+  // not user-facing prose. Only the zone used to resolve the day is prefs-tz.
+  const dayName = date.toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone,
+  });
+  const dayNum = DateTime.fromJSDate(date).setZone(timeZone).day;
   return `${dayName} ${dayNum}`;
 }
 
 /**
  * Format week range as "Mar 3-9" style label.
+ *
+ * The bucket boundary instants are midnight in the acting user's timezone, so
+ * month names and day numbers are resolved in that same `timeZone` to keep the
+ * tick from rendering off-by-one for east-of-UTC users. The month NAMES stay
+ * English by design.
+ *
+ * @param start - The bucket start instant
+ * @param end - The bucket end instant
+ * @param timeZone - IANA timezone the bucket days/months are read in
+ * @returns the assembled week-range label (e.g. "Mar 3-9" or "Mar 28-Apr 3")
  */
-function formatWeekLabel(start: Date, end: Date): string {
-  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
+function formatWeekLabel(start: Date, end: Date, timeZone: string): string {
+  // why: month NAMES kept English on purpose — chart-axis labels read
+  // consistently for consistent report visuals; not affected by the user's
+  // display date-format preference. Only the zone used to resolve the day is
+  // prefs-tz.
+  const startMonth = start.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
+  const startDay = DateTime.fromJSDate(start).setZone(timeZone).day;
+  const endDay = DateTime.fromJSDate(end).setZone(timeZone).day;
 
   // If same month, show "Mar 3-9"
   // If different months, show "Mar 28-Apr 3"
-  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  const endMonth = end.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
   if (startMonth === endMonth) {
     return `${startMonth} ${startDay}-${endDay}`;
   }
@@ -806,6 +903,8 @@ async function computeCustodianPerformance(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Filter by scheduled end date for consistency with main compliance query
       to: { gte: timeframe.from, lte: timeframe.to },
     },
@@ -1009,7 +1108,9 @@ async function fetchOverdueRows(
 
   const bookings = await db.booking.findMany({
     where,
-    orderBy: { to: "asc" }, // Most overdue first (earliest scheduled end)
+    // Most overdue first (earliest scheduled end); `id` tiebreaker keeps
+    // skip/take paging deterministic for bookings sharing the same `to`.
+    orderBy: [{ to: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1124,6 +1225,10 @@ async function computeOverdueKpis(
       to: true,
       bookingAssets: {
         select: {
+          // `BookingAsset.quantity` = booked units. Value-at-risk for an
+          // overdue booking is the value of what hasn't been returned —
+          // `valuation × bookedUnits`, NOT `valuation × workspaceStock`.
+          quantity: true,
           asset: {
             select: { id: true, valuation: true },
           },
@@ -1163,9 +1268,15 @@ async function computeOverdueKpis(
       0,
       b._count.bookingAssets - checkedInAssetIds.size
     );
+    // Multiplies per-unit valuation × booked units (BookingAsset.quantity).
+    // Using `asset.quantity` (workspace stock) would value a 5-of-100
+    // booked + overdue row at 100 units of risk. See select above.
     totalValueAtRisk += b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((assetSum, ba) => assetSum + (ba.asset.valuation || 0), 0);
+      .reduce(
+        (assetSum, ba) => assetSum + (ba.asset.valuation ?? 0) * ba.quantity,
+        0
+      );
   }
 
   // Also track total for context in hero subtitle
@@ -1412,7 +1523,9 @@ async function fetchIdleAssetRows(
         },
       },
     },
-    orderBy: { updatedAt: "asc" }, // Least recently updated first
+    // Least recently updated first; `id` tiebreaker keeps skip/take paging
+    // deterministic for assets sharing an `updatedAt` (bulk operations).
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1422,8 +1535,13 @@ async function fetchIdleAssetRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
+      type: true,
+      quantity: true,
+      unitOfMeasure: true,
       updatedAt: true,
       category: {
         select: {
@@ -1481,12 +1599,17 @@ async function fetchIdleAssetRows(
       assetId: asset.id,
       assetName: asset.title,
       thumbnailImage: asset.thumbnailImage,
+      mainImage: asset.mainImage,
+      assetModel: asset.assetModel ?? null,
       category: asset.category?.name || null,
       location: getPrimaryLocation(asset)?.name || null,
       lastBookedAt,
       daysSinceLastUse,
       status: asset.status,
       valuation: asset.valuation,
+      type: asset.type,
+      quantity: asset.quantity,
+      unitOfMeasure: asset.unitOfMeasure,
     };
   });
 }
@@ -1575,6 +1698,9 @@ async function computeIdleAssetsKpis(
     select: {
       id: true,
       valuation: true,
+      // `quantity` is selected so `totalIdleValue` below can compute
+      // valuation × quantity (QT-aware totals).
+      quantity: true,
       updatedAt: true,
       bookingAssets: {
         where: {
@@ -1600,9 +1726,9 @@ async function computeIdleAssetsKpis(
   const idlePercentage =
     totalAssets > 0 ? Math.round((totalIdle / totalAssets) * 100) : 0;
 
-  // Calculate total value of idle assets
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   const totalIdleValue = trulyIdle.reduce(
-    (sum, asset) => sum + (asset.valuation || 0),
+    (sum, asset) => sum + getAssetTotalValue(asset),
     0
   );
 
@@ -1797,12 +1923,18 @@ async function fetchCustodyRows(
   // `refreshExpiredAssetImages` below without an extra round-trip.
   const custodyRecords = await db.custody.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
       id: true,
       createdAt: true,
+      // `Custody.quantity` = units this custodian actually holds (not
+      // workspace stock). Drives the row's value breakdown — a custodian
+      // holding 5 of a 100-unit pool should see value-for-5, not 100.
+      quantity: true,
       custodian: {
         select: {
           id: true,
@@ -1817,7 +1949,11 @@ async function fetchCustodyRows(
           mainImage: true,
           mainImageExpiration: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           valuation: true,
+          type: true,
+          unitOfMeasure: true,
           category: {
             select: { name: true },
           },
@@ -1844,6 +1980,12 @@ async function fetchCustodyRows(
   const refreshedThumbnailByAssetId = new Map(
     refreshedAssets.map((a) => [a.id, a.thumbnailImage])
   );
+  // `refreshExpiredAssetImages` may re-sign BOTH urls; keeping only the
+  // thumbnail would hand the row a stale `mainImage`, and the resolver reads
+  // `mainImage` to decide the tier.
+  const refreshedMainImageByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.mainImage])
+  );
 
   return custodyRecords.map((c) => {
     const assignedAt = c.createdAt;
@@ -1857,6 +1999,9 @@ async function fetchCustodyRows(
       assetName: c.asset.title,
       thumbnailImage:
         refreshedThumbnailByAssetId.get(c.asset.id) ?? c.asset.thumbnailImage,
+      mainImage:
+        refreshedMainImageByAssetId.get(c.asset.id) ?? c.asset.mainImage,
+      assetModel: c.asset.assetModel ?? null,
       category: c.asset.category?.name || null,
       location: getPrimaryLocation(c.asset)?.name || null,
       custodianId: c.custodian.id,
@@ -1864,6 +2009,11 @@ async function fetchCustodyRows(
       assignedAt,
       daysInCustody,
       valuation: c.asset.valuation,
+      type: c.asset.type,
+      // Surfaced as the multiplier for the per-row Value cell — units
+      // in this custody, not asset stock. See select comment above.
+      quantity: c.quantity,
+      unitOfMeasure: c.asset.unitOfMeasure,
     };
   });
 }
@@ -1882,6 +2032,10 @@ async function computeCustodyKpis(
     select: {
       createdAt: true,
       teamMemberId: true,
+      // `Custody.quantity` = units held by this custodian. Multiplied
+      // against per-unit valuation below — using `Asset.quantity` (total
+      // stock) would value a 5-of-100 custody at 100 units.
+      quantity: true,
       asset: {
         select: {
           valuation: true,
@@ -1896,9 +2050,9 @@ async function computeCustodyKpis(
   const uniqueCustodians = new Set(custodyRecords.map((c) => c.teamMemberId))
     .size;
 
-  // Calculate total value
+  // Multiplies per-unit valuation × custody-held units. See select above.
   const totalValue = custodyRecords.reduce(
-    (sum, c) => sum + (c.asset.valuation || 0),
+    (sum, c) => sum + (c.asset.valuation ?? 0) * c.quantity,
     0
   );
 
@@ -2091,6 +2245,8 @@ async function fetchTopBookedAssetRows(
               mainImage: true,
               mainImageExpiration: true,
               thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: { select: { name: true } },
               assetLocations: {
                 select: {
@@ -2112,6 +2268,13 @@ async function fetchTopBookedAssetRows(
         id: string;
         title: string;
         thumbnailImage: string | null;
+        /**
+         * The asset's OWN image. `resolveAssetImage` decides the ownership
+         * tier from this alone, so dropping it here would make every asset
+         * look like it inherits its model's cover.
+         */
+        mainImage: string | null;
+        assetModel: ResolvableAssetModelImage;
         category: string | null;
         location: string | null;
       };
@@ -2156,6 +2319,8 @@ async function fetchTopBookedAssetRows(
             id: asset.id,
             title: asset.title,
             thumbnailImage: asset.thumbnailImage,
+            mainImage: asset.mainImage,
+            assetModel: asset.assetModel ?? null,
             category: asset.category?.name || null,
             location: getPrimaryLocation(asset)?.name || null,
           },
@@ -2178,6 +2343,11 @@ async function fetchTopBookedAssetRows(
   const refreshedThumbnailByAssetId = new Map(
     refreshedAssets.map((a) => [a.id, a.thumbnailImage])
   );
+  // See the note in the custody-snapshot builder: the re-signed `mainImage`
+  // must travel with the thumbnail or the row keeps a stale url.
+  const refreshedMainImageByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.mainImage])
+  );
 
   // Convert to array and sort by booking count
   const results = Array.from(assetMap.values())
@@ -2188,6 +2358,10 @@ async function fetchTopBookedAssetRows(
       thumbnailImage:
         refreshedThumbnailByAssetId.get(entry.asset.id) ??
         entry.asset.thumbnailImage,
+      mainImage:
+        refreshedMainImageByAssetId.get(entry.asset.id) ??
+        entry.asset.mainImage,
+      assetModel: entry.asset.assetModel,
       category: entry.asset.category,
       location: entry.asset.location,
       bookingCount: entry.bookingCount,
@@ -2850,20 +3024,31 @@ async function computeDistributionByStatus(
 async function computeDistributionKpis(
   organizationId: string
 ): Promise<ReportKpi[]> {
-  const [totalAssets, totalValue, categoryCount, locationCount] =
+  const [totalAssets, totalValueRows, categoryCount, locationCount] =
     await Promise.all([
       db.asset.count({
         where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
       }),
-      db.asset.aggregate({
-        where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
-        _sum: { valuation: true },
-      }),
+      // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
+      // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop to `$queryRaw`.
+      // Column name is `value` (Asset.valuation is `@map("value")`). COALESCE
+      // mirrors `getAssetTotalValue` (null quantity → 1, null value → 0).
+      // No `::bigint` cast — it truncated fractional Float valuations.
+      // `archivedAt IS NULL` is the raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER
+      // (issue #382) so this KPI reconciles with the breakdowns above it.
+      db.$queryRaw<{ total: number | null }[]>(
+        Prisma.sql`
+          SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
+          FROM "Asset"
+          WHERE "organizationId" = ${organizationId}
+            AND "archivedAt" IS NULL
+        `
+      ),
       db.category.count({ where: { organizationId } }),
       db.location.count({ where: { organizationId } }),
     ]);
 
-  const totalAssetValue = totalValue._sum.valuation || 0;
+  const totalAssetValue = Number(totalValueRows[0]?.total ?? 0);
 
   return [
     {
@@ -2962,7 +3147,13 @@ export async function assetInventoryReport(
     const [rows, totalCount, kpis] = await Promise.all([
       fetchInventoryRows(where, page, pageSize),
       db.asset.count({ where }),
-      computeInventoryKpis(organizationId, where),
+      // Filters are passed through so the KPI helper can mirror them in its
+      // `$queryRaw` valuation sum (Prisma doesn't expose where → SQL).
+      computeInventoryKpis(organizationId, where, {
+        categoryIds,
+        locationIds,
+        statuses: statuses as AssetStatus[] | undefined,
+      }),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -3013,7 +3204,9 @@ async function fetchInventoryRows(
   // extra round-trip.
   const assets = await db.asset.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -3023,8 +3216,13 @@ async function fetchInventoryRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
+      type: true,
+      quantity: true,
+      unitOfMeasure: true,
       createdAt: true,
       category: { select: { name: true } },
       assetLocations: {
@@ -3052,6 +3250,8 @@ async function fetchInventoryRows(
     assetId: a.id,
     assetName: a.title,
     thumbnailImage: a.thumbnailImage,
+    mainImage: a.mainImage,
+    assetModel: a.assetModel ?? null,
     category: a.category?.name || null,
     location: getPrimaryLocation(a)?.name || null,
     status: a.status,
@@ -3062,6 +3262,9 @@ async function fetchInventoryRows(
       ? stripNameSuffix(a.custody[0].custodian.name)
       : null,
     valuation: a.valuation,
+    type: a.type,
+    quantity: a.quantity,
+    unitOfMeasure: a.unitOfMeasure,
     createdAt: a.createdAt,
     qrId: a.qrCodes[0]?.id || null,
   }));
@@ -3069,18 +3272,55 @@ async function fetchInventoryRows(
 
 async function computeInventoryKpis(
   organizationId: string,
-  where: Prisma.AssetWhereInput
+  where: Prisma.AssetWhereInput,
+  filters: {
+    categoryIds?: string[];
+    locationIds?: string[];
+    statuses?: AssetStatus[];
+  }
 ): Promise<ReportKpi[]> {
   // Defense-in-depth: enforce organizationId on every query even though
   // callers' `where` already includes it. Cheap to add, prevents an
   // accidental cross-org leak if the where-builder ever regresses.
   const scopedWhere: Prisma.AssetWhereInput = { ...where, organizationId };
-  const [totalAssets, totalValue, statusCounts] = await Promise.all([
+
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+  // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
+  // to `$queryRaw` and mirror the same filters (organizationId + the optional
+  // category / location / status filters) the Prisma `where` carries.
+  const filterFragments: Prisma.Sql[] = [
+    Prisma.sql`"organizationId" = ${organizationId}`,
+  ];
+  if (filters.categoryIds && filters.categoryIds.length > 0) {
+    filterFragments.push(
+      Prisma.sql`"categoryId" IN (${Prisma.join(filters.categoryIds)})`
+    );
+  }
+  if (filters.locationIds && filters.locationIds.length > 0) {
+    filterFragments.push(
+      Prisma.sql`id IN (SELECT "assetId" FROM "AssetLocation" WHERE "locationId" IN (${Prisma.join(
+        filters.locationIds
+      )}))`
+    );
+  }
+  if (filters.statuses && filters.statuses.length > 0) {
+    filterFragments.push(
+      Prisma.sql`status::text IN (${Prisma.join(filters.statuses)})`
+    );
+  }
+  const whereSql = Prisma.join(filterFragments, " AND ");
+
+  const [totalAssets, totalValueRows, statusCounts] = await Promise.all([
     db.asset.count({ where: scopedWhere }),
-    db.asset.aggregate({
-      where: scopedWhere,
-      _sum: { valuation: true },
-    }),
+    // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
+    // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+    db.$queryRaw<{ total: number | null }[]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
+        FROM "Asset"
+        WHERE ${whereSql}
+      `
+    ),
     db.asset.groupBy({
       by: ["status"],
       where: scopedWhere,
@@ -3092,7 +3332,7 @@ async function computeInventoryKpis(
     statusCounts.find((s) => s.status === "AVAILABLE")?._count.id || 0;
   const inCustodyCount =
     statusCounts.find((s) => s.status === "IN_CUSTODY")?._count.id || 0;
-  const totalAssetValue = totalValue._sum.valuation || 0;
+  const totalAssetValue = Number(totalValueRows[0]?.total ?? 0);
 
   return [
     {
@@ -3236,6 +3476,9 @@ export async function monthlyBookingTrendsReport(
 
         return {
           id: key,
+          // why: kept ISO/English on purpose — chart-axis month label stays
+          // in English for consistent report visuals; not driven by the
+          // user's display date-format preference.
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",
@@ -3455,7 +3698,12 @@ export async function assetUtilizationReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         valuation: true,
+        type: true,
+        quantity: true,
+        unitOfMeasure: true,
         category: { select: { name: true } },
         assetLocations: {
           select: {
@@ -3521,6 +3769,8 @@ export async function assetUtilizationReport(
         assetId: asset.id,
         assetName: asset.title,
         thumbnailImage: asset.thumbnailImage,
+        mainImage: asset.mainImage,
+        assetModel: asset.assetModel ?? null,
         category: asset.category?.name || null,
         location: getPrimaryLocation(asset)?.name || null,
         totalDays,
@@ -3528,6 +3778,9 @@ export async function assetUtilizationReport(
         utilizationRate,
         bookingCount: bookingIds.size,
         valuation: asset.valuation,
+        type: asset.type,
+        quantity: asset.quantity,
+        unitOfMeasure: asset.unitOfMeasure,
       };
     });
 
@@ -3601,10 +3854,15 @@ export async function assetUtilizationReport(
     const refreshedThumbnailByAssetId = new Map(
       refreshedPageAssets.map((a) => [a.id, a.thumbnailImage])
     );
+    // See the note in the custody-snapshot builder.
+    const refreshedMainImageByAssetId = new Map(
+      refreshedPageAssets.map((a) => [a.id, a.mainImage])
+    );
     const pagedRows = pageRows.map((r) => ({
       ...r,
       thumbnailImage:
         refreshedThumbnailByAssetId.get(r.assetId) ?? r.thumbnailImage,
+      mainImage: refreshedMainImageByAssetId.get(r.assetId) ?? r.mainImage,
     }));
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -3682,6 +3940,8 @@ export async function assetActivityReport(
       "ASSET_LOCATION_CHANGED",
       "ASSET_STATUS_CHANGED",
       "ASSET_VALUATION_CHANGED",
+      "ASSET_QUANTITY_CHANGED",
+      "ASSET_MIN_QUANTITY_CHANGED",
       "ASSET_TAGS_CHANGED",
       "ASSET_CUSTOM_FIELD_CHANGED",
       "CUSTODY_ASSIGNED",
@@ -3713,7 +3973,9 @@ export async function assetActivityReport(
     const [events, totalCount] = await Promise.all([
       db.activityEvent.findMany({
         where,
-        orderBy: { occurredAt: "desc" },
+        // `id` tiebreaker keeps skip/take paging deterministic for events
+        // sharing an `occurredAt` (bulk mutations emit same-instant events).
+        orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -3735,6 +3997,8 @@ export async function assetActivityReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
       },
     });
     const refreshedAssets = await refreshExpiredAssetImages(assets);
@@ -3754,6 +4018,8 @@ export async function assetActivityReport(
         assetId: event.assetId || "",
         assetName: asset?.title || "Unknown Asset",
         thumbnailImage: asset?.thumbnailImage || null,
+        mainImage: asset?.mainImage || null,
+        assetModel: asset?.assetModel ?? null,
         activityType: mapActionToActivityType(event.action),
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,
@@ -3913,6 +4179,8 @@ function buildActivityDescription(event: {
     ASSET_LOCATION_CHANGED: "Location changed",
     ASSET_STATUS_CHANGED: "Status changed",
     ASSET_VALUATION_CHANGED: "Valuation changed",
+    ASSET_QUANTITY_CHANGED: "Quantity changed",
+    ASSET_MIN_QUANTITY_CHANGED: "Min quantity changed",
     ASSET_TAGS_CHANGED: "Tags updated",
     ASSET_CUSTOM_FIELD_CHANGED: "Custom field updated",
     CUSTODY_ASSIGNED: "Custody assigned",

@@ -36,6 +36,7 @@ import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   AdvancedIndexAsset,
@@ -48,6 +49,7 @@ import type {
 } from "~/modules/asset-index-settings/helpers";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -81,8 +83,8 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization, timeZone } =
-    useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -105,10 +107,10 @@ export function AdvancedIndexColumn({
       );
     }
 
-    const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
-      locale,
-      timeZone,
-    });
+    const customFieldDisplayValue = getCustomFieldDisplayValue(
+      fieldValue,
+      prefs
+    );
 
     return (
       <Td>
@@ -124,8 +126,12 @@ export function AdvancedIndexColumn({
                   "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
+                {/* Custom field values are authored in `MarkdownEditor`,
+                    whose link control makes external links a deliberate
+                    feature — same treatment as comments and announcements. */}
                 <MarkdownViewer
                   content={customFieldDisplayValue as RenderableTreeNode}
+                  allowExternalLinks
                 />
               </PopoverContent>
             </PopoverPortal>
@@ -169,6 +175,7 @@ export function AdvancedIndexColumn({
                     mainImage: item.mainImage,
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
+                    assetModel: item.assetModel ?? null,
                   }}
                   alt={`Image of ${item.title}`}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
@@ -233,16 +240,36 @@ export function AdvancedIndexColumn({
       return <DescriptionColumn value={item.description ?? ""} />;
 
     case "valuation": {
-      const value = item?.valuation
-        ? formatCurrency({
-            value: item.valuation,
-            locale,
-            currency: currentOrganization.currency,
-          })
-        : null;
+      // Quantity-aware: render TOTAL (valuation × quantity) on top, with a
+      // small "<unit price> × N <unit>" subtext for QT assets whose total
+      // differs from the per-unit price. INDIVIDUAL assets and QT with
+      // quantity ≤ 1 collapse to a single line — visually unchanged from
+      // the legacy behaviour. See {@link formatAssetValueWithBreakdown}.
+      if (item?.valuation == null) {
+        return (
+          <Td className="w-full max-w-none whitespace-nowrap">
+            <EmptyTableValue />
+          </Td>
+        );
+      }
+
+      const breakdown = formatAssetValueWithBreakdown(item, {
+        currency: currentOrganization.currency,
+        locale,
+      });
+
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
-          {value ? value : <EmptyTableValue />}
+          {breakdown.unit && breakdown.suffix ? (
+            <div className="flex flex-col leading-tight">
+              <span className="tabular-nums">{breakdown.total}</span>
+              <span className="text-xs tabular-nums text-gray-500">
+                {breakdown.unit} {breakdown.suffix}
+              </span>
+            </div>
+          ) : (
+            <span className="tabular-nums">{breakdown.total}</span>
+          )}
         </Td>
       );
     }
@@ -325,6 +352,19 @@ export function AdvancedIndexColumn({
             `${item.quantity}${
               item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
             }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "minQuantity":
+      // Low-stock reorder threshold — only meaningful for QUANTITY_TRACKED
+      // assets. Plain number, mirroring the "quantity" cell above.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.minQuantity != null ? (
+            item.minQuantity
           ) : (
             <EmptyTableValue />
           )}
@@ -428,6 +468,10 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
+              {/* No `allowExternalLinks`: descriptions are authored in a plain
+                  textarea and rendered as plain text on the asset page, so
+                  they are not a markdown surface. Links here would also be
+                  unreachable — Radix tooltip content is not interactive. */}
               <MarkdownViewer content={value} className="mt-2 text-sm" />
             </TooltipContent>
           </Tooltip>

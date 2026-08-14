@@ -203,6 +203,12 @@ export default function LoginScreen() {
               placeholder="Your password"
               placeholderTextColor={colors.placeholderText}
               secureTextEntry
+              // why: without this iOS applies its default sentence-casing to the
+              // first character, silently sending "Trixie01" for "trixie01" and
+              // failing login for any password that starts with a lowercase
+              // letter. The email field already guards against this.
+              autoCapitalize="none"
+              autoCorrect={false}
               autoComplete="password"
               textContentType="password"
               returnKeyType="go"

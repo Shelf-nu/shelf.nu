@@ -46,6 +46,12 @@ appId: com.shelf.companion.carlos
     id: "sign-in-button"
     optional: true
 
+# Dismiss the iOS "Save Password?" AutoFill prompt (appears on fresh simulators
+# after clearKeychain; it covers the tab bar and blocks the Home assertion).
+- tapOn:
+    text: "Not Now"
+    optional: true
+
 # Wait for main app to load
 - extendedWaitUntil:
     visible: "Home"

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
@@ -5,6 +6,7 @@ import { ShelfError } from "~/utils/error";
 import {
   assetQueryFragment,
   assetQueryJoins,
+  buildAdvancedAssetsQuery,
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
@@ -20,18 +22,54 @@ describe("parseSortingOptions", () => {
   it("allows sorting by updatedAt", () => {
     const { orderByClause } = parseSortingOptions(["updatedAt:desc"]);
 
-    expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+    // Explicit sorts carry a stable `"assetId" ASC` tiebreaker for deterministic
+    // pagination across rows tied on the sort key.
+    expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc, "assetId" ASC');
+  });
+
+  // The inner clause feeds `ROW_NUMBER() OVER (ORDER BY ...)` in the
+  // paginate-first rewrite: it must equal the full clause minus the leading
+  // "ORDER BY " token, for both explicit and default sorts.
+  it("exposes the inner order-by (no leading ORDER BY) for an explicit sort", () => {
+    const { orderByClause, orderByInner } = parseSortingOptions([
+      "updatedAt:desc",
+    ]);
+    expect(orderByInner).toBe('"assetUpdatedAt" desc, "assetId" ASC');
+    expect(orderByClause).toBe(`ORDER BY ${orderByInner}`);
+  });
+
+  it("does not duplicate the assetId tiebreaker when the sort already uses id", () => {
+    // `id` maps to the "assetId" column, so the tiebreaker must not be appended
+    // again (otherwise ORDER BY would list "assetId" twice).
+    const { orderByInner } = parseSortingOptions(["id:asc"]);
+    expect(orderByInner).toBe('"assetId" asc');
+    expect(orderByInner.match(/"assetId"/g)).toHaveLength(1);
+
+    // Also deduped when id is a secondary sort term.
+    const combo = parseSortingOptions(["name:asc", "id:desc"]).orderByInner;
+    expect(combo.match(/"assetId"/g)).toHaveLength(1);
+  });
+
+  it("exposes the inner order-by for the default (no-sort) fallback", () => {
+    const { orderByInner } = parseSortingOptions([]);
+    expect(orderByInner).toBe('"assetCreatedAt" DESC, "assetId" ASC');
   });
 
   describe("direction validation", () => {
     it("normalizes uppercase DESC to desc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:DESC"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+      // Explicit sorts get a stable `"assetId" ASC` tiebreaker so paging is
+      // deterministic across rows tied on the sort key.
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" desc, "assetId" ASC'
+      );
     });
 
     it("normalizes mixed-case Desc to desc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:Desc"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" desc, "assetId" ASC'
+      );
     });
 
     // Regression test for GHSA-69xv-wmgg-3qp3: SQL injection via direction.
@@ -73,12 +111,16 @@ describe("parseSortingOptions", () => {
 
     it("defaults missing direction to asc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" asc, "assetId" ASC'
+      );
     });
 
     it("defaults empty direction to asc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:"]);
-      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+      expect(orderByClause).toBe(
+        'ORDER BY "assetUpdatedAt" asc, "assetId" ASC'
+      );
     });
   });
 
@@ -145,12 +187,12 @@ describe("parseSortingOptions", () => {
 
     it("uses direct sort for DATE fields", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:DATE"]);
-      expect(orderByClause).toBe("ORDER BY cf_x asc");
+      expect(orderByClause).toBe('ORDER BY cf_x asc, "assetId" ASC');
     });
 
     it("uses ::numeric cast for AMOUNT fields", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:AMOUNT"]);
-      expect(orderByClause).toBe("ORDER BY cf_x::numeric asc");
+      expect(orderByClause).toBe('ORDER BY cf_x::numeric asc, "assetId" ASC');
     });
 
     it("falls through to natural sort for unknown fieldType", () => {
@@ -193,7 +235,15 @@ describe("parseSortingOptions", () => {
 
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
-      expect(orderByClause).toContain("custody->>'name'");
+      // Regression (custody-sort no-op): the `custody` column is a jsonb
+      // ARRAY (`Custody[]`) since the quantity-tracked multi-custodian
+      // refactor, not a single object. `custody->>'name'` on an array
+      // returns NULL for every row (asc == desc, only the id tiebreaker
+      // orders), so we must index the first element: `custody->0->>'name'`.
+      expect(orderByClause).toContain("custody->0->>'name'");
+      // Guard against a regression back to the object-shaped key that
+      // silently no-ops on the array.
+      expect(orderByClause).not.toContain("custody->>'name'");
       expect(orderByClause).toContain("desc");
     });
 
@@ -256,6 +306,30 @@ describe("generateCustomFieldSelect", () => {
 function getSqlString(sql: ReturnType<typeof generateWhereClause>): string {
   return sql.strings.join("?");
 }
+
+describe("generateWhereClause - search fail-closed", () => {
+  const orgId = "org-1";
+
+  it("matches nothing for typed input that yields zero terms", () => {
+    // why: `?s=%20` arrives untrimmed as " " — truthy but zero terms. The
+    // advanced path must fail closed like getAssets does in simple mode,
+    // or the same search box answers differently per index mode.
+    const result = generateWhereClause(orgId, "   ", []);
+    expect(getSqlString(result)).toContain("AND FALSE");
+  });
+
+  it("does not fail closed for a genuinely empty search", () => {
+    const result = generateWhereClause(orgId, null, []);
+    expect(getSqlString(result)).not.toContain("AND FALSE");
+  });
+
+  it("builds search conditions for real terms", () => {
+    const result = generateWhereClause(orgId, "tripod", []);
+    const sql = getSqlString(result);
+    expect(sql).toContain("ILIKE");
+    expect(sql).not.toContain("AND FALSE");
+  });
+});
 
 describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
@@ -648,6 +722,90 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
+describe("generateWhereClause - built-in date filter timezone", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * Built-in date columns (createdAt, updatedAt, …) are Prisma-default
+   * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+   * as a bare wall clock. To truncate to the calendar day the row DISPLAYS in
+   * for a non-UTC user, the column is converted in TWO steps —
+   * `AT TIME ZONE 'UTC'` (reinterpret the wall clock as a UTC instant) then
+   * `AT TIME ZONE ${tz}` (to the user's wall clock) — before `::date`.
+   *
+   * A single `AT TIME ZONE ${tz}` is the bug this guards: it ASSUMES the stored
+   * value is already in the user's zone, mis-shifting by the offset. Verified
+   * against Postgres: an asset at `2026-07-20 23:00Z` (shows as Jul 21 in Tokyo)
+   * truncates to Jul 20 under the single cast, Jul 21 under the double cast.
+   *
+   * The user tz is bound as a SQL parameter (`AT TIME ZONE $n`), so it surfaces
+   * in `values`; the leading `'UTC'` is a fixed literal in the SQL text.
+   */
+  it("converts UTC→user-tz (double AT TIME ZONE) before truncating to a date", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    // The two-step conversion — a single `AT TIME ZONE` would be the off-by-one
+    // bug. The literal 'UTC' lives in the SQL text; the user tz is bound.
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    expect(result.values).toContain("Asia/Tokyo");
+  });
+
+  it("defaults the built-in date filter timezone to UTC when unspecified", () => {
+    const filter: Filter = {
+      name: "createdAt",
+      type: "date",
+      operator: "is",
+      value: "2026-07-20",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(getSqlString(result)).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    // The (defaulted) user tz is bound as a parameter.
+    expect(result.values).toContain("UTC");
+  });
+
+  /**
+   * Custom-field DATE values are stored date-only (no timezone), so their
+   * filter must NOT be wrapped in AT TIME ZONE — doing so would be a no-op at
+   * best and a cast error at worst. Regression guard for the deliberate carve-out.
+   */
+  it("does NOT apply AT TIME ZONE to a custom-field DATE filter", () => {
+    const filter = {
+      name: "cf_PurchaseDate",
+      type: "customField",
+      fieldType: "DATE",
+      operator: "is",
+      value: "2026-07-20",
+    } as Filter;
+
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [filter],
+      undefined,
+      false,
+      "Asia/Tokyo"
+    );
+
+    expect(getSqlString(result)).not.toContain("AT TIME ZONE");
+  });
+});
+
 describe("assetQueryFragment", () => {
   /**
    * Helper to extract SQL string from Prisma.Sql for testing.
@@ -656,6 +814,29 @@ describe("assetQueryFragment", () => {
   function getFragmentSqlString(sql: ReturnType<typeof assetQueryFragment>) {
     return sql.strings.join("?");
   }
+
+  describe("asset model cover image", () => {
+    // why: raw SQL is opaque to typecheck — Prisma.sql is just a string, and the
+    // row type is a user-supplied cast. Asserting the column names is the only
+    // cheap regression guard, and it also catches a template literal that got
+    // truncated (e.g. by a stray backtick inside a SQL comment).
+    it("projects the model's image columns off the existing am join", () => {
+      const sql = getFragmentSqlString(assetQueryFragment());
+
+      expect(sql).toContain('am.image AS "assetModelImage"');
+      expect(sql).toContain(
+        'am."thumbnailImage" AS "assetModelThumbnailImage"'
+      );
+    });
+
+    it("keeps using the already-present AssetModel join", () => {
+      const joins = assetQueryJoins.strings.join("?");
+      const joinCount = joins.split('LEFT JOIN public."AssetModel" am').length;
+
+      // Exactly one join — the image columns must not add a second one.
+      expect(joinCount - 1).toBe(1);
+    });
+  });
 
   describe("custody output", () => {
     it("only includes booking custody when asset status is CHECKED_OUT", () => {
@@ -770,6 +951,19 @@ describe("assetQueryFragment", () => {
       expect(sql).toContain("'quantity', cu.quantity");
     });
 
+    it("orders the custody aggregation deterministically for a stable primary", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // The custody sort key (`custody->0->>'name'`) and the rendered badge
+      // (formatCustodyList picks custody[0]) both rely on element 0 being
+      // the primary custodian. jsonb_agg has an undefined input order without
+      // an explicit ORDER BY, so a multi-custodian (qty-tracked) asset's
+      // primary — and thus its sort key — could otherwise vary by plan and
+      // disagree with the badge. Oldest-first (createdAt, id) matches the
+      // kit/location primary-pick convention.
+      expect(sql).toContain('ORDER BY cu."createdAt" ASC, cu.id ASC');
+    });
+
     it("falls back to '[]'::jsonb when an asset has no custody rows", () => {
       const sql = getJoinsSqlString(assetQueryJoins);
 
@@ -812,6 +1006,58 @@ describe("assetQueryFragment", () => {
       expect(sql).not.toContain("cf.options");
       expect(sql).not.toContain("categories");
       expect(sql).not.toContain("_CategoryToCustomField");
+    });
+  });
+
+  describe("withBookings option (availability view)", () => {
+    /**
+     * The availability calendar folds the per-(asset, booking) BookingAsset
+     * pivot rows into one bar and needs each slice's `assetKitId`, booked
+     * `quantity`, and resolved kit name. Typecheck cannot validate the raw SQL
+     * (`Prisma.sql` is just a string to TS), so a wrong-column refactor would
+     * only surface as a 500 — per .claude/rules/raw-sql-respects-prisma-map
+     * item 4, guard the column/join names with a cheap string assertion.
+     * (No @map trap here: BookingAsset.quantity/assetKitId and Kit.name are
+     * unmapped, so the Prisma field names equal the DB column names.)
+     */
+    it("projects per-slice pivot columns and resolves kit name via joins", () => {
+      const fragment = assetQueryFragment({ withBookings: true });
+      const sql = getFragmentSqlString(fragment);
+
+      // Per-slice pivot metadata the fold reads (booked units, kit membership).
+      expect(sql).toContain('atb."assetKitId"');
+      expect(sql).toContain('atb."quantity"');
+      // Kit name resolved through org-scoped AssetKit -> Kit joins, using
+      // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
+      expect(sql).toContain("'kitName', bk_kit.name");
+      expect(sql).toContain('LEFT JOIN public."AssetKit" bk_ak');
+      // Org-scoped so a cross-org assetKitId resolves to NULL, never a leak.
+      expect(sql).toContain('bk_ak."organizationId" = a."organizationId"');
+      expect(sql).toContain(
+        'LEFT JOIN public."Kit" bk_kit ON bk_ak."kitId" = bk_kit.id'
+      );
+    });
+
+    it("omits the bookings subquery entirely when withBookings is false", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // Default (table views) must not pay for the availability-only subquery.
+      expect(sql).not.toContain("AS bookings");
+      expect(sql).not.toContain('atb."assetKitId"');
+      expect(sql).not.toContain("'kitName', bk_kit.name");
+    });
+  });
+
+  describe("quantity-tracking fields projection (import-ready export)", () => {
+    it("projects minQuantity and consumptionType by their mapped column names", () => {
+      // why: Prisma.sql is an opaque string to TS, so a wrong/missing column
+      // name only surfaces as a runtime 500. Guard the projection statically.
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      expect(sql).toContain('a."minQuantity" AS "assetMinQuantity"');
+      expect(sql).toContain('a."consumptionType" AS "assetConsumptionType"');
     });
   });
 });
@@ -884,5 +1130,288 @@ describe("generateWhereClause - barcode value case normalization", () => {
 
     expect(result.values).toContain("ABC123");
     expect(result.values).not.toContain("abc123");
+  });
+});
+
+describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * The paginate-first rewrite drops the fanning `LEFT JOIN _AssetToTag + Tag`
+   * from the cheap phase, so any tag reference in the WHERE clause must be a
+   * self-contained per-asset EXISTS (not a bare `t.name`/`t.id` against an
+   * outer join alias). These tests lock that shape.
+   */
+  it("EXISTS-ifies the tag-name search (per-asset scoped, not a fanning join)", () => {
+    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
+
+    // The tag search must be an EXISTS over _AssetToTag JOIN Tag scoped to the
+    // current asset — never a bare `t.name ILIKE` disjunct against an outer
+    // join that would force a GROUP BY.
+    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
+    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
+    expect(sql).toContain('WHERE att."A" = a.id AND t.name ILIKE');
+  });
+
+  it("EXISTS-ifies a single-tag `contains` filter", () => {
+    const filter: Filter = {
+      name: "tags",
+      type: "array",
+      operator: "contains",
+      value: "tag-1",
+    };
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    // No bare `t.id = ` against an outer alias; must be a scoped EXISTS whose
+    // `t.id =` predicate lives inside a per-asset subquery. Tables are
+    // schema-qualified (`public.`) to match the rest of the module.
+    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
+    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
+    expect(sql).toContain('WHERE att."A" = a.id AND t.id =');
+  });
+
+  it("EXISTS-ifies a multi-tag `containsAny` filter", () => {
+    const filter: Filter = {
+      name: "tags",
+      type: "array",
+      operator: "containsAny",
+      value: "tag-1,tag-2",
+    };
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    expect(sql).toContain('WHERE att."A" = a.id AND t.id = ANY');
+  });
+});
+
+describe("generateWhereClause - lowStockOnly", () => {
+  const orgId = "test-org-id";
+
+  it("does NOT emit the low-stock predicate when the flag is unset", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("does NOT emit the low-stock predicate when explicitly false", () => {
+    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+    );
+    expect(sql).not.toContain("QUANTITY_TRACKED");
+    expect(sql).not.toContain("minQuantity");
+  });
+
+  it("emits the low-stock predicate when the flag is set", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+    );
+    expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
+    expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
+    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
+describe("buildAdvancedAssetsQuery", () => {
+  /** Joins the raw SQL segments; interpolated values render as `?`. */
+  function getQuerySqlString(sql: Prisma.Sql): string {
+    return sql.strings.join("?");
+  }
+
+  /**
+   * Assembles the query through the real builder + fragments, mirroring the
+   * service call site so these assertions lock the shipped shape.
+   */
+  function build(overrides?: {
+    sortBy?: string[];
+    parsedFilters?: Filter[];
+    withBookings?: boolean;
+    withBarcodes?: boolean;
+    search?: string | null;
+  }): Prisma.Sql {
+    const sortBy = overrides?.sortBy ?? [];
+    const parsedFilters = overrides?.parsedFilters ?? [];
+    const search = overrides?.search ?? null;
+    const whereClause = generateWhereClause("org-1", search, parsedFilters);
+    const { orderByInner, customFieldSortings } = parseSortingOptions(sortBy);
+    return buildAdvancedAssetsQuery({
+      whereClause,
+      orderByInner,
+      customFieldSortings,
+      sortBy,
+      parsedFilters,
+      withBookings: overrides?.withBookings ?? false,
+      withBarcodes: overrides?.withBarcodes ?? false,
+      paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
+      hasSearch: Boolean(search),
+    });
+  }
+
+  it("emits the three-CTE + lateral paginate-first skeleton", () => {
+    const sql = getQuerySqlString(build());
+
+    expect(sql).toContain("WITH asset_query AS");
+    expect(sql).toContain("sorted_asset_query AS");
+    expect(sql).toContain("count_query AS");
+    expect(sql).toContain("COUNT(*)::integer AS total_count");
+    // Heavy projection runs once per page row via a correlated lateral.
+    expect(sql).toContain("LEFT JOIN LATERAL");
+    expect(sql).toContain('WHERE a.id = saq."assetId"');
+  });
+
+  it("freezes the sort into an integer ROW_NUMBER rank and replays it", () => {
+    const sql = getQuerySqlString(build());
+
+    // Default sort feeds the window; the array is ordered by the frozen rank.
+    expect(sql).toContain(
+      'ROW_NUMBER() OVER (ORDER BY "assetCreatedAt" DESC, "assetId" ASC)'
+    );
+    expect(sql).toContain('AS "__sortRank"');
+    expect(sql).toContain('ORDER BY saq."__sortRank"');
+  });
+
+  it("keeps the slim cheap phase to id + light sort keys (no heavy projection)", () => {
+    const sql = getQuerySqlString(build());
+
+    // Base sort keys are always selected directly off the scan.
+    expect(sql).toContain('a.value AS "assetValue"');
+    expect(sql).toContain('a.quantity AS "assetQuantity"');
+  });
+
+  it("gates a name-sort column in the cheap phase on the active sort", () => {
+    // The heavy projection always selects `k.name AS "kitName"` (for display),
+    // so isolate the CHEAP phase (everything before `sorted_asset_query`) to
+    // assert the gating: default sort omits the name joins/selects there — the
+    // residual-O(N) fix — and sorting by one brings it back.
+    const cheap = (overrides?: Parameters<typeof build>[0]) => {
+      const sql = getQuerySqlString(build(overrides));
+      return sql.slice(0, sql.indexOf("sorted_asset_query"));
+    };
+    const def = cheap({ sortBy: [] });
+    expect(def).not.toContain('k.name AS "kitName"');
+    expect(def).not.toContain('l.name AS "locationName"');
+
+    expect(cheap({ sortBy: ["kit:asc"] })).toContain('k.name AS "kitName"');
+    expect(cheap({ sortBy: ["location:asc"] })).toContain(
+      'l.name AS "locationName"'
+    );
+  });
+
+  it("keeps Category/Location joins for text search even without a name sort", () => {
+    // The search predicate references c.name / l.name in the WHERE, so a search
+    // must resolve those joins (independent of any sort). `c.name ILIKE` only
+    // appears when a search is active, so it is the reliable signal.
+    expect(getQuerySqlString(build({ search: "widget" }))).toContain(
+      "c.name ILIKE"
+    );
+    expect(getQuerySqlString(build({ sortBy: [] }))).not.toContain(
+      "c.name ILIKE"
+    );
+  });
+
+  it("injects the barcode sort-key selects only when a barcode sort is active", () => {
+    // withBarcodes:false ⇒ the heavy phase omits barcode scalars, so any
+    // `AS barcode_Code128` must come from the cheap phase's sort-key select.
+    const withBarcodeSort = getQuerySqlString(
+      build({ sortBy: ["barcode_Code128:asc"], withBarcodes: false })
+    );
+    expect(withBarcodeSort).toContain("AS barcode_Code128");
+
+    const withoutBarcodeSort = getQuerySqlString(
+      build({ sortBy: [], withBarcodes: false })
+    );
+    expect(withoutBarcodeSort).not.toContain("AS barcode_Code128");
+  });
+
+  it("selects a.value (never valuation) — respects the @map column", () => {
+    const sql = getQuerySqlString(build());
+    expect(sql).toContain('a.value AS "assetValue"');
+    expect(sql).not.toContain("a.valuation");
+  });
+
+  it("sorts custody by the first array element with a deterministic primary", () => {
+    // `custody` is a jsonb array; the sort key must index element 0
+    // (`custody->0->>'name'`), and the cheap-phase custody aggregation must
+    // order its jsonb_agg so element 0 is stable and matches the badge.
+    const sql = getQuerySqlString(build({ sortBy: ["custody:asc"] }));
+
+    // Array-indexed sort key (never the object-shaped no-op `custody->>'name'`).
+    expect(sql).toContain("custody->0->>'name'");
+    expect(sql).not.toContain("custody->>'name'");
+    // Cheap-phase custody aggregation is injected for the sort and carries the
+    // deterministic ordering (mirrors the heavy phase).
+    expect(sql).toContain(") custody_agg ON TRUE");
+    expect(sql).toContain('ORDER BY cu."createdAt" ASC, cu.id ASC');
+  });
+
+  // why: regression coverage for the "Created at is 6 hours ahead" report from a
+  // UTC-6 workspace. Prisma maps `DateTime` to `TIMESTAMP(3)` *without* time
+  // zone, and `jsonb_build_object` renders those with no zone designator
+  // ("2026-07-27T19:42:46.459"). `new Date()` then reads that as LOCAL time, so
+  // every non-UTC viewer saw a shifted clock in the advanced asset index while
+  // the asset Activity tab (normal Prisma path) showed the truth. Assert the
+  // shipped SQL stamps an explicit UTC marker on every such field — and, just as
+  // importantly, that it leaves genuine `timestamptz` columns alone.
+  describe("timestamp fields carry an explicit UTC designator in the JSON payload", () => {
+    const UTC_ISO_FORMAT = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
+
+    const wrappedFields: { jsonKey: string; column: string }[] = [
+      { jsonKey: "createdAt", column: 'aq."assetCreatedAt"' },
+      { jsonKey: "updatedAt", column: 'aq."assetUpdatedAt"' },
+      {
+        jsonKey: "mainImageExpiration",
+        column: 'aq."assetMainImageExpiration"',
+      },
+      { jsonKey: "alertDateTime", column: 'ar."alertDateTime"' },
+    ];
+
+    for (const { jsonKey, column } of wrappedFields) {
+      it(`wraps '${jsonKey}' so the client parses it as UTC`, () => {
+        const sql = getQuerySqlString(build());
+
+        expect(sql).toContain(
+          `'${jsonKey}', to_char(${column}, ${UTC_ISO_FORMAT})`
+        );
+        // The bare column must not survive as the JSON value — that is the bug.
+        // Matched up to the delimiter so this also holds for the last key in an
+        // object (no trailing comma), e.g. `alertDateTime`.
+        const bare = new RegExp(
+          `'${jsonKey}',\\s*${column.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            "\\$&"
+          )}\\s*[,)\\n]`
+        );
+        expect(sql).not.toMatch(bare);
+      });
+    }
+
+    it("pins the table aliases the wrapper hardcodes", () => {
+      // `utcJsonTimestamp` builds its SQL with `Prisma.raw`, so typecheck cannot
+      // see these references. Renaming either alias would 500 every /assets page
+      // with `column aq.assetCreatedAt does not exist`; fail here instead.
+      const sql = getQuerySqlString(build());
+
+      expect(sql).toContain(") aq ON TRUE");
+      expect(sql).toContain('FROM public."AssetReminder" ar');
+    });
+
+    it("does not wrap Booking.from/to — they are timestamptz and already correct", () => {
+      // `to_char` on a timestamptz renders in the *session* TimeZone, so
+      // wrapping these would make the payload depend on ambient server config.
+      const sql = getQuerySqlString(build({ withBookings: true }));
+
+      expect(sql).toContain(`'from', bk."from"`);
+      expect(sql).toContain(`'to', bk."to"`);
+      expect(sql).not.toContain(`to_char(bk."from"`);
+      expect(sql).not.toContain(`to_char(bk."to"`);
+    });
+
+    it("keeps the sort keys as real timestamps, not formatted text", () => {
+      // Ordering must stay on the typed column; formatting it would turn the
+      // comparison into a lexicographic one on text.
+      const sql = getQuerySqlString(build({ sortBy: ["createdAt:desc"] }));
+
+      expect(sql).toContain('a."createdAt" AS "assetCreatedAt"');
+      expect(sql).not.toContain('to_char(a."createdAt"');
+    });
   });
 });

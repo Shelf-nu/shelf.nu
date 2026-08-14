@@ -162,6 +162,8 @@ export function AssetIndexFilters({
                   name: "teamMember",
                   queryKey: "name",
                   deletedAt: null,
+                  // A read FILTER — the workspace custody override governs.
+                  custodyPurpose: "custody-filter",
                 }}
                 renderItem={(item) => resolveTeamMemberName(item, true)}
                 label="Filter by custodian"

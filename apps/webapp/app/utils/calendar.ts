@@ -4,6 +4,7 @@ import type {
   EventHoveringArg,
 } from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
 export function getStatusClasses(
@@ -258,39 +259,50 @@ export function handleEventClick(info: EventClickArg) {
 }
 
 /**
- * This function returns the title and subtitle for the calendar
- * based on the current view type.
+ * Build the calendar header title + subtitle for the current view, formatting
+ * every visible date through the user's resolved prefs (absolute).
  *
- * @param viewType - The type of the calendar view (e.g., resourceTimelineWeek, timeGridWeek)
- * @param calendar - The CalendarApi instance to get the current date.
+ * @param viewType - FullCalendar view name (…Week / …Day / month)
+ * @param calendarApi - The CalendarApi instance to read the current date from
+ * @param prefs - Resolved user format prefs
  */
 export function getCalendarTitleAndSubtitle({
   viewType,
   calendarApi,
+  prefs,
 }: {
   viewType: string;
   calendarApi: CalendarApi;
+  prefs: ResolvedFormatPrefs;
 }) {
   const currentDate = calendarApi.getDate();
-  const currentMonth = currentDate.toLocaleString("default", { month: "long" });
-  const currentYear = currentDate.getFullYear();
+  const monthYear = formatDate(currentDate, prefs, {
+    month: "long",
+    year: "numeric",
+    localeOnly: true,
+  });
 
-  let title = `${currentMonth} ${currentYear}`;
+  let title = monthYear;
   let subtitle = "";
 
   if (viewType.endsWith("Week")) {
-    const [startingDay, endingDay] = getWeekStartingAndEndingDates(currentDate);
+    const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+      currentDate,
+      prefs
+    );
 
-    title = `${currentMonth} ${currentYear}`;
+    title = monthYear;
     subtitle = `Week ${startingDay} - ${endingDay}`;
   } else if (viewType.endsWith("Day")) {
-    const formattedDate = currentDate.toLocaleDateString("default", {
+    const formattedDate = formatDate(currentDate, prefs, {
       day: "numeric",
       month: "long",
       year: "numeric",
+      localeOnly: true,
     });
-    const weekday = currentDate.toLocaleDateString("default", {
+    const weekday = formatDate(currentDate, prefs, {
       weekday: "long",
+      localeOnly: true,
     });
     title = formattedDate;
     subtitle = weekday;

@@ -1,6 +1,7 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 
 export type UpdateKitPayload = Partial<
   Pick<
@@ -89,6 +90,8 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImage: true,
   thumbnailImage: true,
   mainImageExpiration: true,
+  // Model cover image for member assets with no image of their own
+  ...ASSET_MODEL_IMAGE_SELECT,
   status: true,
   availableToBook: true,
   // Archived assets keep showing in the kit they belong to, flagged with the
@@ -103,8 +106,11 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   // kit`. Previously the count was derived from `asset.quantity − operator
   // custody`, which is wrong once the kit can hold a strict subset of the
   // pool.
+  // `id` is the `AssetKit` id — `BookingAsset.assetKitId` points at it, so the
+  // kit page can resolve which bookings a row's removal would affect
+  // (`getBookingImpactForAssetKits`).
   assetKits: {
-    select: { kitId: true, quantity: true },
+    select: { id: true, kitId: true, quantity: true },
   },
   custody: {
     select: {

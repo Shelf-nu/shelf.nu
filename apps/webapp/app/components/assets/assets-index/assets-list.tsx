@@ -45,6 +45,7 @@ import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
+import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
@@ -171,23 +172,18 @@ export const AssetsList = ({
                             resource.extendedProps?.thumbnailImage,
                           mainImageExpiration:
                             resource.extendedProps?.mainImageExpiration,
+                          assetModel:
+                            resource.extendedProps?.assetModel ?? null,
                         }}
                         alt={`Image of ${resource.title}`}
-                        className="size-14 rounded border object-cover"
+                        className="size-14 shrink-0 rounded border object-cover"
                         withPreview
                       />
-                      <div className="flex flex-col gap-1">
-                        <div className="min-w-0 flex-1 truncate">
-                          <Button
-                            to={`/assets/${resource.id}`}
-                            variant="link"
-                            className="text-left font-medium text-gray-900 hover:text-gray-700"
-                            target={"_blank"}
-                            onlyNewTabIconOnHover={true}
-                          >
-                            {resource.title}
-                          </Button>
-                        </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <ResourceTitleLink
+                          to={`/assets/${resource.id}`}
+                          title={resource.title}
+                        />
                         <div className="flex flex-wrap items-center gap-2">
                           <AssetStatusBadge
                             id={resource.id}
@@ -277,6 +273,7 @@ export const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

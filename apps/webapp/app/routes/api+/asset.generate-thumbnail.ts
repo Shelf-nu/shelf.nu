@@ -12,7 +12,11 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { createSignedUrl, uploadFile } from "~/utils/storage.server";
+import {
+  createSignedUrl,
+  getThumbnailStoragePath,
+  uploadFile,
+} from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
 
@@ -171,17 +175,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       yield new Uint8Array(buffer);
     };
 
-    // Generate thumbnail filename
-    let thumbnailPath: string;
-
-    // Check if the file has an extension
-    if (originalPath.includes(".")) {
-      // File has extension, replace before the extension
-      thumbnailPath = originalPath.replace(/(\.[^.]+)$/, "-thumbnail$1");
-    } else {
-      // File has no extension, just append -thumbnail
-      thumbnailPath = `${originalPath}-thumbnail`;
-    }
+    // Generate thumbnail filename — same convention the upload path writes to
+    const thumbnailPath = getThumbnailStoragePath(originalPath);
 
     // Create and upload thumbnail
     const uploadedPath = await uploadFile(createAsyncIterable(), {

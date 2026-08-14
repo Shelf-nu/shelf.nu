@@ -29,36 +29,63 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") || "";
 
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        ...(isSelfService ? { userId: user.id } : {}),
-        ...(search
-          ? { name: { contains: search, mode: "insensitive" as const } }
-          : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            profilePicture: true,
+    /**
+     * Pagination. Custody has to be assignable to ANY colleague, not just the
+     * first page of them — an org larger than one page could not hand an asset
+     * to the people past the cut, and search only helps if you already know
+     * the name. Defaults keep older clients unchanged: no params means page 1.
+     */
+    const page = Math.max(
+      1,
+      parseInt(url.searchParams.get("page") || "1", 10) || 1
+    );
+    const perPage = Math.min(
+      100,
+      Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
+    );
+
+    const where = {
+      organizationId,
+      deletedAt: null,
+      ...(isSelfService ? { userId: user.id } : {}),
+      ...(search
+        ? { name: { contains: search, mode: "insensitive" as const } }
+        : {}),
+    };
+
+    const [teamMembers, totalCount] = await Promise.all([
+      db.teamMember.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+            },
           },
         },
-      },
-      orderBy: [
-        // Users (those with a linked user account) come first
-        { userId: "asc" },
-        { name: "asc" },
-      ],
-      take: 50,
-    });
+        orderBy: [
+          // Users (those with a linked user account) come first
+          { userId: "asc" },
+          { name: "asc" },
+        ],
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      db.teamMember.count({ where }),
+    ]);
 
-    return data({ teamMembers });
+    return data({
+      teamMembers,
+      page,
+      perPage,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / perPage)),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

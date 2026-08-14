@@ -2,7 +2,7 @@
   "expo": {
     "name": "Shelf",
     "slug": "shelf-companion",
-    "version": "1.0.3",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shelf",
@@ -11,9 +11,11 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shelf.companion",
+      "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
-        "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits."
+        "NSPhotoLibraryUsageDescription": "Shelf needs photo library access so you can attach photos to assets and audits.",
+        "NSLocationWhenInUseUsageDescription": "Shelf records where assets were scanned so your team can see each item's last known location."
       }
     },
     "android": {
@@ -22,7 +24,41 @@
         "backgroundColor": "#FF7809"
       },
       "package": "com.shelf.companion",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/qr/"
+            },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/assets/"
+            },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/bookings/"
+            },
+            {
+              "scheme": "https",
+              "host": "app.shelf.nu",
+              "pathPrefix": "/audits/"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -45,6 +81,13 @@
         "expo-camera",
         {
           "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-av",
+        {
           "microphonePermission": false
         }
       ],
@@ -65,6 +108,18 @@
         "projectId": "b6d6a6cb-c242-4474-815f-b55d5e691c58"
       }
     },
-    "owner": "shelfassetmanagement"
+    "owner": "shelfassetmanagement",
+    "runtimeVersion": "1.3.0",
+    "updates": {
+      "url": "https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD",
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
+    }
   }
 }

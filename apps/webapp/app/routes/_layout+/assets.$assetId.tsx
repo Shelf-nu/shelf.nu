@@ -8,7 +8,7 @@ import type {
 } from "react-router";
 import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
-import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -20,6 +20,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   archiveAsset,
   deleteAsset,
@@ -41,8 +42,9 @@ import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -114,6 +116,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: {
+        // Model cover image for an asset with no image of its own
+        ...ASSET_MODEL_IMAGE_SELECT,
         custody: { include: { custodian: true } },
         assetKits: {
           select: {
@@ -394,18 +398,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "set-reminder": {
+        // Resolve the acting user's timezone BEFORE validating so the schema's
+        // "must be in the future" check runs in the SAME zone the value is later
+        // stored in (below) and the SAME zone the client validated in. Validating
+        // with the default server-zone schema first, then storing in the pref
+        // zone, lets the two disagree for a wall-clock time near "now".
+        const { timeZone } = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
+
         const { redirectTo, ...payload } = parseData(
           formData,
-          setReminderSchema,
+          createSetReminderSchema({ timeZone }),
           { shouldBeCaptured: false }
         );
-        const hints = getHints(request);
 
+        // Parse the submitted wall-clock time in that same resolved timezone —
+        // not the browser hint. When the two differ the browser zone would
+        // offset the stored UTC instant wrong.
         const alertDateTime = DateTime.fromFormat(
           formData.get("alertDateTime")!.toString()!,
           DATE_TIME_FORMAT,
           {
-            zone: hints.timeZone,
+            zone: timeZone,
           }
         ).toJSDate();
 
@@ -519,7 +535,16 @@ export default function AssetDetailsPage() {
 
   const items = [
     { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    // The activity loader requires `note:read` and 403s without it, so a role
+    // that can't read notes must not be offered the tab. Mirrors the bookings
+    // detail page.
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.note,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "activity", content: "Activity" }]
+      : []),
     { to: "bookings", content: "Bookings" },
     ...(userHasPermission({
       roles,
@@ -542,6 +567,7 @@ export default function AssetDetailsPage() {
                 mainImage: asset.mainImage,
                 thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
+                assetModel: asset.assetModel ?? null,
               }}
               alt={`Image of ${asset.title}`}
               className={tw(

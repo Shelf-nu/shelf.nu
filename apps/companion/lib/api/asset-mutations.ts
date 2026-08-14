@@ -11,9 +11,11 @@
  */
 
 import { apiFetch, apiUpload } from "./client";
-import { cachedApiFetch } from "./cache";
+import { cachedApiFetch, invalidateResponseCache } from "./cache";
 import type {
   CategoriesResponse,
+  TagsResponse,
+  CreateTagResponse,
   CreateAssetResponse,
   CustomFieldsResponse,
   CustomFieldValue,
@@ -21,12 +23,38 @@ import type {
   UpdateAssetResponse,
   DeleteAssetResponse,
   UpdateImageResponse,
+  AdjustQuantityResponse,
 } from "./types";
 
 export const assetMutationsApi = {
   /** Get categories for an organization (for asset creation picker) */
   categories: (orgId: string) =>
     cachedApiFetch<CategoriesResponse>(`/api/mobile/categories?orgId=${orgId}`),
+
+  /** Get tags assignable to assets (for the create-asset tag picker) */
+  tags: (orgId: string) =>
+    cachedApiFetch<TagsResponse>(`/api/mobile/tags?orgId=${orgId}`),
+
+  /**
+   * Create a new tag inline from the tag picker (admins/owners only — the
+   * server enforces `tag.create`; the picker hides the affordance via the
+   * `canCreate` flag on {@link TagsResponse}). Invalidates the cached tag
+   * list on success so the next picker load includes the new tag.
+   *
+   * @param orgId - the active organization
+   * @param name - the tag name (server requires 3+ chars, web parity)
+   */
+  createTag: async (orgId: string, name: string) => {
+    const result = await apiFetch<CreateTagResponse>(
+      `/api/mobile/tags/create?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }
+    );
+    if (!result.error) invalidateResponseCache("/api/mobile/tags");
+    return result;
+  },
 
   /**
    * Get the active custom field definitions for the org, optionally filtered
@@ -67,6 +95,8 @@ export const assetMutationsApi = {
       description?: string;
       categoryId?: string;
       locationId?: string;
+      /** Tag ids to assign to the new asset. */
+      tags?: string[];
       valuation?: number;
       customFields?: { id: string; value: CustomFieldValue }[];
       qrId?: string;
@@ -90,6 +120,34 @@ export const assetMutationsApi = {
       method: "POST",
       body: JSON.stringify({ assetId }),
     }),
+
+  /**
+   * Adjust total stock of a QUANTITY_TRACKED asset (restock / remove /
+   * correction). Mobile twin of the web's /api/assets/adjust-quantity —
+   * the server validates the type gate, org scope and the row-locked
+   * negative-stock check, writes the ConsumptionLog row, and fires the
+   * low-stock alert when the threshold is crossed.
+   */
+  adjustQuantity: (
+    orgId: string,
+    assetId: string,
+    args: {
+      quantity: number;
+      direction: "add" | "subtract";
+      category: "RESTOCK" | "ADJUSTMENT" | "LOSS";
+      note?: string;
+    }
+  ) =>
+    apiFetch<AdjustQuantityResponse>(
+      `/api/mobile/asset/adjust-quantity?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId, ...args }),
+        // why: non-idempotent — a timed-out-but-landed request must not be
+        // auto-retried, or the adjustment double-applies.
+        retry: false,
+      }
+    ),
 
   /** Update asset image (multipart upload) */
   updateImage: (

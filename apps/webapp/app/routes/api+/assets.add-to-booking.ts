@@ -25,7 +25,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -44,7 +44,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     let { finalAssetIds, bookingInfo } = await processBooking(
       id,
       assetsIds,
-      organizationId
+      organizationId,
+      { userId, role }
     );
 
     /**

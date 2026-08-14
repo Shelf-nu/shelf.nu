@@ -16,6 +16,8 @@ import {
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 
+import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
 vi.mock("@remix-run/form-data-parser", async () => {
@@ -35,13 +37,6 @@ vi.mock("lottie-react", () => ({
 }));
 
 const parseFormDataMock = vi.mocked(parseFormData);
-
-const baseRequest = new Request("http://localhost", {
-  headers: {
-    "accept-language": "en-US",
-    Cookie: "CH-time-zone=UTC",
-  },
-});
 
 describe("parseCsv", () => {
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
@@ -369,7 +364,7 @@ describe("buildCsvExportDataFromAssets", () => {
         barcodesEnabled: false,
         currency: "USD",
       },
-      request: baseRequest,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(headers).toEqual([
@@ -394,15 +389,104 @@ describe("buildCsvExportDataFromAssets", () => {
       '"photo, dslr"',
       '"$1,234.50"',
       '"Yes"',
-      '"2024-01-02T03:04:05.000Z"',
+      // Human export formats createdAt in the acting user's prefs (was raw ISO).
+      '"01/02/2024, 3:04 AM"',
       '"Jane Doe"',
       '"Yes"',
       '"Checked and ready"',
-      '"2024-02-10"',
+      // Custom-field DATE now renders in the user's date format (display-only export).
+      '"02/10/2024"',
       '"$5,000.00"',
       '"misc value"',
       '""',
     ]);
+  });
+
+  it("renders a custom-field DATE from `raw`, not the UTC-midnight `valueDate` (no tz shift)", () => {
+    // `valueDate` is deliberately a DIFFERENT day than `raw` so this guard is
+    // tz-independent: the correct path formats `raw` (2026-07-06). If the export
+    // ever reads `valueDate` again — a UTC-midnight ISO that localeOnly parses to
+    // a UTC instant and then reads in the SERVER's local zone, shifting a day
+    // west of UTC — the cell renders 2026-07-05 and this fails on every machine.
+    const assets = [
+      {
+        id: "asset-d",
+        title: "Dated",
+        tags: [],
+        custody: [],
+        customFields: [
+          {
+            customField: { name: "purchaseDate" },
+            value: { raw: "2026-07-06", valueDate: "2026-07-05T00:00:00.000Z" },
+          },
+        ],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      {
+        name: "cf_purchaseDate",
+        visible: true,
+        position: 1,
+        cfType: CustomFieldType.DATE,
+      },
+    ];
+
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    // MM_DD_YYYY default prefs: July 6 from `raw`, never July 5 from `valueDate`.
+    expect(row[1]).toBe('"07/06/2026"');
+  });
+
+  it("emits per-unit valuation and qty-aware total_value side by side", () => {
+    // QT asset: 100 boxes at €1/each. `valuation` column stays per-unit
+    // (CSV round-trip safe — re-import won't inflate it), while the new
+    // synthetic `total_value` column reports the qty-aware total (€100).
+    const assets = [
+      {
+        id: "asset-pens",
+        title: "Pens",
+        valuation: 1,
+        quantity: 100,
+        type: "QUANTITY_TRACKED",
+        unitOfMeasure: "boxes",
+        tags: [],
+        custody: [],
+        customFields: [],
+      },
+    ];
+
+    const columns = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      // Injected by the export caller at MAX_SAFE_INTEGER; here we pin
+      // it to position 2 for a stable assertion.
+      { name: "total_value", visible: true, position: 2 },
+    ];
+
+    const [headers, row] = buildCsvExportDataFromAssets({
+      assets: assets as any,
+      columns: columns as any,
+      currentOrganization: {
+        id: "org-1",
+        barcodesEnabled: false,
+        currency: "USD",
+      },
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
+    expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
   });
 });
 
@@ -432,7 +516,7 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
-      baseRequest
+      HARDCODED_DEFAULT_PREFS
     );
 
     expect(headers).toEqual([
@@ -513,7 +597,7 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [, mainRow, assetRow] = buildCsvExportDataFromBookings(
       [booking as any],
-      baseRequest,
+      HARDCODED_DEFAULT_PREFS,
       checkinsByBooking
     );
 

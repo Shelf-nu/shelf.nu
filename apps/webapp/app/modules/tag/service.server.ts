@@ -326,3 +326,42 @@ export async function getTagsForBookingTagsFilter({
     });
   }
 }
+
+/**
+ * Fetches the tags assignable to ASSETS (tags whose `useFor` is empty or
+ * contains ASSET), used by the companion app's create-asset tag picker.
+ *
+ * Mirrors {@link getTagsForBookingTagsFilter} so the asset and booking tag
+ * sources stay structurally identical, and matches the web asset form's tag
+ * scope (tags default to `[ASSET]`).
+ *
+ * @param params.organizationId - The workspace whose asset tags to list.
+ * @returns `{ tags, totalTags }` for the picker.
+ * @throws {ShelfError} If the query fails.
+ */
+export async function getTagsForAssetTagsFilter({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  try {
+    const tags = await db.tag.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { useFor: { isEmpty: true } },
+          { useFor: { has: TagUseFor.ASSET } },
+        ],
+      },
+    });
+
+    return { tags, totalTags: tags.length };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching tags for asset filter",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}

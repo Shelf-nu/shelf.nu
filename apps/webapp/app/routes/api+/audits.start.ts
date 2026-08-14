@@ -20,6 +20,7 @@ import {
 } from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { badRequest, makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -131,6 +132,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     let assetIds: string[];
 
+    // Resolve the acting user's timezone AT MOST ONCE. Both the select-all id
+    // resolution and the due-date parse below can need it on the same submit;
+    // memoizing means a select-all + due-date start issues a single lookup,
+    // while a start needing neither issues none.
+    let cachedTimeZone: string | undefined;
+    const getUserTimeZone = async () => {
+      if (cachedTimeZone === undefined) {
+        cachedTimeZone = (await resolveUserFormatPrefsById(userId, hints))
+          .timeZone;
+      }
+      return cachedTimeZone;
+    };
+
     if (contextType === "location" && locationIds && locationIds.length > 0) {
       // Bulk "Create audit" from the Locations index (multi-select). Resolve
       // the union of assets across the selected locations server-side — handles
@@ -159,11 +173,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
         role,
       });
 
+      // Acting user's timezone: the select-all set is resolved from the current
+      // date filters, which must truncate the day in the user's tz (avoids an
+      // off-by-one for non-UTC users).
+      const timeZone = await getUserTimeZone();
+
       assetIds = await resolveAssetIdsForBulkOperation({
         assetIds: directAssetIds,
         organizationId,
         currentSearchParams,
         settings,
+        timeZone,
+        // Gated on `audit: create`, which neither BASE nor SELF_SERVICE holds —
+        // unlike `audits.add-assets`, which is `audit: update` and does narrow.
+        allowedTeamMemberIds: "all",
       });
     } else {
       // Resolve asset IDs from either direct input or context
@@ -179,12 +202,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const sanitizedDescription = description?.trim() || undefined;
 
-    // Convert dueDate from user's local timezone to UTC
-    // Get raw value from formData (not parsed Zod value) to ensure proper timezone handling
+    // Convert dueDate from the acting user's stored timezone preference to UTC.
+    // Get raw value from formData (not parsed Zod value) to ensure proper
+    // timezone handling. Parse against the SAME resolved timezone that date
+    // DISPLAY uses (the user's `timeZone` preference), NOT the browser hint —
+    // otherwise a browser/preference zone mismatch offsets the stored instant
+    // (e.g. pref Europe/London, browser UTC+3: typed 15:48 stored as 12:48Z
+    // instead of 14:48Z).
     const dueDateString = formData.get("dueDate")?.toString();
+    // Resolve the acting user's timezone preference lazily — only when a due
+    // date was actually submitted (no date → no parse → no DB lookup needed).
     const dueDateUTC = dueDateString
       ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-          zone: hints.timeZone,
+          zone: await getUserTimeZone(),
         }).toJSDate()
       : undefined;
     if (dueDateUTC && dueDateUTC <= new Date()) {
@@ -256,11 +286,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
             assigneeUser.user.lastName || "User"
           }`;
 
-          // Send async email (don't await to avoid blocking response)
+          // Send async email (don't await to avoid blocking response).
+          // `assignee` is the recipient user id — plumbed so the email helper
+          // can resolve the assignee's own date/time format preferences.
           void sendAuditAssignedEmail({
             audit: auditForEmail,
             assigneeEmail: assigneeUser.user.email,
             assigneeName,
+            assigneeUserId: assignee,
             hints,
           });
         }

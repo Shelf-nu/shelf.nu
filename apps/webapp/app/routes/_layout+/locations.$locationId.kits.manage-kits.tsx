@@ -72,7 +72,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -108,6 +108,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Only reaches `?teamMember=` here; pass the resolved rule so an
+        // admin's custodian filter still works on this dialog.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
         },

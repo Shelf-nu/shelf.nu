@@ -1,4 +1,6 @@
+import Markdoc from "@markdoc/markdoc";
 import {
+  appendUserTextToNote,
   wrapDateForNote,
   wrapKitsForNote,
   wrapAssetsWithDataForNote,
@@ -524,5 +526,47 @@ describe("wrapDescriptionForNote", () => {
     expect(result).toBe(
       `{% description newText="Multi-line\ndescription with\n&quot;multiple&quot; &quot;quotes&quot;" /%}`
     );
+  });
+});
+
+/** Tag nodes Markdoc finds — what an injected payload must never produce. */
+const tagsIn = (content: string) =>
+  [...Markdoc.parse(content).walk()].filter((node) => node.type === "tag");
+
+describe("appendUserTextToNote", () => {
+  const baseLine = "**Jane** released **5** unit(s) from custody.";
+
+  it("appends a quoted remark", () => {
+    expect(appendUserTextToNote(baseLine, "shelf was full")).toBe(
+      `${baseLine} *"shelf was full"*`
+    );
+  });
+
+  it("returns the base line unchanged when there is no remark", () => {
+    expect(appendUserTextToNote(baseLine)).toBe(baseLine);
+    expect(appendUserTextToNote(baseLine, null)).toBe(baseLine);
+    expect(appendUserTextToNote(baseLine, "   ")).toBe(baseLine);
+  });
+
+  it("cannot be used to inject a Markdoc tag", () => {
+    // The remark is free-form user input on the quantity custody/adjustment
+    // endpoints and is persisted as an UPDATE note. A tag injected here would
+    // forge the note's presentation (status badges, asset popovers) even
+    // though the renderer now blocks link payloads.
+    const payload = '{% booking_status status="COMPLETE" /%}';
+
+    const result = appendUserTextToNote(baseLine, payload);
+
+    expect(tagsIn(result)).toHaveLength(0);
+    expect(result).not.toContain("{%");
+  });
+
+  it("resists the doubled-delimiter bypass", () => {
+    const result = appendUserTextToNote(
+      baseLine,
+      '{{%% link to="javascript:alert(1)" text="x" /%%}}'
+    );
+
+    expect(tagsIn(result)).toHaveLength(0);
   });
 });

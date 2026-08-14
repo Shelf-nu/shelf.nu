@@ -42,6 +42,8 @@ import assetCss from "~/styles/assets.css?url";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -72,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         role,
         canUseBarcodes,
+        canSeeAllCustody,
       },
       user,
     ] = await Promise.all([
@@ -138,6 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
+          canSeeAllCustody,
         })
       : await advancedModeLoader({
           request,
@@ -148,6 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
+          canSeeAllCustody,
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -207,12 +212,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
             .and(CurrentSearchParamsSchema)
         );
 
+        // Acting user's timezone: when "select all" is active the deletion set
+        // is resolved from the current date filters, which must truncate the
+        // day in the user's tz (avoids an off-by-one for non-UTC users).
+        const { timeZone } = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
+
         await bulkDeleteAssets({
           assetIds,
           organizationId,
           userId,
           currentSearchParams,
           settings,
+          timeZone,
         });
 
         sendNotification({
