@@ -148,6 +148,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       // Soonest first: a calendar is read forwards.
       orderBy: [{ from: "asc" }],
+      // why: a month for a busy workspace is unbounded otherwise. The grid can
+      // only show a few bands per day anyway, so a ceiling costs nothing that
+      // is visible and stops one request pulling an enormous payload onto a
+      // phone that may be on site data.
+      take: 500,
     });
 
     return data({

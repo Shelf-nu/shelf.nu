@@ -57,6 +57,65 @@ function daysCovered(from: string, to: string): string[] {
   return keys;
 }
 
+/**
+ * Regions that start the week on Sunday. Used only when the JS engine cannot
+ * answer for itself: Hermes ships a reduced Intl and may not carry `weekInfo`.
+ */
+const SUNDAY_FIRST = new Set([
+  "US",
+  "CA",
+  "MX",
+  "BR",
+  "CO",
+  "PE",
+  "VE",
+  "AR",
+  "CL",
+  "JP",
+  "KR",
+  "TW",
+  "CN",
+  "HK",
+  "IL",
+  "IN",
+  "ID",
+  "PH",
+  "TH",
+  "ZA",
+]);
+
+/**
+ * First day of the week for this device, as react-native-calendars wants it
+ * (0 = Sunday, 1 = Monday).
+ *
+ * why: this was hardcoded to Monday, which is simply wrong for every customer
+ * in the US and much of Asia — the calendar would silently show them a week
+ * shape they do not use.
+ */
+function resolveFirstDay(): number {
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    const info = (
+      new Intl.Locale(locale) as unknown as {
+        weekInfo?: { firstDay?: number };
+      }
+    ).weekInfo;
+    // Intl counts 1 = Monday ... 7 = Sunday; the calendar wants 0 for Sunday.
+    if (info?.firstDay) return info.firstDay === 7 ? 0 : info.firstDay;
+    const region = locale.split("-").pop()?.toUpperCase() ?? "";
+    return SUNDAY_FIRST.has(region) ? 0 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Most bands we will stack in one day cell. Beyond this the cell stops being
+ * readable and starts pushing the row height around; the day panel below is
+ * where the full list lives anyway.
+ */
+const MAX_BANDS_PER_DAY = 3;
+
 type Props = {
   /** Active workspace. Nothing is fetched without it. */
   orgId: string | undefined;
@@ -106,33 +165,60 @@ export function BookingCalendar({ orgId }: Props) {
     void load(visibleMonth);
   }, [load, visibleMonth]);
 
-  /** Day key -> one band per booking touching that day. */
-  const marked = useMemo(() => {
-    const acc: Record<
+  /**
+   * Single pass over the bookings, producing both the day marks and a
+   * day -> bookings index.
+   *
+   * why one pass: the day panel used to re-derive every booking's covered days
+   * on every tap. On a busy month that is the same work repeated for each poke
+   * at the grid, and this screen is poked at constantly.
+   */
+  const { marks, byDay } = useMemo(() => {
+    const marks: Record<
       string,
       { periods: { startingDay: boolean; endingDay: boolean; color: string }[] }
     > = {};
+    const byDay: Record<string, CalendarBooking[]> = {};
 
     for (const b of bookings) {
       const keys = daysCovered(b.from, b.to);
       const color = bookingStatusBadge[b.status]?.text ?? colors.primary;
       keys.forEach((key, idx) => {
-        if (!acc[key]) acc[key] = { periods: [] };
-        acc[key].periods.push({
-          startingDay: idx === 0,
-          endingDay: idx === keys.length - 1,
-          color,
-        });
+        (byDay[key] ??= []).push(b);
+        const mark = (marks[key] ??= { periods: [] });
+        // Cap the stack: more than a few bands in one cell is unreadable.
+        if (mark.periods.length < MAX_BANDS_PER_DAY) {
+          mark.periods.push({
+            startingDay: idx === 0,
+            endingDay: idx === keys.length - 1,
+            color,
+          });
+        }
       });
     }
-    return acc;
+    return { marks, byDay };
   }, [bookings, bookingStatusBadge, colors.primary]);
 
-  const dayBookings = useMemo(
-    () =>
-      bookings.filter((b) => daysCovered(b.from, b.to).includes(selectedDay)),
-    [bookings, selectedDay]
+  /**
+   * Marks plus the selected day.
+   *
+   * why at all: without a selected mark you tap a day, the panel below
+   * changes, and the grid tells you nothing about which day you are reading.
+   * The colours for it must be named in the theme, or the library falls back
+   * to its own blue.
+   */
+  const markedDates = useMemo(
+    () => ({
+      ...marks,
+      [selectedDay]: {
+        ...(marks[selectedDay] ?? { periods: [] }),
+        selected: true,
+      },
+    }),
+    [marks, selectedDay, colors.primary]
   );
+
+  const dayBookings = byDay[selectedDay] ?? [];
 
   return (
     <View style={styles.container}>
@@ -141,8 +227,8 @@ export function BookingCalendar({ orgId }: Props) {
         onMonthChange={(m: DateData) => setVisibleMonth(m.dateString)}
         onDayPress={(d: DateData) => setSelectedDay(d.dateString)}
         markingType="multi-period"
-        markedDates={marked}
-        firstDay={1}
+        markedDates={markedDates}
+        firstDay={resolveFirstDay()}
         enableSwipeMonths
         theme={{
           calendarBackground: colors.white,
@@ -150,6 +236,10 @@ export function BookingCalendar({ orgId }: Props) {
           monthTextColor: colors.foreground,
           textSectionTitleColor: colors.muted,
           todayTextColor: colors.primaryText,
+          // why: without these the library paints the selected day its own
+          // default blue (#00adf5), which is nothing to do with our palette.
+          selectedDayBackgroundColor: colors.primary,
+          selectedDayTextColor: colors.primaryForeground,
           arrowColor: colors.primaryText,
           textDisabledColor: colors.mutedLight,
         }}
