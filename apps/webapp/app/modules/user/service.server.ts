@@ -1444,6 +1444,39 @@ export async function revokeAccessToOrganization({
 }) {
   try {
     /**
+     * A workspace must always have an owner, and revoking is a one-way door:
+     * this deletes the owner's `UserOrganization` row, which is the record
+     * `transferOwnership` needs to find in order to hand ownership on. Once it
+     * is gone the workspace cannot be recovered through the UI at all —
+     * `Organization.userId` still points at the ex-owner, but they have no
+     * membership, so they get a 403 and every ownership-transfer path fails.
+     *
+     * Guarded here rather than at the call site so it holds for every caller,
+     * including SCIM deprovisioning. Account deletion is unaffected: it only
+     * iterates organizations the user does *not* own.
+     *
+     * This mirrors `changeUserRole`, which already refuses to touch the OWNER
+     * and points the caller at ownership transfer.
+     */
+    const targetUserOrg = await db.userOrganization.findFirst({
+      where: { userId, organizationId },
+      select: { roles: true },
+    });
+
+    if (targetUserOrg?.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Cannot revoke the owner's access",
+        message:
+          "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+        additionalData: { userId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
      * if I want to revokeAccess access, i simply need to:
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
@@ -1494,6 +1527,12 @@ export async function revokeAccessToOrganization({
 
     return result;
   } catch (cause) {
+    // Preserve our own errors — the owner guard above is a 400 the user needs
+    // to read, and rewrapping would turn it into a generic captured 500.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to revoke user access to organization",
