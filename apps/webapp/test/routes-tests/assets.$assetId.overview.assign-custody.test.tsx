@@ -399,6 +399,9 @@ describe("assets.$assetId.overview.assign-custody action", () => {
         id: "asset-123",
         organizationId: "org-1",
         status: { not: AssetStatus.CHECKED_OUT },
+        // The archived guard rides the claim itself, so an archive that lands
+        // between the pre-check and this write cannot slip through (issue #382).
+        archivedAt: null,
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });
@@ -568,6 +571,7 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
         id: TEST_ASSET_ID,
         organizationId: TEST_ORG_ID,
         status: { not: AssetStatus.CHECKED_OUT },
+        archivedAt: null,
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });

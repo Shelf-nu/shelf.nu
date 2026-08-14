@@ -4812,6 +4812,9 @@ describe("archiveAsset", () => {
   });
 
   it("throws 409 and skips the event when the atomic guard matches nothing (raced)", async () => {
+    // why: the pre-check sees an archivable asset, but by write time the WHERE
+    // matches nothing because another request changed it. That shortfall IS
+    // the race this test is about.
     mockFindFirst.mockResolvedValue({
       id: "a1",
       type: "INDIVIDUAL",
@@ -4882,6 +4885,8 @@ describe("bulkArchiveAssets", () => {
   it("archives only eligible assets, reports skipped, and emits one event each", async () => {
     // Two of three selected are eligible; the third is filtered out by the
     // eligibility query (e.g. checked out / quantity-tracked / already archived).
+    // why: findMany is called twice — first for eligibility, then to read back
+    // which rows the write actually stamped. Both return the same two here.
     mockFindMany.mockResolvedValue([{ id: "a1" }, { id: "a2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
@@ -4901,7 +4906,53 @@ describe("bulkArchiveAssets", () => {
     ]);
   });
 
+  it("counts and emits for the rows the write stamped, not the eligible ones", async () => {
+    // why: eligibility is a read. Between it and the write, an asset can be
+    // checked out, booked or archived by another request, so the WHERE matches
+    // fewer rows. Emitting per ELIGIBLE id would write ASSET_ARCHIVED for an
+    // asset this call never touched and overstate the success count. First
+    // findMany = eligibility (2 rows), second = read-back of what was stamped
+    // (1 row).
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "a1" }, { id: "a2" }])
+      .mockResolvedValueOnce([{ id: "a1" }]);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await bulkArchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2"],
+      settings: {} as never,
+      actorUserId: "u1",
+    });
+
+    expect(result).toEqual({ archivedCount: 1, skippedCount: 1 });
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a1" }),
+    ]);
+  });
+
+  it("emits nothing when the write stamped no rows at all", async () => {
+    // why: every eligible row was raced away. No event, and the whole
+    // selection is reported as skipped.
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "a1" }])
+      .mockResolvedValueOnce([]);
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+
+    const result = await bulkArchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      settings: {} as never,
+    });
+
+    expect(result).toEqual({ archivedCount: 0, skippedCount: 1 });
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+
   it("no-ops (no event, all skipped) when nothing is eligible", async () => {
+    // why: an empty eligibility result is the "every row was skipped" path —
+    // it must not reach the write or emit any event.
     mockFindMany.mockResolvedValue([]);
 
     const result = await bulkArchiveAssets({

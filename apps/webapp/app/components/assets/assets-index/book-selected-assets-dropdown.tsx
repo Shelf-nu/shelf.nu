@@ -13,6 +13,7 @@ import {
 } from "~/components/shared/dropdown";
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
+import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -53,6 +54,9 @@ function ConditionalActionsDropdown() {
   } = useControlledDropdownMenu();
   const organization = useCurrentOrganization();
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const [searchParams] = useSearchParams();
+  /** Active / Archived / All view dimension (issue #382). */
+  const archivedFilter = searchParams.get("archived") ?? "active";
   const { roles } = useUserRoleHelper();
 
   const allSelected = isSelectingAllItems(selectedAssets);
@@ -79,8 +83,17 @@ function ConditionalActionsDropdown() {
       };
     }
 
-    /** If any selected asset is archived (frozen — can't be booked). */
-    const someAssetsArchived = realAssets.some((asset) => !!asset.archivedAt);
+    /**
+     * If any selected asset is archived (frozen — can't be booked).
+     *
+     * "Select all" puts only the ALL_SELECTED_KEY marker in the selection, so
+     * `realAssets` is empty and per-asset inspection sees nothing. Fall back to
+     * the view filter in that case: any view other than Active can contain
+     * archived assets, and the server would refuse the booking anyway.
+     */
+    const someAssetsArchived = allSelected
+      ? archivedFilter !== "active"
+      : realAssets.some((asset) => !!asset.archivedAt);
     if (someAssetsArchived) {
       return {
         reason: "Some of the assets are archived. Reinstate them to book.",
@@ -101,7 +114,7 @@ function ConditionalActionsDropdown() {
     }
 
     return false;
-  }, [selectedAssets]);
+  }, [selectedAssets, allSelected, archivedFilter]);
 
   function closeMenu() {
     setOpen(false);

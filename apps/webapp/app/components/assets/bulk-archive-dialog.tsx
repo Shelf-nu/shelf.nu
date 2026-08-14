@@ -17,6 +17,16 @@ import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
+/**
+ * Payload the bulk archive/reinstate dialog posts to
+ * `/api/assets/bulk-archive`.
+ *
+ * @property assetIds - Selected asset ids. At least one is required. May be the
+ *   single ALL_SELECTED_KEY marker, which the route resolves against the
+ *   current filters via `resolveAssetIdsForBulkOperation`.
+ * @property type - `"archive"` freezes the selection, `"reinstate"` restores
+ *   it. The route branches on this to pick the service.
+ */
 export const BulkArchiveSchema = z.object({
   assetIds: z.string().array().min(1),
   type: z.enum(["archive", "reinstate"]),

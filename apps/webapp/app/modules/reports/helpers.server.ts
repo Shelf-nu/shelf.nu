@@ -1670,10 +1670,14 @@ async function computeIdleAssetsKpis(
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Get total asset count for percentage
+  // Get total asset count for percentage.
+  // Archived assets are excluded here too (issue #382): the idle numerator
+  // rides on `assetWhere`, which excludes them, so an unfiltered denominator
+  // would quietly shrink the "% of Inventory" figure.
   const totalAssets = await db.asset.count({
     where: {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     },
   });
 

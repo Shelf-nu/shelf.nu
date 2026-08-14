@@ -823,7 +823,7 @@ export default function AssetOverview() {
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
-  const canCustody = userHasPermission({
+  const hasCustodyPermission = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.custody,
@@ -832,7 +832,17 @@ export default function AssetOverview() {
     roles,
     organization: currentOrganization,
   });
-  const canEditAsset = canUpdateAvailability;
+  /**
+   * Archived assets are frozen: reinstate or permanently delete, nothing else
+   * (issue #382). Folding `archivedAt` in here rather than at each control
+   * means every inline editor, placement action, move-unit action and custody
+   * control on this route inherits the freeze from one place, and the page
+   * cannot drift as controls are added. Reinstate lives in the Actions
+   * dropdown, so it is unaffected.
+   */
+  const assetIsFrozen = !!asset?.archivedAt;
+  const canEditAsset = canUpdateAvailability && !assetIsFrozen;
+  const canCustody = hasCustodyPermission && !assetIsFrozen;
 
   return (
     <div>

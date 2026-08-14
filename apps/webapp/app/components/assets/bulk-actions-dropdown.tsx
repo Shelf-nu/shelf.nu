@@ -91,7 +91,20 @@ function ConditionalDropdown() {
   // every bulk action is disabled except Reinstate (the calm "archived =
   // read-only except reinstate" rule, issue #382).
   const archivedView = searchParams.get("archived") === "archived";
-  const archivedBulkDisabled: { reason: string } | false = archivedView
+  /**
+   * Whether this selection is frozen. The view alone is not enough: the All
+   * view mixes active and archived rows, so an archived asset picked there
+   * would otherwise light up custody, tags, location, category, kit and
+   * availability. Check the rows themselves, and when "select all" is active
+   * (which puts only the ALL_SELECTED_KEY marker in the selection) fall back
+   * to the view, since any view other than Active can contain archived rows.
+   */
+  const selectionIsArchived = archivedView
+    ? true
+    : allSelected
+    ? searchParams.get("archived") === "all"
+    : selectedAssets.some((asset) => !!asset.archivedAt);
+  const archivedBulkDisabled: { reason: string } | false = selectionIsArchived
     ? {
         reason:
           "Archived assets are read-only. Reinstate them to make changes.",

@@ -309,43 +309,38 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // Location distribution (top 5)
       //
-      // Grouped on the pivot rather than counted through `location._count`
-      // because archived assets must not be counted here (issue #382) and
-      // Prisma cannot order by a FILTERED relation count — the old shape
-      // could only either count archived assets or rank by a number it was
-      // not displaying. Grouping keeps the count and the ranking honest.
-      // One pivot row per (asset, location), so counting rows still counts
-      // assets. Names come from a second, id-keyed read.
-      db.assetLocation
-        .groupBy({
-          by: ["locationId"],
-          where: { organizationId, asset: { archivedAt: null } },
-          _count: { assetId: true },
-          orderBy: { _count: { assetId: "desc" } },
-          take: 5,
-        })
-        .then(async (rows) => {
-          if (rows.length === 0) return [];
-
-          const locations = await db.location.findMany({
-            // Org-scoped even though the ids come from an org-scoped groupBy —
-            // defence in depth, and it keeps the IDOR lint rule satisfied
-            // without an exemption comment.
-            where: {
-              id: { in: rows.map((r) => r.locationId) },
-              organizationId,
-            },
-            select: { id: true, name: true },
+      // Raw SQL because neither Prisma shape can express what this widget
+      // needs. `location._count.assetLocations` cannot exclude archived assets
+      // (issue #382) and Prisma cannot order by a FILTERED relation count; a
+      // groupBy on the pivot fixes both but counts ROWS, and the pivot is not
+      // one row per (asset, location) — its partial uniques allow one manual
+      // placement (assetKitId IS NULL) alongside kit-driven rows at the same
+      // location, so an asset in a kit could be counted twice. COUNT(DISTINCT)
+      // is the only form that gets the number and the ranking right together.
+      db
+        .$queryRaw<{ locationId: string; locationName: string; assetCount: number }[]>(
+          Prisma.sql`
+            SELECT al."locationId"                     AS "locationId",
+                   l.name                              AS "locationName",
+                   COUNT(DISTINCT al."assetId")::int   AS "assetCount"
+            FROM "AssetLocation" al
+            JOIN "Location" l ON l.id = al."locationId"
+            JOIN "Asset" a ON a.id = al."assetId"
+            WHERE al."organizationId" = ${organizationId}
+              AND a."archivedAt" IS NULL
+            GROUP BY al."locationId", l.name
+            HAVING COUNT(DISTINCT al."assetId") > 0
+            ORDER BY COUNT(DISTINCT al."assetId") DESC
+            LIMIT 5
+          `
+        )
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to load location distribution",
+            additionalData: { userId, organizationId },
+            label: "Dashboard",
           });
-          const nameById = new Map(locations.map((l) => [l.id, l.name]));
-
-          return rows
-            .filter((r) => r._count.assetId > 0 && nameById.has(r.locationId))
-            .map((r) => ({
-              locationId: r.locationId,
-              locationName: nameById.get(r.locationId) as string,
-              assetCount: r._count.assetId,
-            }));
         }),
 
       // KPI: total locations

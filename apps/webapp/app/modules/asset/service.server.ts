@@ -2576,7 +2576,17 @@ export async function updateAsset({
       }
 
       const updated = await tx.asset.update({
-        where: { id, organizationId },
+        where: {
+          id,
+          organizationId,
+          // The `assertAssetsAreNotArchived` call at the top of this function
+          // is a read; an archive committed between it and this write would
+          // otherwise still mutate a frozen row. Riding the predicate on the
+          // UPDATE itself closes that window — no match becomes P2025, which
+          // the catch below reports as the archived conflict it almost always
+          // is. `allowArchived` callers (the signed-URL refresh) skip it.
+          ...(allowArchived ? {} : { archivedAt: null }),
+        },
         data,
         include: {
           assetLocations: { include: { location: true } },
@@ -3237,6 +3247,29 @@ export async function updateAsset({
       throw cause;
     }
 
+    /**
+     * The asset write carries `archivedAt: null` in its WHERE, so an archive
+     * that commits mid-transaction makes the row vanish from the predicate and
+     * Prisma raises P2025. Report it as the archived conflict rather than a
+     * generic write failure — the pre-check at the top of this function has
+     * already ruled out "not in this workspace" for every real caller.
+     */
+    if (
+      cause instanceof Prisma.PrismaClientKnownRequestError &&
+      cause.code === "P2025"
+    ) {
+      throw new ShelfError({
+        cause,
+        title: "Asset is archived",
+        message:
+          "This asset was archived while you were editing it. Reinstate it to make changes.",
+        additionalData: { userId, id, organizationId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
@@ -3293,6 +3326,23 @@ export async function deleteAsset({
 }
 
 /**
+ * Booking states in which an asset is still spoken for. Terminal states
+ * (COMPLETE / CANCELLED / ARCHIVED) are history and don't block anything.
+ *
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: the AVAILABLE
+ * status check alone does NOT cover this, because an asset sitting in a DRAFT
+ * or RESERVED booking is still AVAILABLE. Without this guard an asset could be
+ * archived and then reserved and checked out from the booking it was already
+ * in, which contradicts "archived assets can't be booked" (issue #382).
+ */
+const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
  * Archives a single asset (soft "out of view").
  *
  * Archiving is orthogonal to `status`: it sets `archivedAt` so the asset drops
@@ -3319,23 +3369,6 @@ export async function deleteAsset({
  * @returns The archived asset id and the archive timestamp.
  * @throws {ShelfError} On a failed guard or a database error.
  */
-/**
- * Booking states in which an asset is still spoken for. Terminal states
- * (COMPLETE / CANCELLED / ARCHIVED) are history and don't block anything.
- *
- * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: the AVAILABLE
- * status check alone does NOT cover this, because an asset sitting in a DRAFT
- * or RESERVED booking is still AVAILABLE. Without this guard an asset could be
- * archived and then reserved and checked out from the booking it was already
- * in, which contradicts "archived assets can't be booked" (issue #382).
- */
-const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.DRAFT,
-  BookingStatus.RESERVED,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-];
-
 export async function archiveAsset({
   id,
   organizationId,
@@ -3429,6 +3462,13 @@ export async function archiveAsset({
           type: AssetType.INDIVIDUAL,
           status: AssetStatus.AVAILABLE,
           archivedAt: null,
+          // The booking check above is a read, so a booking created between it
+          // and this write would slip through. Re-asserting it here makes the
+          // WHERE the authoritative guard: a raced booking lands in the
+          // count === 0 branch instead of archiving a booked asset.
+          bookingAssets: {
+            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+          },
         },
         data: { archivedAt },
       });
@@ -3642,6 +3682,17 @@ export async function bulkArchiveAssets({
 
     const archivedAt = new Date();
 
+    /**
+     * Ids this call actually wrote. The eligibility query above is a read, so
+     * between it and the write an asset can be checked out, taken into custody,
+     * booked, or archived by another request. Emitting one event per *eligible*
+     * id would then write ASSET_ARCHIVED for assets this call never touched and
+     * report them as archived. The WHERE re-asserts every precondition and the
+     * ids are read back by this call's own `archivedAt` stamp, so both the
+     * events and the counts describe rows that really changed.
+     */
+    let archivedIds: string[] = [];
+
     await db.$transaction(async (tx) => {
       await tx.asset.updateMany({
         where: {
@@ -3650,12 +3701,23 @@ export async function bulkArchiveAssets({
           type: AssetType.INDIVIDUAL,
           status: AssetStatus.AVAILABLE,
           archivedAt: null,
+          bookingAssets: {
+            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+          },
         },
         data: { archivedAt },
       });
 
+      const written = await tx.asset.findMany({
+        where: { id: { in: eligibleIds }, organizationId, archivedAt },
+        select: { id: true },
+      });
+      archivedIds = written.map((a) => a.id);
+
+      if (archivedIds.length === 0) return;
+
       await recordEvents(
-        eligibleIds.map((assetId) => ({
+        archivedIds.map((assetId) => ({
           organizationId,
           actorUserId: actorUserId ?? null,
           action: "ASSET_ARCHIVED" as const,
@@ -3668,8 +3730,8 @@ export async function bulkArchiveAssets({
     });
 
     return {
-      archivedCount: eligibleIds.length,
-      skippedCount: resolvedIds.length - eligibleIds.length,
+      archivedCount: archivedIds.length,
+      skippedCount: resolvedIds.length - archivedIds.length,
     };
   } catch (cause) {
     throw new ShelfError({
