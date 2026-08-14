@@ -1,3 +1,4 @@
+import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -53,10 +54,12 @@ const STATUS_FILTERS: { label: string; value: string }[] = [
   // DRAFT counts as active: a booking being built (e.g. scan-to-add) must
   // not vanish from the default view the moment the user leaves it.
   { label: "Active", value: "DRAFT,RESERVED,ONGOING,OVERDUE" },
-  { label: "Reserved", value: "RESERVED" },
-  { label: "Ongoing", value: "ONGOING" },
-  { label: "Overdue", value: "OVERDUE" },
-  { label: "Completed", value: "COMPLETE" },
+  // why: "Completed" here vs the badge's "Complete" on the same screen — these
+  // were hand-typed while the badges read @shelf/labels through formatStatus.
+  { label: BOOKING_STATUS_LABELS.RESERVED, value: "RESERVED" },
+  { label: BOOKING_STATUS_LABELS.ONGOING, value: "ONGOING" },
+  { label: BOOKING_STATUS_LABELS.OVERDUE, value: "OVERDUE" },
+  { label: BOOKING_STATUS_LABELS.COMPLETE, value: "COMPLETE" },
   {
     label: "All",
     value: "DRAFT,RESERVED,ONGOING,OVERDUE,COMPLETE,ARCHIVED,CANCELLED",

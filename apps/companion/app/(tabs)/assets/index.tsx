@@ -1,3 +1,4 @@
+import { ASSET_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -43,9 +44,12 @@ type FilterConfig = { label: string; status: string; myCustody?: boolean };
 const FILTERS: FilterConfig[] = [
   { label: "All", status: "" },
   { label: "My Custody", status: "", myCustody: true },
-  { label: "Available", status: "AVAILABLE" },
-  { label: "In Custody", status: "IN_CUSTODY" },
-  { label: "Checked Out", status: "CHECKED_OUT" },
+  // why: read from @shelf/labels, not hand-typed. The chips said "In Custody"
+  // and "Checked Out" while the badge on the very same row said "In custody"
+  // and "Checked out", because badges go through formatStatus and these did not.
+  { label: ASSET_STATUS_LABELS.AVAILABLE, status: "AVAILABLE" },
+  { label: ASSET_STATUS_LABELS.IN_CUSTODY, status: "IN_CUSTODY" },
+  { label: ASSET_STATUS_LABELS.CHECKED_OUT, status: "CHECKED_OUT" },
 ];
 const MY_CUSTODY_INDEX = 1;
 
