@@ -77,6 +77,16 @@ export interface UpdateAssetPayload {
   minQuantity?: Asset["minQuantity"];
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
+  /**
+   * Escape hatch for SYSTEM-owned column writes on an archived asset
+   * (issue #382). Archived assets are frozen, and `updateAsset` enforces that
+   * for every caller — but re-signing an expired image URL is the app keeping
+   * its own bookkeeping current, not a user edit, and it happens on the READ
+   * path. Same carve-out the DB freeze trigger makes.
+   *
+   * Only `updateAssetMainImage` sets this. Do not pass it from a route.
+   */
+  allowArchived?: boolean;
 }
 
 export interface CreateAssetFromContentImportPayload

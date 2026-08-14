@@ -1953,8 +1953,20 @@ export async function updateAsset({
   minQuantity,
   consumptionType,
   unitOfMeasure,
+  allowArchived = false,
 }: UpdateAssetPayload) {
   try {
+    /**
+     * Archived assets are frozen: reinstate or permanently delete, nothing
+     * else (issue #382). The guard lives HERE rather than on each route
+     * because `updateAsset` is the single write chokepoint every surface goes
+     * through — web routes, the CSV import-update, and all of the companion
+     * app's asset writes. Guarding per-route left the mobile paths open.
+     */
+    if (!allowArchived) {
+      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+    }
+
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
      * The asset-overview "Update location" dialog surfaces a per-asset
@@ -4119,6 +4131,10 @@ export async function updateAssetMainImage({
       userId,
       organizationId,
       request,
+      // Signed-URL bookkeeping is a system write, not a user edit, so it is
+      // allowed on an archived asset (issue #382). Mirrors the DB freeze
+      // trigger's carve-out for the image columns.
+      allowArchived: true,
     });
 
     /**

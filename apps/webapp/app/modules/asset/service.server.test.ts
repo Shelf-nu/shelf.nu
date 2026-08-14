@@ -1850,6 +1850,86 @@ describe("createAsset cross-org guards", () => {
   });
 });
 
+describe("updateAsset archived freeze (issue #382)", () => {
+  const mockCount = db.asset.count as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Asset itself resolves so the guard is what stops (or doesn't stop) us.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Asset 1",
+      description: null,
+      valuation: null,
+      category: null,
+      tags: [],
+      assetKits: [],
+    });
+  });
+
+  it("refuses to write an archived asset, whatever the caller", async () => {
+    // why: the guard lives in updateAsset, not on the routes, so the web edit
+    // form, the CSV import-update and every companion write are covered by
+    // this one assertion. count > 0 = at least one of the ids is archived.
+    mockCount.mockResolvedValue(1);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        title: "New title",
+      } as any)
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(mockCount).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["asset-1"] },
+        organizationId: "org-1",
+        archivedAt: { not: null },
+      },
+    });
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("lets the signed-URL refresh through on an archived asset", async () => {
+    // why: re-signing an expired image URL is system bookkeeping on the READ
+    // path — blocking it would break viewing an archived asset's image. Same
+    // carve-out the DB freeze trigger makes.
+    mockCount.mockResolvedValue(1);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        mainImage: "https://signed/new",
+        mainImageExpiration: new Date(),
+        allowArchived: true,
+      } as any)
+    ).resolves.toBeDefined();
+
+    expect(mockCount).not.toHaveBeenCalled();
+  });
+
+  it("does not stand in the way of a normal, unarchived write", async () => {
+    // why: assert the guard specifically, not the whole update — the rest of
+    // updateAsset needs org/currency stubs this describe deliberately skips.
+    mockCount.mockResolvedValue(0);
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+        title: "New title",
+      } as any)
+    ).rejects.not.toMatchObject({ title: "Asset is archived" });
+
+    expect(mockCount).toHaveBeenCalled();
+  });
+});
+
 describe("updateAsset custom-field writes", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
