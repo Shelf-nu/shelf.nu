@@ -19,7 +19,7 @@
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/bookings.calendar.ts}
  */
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -255,9 +255,14 @@ type Props = {
 };
 
 /** Month calendar with a day panel underneath. */
+type CachedMonth = {
+  bookings: CalendarBooking[];
+  outside: { count: number; jumpTo: string | null };
+};
+
 export function BookingCalendar({ orgId, statuses, search }: Props) {
   const router = useRouter();
-  const { colors, bookingStatusBadge } = useTheme();
+  const { colors, bookingStatusBadge, isDark } = useTheme();
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
 
@@ -272,19 +277,64 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   /**
+   * Months already fetched, so paging back and forth does not refetch what we
+   * just had. Keyed by month AND filters, because the same month holds a
+   * different answer once a status pill or the search box changes.
+   *
+   * A ref, not state: writing to it must never re-render, and the entries are
+   * read inside the fetch rather than during paint.
+   */
+  const monthCache = useRef(new Map<string, CachedMonth>());
+
+  /**
+   * The request the user is actually waiting for. Paging quickly fires several
+   * fetches, and they do not come back in order - without this, a slow answer
+   * for a month you have already left overwrites the one you are looking at.
+   */
+  const pendingKey = useRef<string>("");
+
+  const cacheKey = useCallback(
+    (monthKey: string) => `${monthKey}|${statuses ?? ""}|${search ?? ""}`,
+    [statuses, search]
+  );
+
+  /**
+   * The cache holds one workspace's bookings, so it cannot survive an org
+   * switch or a filter change: the first would show another workspace's
+   * bookings, the second would show rows the filter excludes.
+   */
+  useEffect(() => {
+    monthCache.current.clear();
+  }, [orgId, statuses, search]);
+
+  /**
    * Fetches the visible month plus a week either side, so a booking that began
    * in the previous month still paints its band into this one.
    */
   const load = useCallback(
-    async (monthKey: string) => {
+    async (monthKey: string, options: { force?: boolean } = {}) => {
       if (!orgId) return;
+
+      const key = cacheKey(monthKey);
+      pendingKey.current = key;
+
+      const cached = options.force ? undefined : monthCache.current.get(key);
+      if (cached) {
+        // Paint what we have, then confirm it below. The month is already
+        // correct in the common case, so the grid does not blink.
+        setBookings(cached.bookings);
+        setOutside(cached.outside);
+        setError(null);
+      } else {
+        setIsLoading(true);
+      }
+
       const base = new Date(monthKey);
       const start = new Date(base.getFullYear(), base.getMonth(), 1);
       start.setDate(start.getDate() - 7);
       const end = new Date(base.getFullYear(), base.getMonth() + 1, 0);
       end.setDate(end.getDate() + 7);
 
-      setIsLoading(true);
       setError(null);
       const res = await api.bookingsCalendar(
         orgId,
@@ -292,14 +342,27 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         end.toISOString(),
         { statuses, search }
       );
-      if (res.error) setError(res.error);
-      else if (res.data) {
-        setBookings(res.data.bookings);
-        setOutside(res.data.outsideWindow ?? { count: 0, jumpTo: null });
+
+      // Dropped on purpose: the user has moved on, and this answer describes a
+      // month they are no longer looking at.
+      if (pendingKey.current !== key) return;
+
+      if (res.error) {
+        // A cached month stays on screen rather than being replaced by an
+        // error for data we already have.
+        if (!cached) setError(res.error);
+      } else if (res.data) {
+        const next = {
+          bookings: res.data.bookings,
+          outside: res.data.outsideWindow ?? { count: 0, jumpTo: null },
+        };
+        monthCache.current.set(key, next);
+        setBookings(next.bookings);
+        setOutside(next.outside);
       }
       setIsLoading(false);
     },
-    [orgId, statuses, search]
+    [orgId, statuses, search, cacheKey]
   );
 
   useEffect(() => {
@@ -405,6 +468,14 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         )}
         firstDay={resolveFirstDay()}
         enableSwipeMonths
+        /**
+         * why the key: react-native-calendars computes its stylesheet once and
+         * caches it, so handing it a new `theme` object on a light/dark switch
+         * changes nothing - the grid stayed white inside a dark app. Remounting
+         * on the switch is the cheap fix; it happens once, when the user changes
+         * appearance, and never during normal use.
+         */
+        key={isDark ? "cal-dark" : "cal-light"}
         theme={{
           calendarBackground: colors.white,
           dayTextColor: colors.foreground,
@@ -467,7 +538,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
              pull to refresh; this had no way at all. */
           <RefreshControl
             refreshing={isLoading}
-            onRefresh={() => void load(visibleMonth)}
+            onRefresh={() => void load(visibleMonth, { force: true })}
             tintColor={colors.muted}
           />
         }
