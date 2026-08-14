@@ -438,10 +438,50 @@ interface UserOrgTransition {
 }
 
 /**
- * Handles the transition of user access when org switches from invite-based to SCIM-based
- * @returns Object containing transition details for logging/notification
+ * Reconciles one workspace's membership against the SAML group claims presented
+ * at login.
+ *
+ * Despite the old name (`handleSCIMTransition`), the only caller is
+ * {@link updateUserFromSSO}'s group-mapping loop — this is the SAML
+ * group-claim path, not SCIM. SCIM has its own lifecycle in
+ * `~/modules/scim/service.server`. The misnomer is why the revocation branch
+ * below sat out of step with every other revoke in the codebase for so long:
+ * it read as SCIM-only code, so nobody compared it to the admin path.
+ *
+ * Runs on EVERY SSO login, once per workspace on the user's email domain.
+ *
+ * Revocation delegates to {@link revokeAccessToOrganization} — the same
+ * function behind the admin "revoke access" UI and
+ * `revokeScimMembership`. It does three things this branch used to skip two
+ * of:
+ *   1. disconnects the `TeamMember` from the `User` (row survives, so custody
+ *      and booking history keeps a name),
+ *   2. deletes the `UserOrganization`,
+ *   3. clears `User.lastSelectedOrganizationId` when it pointed at this org.
+ *
+ * Step 1 is the load-bearing one. A `TeamMember` with no linked user is how the
+ * rest of the codebase recognises revoked access: the booking notification
+ * resolver and the `usersOnly` custodian pickers read straight through
+ * `TeamMember.user` with no membership check, so a revoked user who kept that
+ * link carried on receiving this workspace's booking emails and stayed pickable
+ * as a notification recipient.
+ *
+ * ERROR SEMANTICS — deliberately fail closed. A failure here still aborts the
+ * whole login rather than being logged and skipped per workspace. Swallowing it
+ * would leave the user logged in holding access this call was meant to remove,
+ * which is exactly the leak being fixed; aborting the login denies access
+ * everywhere until the next attempt. `revokeAccessToOrganization` performs the
+ * disconnect and the membership delete in a single `user.update`, so it cannot
+ * half-apply, and its `lastSelectedOrganizationId` cleanup is already
+ * best-effort internally.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organization - The workspace being reconciled
+ * @param currentRoles - Roles the user holds in it right now
+ * @param desiredRole - Role the group claims map to, or `null` to revoke
+ * @returns Transition details for logging/notification
  */
-async function handleSCIMTransition(
+async function reconcileSsoGroupMembership(
   userId: string,
   organization: Organization,
   currentRoles: OrganizationRoles[],
@@ -452,26 +492,22 @@ async function handleSCIMTransition(
     organizationId: organization.id,
     previousRoles: currentRoles,
     newRole: desiredRole,
-    transitionType:
-      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+    transitionType: desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
   };
 
   try {
     if (!desiredRole) {
-      // User has no valid SCIM groups, revoke access
-      await db.userOrganization.delete({
-        where: {
-          userId_organizationId: {
-            userId,
-            organizationId: organization.id,
-          },
-        },
+      // No group claim maps to a role here, so access goes — through the same
+      // path as the admin revoke, not a narrower membership delete.
+      await revokeAccessToOrganization({
+        userId,
+        organizationId: organization.id,
       });
 
       transition.transitionType = "ACCESS_REVOKED";
 
       Logger.info({
-        message: "Revoked user access due to SCIM group changes",
+        message: "Revoked user access due to SSO group claim changes",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -497,7 +533,7 @@ async function handleSCIMTransition(
       transition.transitionType = "ROLE_CHANGE";
 
       Logger.info({
-        message: "Updated user role based on SCIM groups",
+        message: "Updated user role based on SSO group claims",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -511,7 +547,7 @@ async function handleSCIMTransition(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to handle SCIM transition",
+      message: "Failed to reconcile SSO group membership",
       additionalData: {
         userId,
         organizationId: organization.id,
@@ -635,7 +671,7 @@ export async function updateUserFromSSO(
         );
 
         if (existingOrgAccess) {
-          const transition = await handleSCIMTransition(
+          const transition = await reconcileSsoGroupMembership(
             userId,
             org,
             existingOrgAccess.roles,
@@ -644,8 +680,8 @@ export async function updateUserFromSSO(
           transitions.push(transition);
 
           // The user keeps access only when a role still maps; a null
-          // desiredRole makes handleSCIMTransition revoke it, so that org must
-          // not become the post-login landing org.
+          // desiredRole makes reconcileSsoGroupMembership revoke it, so that
+          // org must not become the post-login landing org.
           if (desiredRole) {
             firstMatchedOrg ??= org;
           }

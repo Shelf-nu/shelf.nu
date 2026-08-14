@@ -92,6 +92,41 @@ describe("getTeamMemberForCustodianFilter", () => {
   });
 
   /**
+   * Regression: SSO group-claim revocation.
+   *
+   * Revoking access disconnects `TeamMember.user` and leaves the row behind, so
+   * a revoked member is exactly an NRM from this query's point of view. Every
+   * picker that can send them mail — the booking notification-recipient
+   * pickers — passes `usersOnly`, and that narrowing must reach the ROW query,
+   * not just the count, or the revoked person stays selectable.
+   *
+   * The plain custodian picker still lists the bare name, deliberately: it
+   * carries no user and no email, and dropping it would strip the label off
+   * their existing custody and bookings. Same behaviour as the admin revoke.
+   *
+   * @see {@link file://../user/sso-group-claim-revocation.test.ts}
+   */
+  it("excludes user-less rows from the listed rows under usersOnly", async () => {
+    await getTeamMemberForCustodianFilter({
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+      usersOnly: true,
+    });
+
+    expect(rowsWhere().user).toEqual({ isNot: null });
+  });
+
+  it("lists a revoked member's row when the picker allows NRMs", async () => {
+    await getTeamMemberForCustodianFilter({
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+    });
+
+    expect(rowsWhere().user).toBeUndefined();
+    expect(rowsWhere().deletedAt).toBeNull();
+  });
+
+  /**
    * `selectedTeamMembers` is caller-controlled at almost every call site — it
    * comes from `searchParams.getAll("teamMember")`. Fetching those ids scoped
    * only by `organizationId` handed back any same-org member's row, including
