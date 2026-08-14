@@ -53,17 +53,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ]);
 
     // why: completing is assignee-gated server-side (requireAuditAssignee in
-    // audits.complete.ts): only an assignee may complete, except admins/owners
-    // may complete an audit that has no assignees. Encode that eligibility in
+    // audits.complete.ts): ADMIN/OWNER may complete any audit, BASE and
+    // SELF_SERVICE only when assigned. Encode that eligibility in
     // `canComplete` so the client never shows a "Complete Audit" CTA that
-    // 403s after confirmation — e.g. an admin viewing another user's audit in
-    // the all-workspace list. Mirrors the endpoint's own rule exactly.
+    // 403s after confirmation. Mirrors the endpoint's own rule exactly.
     const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-    const hasNoAssignees = session.assignments.length === 0;
     const isAssignee = session.assignments.some((a) => a.user.id === user.id);
     const canCompleteAudit =
       (session.status === "ACTIVE" || session.status === "PENDING") &&
-      (isAssignee || (!isSelfServiceOrBase && hasNoAssignees));
+      (isAssignee || !isSelfServiceOrBase);
 
     return data({
       audit: {
@@ -118,7 +116,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),
-      canScan: session.status === "PENDING" || session.status === "ACTIVE",
+      // why: same eligibility as record-scan's server-side gate, so the app
+      // never offers a scanner whose submissions are guaranteed to 403
+      canScan:
+        (session.status === "PENDING" || session.status === "ACTIVE") &&
+        (isAssignee || !isSelfServiceOrBase),
       canComplete: canCompleteAudit,
     });
   } catch (cause) {

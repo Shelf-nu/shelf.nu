@@ -90,6 +90,7 @@ import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
   buildAssetOverviewCustomFields,
@@ -150,6 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       canUseBarcodes,
       role,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -278,7 +280,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           request,
           userId,
-          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          // The rule, not a role check: `isSelfService` was false for BASE, so
+          // the seed shipped the whole roster — with every user's email and
+          // Stripe id — to a role that cannot assign custody at all.
+          role,
+          canSeeAllCustody,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
@@ -386,10 +392,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : 0;
 
     return payload({
-      asset: {
-        ...asset,
-        customFields,
-      },
+      // Same reasoning as the parent detail route: this payload carries
+      // `custody[].custodian` and is reachable with `asset: read`.
+      asset: redactCustodianForViewer([{ ...asset, customFields }], {
+        canSeeAllCustody,
+        userId,
+      })[0],
       currentOrganization,
       userId,
       lastScan,
