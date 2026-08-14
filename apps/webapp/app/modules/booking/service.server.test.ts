@@ -9856,7 +9856,28 @@ describe("getAvailableAssetsIdsForBooking", () => {
     ).resolves.toEqual(["asset-1", "asset-2"]);
   });
 
-  it("rejects a kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
+  it("returns a QUANTITY_TRACKED kit member — its free pool stays directly bookable", async () => {
+    // A QT asset allocates only a slice of its pool per kit (and may sit in
+    // several kits at once), so the remaining units are legitimately bookable
+    // on their own. Rejecting on mere membership 400'd the "Book" actions on
+    // the asset overview page for a customer with free standalone units.
+    // why: stub the org-scoped lookup to return one QT asset that IS a kit
+    // member — the branch that must NOT reject.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        status: AssetStatus.AVAILABLE,
+        type: AssetType.QUANTITY_TRACKED,
+        assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+      },
+    ]);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(["asset-1"], "org-1")
+    ).resolves.toEqual(["asset-1"]);
+  });
+
+  it("rejects an INDIVIDUAL kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
     // A selected asset that belongs to a kit is user-input validation, not a
     // server fault, so it must be a 400 kept out of the Sentry error pipeline.
     // why: stub the org-scoped lookup to return one asset that IS a kit member
@@ -9865,6 +9886,7 @@ describe("getAvailableAssetsIdsForBooking", () => {
       {
         id: "asset-1",
         status: AssetStatus.AVAILABLE,
+        type: AssetType.INDIVIDUAL,
         assetKits: [{ kitId: "kit-1" }],
       },
     ]);
