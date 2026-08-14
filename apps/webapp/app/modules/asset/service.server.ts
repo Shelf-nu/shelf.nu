@@ -3445,6 +3445,7 @@ export async function bulkArchiveAssets({
   currentSearchParams,
   settings,
   actorUserId,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
@@ -3452,6 +3453,12 @@ export async function bulkArchiveAssets({
   settings: AssetIndexSettings;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }): Promise<{ archivedCount: number; skippedCount: number }> {
   try {
     const resolvedIds = await resolveAssetIdsForBulkOperation({
@@ -3459,6 +3466,10 @@ export async function bulkArchiveAssets({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with the asset `update` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     // Fetch the eligible subset first so we can emit one event per asset
@@ -3534,6 +3545,7 @@ export async function bulkUnarchiveAssets({
   currentSearchParams,
   settings,
   actorUserId,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
@@ -3541,6 +3553,12 @@ export async function bulkUnarchiveAssets({
   settings: AssetIndexSettings;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }): Promise<{ unarchivedCount: number; skippedCount: number }> {
   try {
     const resolvedIds = await resolveAssetIdsForBulkOperation({
@@ -3548,6 +3566,10 @@ export async function bulkUnarchiveAssets({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with the asset `update` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     const eligible = await db.asset.findMany({

@@ -113,6 +113,9 @@ type ListBookingsContentProps = {
               availableToBook: true;
               custody: true;
               status: true;
+              // Drives the calm "Archived" signal in the assets sidebar
+              // (issue #382) — the sidebar's BookingWithAssets type requires it.
+              archivedAt: true;
               mainImage: true;
               thumbnailImage: true;
               mainImageExpiration: true;

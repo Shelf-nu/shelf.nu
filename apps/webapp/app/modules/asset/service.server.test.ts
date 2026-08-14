@@ -4424,6 +4424,8 @@ describe("bulkUnarchiveAssets", () => {
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a1" }),
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
     ]);
+  });
+});
 
 describe("buildAssetKitCreateData — AssetKit pivot for create-with-kit", () => {
   it("builds the AssetKit pivot nested-create and never emits a `kit` relation", () => {

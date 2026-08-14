@@ -895,7 +895,10 @@ describe("applyArchivedFilter", () => {
 
 describe("getAssetsWhereInput archived default", () => {
   it("hides archived assets when there are no search params at all", () => {
-    const where = getAssetsWhereInput({ organizationId: "org-1" });
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      allowedTeamMemberIds: "all",
+    });
     expect(where.archivedAt).toBeNull();
   });
 
@@ -903,6 +906,7 @@ describe("getAssetsWhereInput archived default", () => {
     const where = getAssetsWhereInput({
       organizationId: "org-1",
       currentSearchParams: "category=cat-1",
+      allowedTeamMemberIds: "all",
     });
     expect(where.archivedAt).toBeNull();
   });
@@ -911,6 +915,7 @@ describe("getAssetsWhereInput archived default", () => {
     const where = getAssetsWhereInput({
       organizationId: "org-1",
       currentSearchParams: "archived=all",
+      allowedTeamMemberIds: "all",
     });
     expect(where.archivedAt).toBeUndefined();
   });
