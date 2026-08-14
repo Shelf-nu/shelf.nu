@@ -1634,45 +1634,6 @@ export async function reserveBooking({
       }
     }
 
-    /**
-     * Race-safe twin of the checks the callers make before they get here: the
-     * web overview disables its Reserve button from loader flags, and the
-     * mobile route refuses up front with a friendlier message. Both read the
-     * booking earlier in the request, so a concurrent edit that empties the
-     * booking or marks an asset unavailable would still land in RESERVED.
-     * This re-read is the last one before the write, so the window closes here.
-     */
-    if (
-      bookingFound.bookingAssets.length === 0 &&
-      bookingFound.modelRequests.length === 0
-    ) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        title: "Nothing to reserve",
-        message:
-          "Add assets or reserve at least one model on this booking before you reserve it.",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-
-    const unavailableAssets = bookingFound.bookingAssets
-      .map((ba) => ba.asset)
-      .filter((asset) => !asset.availableToBook);
-
-    if (unavailableAssets.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        title: "Unavailable assets",
-        message:
-          "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-
     /** Validate the booking dates */
     if (!from || !to) {
       throw new ShelfError({
@@ -1821,6 +1782,58 @@ export async function reserveBooking({
     );
 
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * Eligibility, re-read through `tx` immediately before the status write.
+       *
+       * The callers check this earlier - the web overview disables its Reserve
+       * button from loader flags, the mobile route refuses up front with a
+       * better message - but both read the booking before the working-hours and
+       * settings queries, so a concurrent edit could still land in RESERVED.
+       * `availableToBook` is the one that really moves: it is an asset-level
+       * flag toggled from the asset page, with nothing to do with this booking.
+       *
+       * This does not make the transition serializable on its own. Closing the
+       * window completely would mean locking every asset in the booking, which
+       * the QT path below already does for the assets whose pool is contested.
+       * This narrows it to the width of the transaction.
+       */
+      const eligibility = await tx.booking.findUniqueOrThrow({
+        where: { id, organizationId },
+        select: {
+          bookingAssets: {
+            select: { asset: { select: { id: true, availableToBook: true } } },
+          },
+          modelRequests: { select: { id: true } },
+        },
+      });
+
+      if (
+        eligibility.bookingAssets.length === 0 &&
+        eligibility.modelRequests.length === 0
+      ) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          title: "Nothing to reserve",
+          message:
+            "Add assets or reserve at least one model on this booking before you reserve it.",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (eligibility.bookingAssets.some((ba) => !ba.asset.availableToBook)) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          title: "Unavailable assets",
+          message:
+            "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       if (uniqueQtyTrackedAssetIds.length > 0) {
         const assetById = new Map(
           qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
