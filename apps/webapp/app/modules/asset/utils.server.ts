@@ -534,9 +534,14 @@ export type AllowedCustodianFilterIds = string[] | "all";
  * Applies a custodian allow-list to ids taken from the query string.
  *
  * `"all"` passes them through. Otherwise only ids on the list survive, and a
- * request that asked ONLY for others collapses to a single unmatchable id so
- * the filter returns nothing — dropping it instead would widen the query to
- * every row, which is the opposite of what a refusal should do.
+ * request that asked ONLY for others collapses to a single unmatchable id.
+ *
+ * That id alone is NOT sufficient: it lands in `where.OR`, where a sibling
+ * branch (`uncategorized` / `untagged` / `without-location`) can still match.
+ * `getAssetsWhereInput` therefore also AND-s an unsatisfiable predicate when it
+ * sees the sentinel — see the note at that call site. Dropping the filter
+ * instead of refusing it would widen the query to every row, which is the
+ * opposite of what a refusal should do.
  */
 function applyCustodianAllowList(
   requestedIds: string[],
@@ -700,6 +705,33 @@ export function getAssetsWhereInput({
         ? [{ custody: { none: {} } }]
         : []),
     ];
+
+    /**
+     * A refusal has to survive a sibling OR branch.
+     *
+     * The custody clause is attached with `OR`, and three other filters write
+     * there too — `uncategorized`, `untagged`, `without-location`. Under OR
+     * semantics the refused branch matches nothing while the sibling still
+     * matches plenty, so `?teamMember=<colleague>&category=uncategorized`
+     * returned the sibling's rows rather than none. That leaked nothing (the
+     * result equals the same request with `teamMember` omitted, which anyone
+     * may issue) but it broke the invariant this function documents, and a
+     * future OR branch carrying custody signal would make it a real hole.
+     *
+     * Fixed by AND-ing a predicate nothing satisfies, NOT by moving the custody
+     * clause from OR to AND — that would intersect custody with category/tag/
+     * location for every caller and silently change existing filter results.
+     */
+    if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        { id: CUSTODY_FILTER_REFUSED },
+      ];
+    }
   }
 
   return where;

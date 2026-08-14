@@ -201,3 +201,125 @@ describe("redactCustodianForViewer", () => {
     expect(rows[0].custody?.custodian?.name).toBe("Someone Else");
   });
 });
+
+describe("redactCustodianForViewer — booking-derived custody", () => {
+  /** A CHECKED_OUT row: no `custody`, holder comes from the booking. */
+  const checkedOutByColleague = {
+    id: "asset-1",
+    custody: [],
+    bookingAssets: [
+      {
+        booking: {
+          id: "booking-1",
+          custodianUserId: "someone-else",
+          custodianTeamMember: {
+            id: "tm-colleague",
+            name: "Colleague Name",
+            userId: "someone-else",
+          },
+          custodianUser: { id: "someone-else", email: "colleague@example.com" },
+        },
+      },
+    ],
+  };
+
+  it("empties the booking custodian a restricted viewer may not see", () => {
+    const [row] = redactCustodianForViewer([checkedOutByColleague], {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    // The bug this pins: redacting only `custody` emptied the COPY that
+    // `updateAssetsWithBookingCustodians` makes, while the source rode along
+    // in the same payload under `bookingAssets`.
+    expect(row.bookingAssets[0].booking.custodianTeamMember.name).toBe("");
+    expect(row.bookingAssets[0].booking.custodianUser).toBeNull();
+    // The scalar FK is identity too: an opaque uuid still links rows to one
+    // holder, and `ORGANIZATION_SELECT_FIELDS` ships `owner: { id, email }` to
+    // every role, so it resolves outright when the holder is the owner.
+    expect(row.bookingAssets[0].booking.custodianUserId).toBeNull();
+    expect(JSON.stringify(row)).not.toContain("Colleague Name");
+    expect(JSON.stringify(row)).not.toContain("colleague@example.com");
+    expect(JSON.stringify(row)).not.toContain("someone-else");
+  });
+
+  it("keeps a booking the viewer holds themselves", () => {
+    const [row] = redactCustodianForViewer([checkedOutByColleague], {
+      canSeeAllCustody: false,
+      userId: "someone-else",
+    });
+
+    // Over-redacting here would print "private" on an item the viewer booked.
+    expect(row.bookingAssets[0].booking.custodianTeamMember.name).toBe(
+      "Colleague Name"
+    );
+  });
+
+  it("leaves everything alone for a viewer who may see all custody", () => {
+    const [row] = redactCustodianForViewer([checkedOutByColleague], {
+      canSeeAllCustody: true,
+      userId: "me",
+    });
+
+    expect(row.bookingAssets[0].booking.custodianTeamMember.name).toBe(
+      "Colleague Name"
+    );
+  });
+
+  it("tolerates rows with no bookingAssets at all", () => {
+    const [row] = redactCustodianForViewer(
+      [{ id: "kit-1", custody: { custodian: { name: "X", userId: "other" } } }],
+      { canSeeAllCustody: false, userId: "me" }
+    );
+
+    expect(row.custody.custodian.name).toBe("");
+  });
+
+  it("descends into the kits index nesting (assetKits[].asset.bookingAssets)", () => {
+    // A kit's holder comes from its MEMBER assets' bookings, so the same
+    // custodian sits one level deeper than on the asset index. A top-level
+    // probe alone misses every one of them.
+    const kitRow = {
+      id: "kit-1",
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-1",
+          asset: {
+            id: "asset-1",
+            bookingAssets: [
+              {
+                booking: {
+                  id: "booking-1",
+                  custodianUserId: "someone-else",
+                  custodianTeamMember: {
+                    id: "tm-colleague",
+                    name: "Colleague Name",
+                    userId: "someone-else",
+                  },
+                  custodianUser: { id: "someone-else" },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const [row] = redactCustodianForViewer([kitRow], {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(
+      row.assetKits[0].asset.bookingAssets[0].booking.custodianTeamMember.name
+    ).toBe("");
+    // `kits._index` is the ONE loader that selects this scalar, and it selects
+    // it exactly here — inside the availability nesting.
+    expect(
+      row.assetKits[0].asset.bookingAssets[0].booking.custodianUserId
+    ).toBeNull();
+    expect(JSON.stringify(row)).not.toContain("Colleague Name");
+    expect(JSON.stringify(row)).not.toContain("someone-else");
+  });
+});

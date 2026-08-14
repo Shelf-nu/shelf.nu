@@ -13,10 +13,12 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { makeShelfError } from "~/utils/error";
@@ -46,6 +48,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    const { canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     await requireMobilePermission({
       userId: user.id,
@@ -79,6 +85,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               select: {
                 id: true,
                 name: true,
+                // why: needed to tell the viewer's OWN custody from a
+                // colleague's — without it the visibility check below cannot
+                // distinguish them and would have to hide both.
+                userId: true,
                 user: {
                   select: { firstName: true, lastName: true, email: true },
                 },
@@ -164,7 +174,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       0
     );
 
-    return data({ kit: { ...kitData, assets, totalValue } });
+    /**
+     * `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
+     * `custodian.user.email`. The mobile asset detail route already nulls its
+     * legacy custody field for viewers who may not see it; this one had no
+     * gate at all. Null the whole object rather than emptying the custodian —
+     * that is the established shape on the mobile surface.
+     */
+    const visibleCustody =
+      kitData.custody &&
+      viewerCanSeeLegacyCustody({
+        custodianUserId: kitData.custody.custodian.userId,
+        viewerUserId: user.id,
+        canSeeAllCustody,
+      })
+        ? kitData.custody
+        : null;
+
+    return data({
+      kit: { ...kitData, custody: visibleCustody, assets, totalValue },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
