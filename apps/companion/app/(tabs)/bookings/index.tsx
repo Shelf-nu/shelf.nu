@@ -125,6 +125,11 @@ function BookingsListContent() {
    * five, and someone looking for bookings already comes to this screen.
    */
   const [view, setView] = useState<"list" | "calendar">("list");
+  /**
+   * Bumped when a booking is mutated elsewhere, so the calendar drops its
+   * cached months and refetches the one on screen.
+   */
+  const [calendarRefreshToken, setCalendarRefreshToken] = useState(0);
   const navigation = useNavigation();
 
   /**
@@ -246,6 +251,11 @@ function BookingsListContent() {
       // delete/duplicate) marks the list dirty; bypass the freshness gate so we
       // don't show stale rows on return.
       const mustRefresh = consumeBookingsListDirty();
+      // The calendar keeps its own state and its own month cache, so the flag
+      // has to reach it too. Raising a token here rather than letting the
+      // calendar consume the flag itself: it is a one-shot flag, and whichever
+      // consumer ran first would eat it and leave the other stale.
+      if (mustRefresh) setCalendarRefreshToken((t) => t + 1);
       if (
         !mustRefresh &&
         hasFetchedBookings.current &&
@@ -603,6 +613,7 @@ function BookingsListContent() {
           orgId={currentOrg?.id}
           statuses={STATUS_FILTERS[activeFilter].value}
           search={debouncedSearch}
+          refreshToken={calendarRefreshToken}
         />
       ) : (
         <>

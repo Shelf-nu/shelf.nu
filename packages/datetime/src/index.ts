@@ -821,6 +821,51 @@ export function calendarDayKey(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+/**
+ * The inverse of {@link calendarDayKey}: a `YYYY-MM-DD` key back to a local Date
+ * at midnight.
+ *
+ * Deliberately not `new Date(key)`. A bare `YYYY-MM-DD` is parsed as UTC
+ * midnight by the ECMAScript date-only form, so anywhere west of UTC the Date
+ * lands on the PREVIOUS day: `2026-09-01` in Los Angeles becomes 31 August.
+ * Anything that then reads `getMonth()` gets the wrong month, and a calendar
+ * built on that asks the server for the month before the one on screen. The
+ * bug is invisible east of UTC, which is exactly why it needs its own function.
+ *
+ * @param key - a `YYYY-MM-DD` day key
+ * @returns local midnight on that day, or an Invalid Date when unparseable
+ */
+export function calendarDayKeyToDate(key: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return new Date(NaN);
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * The range a one-month calendar view loads: the month itself plus a week
+ * either side, so a booking that began in the previous month still paints its
+ * band into this one.
+ *
+ * The end is the LAST INSTANT of its day, not midnight. Consumers document an
+ * inclusive window and filter on `from <= end`, so a midnight bound silently
+ * dropped every booking starting later on the window's final day.
+ *
+ * @param monthKey - any `YYYY-MM-DD` day inside the month to show
+ * @returns the inclusive window to request
+ */
+export function calendarMonthWindow(monthKey: string): {
+  start: Date;
+  end: Date;
+} {
+  const base = calendarDayKeyToDate(monthKey);
+  const start = new Date(base.getFullYear(), base.getMonth(), 1);
+  start.setDate(start.getDate() - 7);
+  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+  end.setDate(end.getDate() + 7);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
 /** Upper bound on the days one range may enumerate. */
 const MAX_RANGE_DAYS = 400;
 
@@ -835,7 +880,11 @@ const MAX_RANGE_DAYS = 400;
  * @returns ordered day keys; empty when the range is reversed or unparseable,
  *   and capped so corrupt data cannot spin the caller
  */
-export function calendarDaysCovered(from: string, to: string): string[] {
+export function calendarDaysCovered(
+  from: string,
+  to: string,
+  clip?: { from: Date; to: Date }
+): string[] {
   const start = new Date(from);
   const end = new Date(to);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
@@ -846,6 +895,28 @@ export function calendarDaysCovered(from: string, to: string): string[] {
     start.getDate()
   );
   const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  /**
+   * With a clip, only the days inside it are enumerated. A caller drawing one
+   * month does not need the other 900 days of a two-year booking, and without
+   * this the MAX_RANGE_DAYS cap counts from the booking's own start - so a
+   * booking longer than the cap produced no keys at all for the month on
+   * screen, and simply vanished from it.
+   */
+  if (clip) {
+    const clipFrom = new Date(
+      clip.from.getFullYear(),
+      clip.from.getMonth(),
+      clip.from.getDate()
+    );
+    const clipTo = new Date(
+      clip.to.getFullYear(),
+      clip.to.getMonth(),
+      clip.to.getDate()
+    );
+    if (cursor < clipFrom) cursor.setTime(clipFrom.getTime());
+    if (last > clipTo) last.setTime(clipTo.getTime());
+  }
 
   const keys: string[] = [];
   while (cursor <= last && keys.length < MAX_RANGE_DAYS) {

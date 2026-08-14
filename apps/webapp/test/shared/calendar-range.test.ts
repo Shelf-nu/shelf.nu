@@ -1,4 +1,9 @@
-import { calendarDayKey, calendarDaysCovered } from "@shelf/datetime";
+import {
+  calendarDayKey,
+  calendarDayKeyToDate,
+  calendarDaysCovered,
+  calendarMonthWindow,
+} from "@shelf/datetime";
 
 // @vitest-environment node
 
@@ -28,11 +33,11 @@ describe("calendarDayKey", () => {
   });
 });
 
-describe("calendarDaysCovered", () => {
-  /** Local-time ISO, so these tests do not depend on the machine's zone. */
-  const iso = (y: number, m: number, d: number, h = 12) =>
-    new Date(y, m - 1, d, h).toISOString();
+/** Local-time ISO, so these tests do not depend on the machine's zone. */
+const iso = (y: number, m: number, d: number, h = 12) =>
+  new Date(y, m - 1, d, h).toISOString();
 
+describe("calendarDaysCovered", () => {
   it("returns the single day for a booking that starts and ends the same day", () => {
     expect(
       calendarDaysCovered(iso(2026, 8, 7, 9), iso(2026, 8, 7, 17))
@@ -98,5 +103,90 @@ describe("calendarDaysCovered", () => {
     // the screen.
     const keys = calendarDaysCovered(iso(2000, 1, 1), iso(2030, 1, 1));
     expect(keys.length).toBe(400);
+  });
+});
+
+describe("calendarDayKeyToDate", () => {
+  it("parses a day key as a LOCAL date, not a UTC instant", () => {
+    // why this exists at all: `new Date("2026-09-01")` is the date-only form,
+    // which the spec parses as UTC midnight. Anywhere west of UTC that Date is
+    // 31 August locally, so a calendar reading getMonth() off it asks the
+    // server for August while showing September.
+    const first = calendarDayKeyToDate("2026-09-01");
+    expect(first.getFullYear()).toBe(2026);
+    expect(first.getMonth()).toBe(8); // September, zero indexed
+    expect(first.getDate()).toBe(1);
+    expect(first.getHours()).toBe(0);
+  });
+
+  it("round-trips with calendarDayKey", () => {
+    expect(calendarDayKey(calendarDayKeyToDate("2026-02-28"))).toBe(
+      "2026-02-28"
+    );
+  });
+
+  it("returns an invalid date for a malformed key rather than guessing", () => {
+    expect(Number.isNaN(calendarDayKeyToDate("2026-9-1").getTime())).toBe(true);
+    expect(Number.isNaN(calendarDayKeyToDate("").getTime())).toBe(true);
+  });
+});
+
+describe("calendarDaysCovered, clipped to a window", () => {
+  const window = {
+    from: new Date(2026, 7, 1),
+    to: new Date(2026, 7, 31),
+  };
+
+  it("still marks a booking longer than the enumeration cap", () => {
+    // The regression this guards: the cap counts from the booking's own start,
+    // so a two-year booking ran out of keys long before August and vanished
+    // from a month it genuinely occupies.
+    const keys = calendarDaysCovered(iso(2024, 1, 1), iso(2027, 1, 1), window);
+    expect(keys[0]).toBe("2026-08-01");
+    expect(keys[keys.length - 1]).toBe("2026-08-31");
+    expect(keys.length).toBe(31);
+  });
+
+  it("does not widen a booking that sits inside the window", () => {
+    const keys = calendarDaysCovered(
+      iso(2026, 8, 10),
+      iso(2026, 8, 12),
+      window
+    );
+    expect(keys).toEqual(["2026-08-10", "2026-08-11", "2026-08-12"]);
+  });
+
+  it("returns nothing for a booking outside the window", () => {
+    expect(
+      calendarDaysCovered(iso(2026, 6, 1), iso(2026, 6, 5), window)
+    ).toEqual([]);
+  });
+});
+
+describe("calendarMonthWindow", () => {
+  it("covers the month plus a week either side", () => {
+    const { start, end } = calendarMonthWindow("2026-08-14");
+    expect(calendarDayKey(start)).toBe("2026-07-25"); // 1 Aug minus 7
+    expect(calendarDayKey(end)).toBe("2026-09-07"); // 31 Aug plus 7
+  });
+
+  it("ends at the last instant of the final day, not its midnight", () => {
+    // The endpoint documents an inclusive window and filters on `from <= end`.
+    // With a midnight bound, a booking starting at 10:00 on the last day of the
+    // window sorted as after it and was dropped.
+    const { end } = calendarMonthWindow("2026-08-14");
+    expect(end.getHours()).toBe(23);
+    expect(end.getMinutes()).toBe(59);
+    expect(end.getMilliseconds()).toBe(999);
+
+    const lateThatDay = new Date(2026, 8, 7, 10, 0);
+    expect(lateThatDay <= end).toBe(true);
+  });
+
+  it("reads the month locally, so it does not slip west of UTC", () => {
+    // `new Date("2026-09-01")` is UTC midnight, which is 31 August in Los
+    // Angeles - the window would have been August's while September showed.
+    const { start } = calendarMonthWindow("2026-09-01");
+    expect(calendarDayKey(start)).toBe("2026-08-25"); // 1 Sep minus 7
   });
 });

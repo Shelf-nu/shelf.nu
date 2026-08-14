@@ -23,10 +23,9 @@ const MAX_RANGE_DAYS = 366;
  *
  * Bookings OVERLAPPING a date window, for the companion's calendar view.
  *
- * Customer request (Richard Raiman, Raiman Production): "calendar view to have
- * a picture of upcomming bookings in the context of weeks / months". Web has
- * had a calendar since long before the app; the phone has no way to see
- * bookings laid out over time.
+ * Asked for by rental operations who need to see upcoming bookings across
+ * weeks and months. Web has had a calendar since long before the app; the
+ * phone had no way to see bookings laid out over time.
  *
  * Deliberately NOT `getBookingsForCalendar`: that service shapes its output for
  * FullCalendar, down to CSS class names, which is web rendering detail the app

@@ -1,8 +1,8 @@
 /**
  * BookingCalendar — bookings laid out over time, on the phone.
  *
- * Customer request (Richard Raiman, Raiman Production): "calendar view to have
- * a picture of upcomming bookings in the context of weeks / months".
+ * Asked for by rental operations who need to see upcoming bookings across
+ * weeks and months.
  *
  * The Bookings list already answers "what is coming up" as text. What it cannot
  * show is SHAPE: that one week is packed and the rest of the month is free,
@@ -35,6 +35,7 @@ import { useRouter } from "expo-router";
 import {
   calendarDayKey as toKey,
   calendarDaysCovered as daysCovered,
+  calendarMonthWindow as monthWindow,
 } from "@shelf/datetime";
 import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { api } from "@/lib/api";
@@ -245,6 +246,11 @@ type Props = {
   /** Active workspace. Nothing is fetched without it. */
   orgId: string | undefined;
   /**
+   * Raised by the parent when a booking is mutated on another screen. Any
+   * change bumps it; the calendar drops its cached months and refetches.
+   */
+  refreshToken?: number;
+  /**
    * Comma-joined statuses from the pills above, so the lens and the filter
    * compose: the switch decides HOW you look, the pills decide WHAT at.
    * Without this a filter set in list mode was silently dropped on switching.
@@ -260,7 +266,12 @@ type CachedMonth = {
   outside: { count: number; jumpTo: string | null };
 };
 
-export function BookingCalendar({ orgId, statuses, search }: Props) {
+export function BookingCalendar({
+  orgId,
+  statuses,
+  search,
+  refreshToken = 0,
+}: Props) {
   const router = useRouter();
   const { colors, bookingStatusBadge, isDark } = useTheme();
   const styles = useStyles();
@@ -308,6 +319,16 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   }, [orgId, statuses, search]);
 
   /**
+   * An org switch clears the rows too, not just the cache. Leaving them up
+   * meant the previous workspace's bookings stayed on screen until the new
+   * response landed, which is the one thing a workspace boundary must never do.
+   */
+  useEffect(() => {
+    setBookings([]);
+    setOutside({ count: 0, jumpTo: null });
+  }, [orgId]);
+
+  /**
    * Fetches the visible month plus a week either side, so a booking that began
    * in the previous month still paints its band into this one.
    */
@@ -329,11 +350,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         setIsLoading(true);
       }
 
-      const base = new Date(monthKey);
-      const start = new Date(base.getFullYear(), base.getMonth(), 1);
-      start.setDate(start.getDate() - 7);
-      const end = new Date(base.getFullYear(), base.getMonth() + 1, 0);
-      end.setDate(end.getDate() + 7);
+      const { start, end } = monthWindow(monthKey);
 
       setError(null);
       const res = await api.bookingsCalendar(
@@ -368,6 +385,19 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   useEffect(() => {
     void load(visibleMonth);
   }, [load, visibleMonth]);
+  /**
+   * A booking changed on another screen - checked out, checked in, cancelled,
+   * archived, deleted. Every cached month is suspect, not just this one, since
+   * the change could have moved its dates. Drop the cache and refetch what is
+   * on screen. Skips the first render, where there is nothing to invalidate.
+   */
+  const lastRefreshToken = useRef(refreshToken);
+  useEffect(() => {
+    if (lastRefreshToken.current === refreshToken) return;
+    lastRefreshToken.current = refreshToken;
+    monthCache.current.clear();
+    void load(visibleMonth, { force: true });
+  }, [refreshToken, load, visibleMonth]);
 
   /**
    * Single pass over the bookings, producing both the day marks and a
@@ -393,17 +423,30 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
     > = {};
     const byDay: Record<string, CalendarBooking[]> = {};
 
+    const window = monthWindow(visibleMonth);
+
     for (const b of bookings) {
-      const keys = daysCovered(b.from, b.to);
+      // Clipped to the window: a booking can be longer than the enumeration
+      // cap, and counting from its own start then produced no keys for the
+      // month on screen at all.
+      const keys = daysCovered(b.from, b.to, {
+        from: window.start,
+        to: window.end,
+      });
+      // The caps still come from the booking's real dates, so a band running
+      // in from before the window is drawn open rather than looking like it
+      // starts at the edge of the screen.
+      const trueStart = toKey(new Date(b.from));
+      const trueEnd = toKey(new Date(b.to));
       const color = bookingStatusBadge[b.status]?.text ?? colors.primary;
-      keys.forEach((key, idx) => {
+      keys.forEach((key) => {
         (byDay[key] ??= []).push(b);
         const mark = (marks[key] ??= { periods: [], total: 0 });
         mark.total += 1;
         // Collect every band; the cap is applied after sorting, below.
         mark.periods.push({
-          startingDay: idx === 0,
-          endingDay: idx === keys.length - 1,
+          startingDay: key === trueStart,
+          endingDay: key === trueEnd,
           color,
           priority: STATUS_PRIORITY[b.status] ?? 9,
         });
@@ -424,7 +467,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
     }
 
     return { marks, byDay };
-  }, [bookings, bookingStatusBadge, colors.primary]);
+  }, [bookings, bookingStatusBadge, colors.primary, visibleMonth]);
 
   /**
    * Marks plus the selected day.
