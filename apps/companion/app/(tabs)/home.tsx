@@ -1,3 +1,4 @@
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { useState, useCallback, useRef, memo, useEffect } from "react";
 import {
   View,
@@ -584,11 +585,23 @@ const AuditCard = memo(function AuditCard({
       : "others";
 
   const statusLabel =
-    audit.status === "PENDING"
-      ? "Pending"
-      : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status;
+    AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
+    audit.status;
+
+  // why: ONE source for the ownership sentence. `accessibilityLabel` on the
+  // card replaces the concatenated child text, so anything not repeated here is
+  // simply never announced — a screen-reader user was told the name, status and
+  // counts but never who is allowed to scan.
+  const ownershipLabel =
+    ownership === "open"
+      ? "Unassigned · admins can scan"
+      : ownership === "mine"
+      ? audit.assigneeCount === 1
+        ? "Assigned to you"
+        : `You + ${(audit.assigneeCount ?? 1) - 1} other${
+            (audit.assigneeCount ?? 1) - 1 === 1 ? "" : "s"
+          }`
+      : `${audit.assigneeCount} assigned`;
 
   return (
     <TouchableOpacity
@@ -598,7 +611,11 @@ const AuditCard = memo(function AuditCard({
         onPress();
       }}
       activeOpacity={0.6}
-      accessibilityLabel={`Audit: ${audit.name}, ${statusLabel}, ${audit.foundAssetCount} of ${audit.expectedAssetCount} found`}
+      accessibilityLabel={`Audit: ${audit.name}, ${statusLabel}, ${
+        audit.foundAssetCount
+      } of ${audit.expectedAssetCount} found${
+        ownership ? `, ${ownershipLabel}` : ""
+      }`}
       accessibilityRole="button"
     >
       <View style={styles.bookingHeader}>
@@ -672,15 +689,7 @@ const AuditCard = memo(function AuditCard({
                 },
               ]}
             >
-              {ownership === "open"
-                ? "Unassigned · admins can scan"
-                : ownership === "mine"
-                ? audit.assigneeCount === 1
-                  ? "Assigned to you"
-                  : `You + ${(audit.assigneeCount ?? 1) - 1} other${
-                      (audit.assigneeCount ?? 1) - 1 === 1 ? "" : "s"
-                    }`
-                : `${audit.assigneeCount} assigned`}
+              {ownershipLabel}
             </Text>
           </View>
         )}

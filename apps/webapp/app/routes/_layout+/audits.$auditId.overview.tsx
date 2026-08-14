@@ -1,4 +1,4 @@
-import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   auditAssetStatusLabel,
@@ -315,7 +315,13 @@ export default function AuditOverview() {
   // Labelling it "Missing" told users a brand-new audit was already missing
   // every one of its assets. The asset rows have always been completion-aware
   // (getAuditStatusLabel); this makes the tile agree with them.
-  const isAuditCompleted = session.status === AuditStatus.COMPLETED;
+  // why: NOT `status === COMPLETED`. Archiving a completed audit rewrites the
+  // status to ARCHIVED but keeps `completedAt` and the finalised counts, so a
+  // status check would relabel genuinely missing assets as "Not scanned" the
+  // moment someone archives the audit. `completedAt` is the provenance: it is
+  // set only by completion, so an archived-cancelled audit (never concluded)
+  // correctly keeps the open-audit wording.
+  const isAuditCompleted = session.completedAt !== null;
   const unscannedLabel = auditAssetStatusLabel("PENDING", isAuditCompleted);
   const unexpectedCount = session.unexpectedAssetCount || 0;
 

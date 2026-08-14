@@ -130,8 +130,8 @@ export function getAuditStatusLabel(
   }
 
   // Expected assets with PENDING status:
-  // - On completed audit: Show as "Missing" (they weren't scanned)
-  // - On active/pending audit: Show as "Expected" (still waiting to be scanned)
+  // - On a completed audit: "Missing" (they were never scanned)
+  // - While the audit is open: "Not scanned" (still waiting to be reached)
   if (auditData.expected && auditData.auditStatus === "PENDING") {
     return auditAssetStatusLabel("PENDING", isAuditCompleted);
   }

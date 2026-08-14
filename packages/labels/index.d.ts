@@ -34,6 +34,11 @@ export declare const BOOKING_STATUS_LABELS: {
   readonly CANCELLED: "Cancelled";
 };
 
+/**
+ * Audit session lifecycle (AuditStatus in the Prisma schema). Covers ARCHIVED,
+ * which a hand-written status chain on the companion used to fall through to
+ * "Cancelled".
+ */
 export declare const AUDIT_STATUS_LABELS: {
   readonly PENDING: "Pending";
   readonly ACTIVE: "Active";
@@ -42,6 +47,15 @@ export declare const AUDIT_STATUS_LABELS: {
   readonly ARCHIVED: "Archived";
 };
 
+/**
+ * Per-asset audit outcome (AuditAssetStatus in the Prisma schema).
+ *
+ * PENDING reads "Not scanned", not "Expected"/"Pending"/"Remaining": all of
+ * those were live at once for one and the same set of assets, and "Expected"
+ * was already taken by the tile counting EVERY expected asset. Prefer
+ * {@link auditAssetStatusLabel} over indexing this map for PENDING, since only
+ * that helper applies the completion rule.
+ */
 export declare const AUDIT_ASSET_STATUS_LABELS: {
   readonly PENDING: "Not scanned";
   readonly FOUND: "Found";
@@ -49,14 +63,22 @@ export declare const AUDIT_ASSET_STATUS_LABELS: {
   readonly UNEXPECTED: "Unexpected";
 };
 
+/** Enum keys of {@link AUDIT_ASSET_STATUS_LABELS} — the Prisma status values. */
 export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;
 
+/** The user-facing strings those keys resolve to. */
 export type AuditAssetStatusLabel =
   (typeof AUDIT_ASSET_STATUS_LABELS)[AuditAssetStatusKey];
 
 /**
  * Label for a per-asset audit status. An expected asset that has not been
  * scanned only becomes "Missing" once the audit is completed.
+ *
+ * @param status - the stored AuditAssetStatus
+ * @param isAuditCompleted - derive this from the audit's `completedAt`, not its
+ *   status: archiving a completed audit rewrites the status to ARCHIVED while
+ *   keeping the completion timestamp and the finalised counts.
+ * @returns the words to show for that status
  */
 export declare function auditAssetStatusLabel(
   status: AuditAssetStatusKey,

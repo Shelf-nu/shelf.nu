@@ -27,6 +27,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import {
   AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
   auditAssetStatusLabel,
 } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
@@ -60,11 +61,19 @@ type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
  */
 function isAssetFilterVisible(
   value: AssetFilterValue,
-  status: string
+  audit: { status: string; completedAt: string | null }
 ): boolean {
-  const active = status === "PENDING" || status === "ACTIVE";
-  const completed = status === "COMPLETED";
-  return value === "MISSING" ? completed : value === "PENDING" ? active : true;
+  // why: completion is read from `completedAt`, not the status. Archiving a
+  // completed audit rewrites the status to ARCHIVED, and a status check hid
+  // BOTH pills on it — you could no longer filter an archived audit down to
+  // the assets it recorded as missing.
+  const isOpen = audit.status === "PENDING" || audit.status === "ACTIVE";
+  const isCompleted = audit.completedAt != null;
+  return value === "MISSING"
+    ? isCompleted
+    : value === "PENDING"
+    ? isOpen
+    : true;
 }
 
 // ── Combined asset type for display ─────────────────────
@@ -130,9 +139,7 @@ function AuditDetailContent() {
   // the `audit` object identity). When the filter becomes valid again the
   // selection naturally reapplies. (Codex + DonKoko review, PR #2583.)
   const effectiveFilter: AssetFilterValue =
-    audit && isAssetFilterVisible(assetFilter, audit.status)
-      ? assetFilter
-      : "ALL";
+    audit && isAssetFilterVisible(assetFilter, audit) ? assetFilter : "ALL";
 
   // Progress bar animation
   const reduceMotion = useReducedMotion();
@@ -286,8 +293,12 @@ function AuditDetailContent() {
     // "Missing" once the audit is completed (it's a real discrepancy). This
     // mirrors the unified web + companion vocabulary (@shelf/labels) — "Missing"
     // is reserved for completed audits, never shown mid-scan.
-    const notFoundStatus: AuditAssetStatus =
-      audit.status === "COMPLETED" ? "MISSING" : "PENDING";
+    // why: `completedAt`, not `status === "COMPLETED"` — archiving a completed
+    // audit switches the status to ARCHIVED while keeping the completion
+    // timestamp, and those assets are still genuinely missing.
+    const notFoundStatus: AuditAssetStatus = audit.completedAt
+      ? "MISSING"
+      : "PENDING";
 
     const items: DisplayAsset[] = [];
 
@@ -487,7 +498,9 @@ function AuditDetailContent() {
   };
 
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
-  const isCompleted = audit.status === "COMPLETED";
+  // Completion provenance survives archiving; the status does not. See
+  // `notFoundStatus` above.
+  const isCompleted = audit.completedAt != null;
   const progress =
     audit.expectedAssetCount > 0
       ? audit.foundAssetCount / audit.expectedAssetCount
@@ -503,7 +516,7 @@ function AuditDetailContent() {
   // Shares `isAssetFilterVisible` with the derived `effectiveFilter` above so
   // the visible pills and the applied selection can never disagree.
   const visibleFilters = ASSET_FILTERS.filter((f) =>
-    isAssetFilterVisible(f.value, audit.status)
+    isAssetFilterVisible(f.value, audit)
   );
 
   const isOverdue =
@@ -513,14 +526,11 @@ function AuditDetailContent() {
     .filter(Boolean)
     .join(" ");
 
+  // why: read from the shared map rather than a chain that fell through to
+  // "Cancelled" — an ARCHIVED audit was labelled Cancelled on this screen.
   const statusLabel =
-    audit.status === "PENDING"
-      ? "Pending"
-      : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status === "COMPLETED"
-      ? "Completed"
-      : "Cancelled";
+    AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
+    audit.status;
 
   const assets = filteredAssets();
 
@@ -881,9 +891,14 @@ function AuditDetailContent() {
               color={colors.border}
             />
             <Text style={styles.emptyListText}>
+              {/* why: read the word from the same map the pills use. Lowercasing
+                  the raw filter value produced "No pending assets" next to a
+                  pill labelled "Not scanned". */}
               {effectiveFilter === "ALL"
                 ? "No assets in this audit"
-                : `No ${effectiveFilter.toLowerCase()} assets`}
+                : `No ${AUDIT_ASSET_STATUS_LABELS[
+                    effectiveFilter
+                  ].toLowerCase()} assets`}
             </Text>
           </View>
         }
