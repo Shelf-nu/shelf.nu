@@ -91,6 +91,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertKitsBelongToOrg,
@@ -788,6 +789,19 @@ export async function createBooking({
     // free-pool standalone slice may legitimately coexist with kit slices), so
     // we only pay for a type lookup when there is an actual overlap.
     const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+
+    /**
+     * Archived assets can't be booked (issue #382). Guarding the UNION here,
+     * not just the standalone bucket, is the point: a kit carries its members
+     * in as `kitSlices`, so a kit holding an archived asset would otherwise
+     * walk one straight into a booking that can then be reserved and checked
+     * out. Every "create a booking with assets" route lands here.
+     */
+    await assertAssetsAreNotArchived({
+      assetIds: [...new Set([...dedupedAssetIds, ...kitSliceAssetIds])],
+      organizationId: booking.organizationId,
+    });
+
     const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
     );
@@ -8162,6 +8176,18 @@ export async function updateBookingAssets({
       const uniqueAssetIds = [
         ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
       ];
+
+      /**
+       * Archived assets can't be booked (issue #382). The union matters here
+       * too: a kit-add passes its members as `kitSlices` with an empty
+       * `assetIds`, so guarding only the standalone bucket would let a kit
+       * carry an archived asset into the booking. Read on `tx` so it sees the
+       * same snapshot as the write.
+       */
+      await assertAssetsAreNotArchived(
+        { assetIds: uniqueAssetIds, organizationId },
+        tx
+      );
 
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and
