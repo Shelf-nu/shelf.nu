@@ -1,3 +1,4 @@
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -337,13 +338,12 @@ function AuditsListContent() {
                 style={[styles.statusDot, { backgroundColor: badge.text }]}
               />
               <Text style={[styles.statusText, { color: badge.text }]}>
-                {item.status === "PENDING"
-                  ? "Pending"
-                  : item.status === "ACTIVE"
-                  ? "Active"
-                  : item.status === "COMPLETED"
-                  ? "Completed"
-                  : "Cancelled"}
+                {/* why: the same chain on the detail screen fell through to
+                    "Cancelled", so an ARCHIVED audit was labelled cancelled.
+                    Read the shared map, which covers every status. */}
+                {AUDIT_STATUS_LABELS[
+                  item.status as keyof typeof AUDIT_STATUS_LABELS
+                ] ?? item.status}
               </Text>
             </View>
           </View>
