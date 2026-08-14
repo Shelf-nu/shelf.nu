@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { BookingCalendar } from "@/components/bookings/booking-calendar";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -14,7 +21,7 @@ import {
   Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
@@ -111,6 +118,50 @@ function BookingsListContent() {
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   const listRef = useRef<FlatList>(null);
+
+  /**
+   * List or calendar. The calendar is the same bookings through a different
+   * lens, so it lives here rather than as a sixth tab: the tab bar stays at
+   * five, and someone looking for bookings already comes to this screen.
+   */
+  const [view, setView] = useState<"list" | "calendar">("list");
+  const navigation = useNavigation();
+
+  /**
+   * The lens switch lives in the header, not in the body.
+   *
+   * why: it used to sit under the search box as a third stacked control row,
+   * which pushed the actual bookings down and read as clutter. It also changes
+   * the WHOLE screen, so it belongs with the title rather than among the
+   * filters it replaces. Both options stay visible, since a segmented control
+   * is discoverable in a way a single toggling icon is not, and this is a
+   * feature nobody knows exists yet.
+   */
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.lens}>
+          {(["list", "calendar"] as const).map((v) => (
+            <TouchableOpacity
+              key={v}
+              style={[styles.lensItem, view === v && styles.lensItemActive]}
+              onPress={() => setView(v)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: view === v }}
+              accessibilityLabel={v === "list" ? "List view" : "Calendar view"}
+              hitSlop={hitSlop.sm}
+            >
+              <Ionicons
+                name={v === "list" ? "list-outline" : "calendar-outline"}
+                size={20}
+                color={view === v ? colors.primary : colors.mutedLight}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      ),
+    });
+  }, [navigation, view, styles, colors]);
   useScrollToTop(listRef);
 
   // Swipe-to-filter gesture (Instagram-style horizontal swipe between filters)
@@ -460,159 +511,165 @@ function BookingsListContent() {
 
   return (
     <View style={styles.container}>
-      {/* Keyword search + sort */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={18} color={colors.mutedLight} />
-          <TextInput
-            style={styles.searchInput}
-            value={searchInput}
-            onChangeText={setSearchInput}
-            placeholder="Search bookings..."
-            placeholderTextColor={colors.mutedLight}
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-            accessibilityLabel="Search bookings"
-          />
-          {searchInput.length > 0 ? (
+      {view === "calendar" ? (
+        <BookingCalendar orgId={currentOrg?.id} />
+      ) : (
+        <>
+          {/* Keyword search + sort */}
+          <View style={styles.searchRow}>
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={18} color={colors.mutedLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={searchInput}
+                onChangeText={setSearchInput}
+                placeholder="Search bookings..."
+                placeholderTextColor={colors.mutedLight}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                accessibilityLabel="Search bookings"
+              />
+              {searchInput.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => setSearchInput("")}
+                  hitSlop={hitSlop.sm}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={18}
+                    color={colors.mutedLight}
+                  />
+                </TouchableOpacity>
+              ) : null}
+            </View>
             <TouchableOpacity
-              onPress={() => setSearchInput("")}
-              hitSlop={hitSlop.sm}
-              accessibilityLabel="Clear search"
+              style={styles.sortButton}
+              onPress={openSortMenu}
+              accessibilityLabel="Sort bookings"
               accessibilityRole="button"
             >
-              <Ionicons
-                name="close-circle"
-                size={18}
-                color={colors.mutedLight}
-              />
+              <Ionicons name="swap-vertical" size={20} color={colors.muted} />
             </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={openSortMenu}
-          accessibilityLabel="Sort bookings"
-          accessibilityRole="button"
-        >
-          <Ionicons name="swap-vertical" size={20} color={colors.muted} />
-        </TouchableOpacity>
-      </View>
+          </View>
 
-      {/* Status filter pills — scrollable: more statuses than fit one row */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={styles.filterRow}
-        accessibilityRole="tablist"
-      >
-        {STATUS_FILTERS.map((f, i) => (
-          <TouchableOpacity
-            key={f.value}
-            style={[
-              styles.filterPill,
-              activeFilter === i && styles.filterPillActive,
-            ]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setActiveFilter(i);
-            }}
-            hitSlop={hitSlop.sm}
-            accessibilityLabel={`Filter: ${f.label}`}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeFilter === i }}
+          {/* Status filter pills — scrollable: more statuses than fit one row */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScroll}
+            contentContainerStyle={styles.filterRow}
+            accessibilityRole="tablist"
           >
-            <Text
-              style={[
-                styles.filterPillText,
-                activeFilter === i && styles.filterPillTextActive,
-              ]}
-            >
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Swipeable content area — swipe left/right to cycle filter pills */}
-      <View style={styles.flexFill} {...swipePanHandlers}>
-        <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
-          {error ? (
-            <View style={styles.centered}>
-              <Ionicons
-                name="alert-circle-outline"
-                size={48}
-                color={colors.error}
-              />
-              <Text style={styles.emptyText}>{error}</Text>
+            {STATUS_FILTERS.map((f, i) => (
               <TouchableOpacity
-                style={styles.retryButton}
-                onPress={onRefresh}
-                accessibilityLabel="Retry loading bookings"
-                accessibilityRole="button"
+                key={f.value}
+                style={[
+                  styles.filterPill,
+                  activeFilter === i && styles.filterPillActive,
+                ]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setActiveFilter(i);
+                }}
+                hitSlop={hitSlop.sm}
+                accessibilityLabel={`Filter: ${f.label}`}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: activeFilter === i }}
               >
-                <Text style={styles.retryText}>Retry</Text>
+                <Text
+                  style={[
+                    styles.filterPillText,
+                    activeFilter === i && styles.filterPillTextActive,
+                  ]}
+                >
+                  {f.label}
+                </Text>
               </TouchableOpacity>
-            </View>
-          ) : isLoading && bookings.length === 0 ? (
-            <BookingListSkeleton />
-          ) : bookings.length === 0 ? (
-            <View style={styles.centered}>
-              <Ionicons
-                name="calendar-outline"
-                size={48}
-                color={colors.border}
-              />
-              <Text style={styles.emptyTitle}>
-                {activeFilter === 0
-                  ? "No active bookings"
-                  : activeFilter === 2
-                  ? "No bookings"
-                  : `No ${STATUS_FILTERS[
-                      activeFilter
-                    ].label.toLowerCase()} bookings`}
-              </Text>
-              <Text style={styles.emptyText}>
-                {activeFilter === 0
-                  ? "Active bookings will appear here when created"
-                  : "Try selecting a different status filter"}
-              </Text>
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={bookings}
-              renderItem={renderBooking}
-              keyExtractor={bookingKeyExtractor}
-              contentContainerStyle={styles.list}
-              removeClippedSubviews
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              initialNumToRender={10}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isRefreshing}
-                  onRefresh={onRefresh}
-                  tintColor={colors.muted}
-                  accessibilityLabel="Pull to refresh"
-                />
-              }
-              onEndReached={onEndReached}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={
-                isLoadingMore ? (
-                  <ActivityIndicator
-                    style={styles.footer}
-                    color={colors.muted}
+            ))}
+          </ScrollView>
+
+          {/* Swipeable content area — swipe left/right to cycle filter pills */}
+          <View style={styles.flexFill} {...swipePanHandlers}>
+            <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
+              {error ? (
+                <View style={styles.centered}>
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={48}
+                    color={colors.error}
                   />
-                ) : null
-              }
-            />
-          )}
-        </Animated.View>
-      </View>
+                  <Text style={styles.emptyText}>{error}</Text>
+                  <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={onRefresh}
+                    accessibilityLabel="Retry loading bookings"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.retryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : isLoading && bookings.length === 0 ? (
+                <BookingListSkeleton />
+              ) : bookings.length === 0 ? (
+                <View style={styles.centered}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={48}
+                    color={colors.border}
+                  />
+                  <Text style={styles.emptyTitle}>
+                    {activeFilter === 0
+                      ? "No active bookings"
+                      : activeFilter === 2
+                      ? "No bookings"
+                      : `No ${STATUS_FILTERS[
+                          activeFilter
+                        ].label.toLowerCase()} bookings`}
+                  </Text>
+                  <Text style={styles.emptyText}>
+                    {activeFilter === 0
+                      ? "Active bookings will appear here when created"
+                      : "Try selecting a different status filter"}
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  ref={listRef}
+                  data={bookings}
+                  renderItem={renderBooking}
+                  keyExtractor={bookingKeyExtractor}
+                  contentContainerStyle={styles.list}
+                  removeClippedSubviews
+                  maxToRenderPerBatch={10}
+                  windowSize={5}
+                  initialNumToRender={10}
+                  refreshControl={
+                    <RefreshControl
+                      refreshing={isRefreshing}
+                      onRefresh={onRefresh}
+                      tintColor={colors.muted}
+                      accessibilityLabel="Pull to refresh"
+                    />
+                  }
+                  onEndReached={onEndReached}
+                  onEndReachedThreshold={0.5}
+                  ListFooterComponent={
+                    isLoadingMore ? (
+                      <ActivityIndicator
+                        style={styles.footer}
+                        color={colors.muted}
+                      />
+                    ) : null
+                  }
+                />
+              )}
+            </Animated.View>
+          </View>
+        </>
+      )}
 
       {/* Create booking — only TEAM workspaces can use bookings (matches the
           server premium gate; personal workspaces 403 on create). */}
@@ -649,6 +706,28 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // Keyword search box + sort button
+  /**
+   * Two-state lens switch in the native header.
+   *
+   * why: no track. A grey track on a white header is nearly invisible, and the
+   * active chip inside it was white on near-white, so the selected state did
+   * not read at all. Colour carries the state instead, using exactly the
+   * active/inactive language of the tab bar directly below, which users already
+   * understand without being taught.
+   */
+  lens: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  lensItem: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lensItemActive: {},
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

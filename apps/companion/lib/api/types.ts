@@ -1260,3 +1260,25 @@ export type DashboardResponse = {
   overdueBookings: DashboardBooking[];
   activeAudits: DashboardAudit[];
 };
+
+/**
+ * One booking as the calendar needs it. Ranges, not points: `from`/`to` are
+ * what get drawn as a band across the days the booking covers.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/bookings.calendar.ts}
+ */
+export type CalendarBooking = {
+  id: string;
+  name: string;
+  status: BookingStatus;
+  from: string;
+  to: string;
+  assetCount: number;
+  custodianName: string | null;
+  custodianImage: string | null;
+};
+
+/** Bookings overlapping the requested window. */
+export type CalendarBookingsResponse = {
+  bookings: CalendarBooking[];
+};

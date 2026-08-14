@@ -16,9 +16,20 @@ import type {
   AvailableModelsResponse,
   ModelRequestMutationResponse,
   BookingTagsResponse,
+  CalendarBookingsResponse,
 } from "./types";
 
 export const bookingsApi = {
+  /**
+   * Bookings overlapping a date window, for the calendar view. Ranges are
+   * inclusive on both ends; the server caps the window it will answer.
+   */
+  bookingsCalendar: (orgId: string, start: string, end: string) =>
+    apiFetch<CalendarBookingsResponse>(
+      `/api/mobile/bookings/calendar?orgId=${orgId}&start=${encodeURIComponent(
+        start
+      )}&end=${encodeURIComponent(end)}`
+    ),
   /** Get paginated bookings for an organization */
   bookings: (
     orgId: string,
