@@ -3290,6 +3290,11 @@ async function computeInventoryKpis(
   // category / location / status filters) the Prisma `where` carries.
   const filterFragments: Prisma.Sql[] = [
     Prisma.sql`"organizationId" = ${organizationId}`,
+    // Raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER, which `scopedWhere`
+    // carries (issue #382). Without it the Total Value KPI would count
+    // archived assets while the Total Assets count beside it does not, and
+    // the two numbers on the same card would disagree.
+    Prisma.sql`"archivedAt" IS NULL`,
   ];
   if (filters.categoryIds && filters.categoryIds.length > 0) {
     filterFragments.push(
