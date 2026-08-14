@@ -338,6 +338,10 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               {...newTabRel}
               className={finalStyles}
               aria-label={ariaLabel}
+              // why: no native `disabled` here — it would swallow the pointer
+              // events the reason popup needs — so expose the state to
+              // assistive tech explicitly.
+              aria-disabled={true}
               onMouseDown={(e: MouseEvent) => e.preventDefault()}
               onClick={(e: MouseEvent) => {
                 // why: tap must reveal the reason — touch has no hover.

@@ -26,9 +26,13 @@ describe("Button disabled with reason", () => {
       screen.queryByText(/only the owner can do this/i)
     ).not.toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /transfer ownership/i })
-    );
+    const button = screen.getByRole("button", { name: /transfer ownership/i });
+
+    // No native `disabled` attribute (it would swallow the pointer events the
+    // popup needs), so the state must be exposed to assistive tech instead.
+    expect(button).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(button);
 
     expect(screen.getByText(/only the owner can do this/i)).toBeInTheDocument();
   });
