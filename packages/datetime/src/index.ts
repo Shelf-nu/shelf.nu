@@ -796,3 +796,61 @@ export function formatDate(
 
   return out.join(", ");
 }
+
+/* ────────────────────────── Calendar range helpers ─────────────────────────
+ * Day-level range maths for calendar surfaces. Formatting lives above; this is
+ * about WHICH DAYS a booking touches, which is a different question and one
+ * both apps will ask if web ever redraws its calendar from our own primitives.
+ * Kept here rather than in the companion so the answer can never differ
+ * between surfaces, and so it is testable without a React Native runtime.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `YYYY-MM-DD` for a date, in the LOCAL timezone.
+ *
+ * Deliberately not `toISOString().slice(0, 10)`: that converts to UTC first, so
+ * a booking at 22:00 on the 7th in UTC+3 would be keyed to the 8th and its band
+ * would be drawn on the wrong day.
+ *
+ * @param date - the instant to key
+ * @returns the local calendar day, zero padded
+ */
+export function calendarDayKey(date: Date): string {
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** Upper bound on the days one range may enumerate. */
+const MAX_RANGE_DAYS = 400;
+
+/**
+ * Every local day key a range covers, inclusive of both ends.
+ *
+ * A booking is a range, so a five-day job must be drawable as one continuous
+ * run rather than five unrelated marks.
+ *
+ * @param from - ISO start instant
+ * @param to - ISO end instant
+ * @returns ordered day keys; empty when the range is reversed or unparseable,
+ *   and capped so corrupt data cannot spin the caller
+ */
+export function calendarDaysCovered(from: string, to: string): string[] {
+  const start = new Date(from);
+  const end = new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  const cursor = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate()
+  );
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  const keys: string[] = [];
+  while (cursor <= last && keys.length < MAX_RANGE_DAYS) {
+    keys.push(calendarDayKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}

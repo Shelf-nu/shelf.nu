@@ -23,6 +23,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, ActivityIndicator, TouchableOpacity } from "react-native";
 import { Calendar, type DateData } from "react-native-calendars";
 import { useRouter } from "expo-router";
+import {
+  calendarDayKey as toKey,
+  calendarDaysCovered as daysCovered,
+} from "@shelf/datetime";
 import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { api } from "@/lib/api";
 import type { CalendarBooking } from "@/lib/api/types";
@@ -30,32 +34,6 @@ import { useTheme } from "@/lib/theme-context";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
-
-/** `YYYY-MM-DD` in LOCAL time. Never toISOString here: it shifts the day. */
-function toKey(d: Date): string {
-  const m = `${d.getMonth() + 1}`.padStart(2, "0");
-  const day = `${d.getDate()}`.padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
-/** Every day key a booking covers, inclusive of both ends. */
-function daysCovered(from: string, to: string): string[] {
-  const start = new Date(from);
-  const end = new Date(to);
-  const keys: string[] = [];
-  const cursor = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  );
-  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  // Bounded, so a reversed or absurd range cannot loop forever.
-  while (cursor <= last && keys.length < 400) {
-    keys.push(toKey(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return keys;
-}
 
 /**
  * Regions that start the week on Sunday. Used only when the JS engine cannot
