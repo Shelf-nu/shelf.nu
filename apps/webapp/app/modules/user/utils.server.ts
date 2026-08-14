@@ -109,6 +109,36 @@ export async function resolveUserAction(
         }
       );
 
+      /**
+       * Parity with `changeUserRole`: only the OWNER may act on an ADMIN.
+       * Without this an ADMIN who is refused a role change ("Only the workspace
+       * owner can change an Administrator's role") can just revoke that
+       * ADMIN's access instead, which is the stronger action.
+       *
+       * Revoking the OWNER is refused by `revokeAccessToOrganization` itself,
+       * so it holds for every caller rather than only this one.
+       */
+      const targetUserOrg = await db.userOrganization.findFirst({
+        where: { userId: targetUserId, organizationId },
+        select: { roles: true },
+      });
+
+      if (
+        targetUserOrg?.roles.includes(OrgRolesEnum.ADMIN) &&
+        callerRole !== OrgRolesEnum.OWNER
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Insufficient permissions",
+          message:
+            "Only the workspace owner can revoke an Administrator's access.",
+          additionalData: { organizationId, targetUserId },
+          label: "Team",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
         organizationId,
