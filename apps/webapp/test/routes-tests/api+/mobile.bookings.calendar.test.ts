@@ -38,7 +38,15 @@ vi.mock("~/modules/booking/service.server", () => ({
 }));
 
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findMany: vi.fn() } },
+  db: {
+    booking: {
+      findMany: vi.fn(),
+      // why: the loader also asks what this filter matches OUTSIDE the visible
+      // month, so the calendar can say "9 more" rather than looking empty.
+      count: vi.fn(),
+      findFirst: vi.fn(),
+    },
+  },
 }));
 
 vi.mock("~/utils/error", () => ({
@@ -65,7 +73,11 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 const mockDb = db as unknown as {
-  booking: { findMany: ReturnType<typeof vi.fn> };
+  booking: {
+    findMany: ReturnType<typeof vi.fn>;
+    count: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
+  };
 };
 
 /** The `where` the loader handed Prisma on its last call. */
@@ -90,6 +102,8 @@ describe("GET /api/mobile/bookings/calendar", () => {
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
     (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
     mockDb.booking.findMany.mockResolvedValue([]);
+    mockDb.booking.count.mockResolvedValue(0);
+    mockDb.booking.findFirst.mockResolvedValue(null);
   });
 
   describe("the date window", () => {
@@ -240,6 +254,49 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
       expect((res as unknown as Response).status).toBe(403);
       expect(mockDb.booking.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("what lies outside the visible month", () => {
+    it("reports the count and where to jump, so the month never just looks empty", async () => {
+      // why: the bookings LIST is date-blind — Active shows every open booking
+      // whenever it falls — while this grid shows one month. Without this the
+      // same filter shows nine bookings in a list and an empty calendar, with
+      // nothing explaining the difference.
+      mockDb.booking.count.mockResolvedValue(9);
+      mockDb.booking.findFirst.mockResolvedValue({
+        from: new Date("2026-09-13T09:00:00.000Z"),
+      });
+
+      const res = await loader(
+        createLoaderArgs({ request: calendarRequest(RANGE) })
+      );
+      const body = await (res as unknown as Response).json();
+
+      expect(body.outsideWindow.count).toBe(9);
+      expect(body.outsideWindow.jumpTo).toContain("2026-09-13");
+    });
+
+    it("excludes the visible month from that count", async () => {
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      const countWhere = mockDb.booking.count.mock.calls.at(-1)?.[0]?.where;
+      expect(countWhere.NOT).toEqual({
+        AND: [
+          { from: { lte: new Date("2026-08-31T23:59:59.000Z") } },
+          { to: { gte: new Date("2026-08-01T00:00:00.000Z") } },
+        ],
+      });
+    });
+
+    it("offers nothing to jump to when there is nothing outside", async () => {
+      const res = await loader(
+        createLoaderArgs({ request: calendarRequest(RANGE) })
+      );
+      const body = await (res as unknown as Response).json();
+
+      expect(body.outsideWindow.count).toBe(0);
+      expect(body.outsideWindow.jumpTo).toBeNull();
     });
   });
 

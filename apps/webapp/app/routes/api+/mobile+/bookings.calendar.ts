@@ -141,31 +141,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
-    const bookings = await db.booking.findMany({
-      where: {
-        organizationId,
-        status: { in: statuses },
-        // Same name/description keyword match the mobile list applies.
-        ...(search
-          ? {
-              OR: [
-                { name: { contains: search, mode: "insensitive" as const } },
-                {
-                  description: {
-                    contains: search,
-                    mode: "insensitive" as const,
-                  },
+    /**
+     * Everything except the date window, so the same filter can also answer the
+     * opposite question: what matches but falls OUTSIDE the month on screen.
+     *
+     * why that question matters: the bookings LIST is date-blind. "Active"
+     * shows every open booking whenever it falls. The calendar is scoped to one
+     * month, so switching lens could make four bookings vanish with nothing
+     * saying where they went. The counts below let the screen say so.
+     */
+    const baseWhere = {
+      organizationId,
+      status: { in: statuses },
+      // Same name/description keyword match the mobile list applies.
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" as const } },
+              {
+                description: {
+                  contains: search,
+                  mode: "insensitive" as const,
                 },
-              ],
-            }
-          : {}),
-        // Overlap test: starts on or before the window ends, and ends on or
-        // after it begins.
-        from: { lte: end },
-        to: { gte: start },
-        ...(isSelfServiceOrBase && { custodianUserId: user.id }),
-        AND: [bookingDraftVisibilityClause(user.id)],
-      },
+              },
+            ],
+          }
+        : {}),
+      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+      AND: [bookingDraftVisibilityClause(user.id)],
+    };
+
+    // Overlap, not containment: a job running 28 Jul to 3 Aug belongs in August.
+    const overlapsWindow = { from: { lte: end }, to: { gte: start } };
+    const outsideWindow = {
+      ...baseWhere,
+      NOT: { AND: [{ from: { lte: end } }, { to: { gte: start } }] },
+    };
+
+    const bookings = await db.booking.findMany({
+      where: { ...baseWhere, ...overlapsWindow },
       select: {
         id: true,
         name: true,
@@ -187,6 +201,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       take: 500,
     });
 
+    /**
+     * How much this filter matches beyond the visible month, and where to look.
+     * Two cheap indexed lookups, and only they can answer "where did my
+     * bookings go" when the month on screen is empty.
+     */
+    const [outsideCount, nextUp, previous] = await Promise.all([
+      db.booking.count({ where: outsideWindow }),
+      db.booking.findFirst({
+        where: { ...baseWhere, from: { gt: end } },
+        orderBy: { from: "asc" },
+        select: { from: true },
+      }),
+      db.booking.findFirst({
+        where: { ...baseWhere, to: { lt: start } },
+        orderBy: { to: "desc" },
+        select: { from: true },
+      }),
+    ]);
+
     return data({
       bookings: bookings.map((b) => ({
         id: b.id,
@@ -203,6 +236,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
       })),
+      /**
+       * Bookings matching the same filter that this month does not show.
+       * `jumpTo` prefers the next one forward, since a calendar is read
+       * forwards, and falls back to the most recent one behind.
+       */
+      outsideWindow: {
+        count: outsideCount,
+        jumpTo: nextUp?.from ?? previous?.from ?? null,
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

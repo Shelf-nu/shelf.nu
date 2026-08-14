@@ -1281,4 +1281,14 @@ export type CalendarBooking = {
 /** Bookings overlapping the requested window. */
 export type CalendarBookingsResponse = {
   bookings: CalendarBooking[];
+  /**
+   * What the same filter matches beyond the visible month. The bookings LIST is
+   * date-blind, so without this the calendar can look empty while the list is
+   * full, and nothing explains the difference.
+   */
+  outsideWindow: {
+    count: number;
+    /** ISO date to jump to, or null when there is nothing outside. */
+    jumpTo: string | null;
+  };
 };

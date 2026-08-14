@@ -19,8 +19,16 @@
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/bookings.calendar.ts}
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ActivityIndicator, TouchableOpacity } from "react-native";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Calendar, type DateData } from "react-native-calendars";
 import { useRouter } from "expo-router";
 import {
@@ -94,6 +102,128 @@ function resolveFirstDay(): number {
  */
 const MAX_BANDS_PER_DAY = 3;
 
+/** What our `markedDates` payload carries into the custom cell. */
+type DayMarking = {
+  periods?: { startingDay: boolean; endingDay: boolean; color: string }[];
+  total?: number;
+  selected?: boolean;
+};
+
+/**
+ * One day cell.
+ *
+ * why custom rather than the library's `multi-period` rendering: that draws the
+ * bands but has nowhere to say how many it did NOT draw. Under real load — a
+ * rental day with seven overlapping jobs — the cell showed three bands and
+ * looked like a quiet day. A calendar whose whole purpose is judging capacity
+ * must not under-report it, so the cell now carries a "+N" when it is holding
+ * back.
+ *
+ * Bands still read as continuous runs across days: each covered day paints a
+ * full-width bar, and only the true start and end get a rounded cap, so
+ * adjacent cells join up.
+ */
+const DayCell = memo(function DayCell({
+  date,
+  state,
+  marking,
+  onPress,
+  colors,
+  maxBands,
+}: {
+  date?: { dateString: string; day: number };
+  state?: string;
+  marking?: DayMarking;
+  onPress: (dateString: string) => void;
+  colors: ReturnType<typeof useTheme>["colors"];
+  maxBands: number;
+}) {
+  const periods = marking?.periods ?? [];
+  const hidden = Math.max(0, (marking?.total ?? 0) - periods.length);
+  const isSelected = marking?.selected === true;
+  const isToday = state === "today";
+
+  return (
+    <TouchableOpacity
+      style={dayStyles.cell}
+      onPress={() => date && onPress(date.dateString)}
+      accessibilityRole="button"
+      accessibilityLabel={
+        date
+          ? `${date.day}${
+              marking?.total
+                ? `, ${marking.total} booking${marking.total === 1 ? "" : "s"}`
+                : ", no bookings"
+            }`
+          : undefined
+      }
+      accessibilityState={{ selected: isSelected }}
+    >
+      <View
+        style={[
+          dayStyles.numberWrap,
+          isSelected && { backgroundColor: colors.primary },
+        ]}
+      >
+        <Text
+          style={[
+            dayStyles.number,
+            {
+              color:
+                state === "disabled" ? colors.mutedLight : colors.foreground,
+            },
+            isToday &&
+              !isSelected && { color: colors.primaryText, fontWeight: "700" },
+            isSelected && {
+              color: colors.primaryForeground,
+              fontWeight: "700",
+            },
+          ]}
+        >
+          {date?.day}
+        </Text>
+      </View>
+
+      <View style={dayStyles.bands}>
+        {periods.slice(0, maxBands).map((p, i) => (
+          <View
+            key={i}
+            style={[
+              dayStyles.band,
+              { backgroundColor: p.color },
+              p.startingDay && dayStyles.bandStart,
+              p.endingDay && dayStyles.bandEnd,
+            ]}
+          />
+        ))}
+        {hidden > 0 ? (
+          <Text style={[dayStyles.more, { color: colors.muted }]}>
+            +{hidden}
+          </Text>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const dayStyles = StyleSheet.create({
+  cell: { width: "100%", alignItems: "center", paddingBottom: 2 },
+  numberWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  number: { fontSize: 15 },
+  // Full width so neighbouring days visually join into one run.
+  bands: { width: "100%", gap: 2, marginTop: 1, minHeight: 14 },
+  band: { height: 3, width: "100%" },
+  bandStart: { borderTopLeftRadius: 2, borderBottomLeftRadius: 2 },
+  bandEnd: { borderTopRightRadius: 2, borderBottomRightRadius: 2 },
+  more: { fontSize: 9, fontWeight: "700", textAlign: "center" },
+});
+
 type Props = {
   /** Active workspace. Nothing is fetched without it. */
   orgId: string | undefined;
@@ -117,6 +247,10 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   const [visibleMonth, setVisibleMonth] = useState(() => toKey(new Date()));
   const [selectedDay, setSelectedDay] = useState(() => toKey(new Date()));
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);
+  const [outside, setOutside] = useState<{
+    count: number;
+    jumpTo: string | null;
+  }>({ count: 0, jumpTo: null });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -142,7 +276,10 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         { statuses, search }
       );
       if (res.error) setError(res.error);
-      else if (res.data) setBookings(res.data.bookings);
+      else if (res.data) {
+        setBookings(res.data.bookings);
+        setOutside(res.data.outsideWindow ?? { count: 0, jumpTo: null });
+      }
       setIsLoading(false);
     },
     [orgId, statuses, search]
@@ -163,7 +300,11 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   const { marks, byDay } = useMemo(() => {
     const marks: Record<
       string,
-      { periods: { startingDay: boolean; endingDay: boolean; color: string }[] }
+      {
+        periods: { startingDay: boolean; endingDay: boolean; color: string }[];
+        /** EVERY booking touching the day, not just the bands we draw. */
+        total: number;
+      }
     > = {};
     const byDay: Record<string, CalendarBooking[]> = {};
 
@@ -172,8 +313,11 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
       const color = bookingStatusBadge[b.status]?.text ?? colors.primary;
       keys.forEach((key, idx) => {
         (byDay[key] ??= []).push(b);
-        const mark = (marks[key] ??= { periods: [] });
-        // Cap the stack: more than a few bands in one cell is unreadable.
+        const mark = (marks[key] ??= { periods: [], total: 0 });
+        mark.total += 1;
+        // Cap the stack: more than a few bands in one cell is unreadable. The
+        // count above is what the cell reports, so a capped day still tells
+        // the truth about how busy it is.
         if (mark.periods.length < MAX_BANDS_PER_DAY) {
           mark.periods.push({
             startingDay: idx === 0,
@@ -198,7 +342,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
     () => ({
       ...marks,
       [selectedDay]: {
-        ...(marks[selectedDay] ?? { periods: [] }),
+        ...(marks[selectedDay] ?? { periods: [], total: 0 }),
         selected: true,
       },
     }),
@@ -210,11 +354,22 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
   return (
     <View style={styles.container}>
       <Calendar
-        current={visibleMonth}
+        // why initialDate and not current: the library reads `current` once, at
+        // mount, and thereafter only watches `initialDate`. With `current` a
+        // programmatic jump moved the DATA but left the grid showing the old
+        // month, so the header said August while the panel listed September.
+        initialDate={visibleMonth}
         onMonthChange={(m: DateData) => setVisibleMonth(m.dateString)}
         onDayPress={(d: DateData) => setSelectedDay(d.dateString)}
-        markingType="multi-period"
         markedDates={markedDates}
+        dayComponent={(dayProps: any) => (
+          <DayCell
+            {...dayProps}
+            colors={colors}
+            maxBands={MAX_BANDS_PER_DAY}
+            onPress={setSelectedDay}
+          />
+        )}
         firstDay={resolveFirstDay()}
         enableSwipeMonths
         theme={{
@@ -233,7 +388,46 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
         style={styles.calendar}
       />
 
-      <View style={styles.dayPanel}>
+      {/* why: the bookings list is date-blind — "Active" shows every open
+          booking whenever it falls — while this grid shows one month. Without
+          this line you switch lens and four bookings simply vanish, with
+          nothing saying they are in March. */}
+      {outside.count > 0 && outside.jumpTo ? (
+        <TouchableOpacity
+          style={styles.outsideRow}
+          onPress={() => {
+            const target = toKey(new Date(outside.jumpTo as string));
+            setVisibleMonth(target);
+            setSelectedDay(target);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`${
+            outside.count
+          } more bookings outside this month. Jump to ${formatDate(
+            outside.jumpTo
+          )}`}
+        >
+          <Ionicons
+            name="arrow-forward-circle-outline"
+            size={16}
+            color={colors.primaryText}
+          />
+          <Text style={styles.outsideText}>
+            {outside.count} more outside this month
+          </Text>
+          <Text style={styles.outsideJump}>{formatDate(outside.jumpTo)}</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {/* why a ScrollView: a busy day can hold a dozen bookings. As a plain
+          View only the first one and a half were reachable, which is precisely
+          the day a dispatcher most needs to read. The bottom padding clears
+          the floating create button, which was sitting on top of the rows. */}
+      <ScrollView
+        style={styles.dayPanel}
+        contentContainerStyle={styles.dayPanelContent}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.dayTitle}>{formatDate(selectedDay)}</Text>
 
         {isLoading && bookings.length === 0 ? (
@@ -283,7 +477,7 @@ export function BookingCalendar({ orgId, statuses, search }: Props) {
             );
           })
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -294,10 +488,34 @@ const useStyles = createStyles((colors) => ({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  outsideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.primaryBg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  outsideText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    color: colors.foregroundSecondary,
+  },
+  outsideJump: {
+    fontSize: fontSize.sm,
+    fontWeight: "700",
+    color: colors.primaryText,
+  },
   dayPanel: {
     flex: 1,
+  },
+  dayPanelContent: {
     padding: spacing.lg,
     gap: spacing.sm,
+    // Clears the floating create button so the last row is readable.
+    paddingBottom: 96,
   },
   dayTitle: {
     fontSize: fontSize.sm,
