@@ -117,13 +117,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Only assignees can complete the audit via scan route
-    // Exception: if audit has no assignees, admins/owners can complete
+    // Assignee-gated: ADMIN/OWNER may act on any audit,
+    // BASE/SELF_SERVICE only when assigned.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
-      request,
       isSelfServiceOrBase,
     });
 
@@ -305,16 +304,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/audits/${auditId}/overview`);
     }
 
-    // Permission logic for scan access:
-    // - If audit has assignees: only assignees can scan
-    // - If audit has NO assignees: admins/owners can scan, BASE/SELF_SERVICE cannot
-    const hasNoAssignees = session.assignments.length === 0;
-    const shouldForceAssigneeCheck = isSelfServiceOrBase || !hasNoAssignees;
-
+    // Scan access: ADMIN/OWNER can scan any audit,
+    // BASE/SELF_SERVICE only when assigned.
     requireAuditAssigneeForBaseSelfService({
       audit: session,
       userId,
-      isSelfServiceOrBase: shouldForceAssigneeCheck,
+      isSelfServiceOrBase,
       auditId,
     });
 
