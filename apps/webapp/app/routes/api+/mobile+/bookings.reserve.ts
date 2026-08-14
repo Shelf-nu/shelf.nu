@@ -11,7 +11,10 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { reserveBooking } from "~/modules/booking/service.server";
+import {
+  getBookingFlags,
+  reserveBooking,
+} from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -96,6 +99,9 @@ export async function action({ request }: ActionFunctionArgs) {
         custodianTeamMemberId: true,
         custodianTeamMember: { select: { id: true, name: true, userId: true } },
         tags: { select: { id: true } },
+        // Needed for the same Reserve eligibility check the web form runs.
+        bookingAssets: { select: { assetId: true } },
+        modelRequests: { select: { id: true } },
       },
     });
 
@@ -131,6 +137,57 @@ export async function action({ request }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Booking has no custodian. Add a custodian before reserving.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Reserve eligibility, matching the web form exactly.
+     *
+     * Web disables its Reserve button when a booking has neither assets nor
+     * model requests, or when it holds an asset marked unavailable. Those
+     * checks lived only in the web UI, so the phone could reserve a booking
+     * the website refuses — an empty reservation reserves nothing, and an
+     * unavailable asset is unavailable on either surface. The repo's own rule
+     * (see `bookings.checkin.ts`) is that the app must never be more
+     * permissive than the web, so this is enforced server-side where no client
+     * can skip it.
+     *
+     * Already-booked assets are NOT re-checked here: `reserveBooking` runs its
+     * own conflict validation inside the transaction, which is the race-safe
+     * place for it.
+     */
+    const flags = await getBookingFlags({
+      id: booking.id,
+      organizationId,
+      assetIds: booking.bookingAssets.map((ba) => ba.assetId),
+      // A booking with no concrete assets but a model-level reservation is
+      // still a valid thing to reserve — same door web leaves open.
+      modelRequestCount: booking.modelRequests.length,
+      from: booking.from,
+      to: booking.to,
+    });
+
+    if (!flags.hasAssets && !flags.hasModelRequests) {
+      throw new ShelfError({
+        cause: null,
+        title: "Nothing to reserve",
+        message:
+          "Add assets or reserve at least one model on this booking before you reserve it.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (flags.hasUnavailableAssets) {
+      throw new ShelfError({
+        cause: null,
+        title: "Unavailable assets",
+        message:
+          "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,

@@ -116,6 +116,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // why: lets the app grey out Reserve for the same reason web
+                // does, instead of offering a tap the server will refuse.
+                availableToBook: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -465,6 +468,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
+          availableToBook: a.availableToBook,
           assetType: a.type,
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =

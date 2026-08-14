@@ -919,6 +919,21 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  /**
+   * Why Reserve is unavailable, or null when it is fine. Mirrors the web
+   * form's disable rules so the app never offers a tap the server refuses:
+   * a booking with neither assets nor model reservations reserves nothing,
+   * and an asset flagged unavailable is unavailable on either surface.
+   * Enforced server-side too, in `bookings.reserve.ts`.
+   */
+  const reserveBlockedReason: string | null = !booking
+    ? null
+    : booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
+    ? "Add assets or reserve at least one model on this booking before you reserve it."
+    : booking.assets.some((a) => a.availableToBook === false)
+    ? "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving."
+    : null;
+
   const custodianName =
     booking.custodianTeamMember?.name ||
     [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
@@ -1232,9 +1247,20 @@ export default function BookingDetailScreen() {
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.manageRowItem]}
-                    onPress={handleReserve}
+                    style={[
+                      styles.actionButton,
+                      styles.manageRowItem,
+                      reserveBlockedReason ? styles.actionButtonDisabled : null,
+                    ]}
+                    onPress={
+                      reserveBlockedReason
+                        ? () =>
+                            Alert.alert("Cannot reserve", reserveBlockedReason)
+                        : handleReserve
+                    }
                     accessibilityLabel="Reserve this booking"
+                    accessibilityState={{ disabled: !!reserveBlockedReason }}
+                    accessibilityHint={reserveBlockedReason ?? undefined}
                     accessibilityRole="button"
                   >
                     <Ionicons
@@ -2072,6 +2098,9 @@ const useStyles = createStyles((colors, shadows) => ({
   manageRow: {
     flexDirection: "row",
     gap: spacing.sm,
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
   },
   manageRowItem: {
     flex: 1,
