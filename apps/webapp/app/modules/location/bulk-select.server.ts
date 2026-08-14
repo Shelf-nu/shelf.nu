@@ -1,8 +1,19 @@
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { getKitsWhereInput } from "~/modules/kit/utils.server";
-import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+
+/**
+ * The filters the user had applied, taken from the submitted form.
+ *
+ * These deliberately do NOT come from `request.url`. The bulk dialogs post to a
+ * bare `actionUrl` (`/locations/:id/assets`), so inside the action `request.url`
+ * carries no query string at all — reading filters from it yields an empty set
+ * and turns "select all" into "select everything at this location". The dialog
+ * submits the real filters as a `currentSearchParams` field; that is the only
+ * source that reflects what the user was actually looking at.
+ */
+type WithSearchParams = { currentSearchParams?: string | null };
 
 /**
  * Resolves asset IDs for bulk location operations.
@@ -13,21 +24,19 @@ export async function resolveLocationAssetIds({
   ids,
   organizationId,
   locationId,
-  request,
+  currentSearchParams,
 }: {
   ids: string[];
   organizationId: string;
   locationId: string;
-  request: Request;
-}): Promise<string[]> {
+} & WithSearchParams): Promise<string[]> {
   if (!ids.includes(ALL_SELECTED_KEY)) {
     return ids;
   }
 
-  const searchParams = getCurrentSearchParams(request);
   const assetsWhere = getAssetsWhereInput({
     organizationId,
-    currentSearchParams: searchParams.toString(),
+    currentSearchParams,
     // Location writes are ADMIN/OWNER-only, so the custodian filter
     // here can never come from a restricted viewer.
     allowedTeamMemberIds: "all",
@@ -53,21 +62,19 @@ export async function resolveLocationKitIds({
   ids,
   organizationId,
   locationId,
-  request,
+  currentSearchParams,
 }: {
   ids: string[];
   organizationId: string;
   locationId: string;
-  request: Request;
-}): Promise<string[]> {
+} & WithSearchParams): Promise<string[]> {
   if (!ids.includes(ALL_SELECTED_KEY)) {
     return ids;
   }
 
-  const searchParams = getCurrentSearchParams(request);
   const kitsWhere = getKitsWhereInput({
     organizationId,
-    currentSearchParams: searchParams.toString(),
+    currentSearchParams,
     // Location writes are ADMIN/OWNER-only, so the custodian filter
     // here can never come from a restricted viewer.
     allowedTeamMemberIds: "all",
