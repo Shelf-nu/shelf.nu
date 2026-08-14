@@ -209,6 +209,13 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
   ) {
     const Component = isLinkProps(props) ? Link : as;
 
+    /**
+     * Disabled-with-reason popup state. Controlled so a tap can open it too:
+     * touch devices never fire hover, so a hover-only reason leaves the
+     * button looking dead on mobile.
+     */
+    const [disabledReasonOpen, setDisabledReasonOpen] = React.useState(false);
+
     // Default to type="button" for native button elements to prevent
     // implicit form submission (HTML spec defaults to type="submit").
     if (!isLinkProps(props) && as === "button" && !("type" in props)) {
@@ -316,20 +323,36 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     // Render disabled button with hover card
     if (isDisabled && disabledReason) {
       return (
-        <HoverCard openDelay={50} closeDelay={50}>
-          <HoverCardTrigger className="disabled cursor-not-allowed" asChild>
+        <HoverCard
+          openDelay={50}
+          closeDelay={50}
+          open={disabledReasonOpen}
+          onOpenChange={setDisabledReasonOpen}
+        >
+          <HoverCardTrigger
+            className="disabled cursor-not-allowed select-none"
+            asChild
+          >
             <Component
               {...props}
               {...newTabRel}
               className={finalStyles}
               aria-label={ariaLabel}
               onMouseDown={(e: MouseEvent) => e.preventDefault()}
-              onClick={(e: MouseEvent) => e.preventDefault()}
+              onClick={(e: MouseEvent) => {
+                // why: tap must reveal the reason — touch has no hover.
+                // Outside taps and Escape dismiss via Radix.
+                e.preventDefault();
+                setDisabledReasonOpen((prev) => !prev);
+              }}
             >
               {buttonContent}
             </Component>
           </HoverCardTrigger>
-          <HoverCardContent side="left">
+          {/* why: bottom placement stays on-screen for wide buttons on
+          narrow viewports — a left-side popup has no room there and rendered
+          half off-screen. collisionPadding keeps it inside the viewport. */}
+          <HoverCardContent side="bottom" collisionPadding={8}>
             <h5 className="text-left text-[14px]">
               {disabledTitle || "Action disabled"}
             </h5>
