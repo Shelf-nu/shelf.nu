@@ -328,7 +328,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           if (rows.length === 0) return [];
 
           const locations = await db.location.findMany({
-            where: { id: { in: rows.map((r) => r.locationId) } },
+            // Org-scoped even though the ids come from an org-scoped groupBy —
+            // defence in depth, and it keeps the IDOR lint rule satisfied
+            // without an exemption comment.
+            where: {
+              id: { in: rows.map((r) => r.locationId) },
+              organizationId,
+            },
             select: { id: true, name: true },
           });
           const nameById = new Map(locations.map((l) => [l.id, l.name]));

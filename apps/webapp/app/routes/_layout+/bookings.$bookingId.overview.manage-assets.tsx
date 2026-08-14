@@ -94,7 +94,6 @@ import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import { isFormProcessing } from "~/utils/form";
 import {
   payload,
@@ -113,6 +112,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
