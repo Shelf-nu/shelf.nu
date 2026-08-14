@@ -388,6 +388,37 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     expect(JSON.stringify(body)).not.toContain("Colleague Name");
   });
 
+  it("keeps the viewer's OWN custody visible to a restricted viewer", async () => {
+    // The direction the other two cases miss. Hiding here would take an item
+    // away from the person actually holding it, and the gate is supposed to
+    // reject on OWNERSHIP, not on the role alone.
+    // why: same fixture as above with the custodian re-pointed at the caller —
+    // isolates ownership as the only variable.
+    findManyMock.mockResolvedValue([
+      {
+        ...colleaguesAsset,
+        custody: [
+          {
+            ...colleaguesAsset.custody[0],
+            custodian: {
+              ...colleaguesAsset.custody[0].custodian,
+              userId: FAKE_USER_ID,
+            },
+          },
+        ],
+      },
+    ] as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody).not.toBeNull();
+    expect(body.assets[0].custodyList).toHaveLength(1);
+  });
+
   it("keeps custody visible for a viewer who may see all of it", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
       canSeeAllCustody: true,
