@@ -2,6 +2,7 @@ import {
   AssetStatus,
   OrganizationRoles,
   type AssetIndexSettings,
+  type Prisma,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -2851,6 +2852,25 @@ describe("updateAsset quantity audit trail", () => {
  * r3202162994 / r3202161632). Moving the check into the service makes
  * both callers safe by default; these tests are the regression guard.
  */
+/**
+ * Complete `AssetIndexSettings` row. These tests pass explicit asset ids, so
+ * nothing reads the settings at runtime — but the parameter is typed, and
+ * `{} as any` opts the whole call out of that contract, hiding a signature
+ * change behind a cast. One shared fixture keeps the type honest without
+ * repeating the shape at four call sites.
+ */
+const ASSET_INDEX_SETTINGS: AssetIndexSettings = {
+  id: "settings-1",
+  userId: "user-current",
+  organizationId: "org-1",
+  mode: "SIMPLE",
+  columns: [],
+  freezeColumn: true,
+  showAssetImage: true,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  updatedAt: new Date("2026-01-01T00:00:00Z"),
+};
+
 describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -2889,7 +2909,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianId: "tm-other",
         custodianName: "Other Person",
         organizationId: "org-1",
-        settings: {} as any,
+        settings: ASSET_INDEX_SETTINGS,
         role: OrganizationRoles.SELF_SERVICE,
       });
     } catch (err) {
@@ -2935,7 +2955,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianId: "tm-self",
         custodianName: "Self",
         organizationId: "org-1",
-        settings: {} as any,
+        settings: ASSET_INDEX_SETTINGS,
         role: OrganizationRoles.SELF_SERVICE,
       });
     } catch (err) {
@@ -2974,7 +2994,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianId: "tm-anyone",
         custodianName: "Anyone",
         organizationId: "org-1",
-        settings: {} as any,
+        settings: ASSET_INDEX_SETTINGS,
         role: OrganizationRoles.ADMIN,
       });
     } catch (err) {
@@ -3018,7 +3038,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianId: "tm-anyone",
         custodianName: "Anyone",
         organizationId: "org-1",
-        settings: {} as any,
+        settings: ASSET_INDEX_SETTINGS,
       });
     } catch (err) {
       if (err instanceof ShelfError && err.status === 403) threw403 = true;
@@ -3764,7 +3784,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
         custodianId: "tm-1",
         custodianName: "Custodian",
         organizationId: "org-1",
-        settings: {} as any,
+        settings: ASSET_INDEX_SETTINGS,
         role: OrganizationRoles.ADMIN,
       })
     ).rejects.toThrow(/checked out while this action was in progress/);
@@ -3783,7 +3803,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
       custodianId: "tm-1",
       custodianName: "Custodian",
       organizationId: "org-1",
-      settings: {} as any,
+      settings: ASSET_INDEX_SETTINGS,
       role: OrganizationRoles.ADMIN,
     }).catch((err: unknown) => err);
 
@@ -3805,7 +3825,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
       custodianId: "tm-1",
       custodianName: "Custodian",
       organizationId: "org-1",
-      settings: {} as any,
+      settings: ASSET_INDEX_SETTINGS,
       role: OrganizationRoles.ADMIN,
     }).catch(() => undefined);
 
@@ -4394,6 +4414,25 @@ describe("placeUnplacedUnits", () => {
   });
 });
 
+/**
+ * Narrows `where.OR` to the array form the query builder always produces.
+ *
+ * `Prisma.AssetWhereInput["OR"]` also admits a single object and `undefined`,
+ * so indexing it needs a check. Throwing here makes a missing clause fail with
+ * a readable message instead of surfacing as `undefined[0]` several lines
+ * later — which is what the `as any` these assertions used to carry was
+ * hiding.
+ */
+function orClauses(where: Prisma.AssetWhereInput): Prisma.AssetWhereInput[] {
+  const or = where.OR;
+  if (!Array.isArray(or)) {
+    throw new Error(
+      `expected where.OR to be an array, got ${JSON.stringify(or)}`
+    );
+  }
+  return or;
+}
+
 describe("getAssets search fallback", () => {
   const findManyMock = vi.mocked(db.asset.findMany);
   const countMock = vi.mocked(db.asset.count);
@@ -4430,7 +4469,9 @@ describe("getAssets search fallback", () => {
 
     await getAssets({ ...baseParams, search: " , " });
 
-    const where = (findManyMock.mock.calls[0][0] as any).where;
+    const where = (
+      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
+    ).where;
     expect(where.id).toEqual({ in: [] });
     expect(where.OR).toBeUndefined();
   });
@@ -4443,7 +4484,9 @@ describe("getAssets search fallback", () => {
     const result = await getAssets({ ...baseParams, search: "103468" });
 
     expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (findManyMock.mock.calls[0][0] as any).where;
+    const where = (
+      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
+    ).where;
     // Narrow clause covers the indexed ID columns: sequentialId / barcode / qr.
     expect(where.OR).toContainEqual({
       sequentialId: { contains: "103468", mode: "insensitive" },
@@ -4481,7 +4524,9 @@ describe("getAssets search fallback", () => {
     await getAssets({ ...baseParams, search: "451" });
 
     expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (findManyMock.mock.calls[0][0] as any).where;
+    const where = (
+      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
+    ).where;
     expect(where.OR).toContainEqual({
       title: { contains: "451", mode: "insensitive" },
     });
@@ -4503,8 +4548,10 @@ describe("getAssets search fallback", () => {
     // The narrow-first behaviour is asserted by the single-query test above;
     // getAssets mutates and reuses one `where` object across both fetches, so
     // we can only reliably inspect its final (post-fallback) state here.
-    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
-    expect(secondWhere.OR[0]).toEqual({
+    const secondWhere = (
+      findManyMock.mock.calls[1][0] as { where: Prisma.AssetWhereInput }
+    ).where;
+    expect(orClauses(secondWhere)[0]).toEqual({
       OR: expect.arrayContaining([titleClause]),
     });
     expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
@@ -4519,7 +4566,9 @@ describe("getAssets search fallback", () => {
     await getAssets({ ...baseParams, search: "armchair" });
 
     expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (findManyMock.mock.calls[0][0] as any).where;
+    const where = (
+      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
+    ).where;
     expect(JSON.stringify(where.OR)).toContain("title");
   });
 
@@ -4539,9 +4588,11 @@ describe("getAssets search fallback", () => {
       teamMemberIds: ["tm-1"],
     });
 
-    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
+    const secondWhere = (
+      findManyMock.mock.calls[1][0] as { where: Prisma.AssetWhereInput }
+    ).where;
     // Full search clause swapped in...
-    expect(secondWhere.OR[0]).toEqual({
+    expect(orClauses(secondWhere)[0]).toEqual({
       OR: expect.arrayContaining([titleClause]),
     });
     // ...and the team-member filter clause survived the fallback.
