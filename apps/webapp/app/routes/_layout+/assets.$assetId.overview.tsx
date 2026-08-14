@@ -252,7 +252,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // combined `inLocations` would flag a perfectly valid asset (80 manual +
       // 50 kit-driven of 100) as over-allocated.
       const inLocationsManual = (asset.assetLocations ?? []).reduce(
-        (sum: number, al) => sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
+        (sum: number, al) =>
+          sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
         0
       );
 

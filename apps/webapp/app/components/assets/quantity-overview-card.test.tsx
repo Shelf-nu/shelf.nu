@@ -204,6 +204,28 @@ describe("QuantityOverviewCard", () => {
     expect(screen.queryByText("Over-placed")).not.toBeInTheDocument();
   });
 
+  it("exposes the over-placed guidance to keyboard and screen-reader users", () => {
+    // The tooltip carries the only copy saying what the row means and how to
+    // fix it. Hanging it off a bare SVG made it mouse-only: an <svg> is
+    // neither focusable nor announced, so the people most likely to be
+    // auditing stock could never reach the instruction.
+    render(
+      <QuantityOverviewCard
+        {...baseProps}
+        quantity={80}
+        unitOfMeasure="pcs"
+        availableQuantity={80}
+        inLocationsQuantity={90}
+      />
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /Locations claim 10 pcs more/,
+    });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).not.toHaveAttribute("tabindex", "-1");
+  });
+
   it("explains what to do about an over-placed asset", () => {
     render(
       <QuantityOverviewCard

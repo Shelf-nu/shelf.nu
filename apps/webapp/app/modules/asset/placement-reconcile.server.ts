@@ -39,6 +39,7 @@ import type { Prisma } from "@prisma/client";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 const label: ErrorLabel = "Assets";
 
@@ -50,9 +51,9 @@ const label: ErrorLabel = "Assets";
  */
 export type PlacementReconcileTxClient = {
   assetLocation: {
-    findMany: (args: Prisma.AssetLocationFindManyArgs) => Promise<
-      Array<{ id: string; locationId: string; quantity: number }>
-    >;
+    findMany: (
+      args: Prisma.AssetLocationFindManyArgs
+    ) => Promise<Array<{ id: string; locationId: string; quantity: number }>>;
     update: (args: Prisma.AssetLocationUpdateArgs) => Promise<unknown>;
     delete: (args: Prisma.AssetLocationDeleteArgs) => Promise<unknown>;
   };
@@ -134,8 +135,17 @@ export async function reconcileManualPlacementsForStockDecrease({
     0
   );
 
-  // The residual absorbed it (or there are no placements at all).
-  if (placedSum <= newTotal) {
+  /**
+   * The residual absorbed it, or there are no placements at all.
+   *
+   * The `length === 0` term is what makes the empty case total: `placedSum`
+   * is 0 there, so a nonsense NEGATIVE `newTotal` would otherwise fall past
+   * this check, past the multi-placement branch, and destructure `undefined`
+   * out of an empty array. No caller passes a negative total today, but the
+   * function advertises defensive handling of one, so it has to survive the
+   * combination too.
+   */
+  if (placements.length === 0 || placedSum <= newTotal) {
     return { outcome: "within_total" };
   }
 
@@ -180,6 +190,55 @@ export async function reconcileManualPlacementsForStockDecrease({
   }
 
   return { outcome: "reduced", locationId: only.locationId, reducedBy };
+}
+
+/**
+ * Report an `ambiguous` reconcile outcome, and do nothing for any other one.
+ *
+ * Every stock-decrease caller needs the identical response to `ambiguous`:
+ * the units are already gone and the placement sum cannot be corrected
+ * without inventing a source location, so the drift is recorded for a human
+ * instead of being papered over with a guess. Centralised so the capture
+ * policy and `additionalData` shape stay identical across the three paths —
+ * these logs are the only trace this state leaves, and a per-site copy is
+ * exactly the kind of thing that drifts.
+ *
+ * Not thrown: consumption cannot be refused after the fact, so aborting the
+ * caller's transaction would discard a check-in that physically happened.
+ *
+ * @param result - Whatever {@link reconcileManualPlacementsForStockDecrease}
+ *   returned; non-ambiguous outcomes are ignored
+ * @param context - Sentence-leading description of the path that consumed
+ *   stock, e.g. "Check-in"
+ * @param additionalData - Identifiers for the caller's context, merged into
+ *   the error payload alongside the deficit and contending locations
+ */
+export function reportAmbiguousPlacementReconcile({
+  result,
+  context,
+  additionalData,
+}: {
+  result: PlacementReconcileResult;
+  context: string;
+  additionalData: Record<string, unknown>;
+}): void {
+  if (result.outcome !== "ambiguous") {
+    return;
+  }
+
+  Logger.error(
+    new ShelfError({
+      cause: null,
+      message: `${context} left the location axis over-allocated and the source location is ambiguous.`,
+      additionalData: {
+        ...additionalData,
+        deficit: result.deficit,
+        locationIds: result.locationIds,
+      },
+      label,
+      shouldBeCaptured: false,
+    })
+  );
 }
 
 /**

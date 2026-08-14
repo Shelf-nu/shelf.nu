@@ -58,7 +58,9 @@ describe("ManagePlacementsForm — over-placed state", () => {
         unitOfMeasure="pcs"
         locations={locations}
         serverErrorMessage={null}
-        initialPlacements={[{ locationId: "loc-1", locationName: "Baghdad Store", quantity: 60 }]}
+        initialPlacements={[
+          { locationId: "loc-1", locationName: "Baghdad Store", quantity: 60 },
+        ]}
       />
     );
 
@@ -76,7 +78,9 @@ describe("ManagePlacementsForm — over-placed state", () => {
         unitOfMeasure="pcs"
         locations={locations}
         serverErrorMessage={null}
-        initialPlacements={[{ locationId: "loc-1", locationName: "Baghdad Store", quantity: 87 }]}
+        initialPlacements={[
+          { locationId: "loc-1", locationName: "Baghdad Store", quantity: 87 },
+        ]}
       />
     );
 
@@ -85,10 +89,15 @@ describe("ManagePlacementsForm — over-placed state", () => {
     expect(screen.queryByText("Unplaced")).not.toBeInTheDocument();
   });
 
-  it("does not call a kit-driven placement over-placed", () => {
-    // 80 manual + 50 kit-driven of a 100 total. The location trigger sums
-    // manual rows only, so nothing is breached — but the free manual pool is
-    // gone, which is what "Unplaced 0" correctly says.
+  it("leaves a kitted asset saveable and its manual pool intact", () => {
+    // 80 manual + 50 kit-driven of a 100 total, which the database accepts:
+    // `enforce_asset_location_sum_within_total` sums `assetKitId IS NULL`
+    // rows only, and the kit axis is capped separately. Counting both axes
+    // here used to block the dialog outright for this asset — no over-placed
+    // row, but a validation error and a disabled Save, with no way out except
+    // deleting valid manual placements to "make room" for the kit slice.
+    // The kit slice also must not eat the manual pool: 20 units are still
+    // free to place.
     render(
       <ManagePlacementsForm
         isQty
@@ -112,9 +121,16 @@ describe("ManagePlacementsForm — over-placed state", () => {
 
     expect(screen.queryByText("Over-placed")).not.toBeInTheDocument();
     expect(screen.getByText("Unplaced")).toBeInTheDocument();
+    // Manual axis: 100 total − 80 manual. The kit slice is reported on its
+    // own line and takes nothing away from this.
+    expect(screen.getByText("20 pcs")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/exceeds the asset's total quantity/)
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Stock was used up while every unit was assigned/)
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save/i })).not.toBeDisabled();
   });
 
   it("explains an app-created over-allocation rather than blaming the user's input", () => {
@@ -125,7 +141,9 @@ describe("ManagePlacementsForm — over-placed state", () => {
         unitOfMeasure="pcs"
         locations={locations}
         serverErrorMessage={null}
-        initialPlacements={[{ locationId: "loc-1", locationName: "Baghdad Store", quantity: 87 }]}
+        initialPlacements={[
+          { locationId: "loc-1", locationName: "Baghdad Store", quantity: 87 },
+        ]}
       />
     );
 

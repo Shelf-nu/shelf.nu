@@ -64,6 +64,14 @@ vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn(),
 }));
 
+// why: the route row-locks the asset before the pivot write so a concurrent
+// stock decrease cannot interleave. The lock issues a raw
+// `SELECT ... FOR UPDATE`, which a mocked tx client cannot execute — stub it
+// to return the row the write should be based on.
+vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vi.fn(),
+}));
+
 // why: external service — we don't want to create real notes in the database
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
@@ -98,6 +106,7 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNote } from "~/modules/note/service.server";
 
 const mockUser = {
@@ -136,6 +145,16 @@ describe("POST /api/mobile/asset/update-location", () => {
     // route's tx.assetLocation.{deleteMany,create} + tx.asset.findUniqueOrThrow
     // chain resolves against the same vi.fn() spies we assert against.
     dbMocks.$transaction.mockImplementation((cb: any) => cb(dbMocks));
+
+    // Default locked row. Individual assets place a single unit; the
+    // quantity-tracked case overrides this to assert the placed quantity
+    // comes from the LOCKED row rather than the pre-transaction read.
+    (lockAssetForQuantityUpdate as any).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: 1,
+    });
   });
 
   it("should update asset location and create a note", async () => {
@@ -198,6 +217,54 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+  });
+
+  it("places the quantity from the locked row, not the pre-transaction read", async () => {
+    // A concurrent consume can commit between the route's first read and the
+    // pivot write. Placing the stale figure would record more units at the
+    // location than the asset owns — a breach the location trigger only
+    // catches as a raw check_violation, and one the reconcile on the consume
+    // side has already run past.
+    (db.asset.findUnique as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 100, // stale
+      assetLocations: [{ location: { id: "loc-old", name: "Old Office" } }],
+      assetKits: [],
+    });
+    (lockAssetForQuantityUpdate as any).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 60, // what is actually committed by the time we hold the lock
+    });
+    (db.location.findFirst as any).mockResolvedValue({
+      id: "loc-new",
+      name: "New Office",
+    });
+    (dbMocks.assetLocation.deleteMany as any).mockResolvedValue({ count: 1 });
+    (dbMocks.assetLocation.create as any).mockResolvedValue({});
+    (dbMocks.asset.findUniqueOrThrow as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      assetLocations: [{ location: { id: "loc-new", name: "New Office" } }],
+    });
+
+    await action(
+      createActionArgs({
+        request: createRequest({ assetId: "asset-1", locationId: "loc-new" }),
+      })
+    );
+
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset-1",
+      "org-1"
+    );
+    expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ quantity: 60 }),
+    });
   });
 
   it("should short-circuit (no update, no event, no note) when location is unchanged", async () => {

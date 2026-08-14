@@ -11,9 +11,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
 } from "./placement-reconcile.server";
 
 /**
@@ -26,6 +29,10 @@ import {
 function txWith(
   placements: Array<{ id: string; locationId: string; quantity: number }>
 ) {
+  // why: the unit under test is a decision over a row set, not the Prisma
+  // round-trip. Faking the two delegate methods keeps each scenario's
+  // placement shape at the call site and lets the assertions be about WHICH
+  // write happened, which a real client would hide behind the database.
   const update = vi.fn().mockResolvedValue({});
   const destroy = vi.fn().mockResolvedValue({});
   return {
@@ -201,6 +208,25 @@ describe("reconcileManualPlacementsForStockDecrease", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("survives a negative total with nothing placed", async () => {
+    // Both defensive inputs at once. With no rows, `placedSum` is 0, which is
+    // NOT <= a negative total — so without the explicit empty-set term this
+    // fell through to the single-placement branch and destructured `undefined`
+    // out of an empty array, throwing a TypeError inside the caller's
+    // transaction instead of reporting "nothing to reconcile".
+    const { tx, update, destroy } = txWith([]);
+
+    const result = await reconcileManualPlacementsForStockDecrease({
+      assetId: "asset-1",
+      newTotal: -3,
+      tx,
+    });
+
+    expect(result).toEqual({ outcome: "within_total" });
+    expect(update).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("still absorbs into the residual when several placements fit", async () => {
     // Multi-placement is only ambiguous once the residual is gone.
     const { tx, update } = txWith([
@@ -329,5 +355,59 @@ describe("assertStockNotBelowManualPlacements", () => {
         where: { assetId: "asset-1", assetKitId: null },
       })
     );
+  });
+});
+
+/**
+ * The `ambiguous` branch does exactly one thing — report — so the report IS
+ * the behaviour. Without these, a refactor could drop the logging and every
+ * other assertion in this file would still pass while the drift went silent.
+ */
+describe("reportAmbiguousPlacementReconcile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("logs the deficit and the contending locations", () => {
+    // why: Logger is the observable output of this function; spying is the
+    // only way to assert it without a real transport.
+    const errorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
+
+    reportAmbiguousPlacementReconcile({
+      result: {
+        outcome: "ambiguous",
+        deficit: 10,
+        locationIds: ["loc-baghdad", "loc-erbil"],
+      },
+      context: "Check-in",
+      additionalData: { assetId: "asset-1", bookingId: "booking-1" },
+    });
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const reported = errorSpy.mock.calls[0][0] as ShelfError;
+    expect(reported.message).toContain("Check-in");
+    expect(reported.additionalData).toMatchObject({
+      assetId: "asset-1",
+      bookingId: "booking-1",
+      deficit: 10,
+      locationIds: ["loc-baghdad", "loc-erbil"],
+    });
+  });
+
+  it("stays silent for outcomes that need no human", () => {
+    const errorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
+
+    reportAmbiguousPlacementReconcile({
+      result: { outcome: "within_total" },
+      context: "Check-in",
+      additionalData: { assetId: "asset-1" },
+    });
+    reportAmbiguousPlacementReconcile({
+      result: { outcome: "reduced", locationId: "loc-1", reducedBy: 5 },
+      context: "Check-in",
+      additionalData: { assetId: "asset-1" },
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

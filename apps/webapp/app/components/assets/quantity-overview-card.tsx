@@ -167,8 +167,22 @@ function OverviewRow({
         {warning ? (
           <TooltipProvider>
             <Tooltip>
+              {/* A button, not the bare icon: the tooltip carries the only
+                  copy explaining what the row means and how to fix it, and an
+                  SVG is neither focusable nor announced, so keyboard and
+                  screen-reader users would never reach it. `aria-label`
+                  duplicates the message so it is available without hovering. */}
               <TooltipTrigger asChild>
-                <TriangleAlertIcon className="size-4 text-amber-500" />
+                <button
+                  type="button"
+                  aria-label={warningMessage}
+                  className="flex items-center rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                >
+                  <TriangleAlertIcon
+                    aria-hidden="true"
+                    className="size-4 text-amber-500"
+                  />
+                </button>
               </TooltipTrigger>
               <TooltipContent side="left">
                 <p className="text-xs">{warningMessage}</p>
@@ -219,6 +233,26 @@ export function QuantityOverviewCard({
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
   const inLocationsManual = inLocationsManualQuantity ?? inLocations;
+  /**
+   * Units not recorded at ANY location — so the COMBINED sum, kit-driven rows
+   * included. A kit-driven row does put its units somewhere: the kit is at a
+   * location and its members are with it. Measuring this on the manual axis
+   * instead would report an asset with 50 of 100 units in a kit as having all
+   * 100 unplaced, which is plainly false.
+   *
+   * Deliberately a different question from {@link overPlacedBy} below, which
+   * is measured on the manual axis alone. "Is anything sitting nowhere?" spans
+   * both axes; "have manual claims outrun the total?" can only be asked of the
+   * axis `enforce_asset_location_sum_within_total` actually bounds. The two are
+   * mutually exclusive — `unplaced > 0` requires `qty > inLocations >=
+   * inLocationsManual`, which forces `overPlacedBy` to 0 — so the card never
+   * shows a contradictory pair.
+   *
+   * The overlap case (80 manual + 50 kit-driven of 100) renders neither row,
+   * which is correct: nothing is sitting nowhere, and nothing breaches the
+   * bounded axis. The manual free pool is a question for the placements
+   * editor, which computes it there.
+   */
   const unplaced = Math.max(0, qty - inLocations);
   /**
    * The honest negative side of the residual, computed on the MANUAL axis

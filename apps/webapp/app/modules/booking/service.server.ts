@@ -35,8 +35,11 @@ import {
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
 } from "~/modules/asset/availability.server";
-import { reconcileManualPlacementsForStockDecrease } from "~/modules/asset/placement-reconcile.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
+} from "~/modules/asset/placement-reconcile.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
@@ -4661,23 +4664,11 @@ export async function checkinBooking({
               tx,
             });
 
-            if (reconcile.outcome === "ambiguous") {
-              Logger.error(
-                new ShelfError({
-                  cause: null,
-                  message:
-                    "Check-in left the location axis over-allocated and the source location is ambiguous.",
-                  additionalData: {
-                    assetId: slice.assetId,
-                    bookingId: id,
-                    deficit: reconcile.deficit,
-                    locationIds: reconcile.locationIds,
-                  },
-                  label,
-                  shouldBeCaptured: false,
-                })
-              );
-            }
+            reportAmbiguousPlacementReconcile({
+              result: reconcile,
+              context: "Check-in",
+              additionalData: { assetId: slice.assetId, bookingId: id },
+            });
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -5991,23 +5982,11 @@ export async function partialCheckinBooking({
             tx,
           });
 
-          if (reconcile.outcome === "ambiguous") {
-            Logger.error(
-              new ShelfError({
-                cause: null,
-                message:
-                  "Partial check-in left the location axis over-allocated and the source location is ambiguous.",
-                additionalData: {
-                  assetId: disp.assetId,
-                  bookingId: id,
-                  deficit: reconcile.deficit,
-                  locationIds: reconcile.locationIds,
-                },
-                label,
-                shouldBeCaptured: false,
-              })
-            );
-          }
+          reportAmbiguousPlacementReconcile({
+            result: reconcile,
+            context: "Partial check-in",
+            additionalData: { assetId: disp.assetId, bookingId: id },
+          });
         }
 
         const pendingAfter = remaining - claimed;

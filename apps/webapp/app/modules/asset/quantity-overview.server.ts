@@ -56,9 +56,14 @@ export type QuantityData = {
    * This is the sum `enforce_asset_location_sum_within_total` actually
    * bounds: since `20260602100000_assetlocation_sum_exclude_kit_driven` the
    * trigger ignores kit-driven rows, which are bounded separately by
-   * `enforce_asset_kit_sum_within_total`. Deriving the placed / unplaced /
-   * over-placed split from {@link inLocations} instead would report a valid
-   * asset (80 manual + 50 kit-driven of 100) as over-allocated.
+   * `enforce_asset_kit_sum_within_total`.
+   *
+   * Used for the OVER-PLACED figure specifically. "Have placements outrun the
+   * total?" can only be asked of the bounded axis — measuring it against
+   * {@link inLocations} would report a valid asset (80 manual + 50 kit-driven
+   * of 100) as over-allocated. "Unplaced" is a different question ("is
+   * anything sitting nowhere?") and correctly spans both axes, so it keeps
+   * using {@link inLocations}.
    */
   inLocationsManual: number;
   /**
