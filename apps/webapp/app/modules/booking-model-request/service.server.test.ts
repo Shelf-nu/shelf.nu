@@ -544,7 +544,10 @@ describe("materializeModelRequestForAsset", () => {
     // The claim is a conditional atomic write. Assert the capacity predicate
     // is IN the statement — a pre-read guard plus an unconditional increment
     // is exactly the shape that over-filled the row under concurrency.
-    const sql = ((vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ?? []).join("?");
+    const sql = (
+      (vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ??
+      []
+    ).join("?");
     expect(sql).toContain('"fulfilledQuantity" < "quantity"');
     // Row is NEVER deleted under the audit-trail schema.
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
@@ -590,8 +593,10 @@ describe("materializeModelRequestForAsset", () => {
     // pre-write read — that gap is what let two concurrent claims both decide
     // "not complete" and leave the row delivered-but-unstamped, invisible to
     // the UI and still blocking check-out.
-    const sql =
-      ((vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ?? []).join("?");
+    const sql = (
+      (vitest.mocked(db.$queryRaw).mock.calls[0]?.[0] as unknown as string[]) ??
+      []
+    ).join("?");
     expect(sql).toContain('"fulfilledQuantity" + 1 >= "quantity"');
     // COALESCE keeps an existing stamp rather than moving it on a later write.
     expect(sql).toContain("COALESCE");

@@ -695,23 +695,27 @@ describe("buildPdfAssetRows", () => {
 
     // Each slice carries its `BookingAsset.assetKitId` (an AssetKit.id);
     // buildPdfAssetRows matches it against the asset's `assetKits[].id`, and the
-    // OUTPUT row's `kitId` is the resolved Kit.id.
+    // OUTPUT row's `kitId` is the resolved Kit.id. `sourceKitId` holds that same
+    // `Kit.id` durably, and agrees with the membership while it lives.
     const slices: PdfBookingAssetSlice[] = [
       {
         id: "boards",
         assetKitId: null,
+        sourceKitId: null,
         quantity: 4,
         bookingAssetId: "ba-standalone",
       },
       {
         id: "boards",
         assetKitId: "ak-b1",
+        sourceKitId: "kit-b1",
         quantity: 3,
         bookingAssetId: "ba-b1",
       },
       {
         id: "boards",
         assetKitId: "ak-b2",
+        sourceKitId: "kit-b2",
         quantity: 3,
         bookingAssetId: "ba-b2",
       },
@@ -749,6 +753,7 @@ describe("buildPdfAssetRows", () => {
         {
           id: "laptop",
           assetKitId: null,
+          sourceKitId: null,
           quantity: 1,
           bookingAssetId: "ba-laptop",
         },
@@ -772,6 +777,7 @@ describe("buildPdfAssetRows", () => {
         {
           id: "ghost",
           assetKitId: null,
+          sourceKitId: null,
           quantity: 2,
           bookingAssetId: "ba-ghost",
         },
@@ -799,18 +805,21 @@ describe("buildPdfAssetRows", () => {
         {
           id: "boards",
           assetKitId: null,
+          sourceKitId: null,
           quantity: 4,
           bookingAssetId: "ba-standalone",
         },
         {
           id: "boards",
           assetKitId: "ak-b1",
+          sourceKitId: "kit-b1",
           quantity: 3,
           bookingAssetId: "ba-b1",
         },
         {
           id: "boards",
           assetKitId: "ak-b2",
+          sourceKitId: "kit-b2",
           quantity: 3,
           bookingAssetId: "ba-b2",
         },
@@ -828,6 +837,221 @@ describe("buildPdfAssetRows", () => {
     ]);
   });
 
+  it("renders a detached slice under its original kit via sourceKitId", () => {
+    // The asset has since been removed from the kit: its `AssetKit` row is
+    // gone (so `assetKits` is empty and `assetKitId` was `SET NULL`'d), but
+    // the finished booking must still describe the job as containing that
+    // kit rather than a loose asset.
+    const tripod = rawAsset({ id: "tripod", title: "Tripod" });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "tripod",
+          assetKitId: null,
+          sourceKitId: "kit-camera",
+          quantity: 1,
+          bookingAssetId: "ba-tripod",
+        },
+      ],
+      new Map([["tripod", tripod]]),
+      new Map([
+        [
+          "kit-camera",
+          {
+            id: "kit-camera",
+            name: "Camera Kit",
+            location: { name: "Studio" },
+          },
+        ],
+      ])
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      bookingAssetId: "ba-tripod",
+      kitId: "kit-camera",
+      kit: {
+        id: "kit-camera",
+        name: "Camera Kit",
+        location: { name: "Studio" },
+      },
+    });
+  });
+
+  it("leaves a detached slice standalone when its source kit is not resolvable", () => {
+    // `sourceKitId`'s FK accepts a `Kit` in any organization, so the caller's
+    // lookup is org-scoped and can legitimately come back empty. That must
+    // degrade to a loose row, never crash.
+    const tripod = rawAsset({ id: "tripod", title: "Tripod" });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "tripod",
+          assetKitId: null,
+          sourceKitId: "kit-other-org",
+          quantity: 1,
+          bookingAssetId: "ba-tripod",
+        },
+      ],
+      new Map([["tripod", tripod]])
+    );
+
+    expect(rows[0]).toMatchObject({ kitId: null, kit: null });
+  });
+
+  it("prefers the live membership over the snapshot kit", () => {
+    // While the membership lives the two agree, but the live join stays the
+    // source of truth — a renamed/moved kit must render from current data.
+    const boards = rawAsset({
+      id: "boards",
+      assetKits: [
+        {
+          id: "ak-b1",
+          kit: { id: "kit-b1", name: "b1 (live)", location: null },
+        },
+      ],
+    });
+
+    const rows = buildPdfAssetRows(
+      [
+        {
+          id: "boards",
+          assetKitId: "ak-b1",
+          sourceKitId: "kit-b1",
+          quantity: 3,
+          bookingAssetId: "ba-b1",
+        },
+      ],
+      new Map([["boards", boards]]),
+      new Map([
+        [
+          "kit-b1",
+          { id: "kit-b1", name: "b1 (stale)", location: { name: "Nowhere" } },
+        ],
+      ])
+    );
+
+    expect(rows[0].kit).toEqual({
+      id: "kit-b1",
+      name: "b1 (live)",
+      location: null,
+    });
+  });
+
+  describe("isRemovedFromKit (printed residue marker)", () => {
+    /** The snapshot map every case below resolves `kit-camera` through. */
+    const cameraSnapshot = new Map([
+      ["kit-camera", { id: "kit-camera", name: "Camera Kit", location: null }],
+    ]);
+
+    it("flags a slice whose asset has genuinely left the kit", () => {
+      // Membership gone (`assetKits` empty, `assetKitId` SET NULL'd) but the
+      // slice still renders under `kit-camera` via `sourceKitId` — the printed
+      // row must say so, or it reads as a live kit member.
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: null,
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", rawAsset({ id: "tripod", title: "Tripod" })]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0]).toMatchObject({
+        kitId: "kit-camera",
+        isRemovedFromKit: true,
+      });
+    });
+
+    it("does not flag a live kit member", () => {
+      const tripod = rawAsset({
+        id: "tripod",
+        assetKits: [
+          {
+            id: "ak-camera",
+            kit: { id: "kit-camera", name: "Camera Kit", location: null },
+          },
+        ],
+      });
+
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: "ak-camera",
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", tripod]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0].isRemovedFromKit).toBe(false);
+    });
+
+    it("does not flag a standalone slice", () => {
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "laptop",
+            assetKitId: null,
+            sourceKitId: null,
+            quantity: 1,
+            bookingAssetId: "ba-laptop",
+          },
+        ],
+        new Map([["laptop", rawAsset({ id: "laptop", title: "Laptop" })]]),
+        cameraSnapshot
+      );
+
+      expect(rows[0].isRemovedFromKit).toBe(false);
+    });
+
+    it("does not flag an asset that was re-added to the same kit", () => {
+      // Re-adding creates a NEW `AssetKit` row the nulled slice never points
+      // at, so the row still resolves through the snapshot — but the asset IS
+      // a current member again, so calling it removed would be a lie.
+      const tripod = rawAsset({
+        id: "tripod",
+        assetKits: [
+          {
+            id: "ak-camera-new",
+            kit: { id: "kit-camera", name: "Camera Kit", location: null },
+          },
+        ],
+      });
+
+      const rows = buildPdfAssetRows(
+        [
+          {
+            id: "tripod",
+            assetKitId: null,
+            sourceKitId: "kit-camera",
+            quantity: 1,
+            bookingAssetId: "ba-tripod",
+          },
+        ],
+        new Map([["tripod", tripod]]),
+        cameraSnapshot
+      );
+
+      // Still grouped under the kit, just not marked as removed.
+      expect(rows[0]).toMatchObject({
+        kitId: "kit-camera",
+        isRemovedFromKit: false,
+      });
+    });
+  });
+
   it("returns an empty array for no slices", () => {
     expect(buildPdfAssetRows([], new Map<string, RawPdfAsset>())).toEqual([]);
   });
@@ -839,6 +1063,7 @@ describe("buildPdfBookingAssetSlices", () => {
     id: string;
     quantity?: number;
     assetKitId?: string | null;
+    sourceKitId?: string | null;
     asset: {
       id: string;
       title: string;
@@ -856,6 +1081,9 @@ describe("buildPdfBookingAssetSlices", () => {
     id: over.id,
     quantity: over.quantity ?? 1,
     assetKitId: over.assetKitId ?? null,
+    // Defaults to null so these cases exercise the LIVE membership path; the
+    // `sourceKitId` fallback only engages once the membership is gone.
+    sourceKitId: over.sourceKitId ?? null,
     asset: { assetKits: [], assetLocations: [], ...over.asset },
   });
 

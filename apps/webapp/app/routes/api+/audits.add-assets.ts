@@ -6,6 +6,7 @@ import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { addAssetsToAudit } from "~/modules/audit/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { badRequest, makeShelfError } from "~/utils/error";
@@ -28,12 +29,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.audit,
-      action: PermissionAction.update,
-    });
+    const { organizationId, canUseBarcodes, role, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.update,
+      });
 
     const formData = await request.formData();
 
@@ -78,6 +80,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         currentSearchParams,
         settings,
         timeZone,
+        // `audit: update` is held by BASE and SELF_SERVICE, and the resulting
+        // audit lists the assets it resolved — so a custodian filter here has
+        // to be narrowed to the caller's own custody.
+        allowedTeamMemberIds: await scopeCustodianFilterIds({
+          teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+            "teamMember"
+          ),
+          canSeeAllCustody,
+          userId,
+          organizationId,
+        }),
       });
     } else {
       assetIds = directAssetIds;

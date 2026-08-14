@@ -40,6 +40,7 @@ import {
   deleteBooking,
   getBooking,
   duplicateBooking,
+  computeBookingKitDrift,
   revertBookingToDraft,
   extendBooking,
   removeAssets,
@@ -132,13 +133,18 @@ vitest.mock("~/database/db.server", () => ({
     },
     assetKit: {
       // why: assertAssetKitsBelongToOrg (kit-slice cross-org guard) calls
-      // db.assetKit.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
-      // Echo the requested ids so the guard passes for happy-path tests;
-      // tests asserting a foreign kit id override per-case.
+      // db.assetKit.findMany({ where:{ id:{ in }, organizationId },
+      // select:{ id, kitId }}) and returns an `assetKitId -> kitId` map that
+      // the booking write paths use as the ONLY source for
+      // `BookingAsset.sourceKitId`. Echo the requested ids with a derived
+      // kitId so the guard passes for happy-path tests; tests that assert a
+      // specific sourceKitId override per-case.
       findMany: vitest.fn().mockImplementation((args?: any) => {
         const ids = args?.where?.id?.in;
         return Promise.resolve(
-          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+          Array.isArray(ids)
+            ? ids.map((id: string) => ({ id, kitId: `kit-of-${id}` }))
+            : []
         );
       }),
       // why: `getAssetAvailability` (the windowed QT availability guard)
@@ -263,6 +269,14 @@ vitest.mock("~/database/db.server", () => ({
     },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
+    },
+    // why: a check-in that CONSUMEs/LOSEs/DAMAGEs units lowers `Asset.quantity`,
+    // so `reconcileManualPlacementsForStockDecrease` reads the manual placement
+    // rows to keep `SUM(AssetLocation.quantity) <= Asset.quantity` true. Default
+    // to no placements — tests that model placement drift override it.
+    assetLocation: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      update: vitest.fn().mockResolvedValue({}),
     },
   },
 }));
@@ -539,14 +553,80 @@ describe("createBooking", () => {
     await createBooking({
       ...mockCreateBookingParams,
       assetIds: ["asset-1"],
-      kitSlices: [{ assetId: "asset-1", assetKitId: "ak-1", quantity: 1 }],
+      kitSlices: [
+        { assetId: "asset-1", assetKitId: "ak-1", kitId: "kit-1", quantity: 1 },
+      ],
     });
 
     expect(db.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           bookingAssets: {
-            create: [{ assetId: "asset-1", quantity: 1, assetKitId: "ak-1" }],
+            create: [
+              {
+                assetId: "asset-1",
+                quantity: 1,
+                assetKitId: "ak-1",
+                // Resolved by the module-level assetKit mock's derived kitId,
+                // not from the `kitId` passed above — see that mock's `why:`.
+                sourceKitId: "kit-of-ak-1",
+              },
+            ],
+          },
+        }),
+      })
+    );
+  });
+
+  it("stamps sourceKitId on kit-driven slices so provenance survives kit edits", async () => {
+    // why: `assetKitId` is SET NULL'd when the asset leaves the kit, which
+    // erases the fact that the slice came from a kit. `sourceKitId` must be
+    // written at insert time or the information is unrecoverable later.
+    //
+    // The value must come from the org-scoped guard's lookup, NOT from the
+    // caller: `sourceKitId`'s FK accepts any org's Kit, so a client-supplied
+    // value would be a cross-org write. The input below therefore carries a
+    // foreign kit id that must be ignored.
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(mockBookingData);
+    // why: assertAssetKitsBelongToOrg returns the org-proven
+    // `assetKitId -> kitId` map; "kit-real" is the membership's true owner.
+    // `Once` (not `mockResolvedValue`) because `clearAllMocks` clears calls but
+    // NOT implementations — a persistent mock here would silently leak this
+    // `ak-a -> kit-real` answer into every later kit-slice test in the file.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-a", kitId: "kit-real" },
+    ]);
+
+    await createBooking({
+      ...mockCreateBookingParams,
+      assetIds: [],
+      kitSlices: [
+        {
+          assetId: "asset-a",
+          assetKitId: "ak-a",
+          // A foreign / tampered value — must never reach the row.
+          kitId: "kit-from-another-org",
+          quantity: 2,
+        },
+      ],
+    });
+
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingAssets: {
+            create: [
+              {
+                assetId: "asset-a",
+                quantity: 2,
+                assetKitId: "ak-a",
+                sourceKitId: "kit-real",
+              },
+            ],
           },
         }),
       })
@@ -1999,8 +2079,10 @@ describe("updateBookingAssets", () => {
     // kit-driven BookingAsset inserts — one per AssetKit (distinct
     // assetKitId). The old 1:1 assetId→assetKitId map silently dropped
     // the second slice. We assert the kit-driven raw INSERT receives
-    // both assetKitIds (and the shared assetId twice).
-    expect.assertions(4);
+    // both assetKitIds (and the shared assetId twice), plus the matching
+    // per-slice `sourceKitId` bindings (server-resolved, and named in the
+    // INSERT's column list).
+    expect.assertions(6);
 
     const mockBooking = {
       id: "booking-1",
@@ -2015,6 +2097,15 @@ describe("updateBookingAssets", () => {
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([{ id: "asset-shared" }]);
 
+    // why: assertAssetKitsBelongToOrg returns the org-proven
+    // `assetKitId -> kitId` map that supplies `sourceKitId`. The client-side
+    // `kitId`s below are deliberately foreign and must be ignored.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-kit-1", kitId: "kit-1" },
+      { id: "ak-kit-2", kitId: "kit-2" },
+    ]);
+
     const params = {
       id: "booking-1",
       organizationId: "org-1",
@@ -2024,8 +2115,18 @@ describe("updateBookingAssets", () => {
       // standalone-asset note block (kit notes are created separately).
       kitIds: ["kit-1", "kit-2"],
       kitSlices: [
-        { assetId: "asset-shared", assetKitId: "ak-kit-1", quantity: 10 },
-        { assetId: "asset-shared", assetKitId: "ak-kit-2", quantity: 5 },
+        {
+          assetId: "asset-shared",
+          assetKitId: "ak-kit-1",
+          kitId: "kit-from-another-org",
+          quantity: 10,
+        },
+        {
+          assetId: "asset-shared",
+          assetKitId: "ak-kit-2",
+          kitId: "kit-from-another-org",
+          quantity: 5,
+        },
       ],
     };
 
@@ -2057,6 +2158,27 @@ describe("updateBookingAssets", () => {
         arg.filter((v) => v === "asset-shared").length === 2
     );
     expect(sharedAssetIdArray).toBeDefined();
+
+    // The `sourceKitId` bindings must reach the statement too — the durable
+    // provenance column is a separate unnest() array, so a dropped binding
+    // would be invisible without asserting on it. Pinned by ORDER (not
+    // `arrayContaining`) so it stays index-aligned with the assetKitIds
+    // array: `["kit-2","kit-1"]` would silently swap each row's provenance.
+    // Values are the SERVER-resolved kit ids, not the foreign ones the caller
+    // supplied.
+    const sourceKitIdArray = kitDrivenCall?.find(
+      (arg: unknown) =>
+        Array.isArray(arg) && arg.includes("kit-1") && arg.includes("kit-2")
+    );
+    expect(sourceKitIdArray).toEqual(["kit-1", "kit-2"]);
+
+    // The binding array is worthless if the column isn't in the INSERT's
+    // column list — the template strings live in `call[0]`, so assert the
+    // statement text actually names `sourceKitId`. Per
+    // `.claude/rules/raw-sql-respects-prisma-map.md` (item 4): typecheck
+    // cannot validate raw SQL, so a column-name regression is only ever
+    // caught by a test like this.
+    expect(kitDrivenCall?.[0]?.join("")).toContain("sourceKitId");
   });
 
   it("skips a kit slice for an INDIVIDUAL asset already standalone on the booking", async () => {
@@ -2074,6 +2196,12 @@ describe("updateBookingAssets", () => {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       { id: "asset-1", type: "INDIVIDUAL" },
     ]);
+    // why: `clearAllMocks` resets calls but NOT implementations, so the
+    // preceding test's two-row assetKit mock would leak in and make
+    // assertAssetKitsBelongToOrg's count check reject this single-slice call.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-1", kitId: "kit-1" },
+    ]);
     // why: the asset already exists on the booking as a standalone row.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
@@ -2084,7 +2212,9 @@ describe("updateBookingAssets", () => {
       organizationId: "org-1",
       assetIds: [],
       kitIds: ["kit-1"],
-      kitSlices: [{ assetId: "asset-1", assetKitId: "ak-1", quantity: 1 }],
+      kitSlices: [
+        { assetId: "asset-1", assetKitId: "ak-1", kitId: "kit-1", quantity: 1 },
+      ],
     });
 
     // The kit-driven raw INSERT must NOT run for the skipped slice — no
@@ -5122,14 +5252,17 @@ describe("duplicateBooking", () => {
     const originalBooking = {
       ...mockBookingData,
       bookingAssets: [
+        // `assetKits: []` mirrors BOOKING_WITH_ASSETS_INCLUDE, which always
+        // selects the relation — duplicateBooking reads it as the legacy
+        // fallback for kit-driven rows written without a `sourceKitId`.
         {
-          asset: { id: "asset-1" },
+          asset: { id: "asset-1", assetKits: [] },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t117",
         },
         {
-          asset: { id: "asset-2" },
+          asset: { id: "asset-2", assetKits: [] },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t118",
@@ -5225,7 +5358,9 @@ describe("duplicateBooking", () => {
           },
           assetId: "asset-shared",
           quantity: 5,
+          // Genuine standalone: BOTH pointers null, so it is copied verbatim.
           assetKitId: null,
+          sourceKitId: null,
           id: "ba-standalone",
         },
         {
@@ -5233,13 +5368,14 @@ describe("duplicateBooking", () => {
             id: "asset-shared",
             type: AssetType.INDIVIDUAL,
             unitOfMeasure: null,
-            // The source's kit-driven slice points at AssetKit "ak-x";
-            // re-resolution needs this `assetKits` entry to find the kit id.
             assetKits: [{ id: "ak-x", kitId: "kit-1" }],
           },
           assetId: "asset-shared",
           quantity: 3,
           assetKitId: "ak-x",
+          // Kit re-resolution reads the kit id from here, not from
+          // `asset.assetKits`.
+          sourceKitId: "kit-1",
           id: "ba-kit",
         },
       ],
@@ -5267,6 +5403,7 @@ describe("duplicateBooking", () => {
             id: "ak-x",
             assetId: "asset-shared",
             quantity: 3,
+            kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
         ]);
@@ -5290,8 +5427,18 @@ describe("duplicateBooking", () => {
         data: expect.objectContaining({
           bookingAssets: {
             create: [
-              { assetId: "asset-shared", quantity: 5, assetKitId: null },
-              { assetId: "asset-shared", quantity: 3, assetKitId: "ak-x" },
+              {
+                assetId: "asset-shared",
+                quantity: 5,
+                assetKitId: null,
+                sourceKitId: null,
+              },
+              {
+                assetId: "asset-shared",
+                quantity: 3,
+                assetKitId: "ak-x",
+                sourceKitId: "kit-1",
+              },
             ],
           },
         }),
@@ -5334,6 +5481,7 @@ describe("duplicateBooking", () => {
           assetId: "asset-standalone",
           quantity: 1,
           assetKitId: null,
+          sourceKitId: null,
           id: "ba-standalone",
         },
         // Three kit-driven slices from the SAME kit (`kit-1`), one per
@@ -5348,6 +5496,7 @@ describe("duplicateBooking", () => {
           assetId: "kit-asset-a",
           quantity: 1,
           assetKitId: "ak-a",
+          sourceKitId: "kit-1",
           id: "ba-k-a",
         },
         {
@@ -5360,6 +5509,7 @@ describe("duplicateBooking", () => {
           assetId: "kit-asset-b",
           quantity: 1,
           assetKitId: "ak-b",
+          sourceKitId: "kit-1",
           id: "ba-k-b",
         },
         {
@@ -5372,6 +5522,7 @@ describe("duplicateBooking", () => {
           assetId: "kit-asset-c",
           quantity: 1,
           assetKitId: "ak-c",
+          sourceKitId: "kit-1",
           id: "ba-k-c",
         },
       ],
@@ -5398,24 +5549,28 @@ describe("duplicateBooking", () => {
             id: "ak-a",
             assetId: "kit-asset-a",
             quantity: 1,
+            kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
           {
             id: "ak-b",
             assetId: "kit-asset-b",
             quantity: 1,
+            kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
           {
             id: "ak-c",
             assetId: "kit-asset-c",
             quantity: 1,
+            kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
           {
             id: "ak-qt",
             assetId: "qt-gloves",
             quantity: 5,
+            kitId: "kit-1",
             asset: {
               type: AssetType.QUANTITY_TRACKED,
               unitOfMeasure: "pairs",
@@ -5442,23 +5597,36 @@ describe("duplicateBooking", () => {
       assetId: string;
       quantity: number;
       assetKitId: string | null;
+      sourceKitId: string | null;
     }>;
 
     // 1 standalone + 4 kit-driven (incl. the new QT) = 5 total slices.
     expect(createdSlices).toHaveLength(5);
 
-    // Standalone slice copied verbatim (quantity preserved, assetKitId NULL).
+    // Standalone slice copied verbatim (quantity preserved, both kit
+    // pointers NULL).
     expect(createdSlices).toEqual(
       expect.arrayContaining([
-        { assetId: "asset-standalone", quantity: 1, assetKitId: null },
+        {
+          assetId: "asset-standalone",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: null,
+        },
       ])
     );
 
     // Kit-driven slice for the newly-added QT carries AssetKit.quantity (5),
-    // NOT a default of 1 — proves we read from AssetKit, not the source.
+    // NOT a default of 1 — proves we read from AssetKit, not the source — and
+    // stamps the owning kit read off that same AssetKit row.
     expect(createdSlices).toEqual(
       expect.arrayContaining([
-        { assetId: "qt-gloves", quantity: 5, assetKitId: "ak-qt" },
+        {
+          assetId: "qt-gloves",
+          quantity: 5,
+          assetKitId: "ak-qt",
+          sourceKitId: "kit-1",
+        },
       ])
     );
 
@@ -5470,6 +5638,663 @@ describe("duplicateBooking", () => {
         meta: expect.objectContaining({ assetCount: 5 }),
       }),
       expect.anything()
+    );
+  });
+
+  it("drops assets that were removed from a kit instead of copying them in as standalone", async () => {
+    // why: the reported customer bug. When an asset leaves a kit the DB
+    // SET NULLs the slice's assetKitId, demoting it to standalone. Copying
+    // standalone rows verbatim then re-adds the swapped-out asset to the
+    // duplicate as a loose asset. `sourceKitId` is what tells the two apart.
+    expect.assertions(4);
+
+    const originalBooking = {
+      ...mockBookingData,
+      bookingAssets: [
+        // Genuine standalone — user added it by hand. MUST be copied.
+        {
+          asset: {
+            id: "asset-loose",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+          assetId: "asset-loose",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: null,
+          id: "ba-loose",
+        },
+        // Still in the kit — re-resolved from current membership.
+        {
+          asset: {
+            id: "switch-b",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ id: "ak-b", kitId: "kit-1" }],
+          },
+          assetId: "switch-b",
+          quantity: 1,
+          assetKitId: "ak-b",
+          sourceKitId: "kit-1",
+          id: "ba-b",
+        },
+        // Detached residue: was in kit-1, swapped out. The DB SET NULL'd
+        // `assetKitId`; only `sourceKitId` remembers where it came from.
+        // MUST NOT be copied.
+        {
+          asset: {
+            id: "switch-a",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+          assetId: "switch-a",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          id: "ba-a",
+        },
+      ],
+      tags: [],
+    };
+
+    // `Once` throughout: `clearAllMocks` clears calls but NOT implementations,
+    // so a persistent mock here would leak this fixture into later tests.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValueOnce(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValueOnce({
+      ...originalBooking,
+      id: "booking-2",
+    });
+
+    // kit-1's CURRENT membership: switch-a is gone, switch-b remains.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockImplementationOnce((args?: any) => {
+      if (args?.where?.kitId?.in) {
+        return Promise.resolve([
+          {
+            id: "ak-b",
+            assetId: "switch-b",
+            quantity: 1,
+            kitId: "kit-1",
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+    });
+
+    const createArg = (
+      db.booking.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    const createdSlices = createArg?.data?.bookingAssets?.create as Array<{
+      assetId: string;
+      assetKitId: string | null;
+      sourceKitId: string | null;
+    }>;
+
+    expect(createdSlices).toHaveLength(2);
+    expect(createdSlices.map((s) => s.assetId).sort()).toEqual([
+      "asset-loose",
+      "switch-b",
+    ]);
+    expect(createdSlices.some((s) => s.assetId === "switch-a")).toBe(false);
+
+    // The audit trail follows the create payload — no BOOKING_ASSETS_ADDED
+    // event may claim the dropped asset was added to the duplicate.
+    const eventRows = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0] as Array<{ assetId: string }>;
+    expect(eventRows.some((e) => e.assetId === "switch-a")).toBe(false);
+  });
+
+  it("re-resolves a kit whose members were ALL removed since the source booking", async () => {
+    // why: every slice of `kit-1` is now detached residue, so there is no
+    // remaining `assetKitId` to hop through. Deriving the kit set from
+    // `sourceKitId` is what keeps the kit in the duplicate — it is
+    // re-resolved to its CURRENT (replacement) member instead of vanishing.
+    expect.assertions(2);
+
+    const originalBooking = {
+      ...mockBookingData,
+      bookingAssets: [
+        {
+          asset: {
+            id: "switch-a",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+          assetId: "switch-a",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          id: "ba-a",
+        },
+      ],
+      tags: [],
+    };
+
+    // `Once` throughout — see the note in the preceding test.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValueOnce(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValueOnce({
+      ...originalBooking,
+      id: "booking-2",
+    });
+
+    // kit-1 was rebuilt around a replacement switch.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockImplementationOnce((args?: any) => {
+      if (args?.where?.kitId?.in) {
+        return Promise.resolve([
+          {
+            id: "ak-new",
+            assetId: "switch-replacement",
+            quantity: 1,
+            kitId: "kit-1",
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+    });
+
+    const createArg = (
+      db.booking.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    const createdSlices = createArg?.data?.bookingAssets?.create as Array<{
+      assetId: string;
+      assetKitId: string | null;
+      sourceKitId: string | null;
+    }>;
+
+    expect(createdSlices).toEqual([
+      {
+        assetId: "switch-replacement",
+        quantity: 1,
+        assetKitId: "ak-new",
+        sourceKitId: "kit-1",
+      },
+    ]);
+    // The kit really was looked up, despite no slice still being kit-driven.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { kitId: { in: ["kit-1"] } },
+      })
+    );
+  });
+
+  it("still resolves the kit for a legacy kit-driven row that has no sourceKitId", async () => {
+    // why: "assetKitId non-null => sourceKitId non-null" is enforced by code
+    // alone — there is no CHECK constraint — and the migration necessarily
+    // lands before the new code, so during a rolling deploy an older instance
+    // can write a kit-driven row with a NULL sourceKitId. Such a row is in
+    // NEITHER bucket (excluded from standalone by assetKitId, contributes no
+    // kit id via sourceKitId), so without the legacy assetKitId -> AssetKit ->
+    // kitId fallback the whole kit vanishes and a kit-only booking duplicates
+    // to an EMPTY booking. Do not delete the fallback to "simplify" this.
+    expect.assertions(2);
+
+    const originalBooking = {
+      ...mockBookingData,
+      bookingAssets: [
+        {
+          asset: {
+            id: "legacy-member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            // The only surviving pointer to the kit for this row.
+            assetKits: [{ id: "ak-1", kitId: "kit-1" }],
+          },
+          assetId: "legacy-member",
+          quantity: 1,
+          assetKitId: "ak-1",
+          // Written before the column existed / by a pre-deploy instance.
+          sourceKitId: null,
+          id: "ba-legacy",
+        },
+      ],
+      tags: [],
+    };
+
+    // `Once` throughout — see the note two tests above.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValueOnce(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValueOnce({
+      ...originalBooking,
+      id: "booking-2",
+    });
+
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockImplementationOnce((args?: any) => {
+      if (args?.where?.kitId?.in) {
+        return Promise.resolve([
+          {
+            id: "ak-1",
+            assetId: "legacy-member",
+            quantity: 1,
+            kitId: "kit-1",
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+    });
+
+    const createArg = (
+      db.booking.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    const createdSlices = createArg?.data?.bookingAssets?.create as Array<{
+      assetId: string;
+      assetKitId: string | null;
+      sourceKitId: string | null;
+    }>;
+
+    // The kit survives the duplicate — and the rebuilt row is upgraded to
+    // carry `sourceKitId`, so the legacy shape doesn't propagate.
+    expect(createdSlices).toEqual([
+      {
+        assetId: "legacy-member",
+        quantity: 1,
+        assetKitId: "ak-1",
+        sourceKitId: "kit-1",
+      },
+    ]);
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { kitId: { in: ["kit-1"] } },
+      })
+    );
+  });
+});
+
+describe("computeBookingKitDrift", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * `computeBookingKitDrift` hits `db.kit.findMany` TWICE: first through
+   * `assertKitsBelongToOrg` (which only counts the returned rows against the
+   * requested ids) and then for the kits' CURRENT membership. The module-level
+   * mock echoes requested ids back as bare `{ id }` rows, which passes the
+   * guard but carries no `assetKits` — so every drift test must queue a full
+   * payload for both calls.
+   *
+   * `mockResolvedValueOnce` rather than `mockResolvedValue`: a persistent
+   * implementation survives `clearAllMocks` and leaks into later tests.
+   *
+   * @param kits - Full `{ id, name, assetKits }` rows; ids must match the ids
+   *   the function requests or `assertKitsBelongToOrg` throws.
+   */
+  function queueKitLookups(kits: unknown[]) {
+    (db.kit.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(kits)
+      .mockResolvedValueOnce(kits);
+  }
+
+  it("reports an asset removed from the kit since the booking was created", async () => {
+    // why: this is the half of drift that has never worked. The removed
+    // asset's slice was demoted to standalone by the `assetKitId` SET NULL
+    // cascade, so a snapshot keyed on `assetKitId` could never see it.
+    // Keying on `sourceKitId` — which survives the detach — does.
+    expect.assertions(2);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "switch-b",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: "ak-b",
+        asset: {
+          id: "switch-b",
+          title: "Switch B",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+      {
+        // Detached residue — `assetKitId` already NULL'd by the cascade,
+        // `sourceKitId` still points at the kit it arrived with.
+        assetId: "switch-a",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: null,
+        asset: {
+          id: "switch-a",
+          title: "Switch A",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+    ]);
+
+    queueKitLookups([
+      {
+        id: "kit-1",
+        name: "Rack 1",
+        assetKits: [
+          {
+            assetId: "switch-b",
+            quantity: 1,
+            asset: {
+              id: "switch-b",
+              title: "Switch B",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const drift = await computeBookingKitDrift({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(drift).toHaveLength(1);
+    expect(drift[0].removed).toEqual([
+      {
+        assetId: "switch-a",
+        title: "Switch A",
+        type: AssetType.INDIVIDUAL,
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it("reports an asset added to the kit since the booking was created", async () => {
+    // Pins the half of drift that already worked, so the snapshot-predicate
+    // rewrite can't regress it.
+    expect.assertions(2);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "switch-b",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: "ak-b",
+        asset: {
+          id: "switch-b",
+          title: "Switch B",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+    ]);
+
+    queueKitLookups([
+      {
+        id: "kit-1",
+        name: "Rack 1",
+        assetKits: [
+          {
+            assetId: "switch-b",
+            quantity: 1,
+            asset: {
+              id: "switch-b",
+              title: "Switch B",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+          {
+            assetId: "switch-c",
+            quantity: 5,
+            asset: {
+              id: "switch-c",
+              title: "Switch C",
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const drift = await computeBookingKitDrift({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(drift[0].added).toEqual([
+      {
+        assetId: "switch-c",
+        title: "Switch C",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 5,
+      },
+    ]);
+    expect(drift[0].removed).toEqual([]);
+  });
+
+  it("reports both sides when a kit member was swapped out for another", async () => {
+    // The reported customer scenario: Switch A was pulled from the kit and
+    // Switch C put in its place. Before `sourceKitId` the modal showed only
+    // the addition, so the user was never warned the duplicate would lose
+    // Switch A.
+    expect.assertions(3);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "switch-a",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: null,
+        asset: {
+          id: "switch-a",
+          title: "Switch A",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+      {
+        assetId: "switch-b",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: "ak-b",
+        asset: {
+          id: "switch-b",
+          title: "Switch B",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+    ]);
+
+    queueKitLookups([
+      {
+        id: "kit-1",
+        name: "Rack 1",
+        assetKits: [
+          {
+            assetId: "switch-b",
+            quantity: 1,
+            asset: {
+              id: "switch-b",
+              title: "Switch B",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+          {
+            assetId: "switch-c",
+            quantity: 1,
+            asset: {
+              id: "switch-c",
+              title: "Switch C",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const drift = await computeBookingKitDrift({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(drift).toHaveLength(1);
+    expect(drift[0].added.map((a) => a.assetId)).toEqual(["switch-c"]);
+    expect(drift[0].removed.map((a) => a.assetId)).toEqual(["switch-a"]);
+  });
+
+  it("omits kits whose membership still matches the booking snapshot", async () => {
+    // Kits without drift are dropped entirely so the modal's banner stays
+    // hidden when nothing changed.
+    expect.assertions(1);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "switch-b",
+        quantity: 1,
+        sourceKitId: "kit-1",
+        assetKitId: "ak-b",
+        asset: {
+          id: "switch-b",
+          title: "Switch B",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+    ]);
+
+    queueKitLookups([
+      {
+        id: "kit-1",
+        name: "Rack 1",
+        assetKits: [
+          {
+            assetId: "switch-b",
+            quantity: 1,
+            asset: {
+              id: "switch-b",
+              title: "Switch B",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const drift = await computeBookingKitDrift({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(drift).toEqual([]);
+  });
+
+  it("still resolves the kit for legacy rows written without a sourceKitId", async () => {
+    // Rolling-deploy window: the migration lands before the code, so an old
+    // instance can write a kit-driven row with `assetKitId` set and
+    // `sourceKitId` NULL. Keying the snapshot on `sourceKitId` ALONE would
+    // drop that kit silently — `duplicateBooking` would still re-resolve it
+    // (it keeps the same `assetKitId -> kitId` fallback) and change the
+    // booking's contents while the modal showed no warning at all.
+    //
+    // This covers BOTH halves of that fallback, and it takes both to pin it:
+    // the returned-drift assertions cover the grouping hop
+    // (`sourceKitId ?? kitIdByAssetKitId.get(assetKitId)`), and the explicit
+    // call-args assertion at the end covers the QUERY predicate. The
+    // module-level `db.bookingAsset.findMany` mock ignores `where` entirely,
+    // so without that last assertion the `assetKitId` leg of the `OR` could be
+    // deleted as "redundant now that sourceKitId is backfilled" and the whole
+    // suite would stay green while the deploy-window hole silently reopened.
+    expect.assertions(4);
+
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        assetId: "switch-b",
+        quantity: 1,
+        sourceKitId: null,
+        assetKitId: "ak-b",
+        asset: {
+          id: "switch-b",
+          title: "Switch B",
+          type: AssetType.INDIVIDUAL,
+        },
+      },
+    ]);
+
+    // why: the legacy fallback resolves `assetKitId -> kitId` through a
+    // dedicated AssetKit lookup. The module-level mock echoes ids back with a
+    // derived `kit-of-<id>` kitId, which wouldn't match the kit fixture below.
+    (
+      db.assetKit.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "ak-b", kitId: "kit-1" }]);
+
+    queueKitLookups([
+      {
+        id: "kit-1",
+        name: "Rack 1",
+        assetKits: [
+          {
+            assetId: "switch-c",
+            quantity: 1,
+            asset: {
+              id: "switch-c",
+              title: "Switch C",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const drift = await computeBookingKitDrift({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(drift).toHaveLength(1);
+    expect(drift[0].added.map((a) => a.assetId)).toEqual(["switch-c"]);
+    expect(drift[0].removed.map((a) => a.assetId)).toEqual(["switch-b"]);
+
+    // The snapshot must select on provenance OR legacy live membership. Both
+    // legs are load-bearing: `sourceKitId` is what makes detached residue (and
+    // therefore `removed`) visible at all, `assetKitId` is what keeps
+    // deploy-window rows from vanishing.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ sourceKitId: { not: null } }, { assetKitId: { not: null } }],
+        }),
+      })
     );
   });
 });
@@ -7291,6 +8116,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   /** Booking id + common params reused across scenarios in this block. */
@@ -7767,6 +8598,48 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("trims the single placement when a partial CONSUME pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // Same invariant as full check-in, different code path: the partial
+    // check-in loop decrements the pool per disposition, so it drifts the
+    // location axis exactly the same way if left unreconciled.
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("writes no placement when a partial CONSUME is absorbed by the unplaced residual", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+  });
+
   it("runs the low-stock notifier for the asset whose pool a CONSUME decremented", async () => {
     expect.assertions(1);
 
@@ -7959,6 +8832,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     (db.asset.update as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({});
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   const mockBookingId = "booking-c1";
@@ -8082,6 +8961,45 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("trims the single placement when a CONSUME check-in pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // All 100 owned units sit in one location, so destroying 10 on check-in
+    // would leave SUM(AssetLocation) = 100 against Asset.quantity = 90. The
+    // location trigger never fires on an `Asset` write, so nothing else
+    // catches this — the next legitimate placement edit is what gets refused.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("leaves placements alone on a CONSUME check-in the unplaced residual absorbs", async () => {
+    expect.assertions(1);
+
+    // 40 of 100 placed, so consuming 10 shrinks the residual from 60 to 50.
+    // Nothing is asserted about the location, so nothing is written to it.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
   });
 
   it("auto-defaults to RETURN for TWO_WAY assets and leaves the pool untouched", async () => {
@@ -8797,6 +9715,85 @@ describe("addScannedAssetsToBooking", () => {
         }),
       ]),
       expect.anything()
+    );
+  });
+
+  it("resolves a kit slice's sourceKitId from the AssetKit row, ignoring the client-supplied kitId", async () => {
+    // The scan drawer's `kitId` is untrusted JSON and `BookingAsset.sourceKitId`
+    // has an FK that accepts ANY kit — including another org's. The server must
+    // re-resolve it from the `assetKitId`, which `assertAssetKitsBelongToOrg`
+    // has already proven in-org. Here the caller sends a foreign kit id; the
+    // persisted value must be the AssetKit's own kit.
+    expect.assertions(1);
+
+    // why: the first test in this describe leaves a booking window on
+    // findFirst; null skips the overlap-conflict guard so this test can focus
+    // on the write payload.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both assertAssetsBelongToOrg (count check) and the
+    // scanned-asset metadata fetch. `assetModelId: null` keeps the
+    // materialize-model-request loop a no-op.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-kit-member",
+        title: "Kit Member",
+        type: AssetType.QUANTITY_TRACKED,
+        assetModelId: null,
+      },
+    ]);
+
+    // why: one mock serves both assetKit reads — assertAssetKitsBelongToOrg
+    // (which only counts rows) and the quantity/kitId resolution. `kit-real`
+    // is the AssetKit's true owner and must win over the caller's value.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-1", quantity: 7, kitId: "kit-real" },
+    ]);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await addScannedAssetsToBooking({
+      assetIds: [],
+      kitIds: [],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      kitSlices: [
+        {
+          assetId: "asset-kit-member",
+          assetKitId: "ak-1",
+          // A foreign / tampered value from the client payload.
+          kitId: "kit-from-another-org",
+        },
+      ],
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          bookingAssets: {
+            create: [
+              {
+                assetId: "asset-kit-member",
+                // Falls back to the AssetKit's quantity (no explicit slice qty).
+                quantity: 7,
+                assetKitId: "ak-1",
+                sourceKitId: "kit-real",
+                // A kit-driven row never discharges a model reservation.
+                bookingModelRequestId: null,
+              },
+            ],
+          },
+        },
+      })
     );
   });
 });

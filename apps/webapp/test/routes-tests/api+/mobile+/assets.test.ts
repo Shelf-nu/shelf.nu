@@ -22,6 +22,7 @@ import { createLoaderArgs } from "@mocks/remix";
 import { db } from "~/database/db.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -61,6 +62,12 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     ...actual,
     requireMobileAuth: vi.fn(),
     requireOrganizationAccess: vi.fn(),
+    // why: the route now resolves custody visibility here. Default the
+    // existing shape assertions to "may see all" so they keep measuring the
+    // shaper, not the custody gate — which has its own tests below.
+    getMobileUserContext: vi.fn().mockResolvedValue({
+      canSeeAllCustody: true,
+    }),
   };
 });
 
@@ -351,5 +358,100 @@ describe("GET /api/mobile/assets — search", () => {
       { createdAt: "desc" },
       { id: "asc" },
     ]);
+  });
+});
+
+describe("GET /api/mobile/assets — custody visibility", () => {
+  /** One asset held by a colleague, shaped as the select returns it. */
+  const colleaguesAsset = {
+    id: "asset-1",
+    title: "Camera",
+    status: "IN_CUSTODY",
+    mainImage: null,
+    thumbnailImage: null,
+    mainImageExpiration: null,
+    assetModel: null,
+    availableToBook: true,
+    category: null,
+    type: "INDIVIDUAL",
+    quantity: null,
+    minQuantity: null,
+    unitOfMeasure: null,
+    consumptionType: null,
+    assetKits: [],
+    assetLocations: [],
+    custody: [
+      {
+        quantity: 1,
+        kitCustodyId: null,
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague Name",
+          userId: "someone-else",
+        },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    findManyMock.mockResolvedValue([colleaguesAsset] as never);
+    vi.mocked(db.asset.count).mockResolvedValue(1 as never);
+  });
+
+  it("hides a colleague's custody from a viewer who may not see all custody", async () => {
+    // The mobile asset DETAIL route gated this; the list did not, so the same
+    // holder name was readable one endpoint over.
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody).toBeNull();
+    expect(body.assets[0].custodyList).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain("Colleague Name");
+  });
+
+  it("keeps the viewer's OWN custody visible to a restricted viewer", async () => {
+    // The direction the other two cases miss. Hiding here would take an item
+    // away from the person actually holding it, and the gate is supposed to
+    // reject on OWNERSHIP, not on the role alone.
+    // why: same fixture as above with the custodian re-pointed at the caller —
+    // isolates ownership as the only variable.
+    findManyMock.mockResolvedValue([
+      {
+        ...colleaguesAsset,
+        custody: [
+          {
+            ...colleaguesAsset.custody[0],
+            custodian: {
+              ...colleaguesAsset.custody[0].custodian,
+              userId: FAKE_USER_ID,
+            },
+          },
+        ],
+      },
+    ] as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody).not.toBeNull();
+    expect(body.assets[0].custodyList).toHaveLength(1);
+  });
+
+  it("keeps custody visible for a viewer who may see all of it", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody?.custodian?.name).toBe("Colleague Name");
   });
 });

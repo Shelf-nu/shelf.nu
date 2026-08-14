@@ -125,6 +125,14 @@ jobs:
       - name: ⚡ Run vitest
         run: pnpm --filter @shelf/webapp test -- --run
 
+      # Workspace packages run their own suites (node:test), which the webapp
+      # vitest run above does not reach. Without this step a package's `test`
+      # script is dead weight — @shelf/quantity-control's had never run in CI.
+      # NOT `turbo run test`: turbo.json marks that task persistent (vitest
+      # watch mode), so it would hang the job.
+      - name: 🧩 Run workspace package tests
+        run: pnpm -r --filter "./packages/*" run test
+
   tooling:
     name: 🛠️ PR review tooling
     runs-on: ubuntu-latest

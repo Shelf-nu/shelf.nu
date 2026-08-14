@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
 import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -243,6 +244,90 @@ export const getPaginatedAndFilterableTeamMembers = async ({
     });
   }
 };
+
+/**
+ * Narrows caller-supplied custodian filter ids to those the caller may use.
+ *
+ * `?teamMember=` is raw request input that list queries apply straight to a
+ * custody clause. Redacting the custodian from the PAYLOAD is not enough on
+ * its own: filtering by a colleague's id and reading which rows come back
+ * still reveals what that person holds. So a viewer who may not see all
+ * custody may only ever filter by themselves.
+ *
+ * Ids arrive as either TeamMember ids or User ids depending on the branch, so
+ * both of the caller's identities are allowed through.
+ *
+ * Returns `[]` when a restricted caller asked only for other people — which
+ * makes the filter match nothing. That is the intended answer: an empty list
+ * discloses nothing, whereas silently dropping the filter would show them
+ * everything and look like the filter had worked.
+ *
+ * @param args.teamMemberIds - Raw ids from the query string.
+ * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
+ * @param args.userId - The caller.
+ * @param args.organizationId - Active workspace.
+ * @returns The ids the caller is allowed to filter by.
+ */
+export async function narrowCustodianFilterIds({
+  teamMemberIds,
+  canSeeAllCustody,
+  userId,
+  organizationId,
+}: {
+  teamMemberIds?: string[] | null;
+  canSeeAllCustody: boolean;
+  userId: string;
+  organizationId: Organization["id"];
+}): Promise<string[]> {
+  const requested = teamMemberIds ?? [];
+
+  if (canSeeAllCustody || requested.length === 0) {
+    return requested;
+  }
+
+  const own = await db.teamMember.findMany({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  // Every team-member row the caller holds in this org, plus their user id —
+  // the custody clauses match on one or the other.
+  const allowed = new Set<string>([...own.map((tm) => tm.id), userId]);
+
+  return requested.filter((id) => allowed.has(id));
+}
+
+/**
+ * {@link narrowCustodianFilterIds}, with a refusal that a where-builder can act
+ * on.
+ *
+ * Narrowing alone is not enough at the query layer. The list where-builders
+ * treat an EMPTY id list as "no custodian filter requested" — they guard on
+ * `.length` — so handing them `[]` after narrowing removed everything DROPS the
+ * filter and returns the caller's whole list. That reads as though the filter
+ * had worked, which is worse than refusing it: the UI still shows the
+ * colleague's chip beside results that ignore it.
+ *
+ * So a fully-narrowed request becomes {@link CUSTODY_FILTER_REFUSED} — an id no
+ * row can carry — and the query returns nothing.
+ *
+ * @param args - Same arguments as {@link narrowCustodianFilterIds}.
+ * @returns The allowed ids, or `[CUSTODY_FILTER_REFUSED]` when a restricted
+ *   caller asked only for other people. Empty only when nothing was requested.
+ */
+export async function scopeCustodianFilterIds(args: {
+  teamMemberIds?: string[] | null;
+  canSeeAllCustody: boolean;
+  userId: string;
+  organizationId: Organization["id"];
+}): Promise<string[]> {
+  const requested = args.teamMemberIds ?? [];
+  const allowed = await narrowCustodianFilterIds(args);
+
+  return requested.length > 0 && allowed.length === 0
+    ? [CUSTODY_FILTER_REFUSED]
+    : allowed;
+}
 
 /** What a custodian picker is being used for. */
 export type CustodianPickerPurpose =
@@ -1068,25 +1153,69 @@ export async function getTeamMembersForQuantityCustody({
   organizationId,
   request,
   userId,
-  isSelfService,
+  role,
+  canSeeAllCustody,
 }: {
   organizationId: string;
   request: Request;
   userId: string;
-  isSelfService: boolean;
+  /**
+   * Caller's role. Takes the place of an `isSelfService` boolean, which was a
+   * ROLE check where a RULE was needed: it is false for BASE, so the scope
+   * below collapsed to `undefined` and the whole roster shipped to a BASE user
+   * — who cannot assign custody at all (`asset: [read]`).
+   */
+  role: OrganizationRoles;
+  /** Resolved by `resolveCanSeeAllCustody`, for the shared scope resolver. */
+  canSeeAllCustody: boolean;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
+
+    /**
+     * This seeds an ASSIGNMENT picker, so the assignment rule governs, not the
+     * custody read rule: BASE may not assign at all, SELF_SERVICE only to
+     * themselves. Same resolver the search endpoint uses for
+     * `custodyPurpose: "custody-assignment"`, so the seed and the list the user
+     * gets after typing cannot disagree.
+     */
+    const scope = resolveCustodianPickerScope({
+      purpose: "custody-assignment",
+      role,
+      canSeeAllCustody,
+      userId,
+    });
+
     const where = {
       deletedAt: null,
       organizationId,
-      userId: isSelfService ? userId : undefined,
+      ...(scope.mode === "self" ? { userId: scope.userId } : {}),
+      // An id no row carries — `mode: "none"` must match NOTHING. Omitting the
+      // clause would widen this back to the whole roster.
+      ...(scope.mode === "none" ? { id: CUSTODY_FILTER_REFUSED } : {}),
     };
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
       db.teamMember.findMany({
         where,
-        include: { user: true },
+        // Only what `resolveTeamMemberName(item, true)` renders. `include: {
+        // user: true }` shipped the entire User row — email, Stripe
+        // `customerId`, `tierId`, `hasUnpaidInvoice` and every other billing
+        // flag — for all 12 roster entries.
+        select: {
+          id: true,
+          name: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              email: true,
+              profilePicture: true,
+            },
+          },
+        },
         orderBy: { userId: "asc" },
         take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       }),

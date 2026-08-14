@@ -19,7 +19,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMemberProfile,
@@ -35,7 +35,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     );
 
     const { headers, ...loaderData } = await getUserAssetsTabLoaderData({
+      // The SUBJECT is the profile being viewed; the VIEWER is the caller.
+      // Passing `selectedUserId` as the viewer would make the custody
+      // narrowing treat the requested custodian as the principal — any caller
+      // could then list any user's custody.
       userId: selectedUserId,
+      viewerId: userId,
+      canSeeAllCustody,
       request,
       organizationId,
     });

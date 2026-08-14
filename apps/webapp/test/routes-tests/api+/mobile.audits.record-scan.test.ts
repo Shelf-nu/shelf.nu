@@ -41,6 +41,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 // why: external service — we mock audit scan recording to avoid database calls
 vi.mock("~/modules/audit/service.server", () => ({
   recordAuditScan: vi.fn(),
+  requireAuditAssignee: vi.fn(),
 }));
 
 // why: we need to control error formatting in the catch block
@@ -61,7 +62,10 @@ import {
   getMobileUserContext,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
-import { recordAuditScan } from "~/modules/audit/service.server";
+import {
+  recordAuditScan,
+  requireAuditAssignee,
+} from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 
 const mockUser = {
@@ -104,6 +108,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
       canUseBarcodes: true,
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    vi.mocked(requireAuditAssignee).mockResolvedValue(undefined);
   });
 
   it("should record a scan and return scan data with counts", async () => {
@@ -138,6 +143,56 @@ describe("POST /api/mobile/audits/record-scan", () => {
       userId: "user-1",
       organizationId: "org-1",
     });
+
+    // why: ADMIN role must map to isSelfServiceOrBase: false so admins can
+    // scan into any audit of their workspace
+    expect(requireAuditAssignee).toHaveBeenCalledWith({
+      auditSessionId: "session-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
+    });
+  });
+
+  it("should return 403 when a BASE user is not assigned to the audit", async () => {
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "BASE",
+      canUseAudits: true,
+      canUseBarcodes: true,
+    });
+    const assigneeError = Object.assign(
+      new Error(
+        "Only users assigned to this audit can perform this action. Please contact the audit creator to be assigned."
+      ),
+      { status: 403 }
+    );
+    vi.mocked(requireAuditAssignee).mockRejectedValue(assigneeError);
+    (makeShelfError as any).mockReturnValue({
+      message: assigneeError.message,
+      status: 403,
+    });
+
+    const request = createRecordScanRequest({
+      auditSessionId: "session-1",
+      qrId: "qr-abc",
+      assetId: "asset-1",
+      isExpected: true,
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("assigned to this audit");
+
+    expect(requireAuditAssignee).toHaveBeenCalledWith({
+      auditSessionId: "session-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: true,
+    });
+    // why: the scan must not be recorded when the assignee gate rejects —
+    // the pre-fix behavior wrote scans for users who could not complete
+    expect(recordAuditScan).not.toHaveBeenCalled();
   });
 
   it("should return 403 when user lacks audit update permission", async () => {

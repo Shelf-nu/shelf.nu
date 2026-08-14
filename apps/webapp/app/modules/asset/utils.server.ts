@@ -12,6 +12,7 @@ import type { Filter } from "~/components/assets/assets-index/advanced-filters/s
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
@@ -517,12 +518,64 @@ export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
 
+/**
+ * Which custodian ids a caller may filter a "select all" query by.
+ *
+ * `"all"` means the caller has already been proven allowed to see everyone's
+ * custody — either by `canSeeAllCustody`, or because the surface is reachable
+ * only with a permission that restricted roles do not hold. Anything else is a
+ * concrete allow-list, normally from `scopeCustodianFilterIds`.
+ *
+ * @see {@link file://./../team-member/service.server.ts} — `scopeCustodianFilterIds`
+ */
+export type AllowedCustodianFilterIds = string[] | "all";
+
+/**
+ * Applies a custodian allow-list to ids taken from the query string.
+ *
+ * `"all"` passes them through. Otherwise only ids on the list survive, and a
+ * request that asked ONLY for others collapses to a single unmatchable id.
+ *
+ * That id alone is NOT sufficient: it lands in `where.OR`, where a sibling
+ * branch (`uncategorized` / `untagged` / `without-location`) can still match.
+ * `getAssetsWhereInput` therefore also AND-s an unsatisfiable predicate when it
+ * sees the sentinel — see the note at that call site. Dropping the filter
+ * instead of refusing it would widen the query to every row, which is the
+ * opposite of what a refusal should do.
+ */
+function applyCustodianAllowList(
+  requestedIds: string[],
+  allowedTeamMemberIds: AllowedCustodianFilterIds
+): string[] {
+  if (allowedTeamMemberIds === "all") {
+    return requestedIds;
+  }
+
+  const allowed = new Set(allowedTeamMemberIds);
+  const kept = requestedIds.filter((id) => allowed.has(id));
+
+  return requestedIds.length > 0 && kept.length === 0
+    ? [CUSTODY_FILTER_REFUSED]
+    : kept;
+}
+
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
+  allowedTeamMemberIds,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Required, with no default, so every call site states an answer.
+   *
+   * `?teamMember=` rides in on `currentSearchParams`, which is raw request
+   * input. A "select all" caller who may not see all custody could otherwise
+   * filter by a colleague's id and read back exactly which rows that person
+   * holds — verified live against `/api/assets/get-assets-for-bulk-qr-download`,
+   * which a BASE user can reach with `qr: read`.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
@@ -533,8 +586,12 @@ export function getAssetsWhereInput({
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  const { categoriesIds, locationIds, tagsIds, search, teamMemberIds } =
-    paramsValues;
+  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+
+  const teamMemberIds = applyCustodianAllowList(
+    paramsValues.teamMemberIds ?? [],
+    allowedTeamMemberIds
+  );
 
   const status =
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
@@ -648,6 +705,33 @@ export function getAssetsWhereInput({
         ? [{ custody: { none: {} } }]
         : []),
     ];
+
+    /**
+     * A refusal has to survive a sibling OR branch.
+     *
+     * The custody clause is attached with `OR`, and three other filters write
+     * there too — `uncategorized`, `untagged`, `without-location`. Under OR
+     * semantics the refused branch matches nothing while the sibling still
+     * matches plenty, so `?teamMember=<colleague>&category=uncategorized`
+     * returned the sibling's rows rather than none. That leaked nothing (the
+     * result equals the same request with `teamMember` omitted, which anyone
+     * may issue) but it broke the invariant this function documents, and a
+     * future OR branch carrying custody signal would make it a real hole.
+     *
+     * Fixed by AND-ing a predicate nothing satisfies, NOT by moving the custody
+     * clause from OR to AND — that would intersect custody with category/tag/
+     * location for every caller and silently change existing filter results.
+     */
+    if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        { id: CUSTODY_FILTER_REFUSED },
+      ];
+    }
   }
 
   return where;

@@ -108,9 +108,24 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 
 ### Packages
 
-| Package           | Path                 | Description                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@shelf/database` | `packages/database/` | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package — it does **not** run Prisma commands directly in production. |
+| Package                   | Path                         | Description                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/database`         | `packages/database/`         | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package — it does **not** run Prisma commands directly in production. |
+| `@shelf/permissions`      | `packages/permissions/`      | **Owns RBAC**: the `PermissionAction`/`PermissionEntity` vocabulary, the role → permission matrix, and `roleHasPermission()` — the resolver **including** the ADMIN/OWNER allow-all short-circuit. Every authorization decision in both apps resolves here.                                                                 |
+| `@shelf/datetime`         | `packages/datetime/`         | Pure, preference-aware date/time formatting shared by both apps so their date rendering never drifts.                                                                                                                                                                                                                       |
+| `@shelf/quantity-control` | `packages/quantity-control/` | Pure quantity/availability domain for `QUANTITY_TRACKED` assets, shared by both apps so their availability math never drifts.                                                                                                                                                                                               |
+| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                  |
+
+Except for `@shelf/database`, these are **pure, dependency-free, no-build**
+packages: their `exports` point straight at `src/index.ts` and consumers
+compile the TypeScript themselves (Vite via `ssr.noExternal`, Metro via Babel).
+Follow that shape for new shared packages — anything importing Prisma or Node
+APIs cannot be consumed by the companion app.
+
+**Adding a `packages/*` dependency requires everyone to re-run `pnpm install`** —
+workspace packages are consumed through symlinks that only `pnpm install`
+creates. Say so in the PR description; see
+`.claude/rules/run-pnpm-install-when-workspace-packages-change.md`.
 
 ### Tooling
 
