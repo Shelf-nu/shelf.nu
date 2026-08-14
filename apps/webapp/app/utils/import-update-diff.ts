@@ -1063,6 +1063,19 @@ export function computeAssetDiffs({
       continue;
     }
 
+    // Archived assets are read-only (issue #382). `updateAsset` refuses them at
+    // apply time regardless; surfacing it here keeps the preview's promise —
+    // it exists to say what will happen BEFORE anything is saved, and without
+    // this it counted an archived row as "to update" and then failed it.
+    if (existingAsset.archivedAt) {
+      failedRows.push({
+        rowNumber,
+        id: assetId,
+        reason: "Asset is archived — reinstate it before updating",
+      });
+      continue;
+    }
+
     // Check for duplicate assets by canonical UUID (not CSV identifier string)
     const firstSeenRow = seenIds.get(existingAsset.id);
     if (firstSeenRow !== undefined) {
