@@ -275,14 +275,15 @@ export type QrResponse = {
 };
 
 /**
- * Machine-readable failure discriminator carried by the QR resolve / link
- * error payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
+ * Machine-readable failure discriminator carried by the QR RESOLVE error
+ * payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
  * side via `apiFetch`'s `errorDetails`. Mirrors the server's
  * `ResolveMobileCodeFailureReason`.
  *
  * `"unclaimed"` — the QR row exists, has no organization yet (a printed
  * Shelf code nobody claimed) and is not linked to an asset or kit. The
- * scanner offers the native claim → create / link flow for it. Absence of a
+ * scanner offers the native claim → create / link flow for it. (The link
+ * route does not emit this: it claims an unclaimed code inline.) Absence of a
  * reason (plain not-found 404, wrong-org 403, or an orgless-but-linked
  * corrupted row the web claim flow refuses) MUST keep the existing dead-end /
  * web-bridge behaviour — never offer claim for those.

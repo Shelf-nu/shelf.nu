@@ -77,6 +77,10 @@ import {
 import { getKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
+import {
+  releaseAssetsToAvailableUnlessCheckedOut,
+  setCustodyDrivenAssetStatus,
+} from "../asset/custody-status.server";
 import type {
   MoveAssetKitUnitsArgs,
   MoveUnitsResult,
@@ -185,6 +189,9 @@ type KitCustodyInheritTxClient = {
  * `tx.assetKit.deleteMany(...)` inside the same transaction; pair the
  * returned array with {@link emitAssetKitDetachmentNotes} after the
  * delete completes to log a per-booking system note.
+ *
+ * @see {@link releaseAssetsToAvailableUnlessCheckedOut} for the shared
+ *   custody-release status flip these kit flows all funnel through.
  *
  * Scope filter: only DRAFT / RESERVED / ONGOING / OVERDUE bookings get
  * notes — already-completed / cancelled / archived bookings are
@@ -2235,12 +2242,11 @@ async function performKitDeletion({
       const assetsToFlipAvailable = allAssetIds.filter(
         (assetId) => !stillCustodiedAssetIds.has(assetId)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToFlipAvailable }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
     }
   });
 
@@ -2573,12 +2579,11 @@ export async function releaseCustody({
       const assetsToFlipAvailable = assetIds.filter(
         (id) => !stillCustodiedAssetIds.has(id)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToFlipAvailable }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
     });
 
     // Notes can be created outside transaction (not critical for consistency).
@@ -3105,12 +3110,14 @@ export async function bulkAssignKitCustody({
           : undefined;
       };
 
-      /** Updating status of all assets of kits */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assets are derived from `kits` (kit.assets) loaded by the org-scoped findMany above; not from request input
-        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
-      });
+      // Guarded, and org-scoped by the helper.
+      // @see {@link file://./../asset/custody-status.server.ts}
+      await setCustodyDrivenAssetStatus(
+        tx,
+        allAssetsOfAllKits.map((asset) => asset.id),
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
 
       /** Creating notes for all the assets of the kit */
       const actor = wrapUserLinkForNote({
@@ -3437,13 +3444,13 @@ export async function bulkReleaseKitCustody({
       const assetsToFlipAvailable = allAssetIds.filter(
         (id) => !stillCustodiedIds.has(id)
       );
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetsToFlipAvailable` derive from `allAssetsOfAllKits` loaded via the org-scoped kits findMany earlier in this flow
-          where: { id: { in: assetsToFlipAvailable } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      // The helper org-scopes the write itself, so the previous
+      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({
@@ -3563,18 +3570,38 @@ export async function createKitsIfNotExists({
   }
 }
 
-export async function updateKitQrCode({
-  kitId,
-  newQrId,
-  organizationId,
-}: {
-  organizationId: string;
-  kitId: string;
-  newQrId: string;
-}) {
+/**
+ * Minimal Prisma surface `updateKitQrCode` needs when run inside a
+ * transaction. Typed structurally because the extended transaction client is
+ * not directly assignable to the generated `Prisma.TransactionClient` (same
+ * approach as `NotesTxClient` / `OrgValidationTxClient`).
+ */
+export type KitQrCodeTxClient = {
+  kit: {
+    update: (args: {
+      where: { id: string; organizationId: string };
+      data: { qrCodes: { set?: { id: string }[]; connect?: { id: string } } };
+    }) => Promise<Kit>;
+  };
+};
+
+export async function updateKitQrCode(
+  {
+    kitId,
+    newQrId,
+    organizationId,
+  }: {
+    organizationId: string;
+    kitId: string;
+    newQrId: string;
+  },
+  tx?: KitQrCodeTxClient
+) {
   try {
+    const client = tx ?? db;
+
     // Disconnect all existing QR codes
-    await db.kit
+    await client.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -3593,7 +3620,7 @@ export async function updateKitQrCode({
       });
 
     // Connect the new QR code
-    return await db.kit
+    return await client.kit
       .update({
         where: { id: kitId, organizationId },
         data: {
@@ -3649,6 +3676,10 @@ export async function relinkKitQrCode({
       message: "Kit not found.",
       label,
       additionalData: { kitId, organizationId, qrId },
+      // why: without an explicit status this resolves to 500 — `cause: null` is
+      // not a P2025, so the ShelfError constructor falls through to
+      // `status || 500`. A missing/cross-org kit is a 404, not a server fault.
+      status: 404,
       shouldBeCaptured: false,
     });
   }
@@ -3671,6 +3702,7 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -3682,24 +3714,59 @@ export async function relinkKitQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label,
+      status: 403,
       shouldBeCaptured: false,
     });
   }
 
   const oldQrCode = kit.qrCodes[0];
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: qr.organizationId checked against caller's organizationId above (guard at the `qr.organizationId && qr.organizationId !== organizationId` throw); null-org QR is a claimable code being assigned here
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    updateKitQrCode({
-      kitId,
-      newQrId: qr.id,
-      organizationId,
-    }),
-  ]);
+  /**
+   * why: mirrors `relinkAssetQrCode` — the guards above are check-then-act, so
+   * the QR write re-asserts the state they observed and a concurrent writer
+   * makes it match zero rows (P2025). Running it first, inside a transaction,
+   * stops a loser from still disconnecting the kit's existing code.
+   */
+  await db.$transaction(async (tx) => {
+    try {
+      await tx.qr.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: qr.organizationId checked against caller's organizationId above (guard at the `qr.organizationId && qr.organizationId !== organizationId` throw); null-org QR is a claimable code being assigned here. The WHERE additionally pins that observed state so a concurrent claim cannot interleave.
+        where: {
+          id: qr.id,
+          organizationId: qr.organizationId,
+          assetId: null,
+          kitId: qr.kitId,
+        },
+        data: { organizationId, userId },
+      });
+    } catch (updateCause) {
+      if (isNotFoundError(updateCause)) {
+        throw new ShelfError({
+          // why: cause deliberately null — makeShelfError collapses any P2025
+          // anywhere in the cause chain to a 404, which would misreport this
+          // lost race as not-found.
+          cause: null,
+          title: "QR already linked.",
+          message:
+            "This QR code was claimed or linked by someone else while you were linking it. Refresh and try again.",
+          additionalData: { qrId, kitId, organizationId },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+      throw updateCause;
+    }
+
+    await updateKitQrCode(
+      {
+        kitId,
+        newQrId: qr.id,
+        organizationId,
+      },
+      tx
+    );
+  });
 
   return {
     oldQrCodeId: oldQrCode?.id,
@@ -4688,6 +4755,11 @@ export async function updateKitAssets({
           // `asset.assetKits[0]?.kitId`.
           assetKits: {
             select: {
+              // This kit's OWN membership ids. `BookingAsset.assetKitId` points
+              // at one of these exactly when a booking holds a slice of THIS
+              // kit, which is how the `kitBookings` derivation below scopes the
+              // new-member propagation.
+              id: true,
               kitId: true,
               // This kit's per-row slice — surfaced in the membership-remove
               // note + ASSET_KIT_CHANGED event ("removed 50 units from ...").
@@ -5034,10 +5106,45 @@ export async function updateKitAssets({
       });
     }
 
-    const kitBookings =
-      kit.assets
-        .find((a) => a.bookingAssets.length > 0)
-        ?.bookingAssets.map((ba) => ba.booking) ?? [];
+    /**
+     * Bookings that hold a slice of THIS kit.
+     *
+     * A booking carries this kit exactly when it has a `BookingAsset` whose
+     * `assetKitId` is one of this kit's own `AssetKit` ids. Anything else on a
+     * member asset — a standalone row, or a slice belonging to another kit the
+     * asset also happens to be in — is a different booking's business.
+     *
+     * This used to be `kit.assets.find((a) => a.bookingAssets.length > 0)`,
+     * taking one arbitrary member's ENTIRE booking list (the `bookingAssets`
+     * include carries no `where`). That was wrong in both directions, and a
+     * QUANTITY_TRACKED asset shared between kits triggered both at once:
+     *
+     *  - false positive: the member's row belonged to ANOTHER kit's booking, so
+     *    a newly-added member was written into a booking that never contained
+     *    this kit — surfacing a whole extra kit nobody added, and creating
+     *    reservation conflicts that silently disabled that booking's Reserve
+     *    button;
+     *  - false negative: once `.find()` locked onto that member, bookings which
+     *    genuinely DO hold this kit were skipped, so the kit drifted out of
+     *    sync with its own bookings.
+     *
+     * Deduped by booking id: several members of this kit normally sit in the
+     * same booking, and each would otherwise contribute a duplicate insert.
+     */
+    const thisKitAssetKitIds = new Set(
+      kitWithRelations.assetKits.map((ak) => ak.id)
+    );
+    const kitBookings = [
+      ...new Map(
+        kit.assets
+          .flatMap((asset) => asset.bookingAssets)
+          .filter(
+            (ba) =>
+              ba.assetKitId != null && thisKitAssetKitIds.has(ba.assetKitId)
+          )
+          .map((ba) => [ba.booking.id, ba.booking] as const)
+      ).values(),
+    ];
 
     // The old kit.update({ data: { assets: { connect, disconnect } } })
     // block becomes direct pivot writes inside a single $transaction so
@@ -5512,11 +5619,16 @@ export async function updateKitAssets({
 
         await tx.custody.createMany({ data: inheritData });
 
+        // `assetsToInheritStatus` filters on `hasCustody` alone, which does
+        // not exclude a checked-out asset — hence the guarded write.
+        // @see {@link file://./../asset/custody-status.server.ts}
         const inheritedIds = inheritData.map((row) => row.assetId);
-        await tx.asset.updateMany({
-          where: { id: { in: inheritedIds }, organizationId },
-          data: { status: AssetStatus.IN_CUSTODY },
-        });
+        await setCustodyDrivenAssetStatus(
+          tx,
+          inheritedIds,
+          organizationId,
+          AssetStatus.IN_CUSTODY
+        );
 
         // Activity events — one CUSTODY_ASSIGNED per asset that inherited
         // custody. `meta.quantity` is the per-row count `buildKitCustodyInheritData`
@@ -5734,12 +5846,11 @@ export async function updateKitAssets({
         const assetsToFlipAvailable = assetIds.filter(
           (id) => !stillCustodiedIds.has(id)
         );
-        if (assetsToFlipAvailable.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: assetsToFlipAvailable }, organizationId },
-            data: { status: AssetStatus.AVAILABLE },
-          });
-        }
+        await releaseAssetsToAvailableUnlessCheckedOut(
+          tx,
+          assetsToFlipAvailable,
+          organizationId
+        );
       });
 
       // Notes can be created outside transaction (not critical for consistency).
@@ -5797,46 +5908,123 @@ export async function updateKitAssets({
           : [];
       const akByAssetId = new Map(newAssetKits.map((ak) => [ak.assetId, ak]));
 
-      await Promise.all(
-        bookingsToUpdate.flatMap((booking) => {
-          const ops = [];
-          if (newlyAddedAssets.length > 0) {
-            ops.push(
-              db.bookingAsset.createMany({
-                data: newlyAddedAssets.map((a) => {
-                  const ak = akByAssetId.get(a.id);
-                  return {
-                    bookingId: booking.id,
-                    assetId: a.id,
-                    quantity: ak?.quantity ?? 1,
-                    assetKitId: ak?.id ?? null,
-                    // Mirror the assetKitId branch exactly: a row that falls
-                    // back to standalone has no kit provenance either. Writing
-                    // one without the other breaks the
-                    // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
-                    sourceKitId: ak ? kit.id : null,
-                  };
-                }),
-                skipDuplicates: true,
-              })
-            );
-          }
-          // why: removing an asset from a kit no longer deletes its
-          // BookingAsset rows from active bookings. The DB-level
-          // `BookingAsset.assetKitId` FK fires `ON DELETE SET NULL` when
-          // the AssetKit row is dropped (the actual delete happens in
-          // the outer tx above), converting the kit-driven booking slice
-          // into a standalone reservation. A per-booking system note
-          // emitted by `emitAssetKitDetachmentNotes` explains the
-          // conversion to the user. Deleting the row here would undo
-          // the SET NULL and silently shrink the booking — the opposite
-          // of the documented behaviour.
-          //
-          // Asset-bulk-remove (asset-side flow) is unaffected; it still
-          // goes through `removeAssets` which deletes the rows explicitly.
-          return ops;
+      /**
+       * Reporting events for the rows just propagated above.
+       *
+       * These are `ActivityEvent` rows — reporting data, NOT the booking's
+       * notes feed (that is `BookingNote`, which the Activity tab and its CSV
+       * export read). No note is written here deliberately: nobody acted on
+       * the booking, so there is nothing to tell its watchers.
+       *
+       * Emitting them matters because this insert is the only way a booking
+       * gains an asset without anybody touching the booking. Until now it left
+       * no trace in ANY table, which is what made the cross-kit leak this
+       * scoping fix addresses impossible to reconstruct after the fact.
+       * `BOOKING_ASSETS_ADDED` has no report consumer yet — it is recorded for
+       * the same reason `updateBookingAssets` records it, so the history exists
+       * when one arrives.
+       *
+       * One event per (booking, asset) pair rather than one per booking, so the
+       * data stays aggregable — see `.claude/rules/record-event-payload-shapes.md`.
+       * `kitId` names the kit that pulled the asset in, which is the provenance
+       * needed to explain why the row is there.
+       *
+       * Scoped to assets with a resolved `AssetKit`: those rows are keyed on a
+       * brand-new `assetKitId`, so the `(bookingId, assetKitId)` partial unique
+       * cannot collide and `skipDuplicates` cannot have silently dropped them.
+       * The `ak`-less fallback writes a standalone row that MAY be skipped
+       * against an existing one, and claiming an add that did not happen would
+       * make the trail lie.
+       */
+      const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
+        newlyAddedAssets.flatMap((asset) => {
+          const ak = akByAssetId.get(asset.id);
+          if (!ak) return [];
+          return [
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "BOOKING_ASSETS_ADDED" as const,
+              entityType: "BOOKING" as const,
+              entityId: booking.id,
+              bookingId: booking.id,
+              assetId: asset.id,
+              kitId: kit.id,
+              meta: assetQtyMeta(asset, ak.quantity),
+            },
+          ];
         })
       );
+
+      /**
+       * Propagated rows and their events commit together.
+       *
+       * A row that lands without its event is not merely untidy, it is
+       * unrecoverable: the membership transaction above has already persisted
+       * the `AssetKit` rows, so a retried call recomputes `newlyAddedAssets` as
+       * empty (it diffs the submitted ids against the kit's CURRENT members),
+       * skips this block entirely, and never re-emits the event. The booking
+       * would keep an asset whose arrival nothing recorded — the exact
+       * untraceability these events exist to prevent.
+       *
+       * A NEW narrow transaction rather than the membership one above: that tx
+       * already carries the detachment-impact fetch, collision merge, placement
+       * preservation, location cascade and a `consumptionLog.groupBy`, and has
+       * produced P2028 on large operations. Reads stay outside it (the
+       * `assetKit.findMany` above, and the event array is pure computation) so
+       * it holds writes only.
+       *
+       * Sequential, not `Promise.all`: an interactive transaction runs on a
+       * single connection, so concurrent queries on one `tx` client are unsafe.
+       * `bookingsToUpdate` is the set of bookings holding this kit — small.
+       *
+       * Residual, deliberately accepted: the membership tx has already
+       * committed, so a failure here still surfaces an error over a partly
+       * applied operation. This guarantees only that the propagated rows and
+       * their audit trail live or die together.
+       */
+      if (newlyAddedAssets.length > 0) {
+        await db.$transaction(async (tx) => {
+          for (const booking of bookingsToUpdate) {
+            await tx.bookingAsset.createMany({
+              data: newlyAddedAssets.map((a) => {
+                const ak = akByAssetId.get(a.id);
+                return {
+                  bookingId: booking.id,
+                  assetId: a.id,
+                  quantity: ak?.quantity ?? 1,
+                  assetKitId: ak?.id ?? null,
+                  // Mirror the assetKitId branch exactly: a row that falls
+                  // back to standalone has no kit provenance either. Writing
+                  // one without the other breaks the
+                  // "assetKitId non-null ⇔ sourceKitId non-null" invariant.
+                  sourceKitId: ak ? kit.id : null,
+                };
+              }),
+              skipDuplicates: true,
+            });
+          }
+
+          if (propagatedEvents.length > 0) {
+            await recordEvents(propagatedEvents, tx);
+          }
+        });
+      }
+
+      // why: there is deliberately no delete counterpart here. Removing an
+      // asset from a kit does not delete its BookingAsset rows from ACTIVE
+      // bookings — the DB-level `BookingAsset.assetKitId` FK fires
+      // `ON DELETE SET NULL` when the AssetKit row is dropped (the actual
+      // delete happens in the membership tx above), converting the kit-driven
+      // slice into a standalone reservation, and
+      // `emitAssetKitDetachmentNotes` writes a per-booking system note
+      // explaining the conversion. Deleting the row here would undo that SET
+      // NULL and silently shrink the booking. Planning-status bookings are the
+      // exception and are handled by `removeKitSlicesFromPlanningBookings`,
+      // inside that same tx.
+      //
+      // Asset-bulk-remove (asset-side flow) is unaffected; it still goes
+      // through `removeAssets`, which deletes the rows explicitly.
     }
 
     /**
@@ -6126,13 +6314,13 @@ export async function bulkRemoveAssetsFromKits({
           organizationId,
         },
       });
-      if (assetsToFlipAvailable.length > 0) {
-        await tx.asset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetsToFlipAvailable` derive from `assets` loaded via the org-scoped `where: { id: { in: resolvedIds }, organizationId }` query earlier in bulkRemoveAssetsFromKits
-          where: { id: { in: assetsToFlipAvailable } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-      }
+      // The helper org-scopes the write itself, so the previous
+      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      await releaseAssetsToAvailableUnlessCheckedOut(
+        tx,
+        assetsToFlipAvailable,
+        organizationId
+      );
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {

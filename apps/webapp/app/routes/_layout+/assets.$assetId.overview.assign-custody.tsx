@@ -255,6 +255,58 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
+        /**
+         * Refuse to take custody of an asset that is checked out on a booking.
+         *
+         * `Asset.status` is a single column, so an unguarded write would
+         * silently overwrite `CHECKED_OUT` and the asset would stop being
+         * counted as off the shelf. Precedence is
+         * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`, per
+         * `reconcileAssetStatusForBookingExit`.
+         *
+         * The predicate lives on the UPDATE itself, not in a preceding read.
+         * Postgres runs at READ COMMITTED here, where a plain `SELECT` takes no
+         * row lock, so a read-then-write leaves exactly the last-writer-wins
+         * window this PR exists to close: a checkout committing between the two
+         * statements would be overwritten. Constraining the UPDATE makes the
+         * check atomic — the same pattern as `checkOutQuantity`,
+         * `releaseQuantity` and every kit custody path.
+         *
+         * `count === 0` means the row was filtered out, so we read only on that
+         * failure path to tell "checked out" apart from "no such asset" and to
+         * name the asset in the message. Rejecting rather than skipping mirrors
+         * `bulkCheckOutAssets`: an INDIVIDUAL asset is one physical item, so a
+         * custody claim while it is out is a real conflict the operator must
+         * see.
+         */
+        const claimed = await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        if (claimed.count === 0) {
+          const blocked = await tx.asset.findFirst({
+            where: { id: assetId, organizationId },
+            select: { title: true },
+          });
+
+          throw new ShelfError({
+            cause: null,
+            title: "Asset is checked out",
+            message: blocked
+              ? `"${blocked.title}" is currently checked out on a booking, so it cannot be given to a custodian. Check the booking in first.`
+              : "This asset could not be found in your workspace.",
+            additionalData: { userId, assetId, custodianId },
+            label: "Assets",
+            shouldBeCaptured: false,
+            status: blocked ? 400 : 404,
+          });
+        }
+
         await tx.custody.deleteMany({ where: { assetId } });
 
         const updated = await tx.asset.update({
@@ -263,7 +315,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             organizationId,
           } as Prisma.AssetWhereUniqueInput,
           data: {
-            status: AssetStatus.IN_CUSTODY,
             custody: {
               create: {
                 custodian: { connect: { id: custodianId } },
@@ -294,6 +345,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return updated;
       })
       .catch((cause) => {
+        // Deliberate, user-facing failures (the CHECKED_OUT conflict above)
+        // must survive this wrapper. `ShelfError` inherits `title` and `status`
+        // from its cause but ALWAYS assigns its own `message`
+        // (`~/utils/error.ts`), and the form renders only
+        // `actionData.error.message` — so wrapping would swap the specific
+        // instruction for the generic one and the operator would never learn
+        // why the assignment failed.
+        if (cause instanceof ShelfError) {
+          throw cause;
+        }
+
         throw new ShelfError({
           cause,
           message:
