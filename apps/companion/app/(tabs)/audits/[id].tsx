@@ -61,18 +61,19 @@ type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
  */
 function isAssetFilterVisible(
   value: AssetFilterValue,
-  audit: { status: string; completedAt: string | null }
+  audit: { completedAt: string | null }
 ): boolean {
-  // why: completion is read from `completedAt`, not the status. Archiving a
-  // completed audit rewrites the status to ARCHIVED, and a status check hid
-  // BOTH pills on it — you could no longer filter an archived audit down to
-  // the assets it recorded as missing.
-  const isOpen = audit.status === "PENDING" || audit.status === "ACTIVE";
+  // why: BOTH branches read `completedAt`, never the status, so the pills can
+  // never disagree with the rows. `displayAssets` classifies an unscanned asset
+  // as PENDING exactly when `completedAt` is null, so gating the pill on
+  // status PENDING/ACTIVE hid it on an archived-cancelled audit that was still
+  // showing "Not scanned" rows under All. Archiving a completed audit has the
+  // mirror problem: the status changes but those assets are still missing.
   const isCompleted = audit.completedAt != null;
   return value === "MISSING"
     ? isCompleted
     : value === "PENDING"
-    ? isOpen
+    ? !isCompleted
     : true;
 }
 
