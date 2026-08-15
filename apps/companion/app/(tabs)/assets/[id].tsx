@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useOrg } from "@/lib/org-context";
+import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
@@ -65,6 +66,37 @@ try {
     require("react-native-qrcode-svg");
 } catch {
   // Will render graceful fallback instead of QR code
+}
+
+/** Canonical wording for a booking status, shared with web via @shelf/labels. */
+function bookingStatusLabel(status: string): string {
+  return (
+    BOOKING_STATUS_LABELS[status as keyof typeof BOOKING_STATUS_LABELS] ??
+    status
+  );
+}
+
+/**
+ * A booking's status, drawn the way every other booking surface draws it.
+ *
+ * Kept as a component rather than inlined so the asset screen, the bookings
+ * list and the calendar cannot drift apart again by editing one of them.
+ */
+function BookingStatusPill({ status }: { status: string }) {
+  const { colors, bookingStatusBadge } = useTheme();
+  const styles = useStyles();
+  const badge = bookingStatusBadge[status] ?? {
+    bg: colors.borderLight,
+    text: colors.muted,
+  };
+
+  return (
+    <View style={[styles.bookingStatusPill, { backgroundColor: badge.bg }]}>
+      <Text style={[styles.bookingStatusText, { color: badge.text }]}>
+        {bookingStatusLabel(status)}
+      </Text>
+    </View>
+  );
 }
 
 export default function AssetDetailScreen() {
@@ -731,7 +763,7 @@ export default function AssetDetailScreen() {
                       style={styles.bookingRow}
                       onPress={() => router.push(`/bookings/${b.id}`)}
                       accessibilityRole="button"
-                      accessibilityLabel={`${b.name}, ${formatStatus(
+                      accessibilityLabel={`${b.name}, ${bookingStatusLabel(
                         b.status
                       )}, ${formatDate(b.from)} to ${formatDate(b.to)}`}
                     >
@@ -748,9 +780,12 @@ export default function AssetDetailScreen() {
                           </Text>
                         ) : null}
                       </View>
-                      <Text style={styles.bookingStatus}>
-                        {formatStatus(b.status)}
-                      </Text>
+                      {/* The same pill the bookings list, the booking detail
+                          and the calendar's day panel draw. This was plain
+                          text, so an asset's bookings were the one place in
+                          the app where a booking status did not look like a
+                          booking status. */}
+                      <BookingStatusPill status={b.status} />
                     </TouchableOpacity>
                   ))
                 )}
@@ -1224,10 +1259,14 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.xs,
     color: colors.mutedLight,
   },
-  bookingStatus: {
+  bookingStatusPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.pill,
+  },
+  bookingStatusText: {
     fontSize: fontSize.xs,
     fontWeight: "600",
-    color: colors.foregroundSecondary,
   },
   sectionTitle: {
     fontSize: fontSize.sm,
