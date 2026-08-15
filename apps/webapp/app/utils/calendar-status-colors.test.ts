@@ -84,11 +84,9 @@ describe("calendar event colours match the rest of the product", () => {
     expect(expectedFamily(BookingStatus.OVERDUE)).toBe("error");
 
     for (const view of ["dayGridMonth", "timeGridWeek"] as const) {
-      const classes = getStatusClasses(
-        BookingStatus.OVERDUE,
-        false,
-        view
-      ).join(" ");
+      const classes = getStatusClasses(BookingStatus.OVERDUE, false, view).join(
+        " "
+      );
       expect(classes).not.toContain("warning");
     }
   });
