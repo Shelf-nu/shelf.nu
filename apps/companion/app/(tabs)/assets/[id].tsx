@@ -1,3 +1,4 @@
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { useState } from "react";
 import {
   View,
@@ -457,22 +458,22 @@ export default function AssetDetailScreen() {
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label="Available"
+                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />
                     {breakdown && (
                       <>
                         <QuantityStat
-                          label="In custody"
+                          label={ASSET_QTY_STATUS_LABELS.IN_CUSTODY}
                           value={`${breakdown.inCustody}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Reserved"
+                          label={ASSET_QTY_STATUS_LABELS.RESERVED}
                           value={`${breakdown.reserved}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Checked out"
+                          label={ASSET_QTY_STATUS_LABELS.CHECKED_OUT}
                           value={`${breakdown.checkedOut}${unitSuffix}`}
                         />
                       </>
@@ -567,8 +568,10 @@ export default function AssetDetailScreen() {
                     label={entry.custodian.name}
                     value={
                       kitHeldQty > 0
-                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
-                        : qtyLabel ?? "In custody"
+                        ? `${
+                            qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                          } • ${kitHeldQty} via kit`
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                     }
                     onPress={
                       canReleaseRow

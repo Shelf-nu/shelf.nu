@@ -43,7 +43,10 @@ const keyExtractor = (item: AssetListItem) => item.id;
 type FilterConfig = { label: string; status: string; myCustody?: boolean };
 const FILTERS: FilterConfig[] = [
   { label: "All", status: "" },
-  { label: "My Custody", status: "", myCustody: true },
+  // why: sentence case ("My custody", not "My Custody") to sit consistently
+  // beside the @shelf/labels chips below, which are sentence case. This one has
+  // no package entry — it is not a status, it is a custodian filter.
+  { label: "My custody", status: "", myCustody: true },
   // why: read from @shelf/labels, not hand-typed. The chips said "In Custody"
   // and "Checked Out" while the badge on the very same row said "In custody"
   // and "Checked out", because badges go through formatStatus and these did not.
@@ -465,6 +468,11 @@ function AssetsListContent() {
               <Text style={styles.emptyTitle}>
                 {debouncedSearch
                   ? "No results found"
+                  : // why: the custodian filter needs its own sentence — running
+                  // its label through the status template yields "No my custody
+                  // assets". The kits list already branches this way.
+                  FILTERS[activeFilter].myCustody
+                  ? "No assets in your custody"
                   : activeFilter > 0
                   ? `No ${FILTERS[activeFilter].label.toLowerCase()} assets`
                   : "No assets yet"}
