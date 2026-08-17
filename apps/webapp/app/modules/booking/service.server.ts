@@ -79,7 +79,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapAssetWithCountForNote,
@@ -146,7 +146,7 @@ import type {
 } from "./types";
 import {
   createBookingConflictConditions,
-  getBookingWhereInput,
+  getBulkBookingsWhereInput,
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -11494,20 +11494,29 @@ export async function bulkDeleteBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -11660,6 +11669,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -11671,14 +11681,22 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const bookings = await db.booking.findMany({
       where,
@@ -11857,20 +11875,29 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
