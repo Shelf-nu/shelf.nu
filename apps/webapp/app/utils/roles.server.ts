@@ -251,6 +251,76 @@ export async function requirePermission({
 }
 
 /**
+ * Whether the user holds OWNER in the given organization.
+ *
+ * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
+ * which returns `roles[0]` — a user carrying more than one role could be the
+ * owner without OWNER being first. This mirrors the check the loaders already
+ * use to decide whether to render the purchase UI, so the server gate and the
+ * UI gate cannot disagree.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @returns `true` if the caller owns this workspace
+ */
+export function isOrganizationOwner({
+  userOrganizations,
+  organizationId,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+}): boolean {
+  return (
+    userOrganizations
+      .find((o) => o.organization.id === organizationId)
+      ?.roles.includes(OrganizationRoles.OWNER) ?? false
+  );
+}
+
+/**
+ * Asserts the caller owns the workspace.
+ *
+ * `requirePermission(subscription, update)` is NOT sufficient for anything that
+ * spends money or burns a one-time entitlement: ADMIN short-circuits to
+ * allow-all in `hasPermission`, so it passes that gate. The add-on purchase UI
+ * is owner-only, but the actions behind it were not — letting an ADMIN burn the
+ * workspace's single free trial (an irreversible flag) and commit the workspace
+ * to a charge on the owner's card.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @param action - Verb phrase completing "Only the workspace owner can …"
+ * @throws {ShelfError} 403 if the caller is not the owner
+ */
+export function assertIsOrganizationOwner({
+  userOrganizations,
+  organizationId,
+  action,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+  action: string;
+}): void {
+  if (!isOrganizationOwner({ userOrganizations, organizationId })) {
+    throw new ShelfError({
+      cause: null,
+      title: "Owner only",
+      message: `Only the workspace owner can ${action}.`,
+      additionalData: { organizationId },
+      label: "Subscription",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Splits a comma-separated `SsoDetails` group-id field into a normalized list of
  * lower-cased, trimmed, non-empty ids. Mirrors the comma-separated convention
  * already used by `SsoDetails.domain`, so one role can map to several IdP groups
