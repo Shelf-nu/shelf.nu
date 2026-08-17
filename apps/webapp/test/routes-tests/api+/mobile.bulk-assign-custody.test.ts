@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/bulk-assign-custody";
 import { createActionArgs } from "@mocks/remix";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // @vitest-environment node
 
@@ -132,7 +133,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     // in the organization. SELF_SERVICE holds `asset:custody`, so this is
     // reachable by a restricted role, not just an admin.
     const request = createBulkAssignRequest({
-      assetIds: ["all-selected"],
+      assetIds: [ALL_SELECTED_KEY],
       custodianId: "custodian-1",
     });
 
@@ -149,7 +150,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     // The service checks `ids.includes(ALL_SELECTED_KEY)`, so one sentinel
     // anywhere switches the whole request to select-all.
     const request = createBulkAssignRequest({
-      assetIds: ["asset-1", "all-selected"],
+      assetIds: ["asset-1", ALL_SELECTED_KEY],
       custodianId: "custodian-1",
     });
 

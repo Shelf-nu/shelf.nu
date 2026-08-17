@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/custody.assign";
 import { createActionArgs } from "@mocks/remix";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // @vitest-environment node
 
@@ -177,7 +178,7 @@ describe("POST /api/mobile/custody/assign", () => {
    */
   it("rejects the select-all sentinel in the scalar assetId field", async () => {
     const request = createCustodyAssignRequest({
-      assetId: "all-selected",
+      assetId: ALL_SELECTED_KEY,
       custodianId: "custodian-1",
     });
 
