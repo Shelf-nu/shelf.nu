@@ -1,11 +1,127 @@
-import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
-import type { Asset, Booking, Organization, Prisma } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
+import type {
+  Asset,
+  Booking,
+  Organization,
+  Prisma,
+  User,
+} from "@prisma/client";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 const label: ErrorLabel = "Booking";
+
+/**
+ * Restricts a bulk booking query to the rows the caller is allowed to act on.
+ *
+ * Mirrors `validateBookingOwnership`, the gate the SINGULAR write paths use:
+ * a BASE or SELF_SERVICE caller may only act on bookings they created or hold
+ * custody of. ADMIN and OWNER are unrestricted.
+ *
+ * Deliberately keyed on the ROLE, not on `canSeeAllBookings`. Those differ:
+ * `selfServiceCanSeeBookings` / `baseUserCanSeeBookings` make the *list* show a
+ * restricted user every booking in the workspace, but they do not grant write
+ * access — singular delete still refuses. Scoping a destructive bulk action by
+ * what the user can SEE would hand those workspaces org-wide deletion.
+ *
+ * Team-member custody links are intentionally absent, matching
+ * `validateBookingOwnership`. The read path is wider (it also matches
+ * `custodianTeamMemberId`), and that asymmetry is a known, separately tracked
+ * inconsistency — widening it here would be a silent authorization change
+ * bundled into a security fix.
+ *
+ * @param role - The caller's effective role in this organization
+ * @param userId - The caller
+ * @returns An ownership predicate, or `null` when the role is unrestricted
+ */
+export function getBookingOwnershipScope({
+  role,
+  userId,
+}: {
+  role: OrganizationRoles;
+  /** Absent for system-initiated calls, which have no acting user */
+  userId?: User["id"];
+}): Prisma.BookingWhereInput | null {
+  const isRestricted =
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+
+  if (!isRestricted) {
+    return null;
+  }
+
+  if (!userId) {
+    /**
+     * A restricted role with nobody to scope to. Returning `null` here would
+     * silently hand the caller every booking in the workspace, so fail closed:
+     * this can only be a wiring mistake, and it must not degrade into an
+     * org-wide destructive query.
+     */
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Cannot resolve which bookings this user may act on. Please contact support.",
+      additionalData: { role },
+      label,
+    });
+  }
+
+  return { OR: [{ creatorId: userId }, { custodianUserId: userId }] };
+}
+
+/**
+ * Builds the complete `where` for a bulk booking action.
+ *
+ * Shared by `bulkDeleteBookings`, `bulkArchiveBookings` and
+ * `bulkCancelBookings` so the three cannot drift — and so the ownership scope
+ * cannot be forgotten on one of them.
+ *
+ * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
+ * only to "select all" would still let a restricted caller act on someone
+ * else's booking by posting its id directly.
+ *
+ * @param bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
+ * @param organizationId - The caller's (validated) organization
+ * @param currentSearchParams - The list filters, for the select-all branch
+ * @param role - The caller's effective role
+ * @param userId - The caller
+ * @returns A `Prisma.BookingWhereInput` scoped to org, filters and ownership
+ */
+export function getBulkBookingsWhereInput({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+  role,
+  userId,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  role: OrganizationRoles;
+  /** Absent for system-initiated calls, which have no acting user */
+  userId?: User["id"];
+}): Prisma.BookingWhereInput {
+  const base: Prisma.BookingWhereInput = bookingIds.includes(ALL_SELECTED_KEY)
+    ? getBookingWhereInput({ currentSearchParams, organizationId })
+    : { id: { in: bookingIds }, organizationId };
+
+  const ownership = getBookingOwnershipScope({ role, userId });
+
+  if (!ownership) {
+    return base;
+  }
+
+  // AND rather than a spread: `base` may carry its own OR, and merging the two
+  // would union them — widening a destructive action instead of narrowing it.
+  return { AND: [base, ownership] };
+}
 
 export function getBookingWhereInput({
   organizationId,
