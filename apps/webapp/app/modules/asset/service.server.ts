@@ -164,12 +164,10 @@ import {
   parseSortingOptions,
 } from "./query.server";
 import {
-  buildAssetStatusWhere,
-  buildFullAssetSearchOr,
-  buildNarrowAssetSearchOr,
-  isIdShapedSearch,
-  splitAssetSearchTerms,
-} from "./search.server";
+  buildAssetSearchUnion,
+  type AssetSearchIdRow,
+} from "./search-union.server";
+import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -642,18 +640,6 @@ export async function getAssets(params: {
 
     const where: Prisma.AssetWhereInput = { organizationId };
 
-    // Lazily builds the full multi-column search clause. Held as a builder
-    // (not a prebuilt value) so a successful narrow ID lookup never pays to
-    // construct the 10-branch clause it won't use; it is only invoked by the
-    // non-ID path or by the fallback re-query when the narrow query is empty.
-    let shouldFallbackToFullSearch = false;
-    let buildFullSearchOr: (() => Prisma.AssetWhereInput[]) | undefined;
-    // Number of OR entries the narrow search contributed. Later filters
-    // (uncategorized / untagged / without-location / team-member) also append
-    // to `where.OR`, so the fallback re-query replaces only these first
-    // entries with the full clause and preserves the appended filter clauses.
-    let narrowSearchOrCount = 0;
-
     if (availableToBookOnly) {
       where.availableToBook = true;
     }
@@ -667,30 +653,38 @@ export async function getAssets(params: {
         // must not return the full list. Mirrors the mobile composer.
         where.id = { in: [] };
       } else {
-        // Full multi-column clause (title, sequentialId, description,
-        // category, location, tags, custodian names, QR/barcode, custom
-        // fields) — shared with the mobile assets endpoint via
-        // modules/asset/search.server.ts so web and mobile search can't
-        // drift apart. It is the slow path, so for ID-shaped searches we run
-        // the narrow clause first and only build/use this when it finds
-        // nothing (see the fallback re-query further down). Kept as a
-        // closure so the clause is constructed only when actually needed.
-        buildFullSearchOr = () => buildFullAssetSearchOr(searchTerms);
-
-        // Fast path for ID-shaped terms: narrow indexed clause first, full
-        // clause only when it returns zero rows (fallback re-query below).
-        // Column choice + rationale live on buildNarrowAssetSearchOr in
-        // modules/asset/search.server.ts.
-        if (isIdShapedSearch(searchTerms)) {
-          shouldFallbackToFullSearch = true;
-          where.OR = buildNarrowAssetSearchOr(searchTerms);
-          // Remember how many entries belong to the search so the fallback can
-          // swap them out without disturbing filter clauses appended later.
-          narrowSearchOrCount = where.OR.length;
-        } else {
-          // Not an ID-shaped search — go straight to the full clause.
-          where.OR = buildFullSearchOr();
-        }
+        // Resolve the search to a set of matching asset ids via the shared
+        // org-scoped UNION (buildAssetSearchUnion) — index-driven, org-scoped
+        // branches, ~165ms vs the old multi-table OR's cross-org seq scans.
+        // Setting where.OR here — BEFORE the category/tag/location/team-member
+        // filters below — preserves the historical OR-entanglement: those
+        // filters append to where.OR, so search OR-combines with them exactly
+        // as the previous buildFullAssetSearchOr clause did. The UNION always
+        // searches all 10 sources (the old id-shaped fast path searched a
+        // subset and fell back on zero rows); id-shaped searches therefore now
+        // return the full result set — a superset of before, the more-correct
+        // answer.
+        // Wrapped in withPrismaRetry (operationIsRead) like the advanced
+        // index's raw query below — a raw $queryRaw bypasses the client's
+        // auto-retry extension, so a transient pool/connection blip on the
+        // id-resolution query would otherwise surface as a hard error (the
+        // SHELF-WEBAPP-227 class) instead of being retried.
+        const rows = await withPrismaRetry(
+          () =>
+            db.$queryRaw<AssetSearchIdRow[]>(
+              Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
+                organizationId,
+                terms: searchTerms,
+              })} AS "search_ids"`
+            ),
+          { operationIsRead: true }
+        );
+        // Materialize the matching ids into a Prisma `id: { in }` member.
+        // Bounded by the org's asset count; an extreme org + a very broad term
+        // could push the bind-param list toward Postgres' ~65k ceiling — if
+        // that ever bites, switch to a raw fetch-by-ids (like the advanced
+        // index's inlined subquery, which never materializes the id set).
+        where.OR = [{ id: { in: rows.map((row) => row.id) } }];
       }
     }
 
@@ -973,22 +967,7 @@ export async function getAssets(params: {
         db.asset.count({ where: assetWhere }),
       ]);
 
-    let [assets, totalAssets] = await fetchAssetsForWhere(where);
-
-    // Fallback: an ID-shaped search ran the narrow clause but matched no
-    // assets. The term may be embedded in a title, description, or custom
-    // field rather than being a real identifier, so re-run with the full
-    // search clause before giving up. Only the narrow search entries are
-    // swapped for the full clause; any filter clauses appended to `where.OR`
-    // afterwards (uncategorized / untagged / without-location / team-member)
-    // are kept so the fallback honours the same filters as the first query.
-    if (shouldFallbackToFullSearch && totalAssets === 0 && buildFullSearchOr) {
-      const appendedFilterOr = Array.isArray(where.OR)
-        ? where.OR.slice(narrowSearchOrCount)
-        : [];
-      where.OR = [...buildFullSearchOr(), ...appendedFilterOr];
-      [assets, totalAssets] = await fetchAssetsForWhere(where);
-    }
+    const [assets, totalAssets] = await fetchAssetsForWhere(where);
 
     return { assets, totalAssets };
   } catch (cause) {
@@ -1105,9 +1084,6 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
       paginationClause,
-      // Search reads c.name / l.name, so the slim phase must join Category +
-      // Location even without a category/location sort.
-      hasSearch: Boolean(search),
     });
 
     // Retry the raw read on transient DB failures. The auto-applied client
