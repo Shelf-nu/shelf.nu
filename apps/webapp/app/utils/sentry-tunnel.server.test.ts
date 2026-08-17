@@ -13,26 +13,49 @@
 
 import { describe, expect, it } from "vitest";
 
-import { envelopeDsnMatches, parseSentryDsn } from "./sentry-tunnel.server";
+import {
+  buildSentryEnvelopeUrl,
+  envelopeDsnMatches,
+  parseSentryDsn,
+} from "./sentry-tunnel.server";
 
 // @vitest-environment node
 
-const TARGET = { host: "o123.ingest.sentry.io", projectId: "456" };
+const TARGET = {
+  origin: "https://o123.ingest.sentry.io",
+  pathPrefix: "",
+  projectId: "456",
+};
 
 describe("parseSentryDsn", () => {
-  it("pulls the ingest host and project id out of a real DSN", () => {
+  it("pulls the ingest origin and project id out of a real DSN", () => {
     expect(parseSentryDsn("https://pubkey@o123.ingest.sentry.io/456")).toEqual(
       TARGET
     );
   });
 
-  it("takes the LAST path segment as the project id", () => {
-    // A self-hosted Sentry can live under a path prefix. The old code used
-    // `pathname.replace("/", "")`, which strips only the FIRST slash and would
-    // have produced "some/path/456".
+  it("keeps the base path a self-hosted instance is mounted under", () => {
+    // The old code used `pathname.replace("/", "")`, which strips only the
+    // FIRST slash and produced "some/path/456" as the project id. Taking the
+    // last segment fixes that, but the prefix still has to be KEPT — the
+    // ingest endpoint lives under it.
     expect(
       parseSentryDsn("https://pubkey@sentry.example.com/some/path/456")
-    ).toEqual({ host: "sentry.example.com", projectId: "456" });
+    ).toEqual({
+      origin: "https://sentry.example.com",
+      pathPrefix: "/some/path",
+      projectId: "456",
+    });
+  });
+
+  it("keeps a non-default port, which `hostname` would drop", () => {
+    expect(
+      parseSentryDsn("https://pubkey@sentry.example.com:8443/456")
+    ).toEqual({
+      origin: "https://sentry.example.com:8443",
+      pathPrefix: "",
+      projectId: "456",
+    });
   });
 
   it.each([
@@ -104,5 +127,30 @@ describe("envelopeDsnMatches", () => {
   it("rejects garbage rather than throwing", () => {
     expect(envelopeDsnMatches("", TARGET)).toBe(false);
     expect(envelopeDsnMatches("not-a-dsn", TARGET)).toBe(false);
+  });
+});
+
+describe("buildSentryEnvelopeUrl", () => {
+  it("builds the endpoint for a root-mounted instance", () => {
+    expect(buildSentryEnvelopeUrl(TARGET)).toBe(
+      "https://o123.ingest.sentry.io/api/456/envelope/"
+    );
+  });
+
+  it("builds the endpoint for a prefixed instance on a non-default port", () => {
+    // Both halves were previously lost: `hostname` dropped :8443, and the
+    // prefix was discarded — forwarding to a URL that does not exist there.
+    const target = parseSentryDsn(
+      "https://pubkey@sentry.example.com:8443/sentry/456"
+    );
+
+    expect(target).not.toBeNull();
+    expect(buildSentryEnvelopeUrl(target!)).toBe(
+      "https://sentry.example.com:8443/sentry/api/456/envelope/"
+    );
+  });
+
+  it("always emits https, because the parser refuses anything else", () => {
+    expect(buildSentryEnvelopeUrl(TARGET).startsWith("https://")).toBe(true);
   });
 });

@@ -33,8 +33,20 @@ import { SENTRY_DSN } from "~/utils/env";
 
 /** The ingest destination a Sentry DSN points at. */
 export type SentryIngestTarget = {
-  /** Ingest hostname, lower-cased by the URL parser. */
-  host: string;
+  /**
+   * Scheme + host + port, normalised by the URL parser (`https://host:8443`).
+   *
+   * `origin` rather than `hostname` because a self-hosted Sentry can run on a
+   * non-default port, and `hostname` silently drops it. It also strips
+   * userinfo, so `https://ours@evil.com/` yields `https://evil.com` and cannot
+   * masquerade as us.
+   */
+  origin: string;
+  /**
+   * Base path a self-hosted Sentry is mounted under, without a trailing slash
+   * (`/sentry`), or `""` for a root-mounted instance such as sentry.io.
+   */
+  pathPrefix: string;
   /** Numeric Sentry project id (the DSN's final path segment). */
   projectId: string;
 };
@@ -76,16 +88,20 @@ export function parseSentryDsn(
     return null;
   }
 
-  // The project id is the LAST path segment. Self-hosted Sentry can sit under
-  // a path prefix, and the previous `pathname.replace("/", "")` stripped only
-  // the first slash — which would have yielded "some/path/456".
-  const projectId = url.pathname.split("/").filter(Boolean).pop() ?? "";
+  // The project id is the LAST path segment; anything before it is the base
+  // path a self-hosted instance is mounted under. Both have to be kept: the
+  // ingest endpoint is `<origin><prefix>/api/<projectId>/envelope/`, so
+  // dropping the prefix (or the port, via `hostname`) forwards to a URL that
+  // does not exist on that deployment.
+  const segments = url.pathname.split("/").filter(Boolean);
+  const projectId = segments.pop() ?? "";
+  const pathPrefix = segments.length > 0 ? `/${segments.join("/")}` : "";
 
   if (!url.hostname || !projectId) {
     return null;
   }
 
-  return { host: url.hostname, projectId };
+  return { origin: url.origin, pathPrefix, projectId };
 }
 
 /**
@@ -106,8 +122,8 @@ export function getConfiguredSentryTarget(): SentryIngestTarget | null {
 /**
  * Whether an envelope's DSN addresses exactly the configured Sentry project.
  *
- * Compares parsed URL components, never substrings. Substring matching on a
- * host is trivially bypassed from both ends — `evil-o123.ingest.sentry.io`
+ * Compares parsed URL components (origin, base path, project id), never
+ * substrings. Substring matching on a host is trivially bypassed from both ends — `evil-o123.ingest.sentry.io`
  * ends with ours, `o123.ingest.sentry.io.evil.com` contains it, and
  * `https://o123.ingest.sentry.io@evil.com/` hides ours in the userinfo where a
  * naive check reads it as the host.
@@ -124,7 +140,8 @@ export function envelopeDsnMatches(
 
   return (
     parsed !== null &&
-    parsed.host === target.host &&
+    parsed.origin === target.origin &&
+    parsed.pathPrefix === target.pathPrefix &&
     parsed.projectId === target.projectId
   );
 }
@@ -140,5 +157,7 @@ export function envelopeDsnMatches(
  * @returns The absolute envelope endpoint URL
  */
 export function buildSentryEnvelopeUrl(target: SentryIngestTarget): string {
-  return `https://${target.host}/api/${target.projectId}/envelope/`;
+  // The scheme comes from `origin`, which is safe because `parseSentryDsn` is
+  // the only way to obtain a target and it refuses anything but https.
+  return `${target.origin}${target.pathPrefix}/api/${target.projectId}/envelope/`;
 }
