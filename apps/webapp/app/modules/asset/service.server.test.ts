@@ -2,7 +2,6 @@ import {
   AssetStatus,
   OrganizationRoles,
   type AssetIndexSettings,
-  type Prisma,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
