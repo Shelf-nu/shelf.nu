@@ -50,10 +50,18 @@ export function getBookingOwnershipScope({
   /** Absent for system-initiated calls, which have no acting user */
   userId?: User["id"];
 }): Prisma.BookingWhereInput | null {
-  const isRestricted =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  /**
+   * ALLOW-list, not a deny-list on SELF_SERVICE/BASE. A role added to
+   * `OrganizationRoles` later lands in the RESTRICTED branch by default, so it
+   * gets scoped to its own rows rather than silently inheriting org-wide
+   * delete. Matches `bookingWriteScopeClause`, which is the other query-side
+   * clause and documents the same reasoning; the submit-time gate
+   * (`validateBookingOwnership`) deny-lists by deliberate, separate design.
+   */
+  const canActOnEveryBooking =
+    role === OrganizationRoles.ADMIN || role === OrganizationRoles.OWNER;
 
-  if (!isRestricted) {
+  if (canActOnEveryBooking) {
     return null;
   }
 

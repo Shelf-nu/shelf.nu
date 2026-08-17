@@ -59,6 +59,28 @@ describe("getBookingOwnershipScope", () => {
       getBookingOwnershipScope({ role: OrganizationRoles.BASE })
     ).toThrow();
   });
+
+  it("restricts an unrecognised role rather than waving it through", () => {
+    // The check allow-lists ADMIN/OWNER, so a role added to the enum later
+    // lands in the RESTRICTED branch by default. A deny-list would hand it
+    // org-wide delete on the day it was introduced.
+    const futureRole = "AUDITOR" as OrganizationRoles;
+
+    expect(getBookingOwnershipScope({ role: futureRole, userId: ME })).toEqual({
+      OR: [{ creatorId: ME }, { custodianUserId: ME }],
+    });
+  });
+
+  it("covers every role in the enum, so a new one cannot slip past unreviewed", () => {
+    // Fails the moment `OrganizationRoles` grows a member: whoever adds it has
+    // to decide which side of this clause it belongs on.
+    expect(Object.values(OrganizationRoles).sort()).toEqual([
+      OrganizationRoles.ADMIN,
+      OrganizationRoles.BASE,
+      OrganizationRoles.OWNER,
+      OrganizationRoles.SELF_SERVICE,
+    ]);
+  });
 });
 
 describe("getBulkBookingsWhereInput — select all", () => {
