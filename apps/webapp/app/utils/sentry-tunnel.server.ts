@@ -67,7 +67,12 @@ export function parseSentryDsn(
     return null;
   }
 
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
+  // https only, deliberately. The tunnel has always egressed over https, so an
+  // http DSN never actually worked — accepting one here would only create an
+  // asymmetry with `buildSentryEnvelopeUrl` (which pins https), and the next
+  // editor to derive the scheme from the parsed target would silently
+  // reintroduce plaintext egress.
+  if (url.protocol !== "https:") {
     return null;
   }
 

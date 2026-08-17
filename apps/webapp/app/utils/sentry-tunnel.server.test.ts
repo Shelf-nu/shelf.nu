@@ -43,6 +43,9 @@ describe("parseSentryDsn", () => {
     ["no project id", "https://pubkey@o123.ingest.sentry.io/"],
     ["a non-http scheme", "file:///etc/passwd"],
     ["a javascript: URL", "javascript:alert(1)"],
+    // The tunnel always egressed over https, so an http DSN never worked.
+    // Refusing it keeps the parser and `buildSentryEnvelopeUrl` in agreement.
+    ["a plaintext http DSN", "http://pubkey@o123.ingest.sentry.io/456"],
   ])("returns null for %s", (_label, input) => {
     expect(parseSentryDsn(input)).toBeNull();
   });
