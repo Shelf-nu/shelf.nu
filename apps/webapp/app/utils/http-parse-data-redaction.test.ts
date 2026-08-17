@@ -123,3 +123,47 @@ describe("parseData redaction", () => {
     expect(validationErrors.password.message).toBe("Password is too short.");
   });
 });
+
+describe("logger serialization", () => {
+  it("redacts a hand-written additionalData that carries a secret", async () => {
+    // Defence in depth for the sites parseData does not build. `serializeError`
+    // is the single point where a ShelfError becomes the object pino writes, so
+    // redacting there makes a new `additionalData` safe by default.
+    const { serializeError } = await import("./logger");
+    const { ShelfError } = await import("./error");
+
+    const serialized = serializeError(
+      new ShelfError({
+        cause: null,
+        message: "Invalid or expired verification code",
+        additionalData: { email: "user@example.com", otp: "123456" },
+        label: "Auth",
+        shouldBeCaptured: false,
+      })
+    ) as unknown as { additionalData: Record<string, unknown> };
+
+    expect(serialized.additionalData.otp).toBe(REDACTED);
+    // The useful context survives — redaction must not cost us debuggability.
+    expect(serialized.additionalData.email).toBe("user@example.com");
+  });
+
+  it("redacts through a nested cause chain", async () => {
+    const { serializeError } = await import("./logger");
+    const { ShelfError } = await import("./error");
+
+    const inner = new ShelfError({
+      cause: null,
+      message: "inner",
+      additionalData: { password: "hunter2" },
+      label: "Auth",
+    });
+
+    const serialized = JSON.stringify(
+      serializeError(
+        new ShelfError({ cause: inner, message: "outer", label: "Auth" })
+      )
+    );
+
+    expect(serialized).not.toContain("hunter2");
+  });
+});
