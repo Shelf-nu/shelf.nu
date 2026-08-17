@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import {
   bulkAssignKitCustody,
   bulkReleaseKitCustody,
@@ -39,16 +40,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("assign-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     custodianId: z.string().min(1),
   }),
   z.object({
     intent: z.literal("release-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
   }),
   z.object({
     intent: z.literal("update-location"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     newLocationId: z.string().min(1),
   }),
 ]);

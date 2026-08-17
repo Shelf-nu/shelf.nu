@@ -6,6 +6,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -46,7 +47,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const body = await request.json();
     const { assetIds, custodianId } = z
       .object({
-        assetIds: z.array(z.string().min(1)).min(1),
+        assetIds: mobileBulkIdsSchema("assetIds"),
         custodianId: z.string().min(1),
       })
       .parse(body);
