@@ -22,6 +22,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
@@ -40,14 +41,15 @@ import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
+import { ArchivedViewToggle } from "./archived-view-toggle";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
+import { useAssetAvailabilityData } from "./use-asset-availability-data";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
-import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 export const AssetsList = ({
   customEmptyStateContent,
@@ -72,6 +74,7 @@ export const AssetsList = ({
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
   const { isBase } = useUserRoleHelper();
+  const canArchiveAssets = useCanArchiveAssets();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -219,6 +222,18 @@ export const AssetsList = ({
               }
               customEmptyStateContent={
                 customEmptyStateContent ? customEmptyStateContent : undefined
+              }
+              /**
+               * Active/Archived/All lives beside the item count, not in the
+               * filter row (issue #382). It is a view SCOPE, not a filter —
+               * it is in NON_FILTER_PARAMS and Clear Filters leaves it alone —
+               * and it changes what "N assets out of M" counts, so it belongs
+               * next to that number. The filter row was also full: 12 controls
+               * ending 33px short of a 1440px viewport, where this took 14%.
+               * One slot serves both index modes, so it cannot drift.
+               */
+              headerTitleContent={
+                canArchiveAssets ? <ArchivedViewToggle /> : undefined
               }
               headerChildren={headerChildren}
               extraItemComponentProps={

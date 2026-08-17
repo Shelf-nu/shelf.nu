@@ -12,14 +12,12 @@ import {
   useSearchParamHasValue,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
-import { ArchivedViewToggle } from "./archived-view-toggle";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
@@ -43,7 +41,6 @@ export function AssetIndexFilters({
   const hasFiltersToClear = useSearchParamHasValue(...filterParams);
   const clearFilters = useClearValueFromParams(...filterParams);
   const { roles } = useUserRoleHelper();
-  const canArchiveAssets = useCanArchiveAssets();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 
@@ -60,12 +57,6 @@ export function AssetIndexFilters({
           "left-of-search": (
             <div className="flex items-center gap-2">
               <StatusFilter statusItems={AssetStatus} />
-              {/* Global Active/Archived/All dimension, separate from the
-                  per-status filter above (issue #382). Only for roles that can
-                  archive — see canArchiveAssets. */}
-              <When truthy={canArchiveAssets}>
-                <ArchivedViewToggle />
-              </When>
             </div>
           ),
           "right-of-search": (
@@ -193,7 +184,6 @@ export function AssetIndexFilters({
 }
 
 function AdvancedAssetIndexFilters() {
-  const canArchiveAssets = useCanArchiveAssets();
 
   return (
     <Filters
@@ -201,11 +191,6 @@ function AdvancedAssetIndexFilters() {
         "left-of-search": <AdvancedFilteringAndSorting />,
         "right-of-search": (
           <div className="flex items-center gap-2">
-            {/* Active/Archived/All view dimension (issue #382). Only for roles
-                that can archive — see canArchiveAssets. */}
-            <When truthy={canArchiveAssets}>
-              <ArchivedViewToggle />
-            </When>
             <AvailabilityViewToggle modeIsSimple={false} />
           </div>
         ),

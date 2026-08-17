@@ -75,6 +75,16 @@ export type ListProps = {
   customPagination?: ReactElement;
   /** Any extra content to the right in Header */
   headerExtraContent?: ReactNode;
+  /**
+   * Rendered beside the title and item count, in the LEFT half of the header
+   * row.
+   *
+   * For controls that change WHICH SET the list is showing, so they sit next
+   * to the count they govern — "20 assets out of 66" means something different
+   * per set. `headerExtraContent` is the right half, which is an actions zone
+   * (export, bulk actions); a scope switch is not an action.
+   */
+  headerTitleContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 
@@ -92,6 +102,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     title,
     ItemComponent,
     headerChildren,
+    headerTitleContent,
     hideFirstHeaderColumn = false,
     navigate,
     className,
@@ -136,12 +147,13 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               "flex justify-between border-b md:items-center "
             )}
           >
-            <div>
+            <div className="flex items-center gap-3">
               <ListTitle
                 title={title}
                 disableSelectAllItems={disableSelectAllItems}
                 hasBulkActions={!!bulkActions}
               />
+              <When truthy={!!headerTitleContent}>{headerTitleContent}</When>
             </div>
             <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
