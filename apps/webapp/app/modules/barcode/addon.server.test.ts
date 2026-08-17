@@ -7,7 +7,7 @@ const { mockStripe } = vi.hoisted(() => ({
   mockStripe: {
     checkout: { sessions: { create: vi.fn() } },
     subscriptions: { create: vi.fn(), list: vi.fn(), update: vi.fn() },
-    prices: { list: vi.fn() },
+    prices: { list: vi.fn(), retrieve: vi.fn() },
     products: { retrieve: vi.fn() },
     paymentMethods: { list: vi.fn() },
   },
@@ -49,6 +49,17 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // why: `assertPriceIsForAddon` resolves the price server-side before any
+  // subscription is created, so every path here needs a valid add-on price.
+  mockStripe.prices.retrieve.mockResolvedValue({
+    id: "price_123",
+    active: true,
+    product: {
+      id: "prod_1",
+      deleted: false,
+      metadata: { product_type: "addon", addon_type: "barcodes" },
+    },
+  });
   mockPremiumIsEnabled.value = true;
   mockOrgUpdate.mockResolvedValue({ id: "org_1" });
 });
@@ -634,5 +645,58 @@ describe("handleBarcodeAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("add-on price validation (entitlement bypass)", () => {
+  /**
+   * A TIER price is an ordinary active recurring price, so before this guard
+   * it was accepted here. The route enables the feature flag eagerly, and the
+   * resulting subscription carries a tierId — which makes `isAddonSubscription`
+   * return false, so the add-on webhook that would clear the flag never runs.
+   * Net effect: a one-time 7-day trial granted the paid feature permanently.
+   *
+   * detail.dev finding D094.
+   */
+  it("refuses a tier price and never creates a subscription", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonTrialSubscription({
+        ...baseTrialParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tier price on the checkout path too", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonCheckoutSession({
+        ...baseCheckoutParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });
