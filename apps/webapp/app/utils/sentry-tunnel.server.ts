@@ -31,7 +31,15 @@
 
 import { SENTRY_DSN } from "~/utils/env";
 
-/** The ingest destination a Sentry DSN points at. */
+/**
+ * A validated Sentry ingest destination.
+ *
+ * Only ever produced by {@link parseSentryDsn}, which is what lets
+ * {@link buildSentryEnvelopeUrl} trust the scheme: a value of this type has
+ * already been proven to be an https DSN. Holding it as a type rather than a
+ * raw string is deliberate — it means a client-supplied DSN cannot reach URL
+ * construction by mistake.
+ */
 export type SentryIngestTarget = {
   /**
    * Scheme + host + port, normalised by the URL parser (`https://host:8443`).
@@ -97,7 +105,14 @@ export function parseSentryDsn(
   const projectId = segments.pop() ?? "";
   const pathPrefix = segments.length > 0 ? `/${segments.join("/")}` : "";
 
-  if (!url.hostname || !projectId) {
+  // The public key is mandatory per the DSN spec, so its absence means the
+  // string is not a DSN at all. We still do not COMPARE it (see below) — this
+  // only stops a malformed value being treated as a usable destination.
+  //
+  // The project id is deliberately NOT required to be numeric: Sentry's own
+  // SDK spec calls it a string identifier that is merely "usually an integer",
+  // and it never reaches URL construction from client input anyway.
+  if (!url.username || !url.hostname || !projectId) {
     return null;
   }
 

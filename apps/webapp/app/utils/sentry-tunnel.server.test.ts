@@ -48,6 +48,18 @@ describe("parseSentryDsn", () => {
     });
   });
 
+  it("accepts a non-numeric project id, which the spec permits", () => {
+    // Sentry's SDK spec calls the project id a string identifier that is
+    // merely "usually an integer". Enforcing numeric would break a valid
+    // deployment and buys nothing: a client-supplied project id is only ever
+    // compared, never used to build a URL.
+    expect(parseSentryDsn("https://pubkey@sentry.example.com/abc123")).toEqual({
+      origin: "https://sentry.example.com",
+      pathPrefix: "",
+      projectId: "abc123",
+    });
+  });
+
   it("keeps a non-default port, which `hostname` would drop", () => {
     expect(
       parseSentryDsn("https://pubkey@sentry.example.com:8443/456")
@@ -69,6 +81,9 @@ describe("parseSentryDsn", () => {
     // The tunnel always egressed over https, so an http DSN never worked.
     // Refusing it keeps the parser and `buildSentryEnvelopeUrl` in agreement.
     ["a plaintext http DSN", "http://pubkey@o123.ingest.sentry.io/456"],
+    // The public key is mandatory per the DSN spec; without it the string is
+    // not a DSN at all.
+    ["a keyless DSN", "https://o123.ingest.sentry.io/456"],
   ])("returns null for %s", (_label, input) => {
     expect(parseSentryDsn(input)).toBeNull();
   });
@@ -101,16 +116,16 @@ describe("envelopeDsnMatches", () => {
   });
 
   it.each([
-    ["an arbitrary attacker host", "https://evil.com/456"],
-    ["the AWS metadata endpoint", "https://169.254.169.254/456"],
-    ["localhost", "https://127.0.0.1/456"],
+    ["an arbitrary attacker host", "https://pubkey@evil.com/456"],
+    ["the AWS metadata endpoint", "https://pubkey@169.254.169.254/456"],
+    ["localhost", "https://pubkey@127.0.0.1/456"],
     [
       "a host that merely ends with ours",
-      "https://evilo123.ingest.sentry.io/456",
+      "https://pubkey@evilo123.ingest.sentry.io/456",
     ],
     [
       "a host that merely contains ours",
-      "https://o123.ingest.sentry.io.evil.com/456",
+      "https://pubkey@o123.ingest.sentry.io.evil.com/456",
     ],
     [
       "ours smuggled into userinfo",
@@ -118,7 +133,7 @@ describe("envelopeDsnMatches", () => {
     ],
     [
       "ours smuggled into the path",
-      "https://evil.com/o123.ingest.sentry.io/456",
+      "https://pubkey@evil.com/o123.ingest.sentry.io/456",
     ],
   ])("rejects %s", (_label, dsn) => {
     expect(envelopeDsnMatches(dsn, TARGET)).toBe(false);
