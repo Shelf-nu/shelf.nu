@@ -9239,6 +9239,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["bk-arch-1", "bk-arch-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Service no longer wraps the updateMany + notes in an interactive
@@ -9285,6 +9286,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9328,6 +9330,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9349,6 +9352,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9382,6 +9386,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["r1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
     expect(db.booking.updateMany).not.toHaveBeenCalled();
@@ -9405,6 +9410,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["o1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9433,6 +9439,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["c1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // COMPLETE rows archive without the flag…
@@ -9482,6 +9489,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -9542,6 +9550,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
@@ -9605,6 +9614,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-canc-1", "bk-canc-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
       hints: mockClientHints,
     });
 
@@ -9866,7 +9876,28 @@ describe("getAvailableAssetsIdsForBooking", () => {
     ).resolves.toEqual(["asset-1", "asset-2"]);
   });
 
-  it("rejects a kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
+  it("returns a QUANTITY_TRACKED kit member — its free pool stays directly bookable", async () => {
+    // A QT asset allocates only a slice of its pool per kit (and may sit in
+    // several kits at once), so the remaining units are legitimately bookable
+    // on their own. Rejecting on mere membership 400'd the "Book" actions on
+    // the asset overview page for a customer with free standalone units.
+    // why: stub the org-scoped lookup to return one QT asset that IS a kit
+    // member — the branch that must NOT reject.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        status: AssetStatus.AVAILABLE,
+        type: AssetType.QUANTITY_TRACKED,
+        assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+      },
+    ]);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(["asset-1"], "org-1")
+    ).resolves.toEqual(["asset-1"]);
+  });
+
+  it("rejects an INDIVIDUAL kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
     // A selected asset that belongs to a kit is user-input validation, not a
     // server fault, so it must be a 400 kept out of the Sentry error pipeline.
     // why: stub the org-scoped lookup to return one asset that IS a kit member
@@ -9875,6 +9906,7 @@ describe("getAvailableAssetsIdsForBooking", () => {
       {
         id: "asset-1",
         status: AssetStatus.AVAILABLE,
+        type: AssetType.INDIVIDUAL,
         assetKits: [{ kitId: "kit-1" }],
       },
     ]);

@@ -41,7 +41,10 @@ import {
   reconcileManualPlacementsForStockDecrease,
   reportAmbiguousPlacementReconcile,
 } from "~/modules/asset/placement-reconcile.server";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  isDirectBookingBlockedByKit,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
@@ -77,7 +80,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapAssetWithCountForNote,
@@ -145,7 +148,7 @@ import type {
 } from "./types";
 import {
   createBookingConflictConditions,
-  getBookingWhereInput,
+  getBulkBookingsWhereInput,
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -11539,20 +11542,29 @@ export async function bulkDeleteBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -11705,6 +11717,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -11716,14 +11729,22 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const bookings = await db.booking.findMany({
       where,
@@ -11902,20 +11923,29 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -12983,8 +13013,15 @@ export async function getExistingBookingDetails(
 /**
  * Resolves the subset of the given asset IDs that can be added to a booking.
  *
- * Assets that belong to a kit are rejected (kits are added as a unit, not as
- * loose assets).
+ * INDIVIDUAL assets that belong to a kit are rejected — they live entirely
+ * inside their kit, so kits are added as a unit rather than as loose assets.
+ *
+ * QUANTITY_TRACKED kit members are ACCEPTED: each `AssetKit` row claims only a
+ * slice of the pool (`AssetKit.quantity`) and a QT asset may sit in several
+ * kits at once while keeping free-pool units, which are legitimately bookable
+ * on their own. That's the same rule the booking page's asset picker already
+ * applies. Over-allocation is caught downstream by the windowed availability
+ * guard in `updateBookingAssets`. See `isDirectBookingBlockedByKit`.
  *
  * @param assetIds - Asset IDs sourced from request/form input
  * @param organizationId - The caller's validated organization ID. Scopes the
@@ -12992,8 +13029,8 @@ export async function getExistingBookingDetails(
  *   be returned), preventing a cross-org IDOR where an attacker in Org A could
  *   add Org B's assets to a booking.
  * @returns The IDs of the assets that exist in `organizationId` and are not
- *   part of a kit
- * @throws {ShelfError} If any selected asset belongs to a kit
+ *   blocked by kit membership
+ * @throws {ShelfError} If any selected INDIVIDUAL asset belongs to a kit
  */
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][],
@@ -13010,15 +13047,18 @@ export async function getAvailableAssetsIdsForBooking(
       select: {
         status: true,
         id: true,
+        // `type` decides whether kit membership actually blocks the add —
+        // only INDIVIDUAL members are exclusive to their kit.
+        type: true,
         assetKits: { select: { kitId: true } },
       },
     });
 
-    if (selectedAssets.some((asset) => asset.assetKits.length > 0)) {
-      // User-input validation, not a server fault: adding kit-member assets
-      // directly is disallowed (kits are added as a unit). A 400 keeps this out
-      // of the Sentry error pipeline (handled client error). The outer catch
-      // re-wraps but inherits status/shouldBeCaptured from this cause. See
+    if (selectedAssets.some(isDirectBookingBlockedByKit)) {
+      // User-input validation, not a server fault: adding INDIVIDUAL kit-member
+      // assets directly is disallowed (kits are added as a unit). A 400 keeps
+      // this out of the Sentry error pipeline (handled client error). The outer
+      // catch re-wraps but inherits status/shouldBeCaptured from this cause. See
       // SHELF-WEBAPP-21Y.
       throw new ShelfError({
         cause: null,
