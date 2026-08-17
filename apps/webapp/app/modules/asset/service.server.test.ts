@@ -2,7 +2,6 @@ import {
   AssetStatus,
   OrganizationRoles,
   type AssetIndexSettings,
-  type Prisma,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -67,6 +66,9 @@ vitest.mock("~/database/db.server", () => ({
           ? (callbackOrArray as (tx: unknown) => unknown)(db)
           : Promise.all(callbackOrArray as Promise<unknown>[])
       ),
+    // why: getAssets resolves its search term to matching asset ids via the
+    // shared buildAssetSearchUnion, executed as a raw query.
+    $queryRaw: vitest.fn().mockResolvedValue([]),
     asset: {
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
@@ -4509,193 +4511,71 @@ describe("placeUnplacedUnits", () => {
   });
 });
 
-/**
- * Narrows `where.OR` to the array form the query builder always produces.
- *
- * `Prisma.AssetWhereInput["OR"]` also admits a single object and `undefined`,
- * so indexing it needs a check. Throwing here makes a missing clause fail with
- * a readable message instead of surfacing as `undefined[0]` several lines
- * later — which is what the `as any` these assertions used to carry was
- * hiding.
- */
-function orClauses(where: Prisma.AssetWhereInput): Prisma.AssetWhereInput[] {
-  const or = where.OR;
-  if (!Array.isArray(or)) {
-    throw new Error(
-      `expected where.OR to be an array, got ${JSON.stringify(or)}`
-    );
-  }
-  return or;
-}
-
-describe("getAssets search fallback", () => {
+describe("getAssets search via UNION", () => {
   const findManyMock = vi.mocked(db.asset.findMany);
   const countMock = vi.mocked(db.asset.count);
+  // why: the UNION runs as a raw query; mock it to return a known id set so we
+  // can assert getAssets threads those ids into the Prisma where.
+  const queryRawMock = vi.mocked(db.$queryRaw);
 
-  /** Minimal required params for a simple-index search call. */
-  const baseParams = {
-    organizationId: "org-1",
+  beforeEach(() => {
+    findManyMock.mockReset().mockResolvedValue([]);
+    countMock.mockReset().mockResolvedValue(0);
+    queryRawMock.mockReset().mockResolvedValue([{ id: "a1" }, { id: "a2" }]);
+  });
+
+  const base = {
+    organizationId: "org_1",
     page: 1,
-    perPage: 8,
+    perPage: 20,
     orderBy: "createdAt" as const,
     orderDirection: "desc" as const,
   };
 
-  /**
-   * Title contains-clause used to assert the full (post-fallback) search clause
-   * surfaces title matches. Note: title now ALSO appears in the narrow fast-path
-   * clause (see the first test below) so bare-numeric substrings embedded in a
-   * title are matched without needing the zero-row fallback.
-   */
-  const titleClause = {
-    title: { contains: "103468", mode: "insensitive" },
-  };
-
-  beforeEach(() => {
-    findManyMock.mockReset();
-    countMock.mockReset();
-  });
-
-  it("matches nothing for typed input that yields zero terms", async () => {
-    // why: whitespace / bare-comma input must not return the full list —
-    // mirrors the mobile composer's fail-closed guard.
-    findManyMock.mockResolvedValueOnce([] as never);
-    countMock.mockResolvedValueOnce(0 as never);
-
-    await getAssets({ ...baseParams, search: " , " });
-
-    const where = (
-      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    expect(where.id).toEqual({ in: [] });
-    expect(where.OR).toBeUndefined();
-  });
-
-  it("runs only the narrow indexed clause when an ID-shaped query matches", async () => {
-    // why: first (and only) fetch returns a row, so no fallback is needed.
-    findManyMock.mockResolvedValueOnce([{ id: "a1" }] as never);
-    countMock.mockResolvedValueOnce(1 as never);
-
-    const result = await getAssets({ ...baseParams, search: "103468" });
-
+  it("runs the UNION and filters assets to the matching id set", async () => {
+    await getAssets({ ...base, search: "chair" });
+    expect(queryRawMock).toHaveBeenCalledTimes(1);
+    // why: findMany's args param is typed optional (Prisma allows a
+    // no-args call); this suite always calls it with args, so the mock
+    // is asserted non-null rather than widening the type in every test.
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toEqual([{ id: { in: ["a1", "a2"] } }]);
+    // exactly one fetch — no fallback re-query
     expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (
-      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    // Narrow clause covers the indexed ID columns: sequentialId / barcode / qr.
-    expect(where.OR).toContainEqual({
-      sequentialId: { contains: "103468", mode: "insensitive" },
-    });
-    expect(where.OR).toContainEqual({
-      barcodes: {
-        some: { value: { contains: "103468", mode: "insensitive" } },
-      },
-    });
-    expect(where.OR).toContainEqual({
-      qrCodes: { some: { id: { contains: "103468", mode: "insensitive" } } },
-    });
-    // ...and ALSO title + description (both trigram-indexed), so a bare-numeric
-    // substring embedded in a title is matched directly in the fast path
-    // instead of relying on the zero-row fallback.
-    expect(where.OR).toContainEqual({
-      title: { contains: "103468", mode: "insensitive" },
-    });
-    expect(where.OR).toContainEqual({
-      description: { contains: "103468", mode: "insensitive" },
-    });
-    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
   });
 
-  it("matches a title-embedded number in the fast path without falling back", async () => {
-    // why: regression guard for the dropped "451" → "KCI-451 Kids Resources Box"
-    // match. "451" is ID-shaped (bare digits) so it takes the narrow path, but
-    // the number lives only inside the title. The narrow clause must carry a
-    // `title` contains-clause so the row surfaces on the FIRST query — otherwise
-    // an unrelated ID-column match returns rows, suppresses the zero-row
-    // fallback, and the title-only asset is silently dropped.
-    findManyMock.mockResolvedValueOnce([{ id: "kci-451" }] as never);
-    countMock.mockResolvedValueOnce(1 as never);
-
-    await getAssets({ ...baseParams, search: "451" });
-
-    expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (
-      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    expect(where.OR).toContainEqual({
-      title: { contains: "451", mode: "insensitive" },
-    });
+  it("does not run the UNION when there is no search term", async () => {
+    await getAssets({ ...base, search: null });
+    expect(queryRawMock).not.toHaveBeenCalled();
+    expect(findManyMock.mock.calls[0][0]!.where!.OR).toBeUndefined();
   });
 
-  it("falls back to the full search when the narrow clause matches nothing", async () => {
-    // why: narrow query finds 0 rows; the number is embedded in a title, so the
-    // fallback re-query with the full clause must surface it.
-    findManyMock
-      .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce([{ id: "a1" }] as never);
-    countMock
-      .mockResolvedValueOnce(0 as never)
-      .mockResolvedValueOnce(1 as never);
-
-    const result = await getAssets({ ...baseParams, search: "103468" });
-
-    expect(findManyMock).toHaveBeenCalledTimes(2);
-    // The narrow-first behaviour is asserted by the single-query test above;
-    // getAssets mutates and reuses one `where` object across both fetches, so
-    // we can only reliably inspect its final (post-fallback) state here.
-    const secondWhere = (
-      findManyMock.mock.calls[1][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    expect(orClauses(secondWhere)[0]).toEqual({
-      OR: expect.arrayContaining([titleClause]),
-    });
-    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  it("fail-closed: whitespace-only search matches nothing, no UNION", async () => {
+    await getAssets({ ...base, search: "   " });
+    expect(queryRawMock).not.toHaveBeenCalled();
+    expect(findManyMock.mock.calls[0][0]!.where!.id).toEqual({ in: [] });
   });
 
-  it("does not run the fast path for free-text searches", async () => {
-    // why: "armchair" is not ID-shaped, so the full clause is used directly and
-    // there is never a second query even when zero rows match.
-    findManyMock.mockResolvedValueOnce([] as never);
-    countMock.mockResolvedValueOnce(0 as never);
-
-    await getAssets({ ...baseParams, search: "armchair" });
-
-    expect(findManyMock).toHaveBeenCalledTimes(1);
-    const where = (
-      findManyMock.mock.calls[0][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    expect(JSON.stringify(where.OR)).toContain("title");
-  });
-
-  it("preserves appended filter clauses when falling back", async () => {
-    // why: the fallback must keep filter OR clauses (here: team-member custody)
-    // appended after the search, or it would return assets outside the filter.
-    findManyMock
-      .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce([{ id: "a1" }] as never);
-    countMock
-      .mockResolvedValueOnce(0 as never)
-      .mockResolvedValueOnce(1 as never);
-
+  it("preserves filter OR-entanglement: uncategorized appends after the search id set", async () => {
     await getAssets({
-      ...baseParams,
-      search: "103468",
-      teamMemberIds: ["tm-1"],
+      ...base,
+      search: "chair",
+      categoriesIds: ["uncategorized"],
     });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      { categoryId: { in: ["uncategorized"] } },
+      { categoryId: null },
+    ]);
+  });
 
-    const secondWhere = (
-      findManyMock.mock.calls[1][0] as { where: Prisma.AssetWhereInput }
-    ).where;
-    // Full search clause swapped in...
-    expect(orClauses(secondWhere)[0]).toEqual({
-      OR: expect.arrayContaining([titleClause]),
-    });
-    // ...and the team-member filter clause survived the fallback.
-    // Post-pivot: custody is now a relation (multiple per-unit rows), so the
-    // teamMember predicate is nested under `some` (was the direct field).
-    expect(secondWhere.OR).toContainEqual({
-      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
-    });
+  it("empty search-id set yields an empty id filter (matches nothing on its own)", async () => {
+    queryRawMock.mockResolvedValue([]);
+    await getAssets({ ...base, search: "zzz-no-match" });
+    expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
+      { id: { in: [] } },
+    ]);
   });
 });
 
