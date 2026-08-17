@@ -113,6 +113,9 @@ vi.mock("~/database/db.server", () => {
       // transaction rejects partway, and a test that only inspects earlier
       // calls would still pass.
       findUnique: vi.fn(),
+      // why: the unexpected-asset insert is idempotent — createMany with
+      // skipDuplicates, then a re-read — so both are on the scan hot path.
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
@@ -166,6 +169,7 @@ const mockDb = db as unknown as {
   };
   auditAsset: {
     createMany: ReturnType<typeof vi.fn>;
+    findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -2467,14 +2471,22 @@ describe("audit service", () => {
       // which used to match zero rows — the scan got no AuditAsset row while
       // the counts still moved, driving missingAssetCount negative.
       mockDb.auditAsset.findUnique.mockResolvedValue(null);
-      mockDb.auditAsset.create.mockResolvedValue({ id: "audit-asset-new" });
+      // why: the insert is idempotent (ON CONFLICT DO NOTHING) and the row is
+      // re-read afterwards, so both mocks are needed. count 1 = we inserted it.
+      mockDb.auditAsset.createMany.mockResolvedValue({ count: 1 });
+      mockDb.auditAsset.findUniqueOrThrow.mockResolvedValue({
+        id: "audit-asset-new",
+        expected: false,
+        status: "UNEXPECTED",
+      });
 
       const result = await recordAuditScan(scanInput);
 
       // It becomes a real unexpected row, so notes and photos can attach.
-      expect(mockDb.auditAsset.create).toHaveBeenCalledWith(
+      expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ expected: false }),
+          data: [expect.objectContaining({ expected: false })],
+          skipDuplicates: true,
         })
       );
       expect(result.auditAssetId).toBe("audit-asset-new");
@@ -2484,6 +2496,114 @@ describe("audit service", () => {
         // of the audit at all.
         missingAssetCount: { increment: 0 },
         unexpectedAssetCount: { increment: 1 },
+      });
+    });
+
+    it("records the scan instead of a 500 when a concurrent scanner inserted the row first", async () => {
+      // why: the read and the insert are not atomic and the duplicate-scan
+      // short-circuit runs outside the transaction, so two scanners can both
+      // find no row. A plain create made the loser fail with Prisma P2002,
+      // which neither isLikeShelfError nor isAuditAssetFkViolation (P2003 only)
+      // recognises — a captured 500 that rolled the loser's whole scan back.
+      mockDb.auditAsset.findUnique.mockResolvedValue(null);
+      // count 0 = ON CONFLICT DO NOTHING skipped our row; the winner's persisted.
+      mockDb.auditAsset.createMany.mockResolvedValue({ count: 0 });
+      mockDb.auditAsset.findUniqueOrThrow.mockResolvedValue({
+        id: "audit-asset-winner",
+        expected: false,
+        status: "UNEXPECTED",
+      });
+
+      const result = await recordAuditScan(scanInput);
+
+      // The loser's scan still lands, attached to the winner's row...
+      expect(result.scanId).toBe("scan-1");
+      expect(result.auditAssetId).toBe("audit-asset-winner");
+      expect(mockDb.auditScan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { auditAssetId: "audit-asset-winner" },
+        })
+      );
+      // ...and contributes NO count movement: the winner already counted it.
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 0 },
+        missingAssetCount: { increment: 0 },
+        unexpectedAssetCount: { increment: 0 },
+      });
+    });
+
+    it("marks the asset FOUND when the insert lost to an admin adding it as expected", async () => {
+      // why: addAssetsToAudit inserts expected rows and only requires the audit
+      // to be PENDING, so it can commit between this scan's read and its insert.
+      // The scanned asset must not be left PENDING — completion would then
+      // report an asset that was physically scanned as missing.
+      mockDb.auditAsset.findUnique.mockResolvedValue(null);
+      mockDb.auditAsset.createMany.mockResolvedValue({ count: 0 });
+      mockDb.auditAsset.findUniqueOrThrow.mockResolvedValue({
+        id: "audit-asset-expected",
+        expected: true,
+        status: "PENDING",
+      });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+
+      await recordAuditScan(scanInput);
+
+      expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "FOUND" }),
+        })
+      );
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 1 },
+        missingAssetCount: { increment: -1 },
+        unexpectedAssetCount: { increment: 0 },
+      });
+    });
+
+    it("refreshes a surviving unexpected row and counts it when its status drifted", async () => {
+      // why: removing a scan can leave the AuditAsset row behind. Re-scanning
+      // must reuse that row (the unique constraint rules out a second one) and
+      // re-count it, because the recompute on scan removal only counts rows
+      // whose status is still UNEXPECTED.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-stale",
+        expected: false,
+        status: "PENDING",
+      });
+
+      const result = await recordAuditScan(scanInput);
+
+      expect(mockDb.auditAsset.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "audit-asset-stale" },
+          data: expect.objectContaining({ status: "UNEXPECTED" }),
+        })
+      );
+      expect(result.auditAssetId).toBe("audit-asset-stale");
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 0 },
+        missingAssetCount: { increment: 0 },
+        unexpectedAssetCount: { increment: 1 },
+      });
+    });
+
+    it("does not re-count an unexpected asset that is already UNEXPECTED", async () => {
+      // why: the counterpart to the test above. A rescan of an already-counted
+      // unexpected asset refreshes its scan metadata but must not inflate
+      // unexpectedAssetCount a second time.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-unexpected",
+        expected: false,
+        status: "UNEXPECTED",
+      });
+
+      await recordAuditScan(scanInput);
+
+      expect(mockDb.auditAsset.update).toHaveBeenCalledTimes(1);
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 0 },
+        missingAssetCount: { increment: 0 },
+        unexpectedAssetCount: { increment: 0 },
       });
     });
 

@@ -1448,13 +1448,10 @@ export async function recordAuditScan(
         //
         // AuditAsset is unique on (auditSessionId, assetId), so that one row is
         // the authority on whether this asset belongs to the audit.
-        const existingAuditAsset = await tx.auditAsset.findUnique({
+        let auditAssetRow = await tx.auditAsset.findUnique({
           where: { auditSessionId_assetId: { auditSessionId, assetId } },
           select: { id: true, expected: true, status: true },
         });
-        const isExpected = existingAuditAsset?.expected === true;
-
-        let auditAssetId: string | null = null;
 
         // Session-count movements for this scan, applied as relative
         // increments below. 0 means "this scan does not move that count".
@@ -1462,23 +1459,65 @@ export async function recordAuditScan(
         let missingDelta = 0;
         let unexpectedDelta = 0;
 
-        // Update or create the audit asset record
-        if (!existingAuditAsset) {
-          // Genuinely unexpected asset - create a new audit asset record
-          const auditAsset = await tx.auditAsset.create({
-            data: {
-              auditSessionId,
-              assetId,
-              expected: false,
-              status: AuditAssetStatus.UNEXPECTED,
-              scannedAt: new Date(),
-              scannedById: userId,
-            },
+        // Tracks whether THIS scan is the one that inserted the row, which is
+        // what decides who owns the unexpected count.
+        let insertedUnexpectedRow = false;
+
+        if (!auditAssetRow) {
+          // The asset is not part of the audit yet — add it as unexpected,
+          // idempotently.
+          //
+          // The read above and this write are not atomic, and the
+          // duplicate-scan short-circuit runs OUTSIDE the transaction, so the
+          // row can appear in between: another scanner recording the same
+          // unexpected asset, or an admin adding it to the still-PENDING audit
+          // as expected (`addAssetsToAudit`). A plain `create` then raises
+          // Prisma P2002 on the (auditSessionId, assetId) unique — which
+          // neither `isLikeShelfError` nor `isAuditAssetFkViolation` (P2003
+          // only) recognises, so it surfaced as a captured 500 and rolled the
+          // whole scan back.
+          //
+          // `skipDuplicates` compiles to ON CONFLICT DO NOTHING, which does not
+          // abort the transaction, and its `count` is exactly the "did WE
+          // insert it" signal the count below needs.
+          const created = await tx.auditAsset.createMany({
+            data: [
+              {
+                auditSessionId,
+                assetId,
+                expected: false,
+                status: AuditAssetStatus.UNEXPECTED,
+                scannedAt: new Date(),
+                scannedById: userId,
+              },
+            ],
+            skipDuplicates: true,
           });
-          auditAssetId = auditAsset.id;
+          insertedUnexpectedRow = created.count === 1;
+
+          // Re-read rather than trust what we tried to write: on a conflict the
+          // winner's row is what persisted, and it may be an EXPECTED row.
+          // ON CONFLICT DO NOTHING waits for the conflicting transaction, so by
+          // now that row is committed and visible to this statement.
+          auditAssetRow = await tx.auditAsset.findUniqueOrThrow({
+            where: { auditSessionId_assetId: { auditSessionId, assetId } },
+            select: { id: true, expected: true, status: true },
+          });
+        }
+
+        const isExpected = auditAssetRow.expected;
+        const auditAssetId = auditAssetRow.id;
+
+        if (insertedUnexpectedRow) {
+          // We created the row, already UNEXPECTED and stamped with this scan.
           unexpectedDelta = 1;
-        } else if (existingAuditAsset.expected) {
+        } else if (auditAssetRow.expected) {
           // Expected asset - update its status to FOUND.
+          //
+          // Reached either normally, or when the insert above lost to an admin
+          // adding this asset to the audit as expected mid-transaction. Both
+          // want the same outcome: a scanned asset must not be left PENDING, or
+          // completion would report it missing.
           //
           // Scoped to a row that is not already FOUND so the counts move
           // exactly once: the duplicate-scan short-circuit above runs outside
@@ -1499,18 +1538,17 @@ export async function recordAuditScan(
             },
           });
 
-          auditAssetId = existingAuditAsset.id;
-
           if (foundClaim.count === 1) {
             foundDelta = 1;
             missingDelta = -1;
           }
         } else {
           // An unexpected row already exists for this asset — its scan was
-          // removed but the row survived. The unique constraint rules out a
-          // second row, so reuse this one and refresh its scan metadata.
+          // removed but the row survived, or a concurrent scanner just inserted
+          // it. The unique constraint rules out a second row, so reuse this one
+          // and refresh its scan metadata.
           await tx.auditAsset.update({
-            where: { id: existingAuditAsset.id },
+            where: { id: auditAssetRow.id },
             data: {
               status: AuditAssetStatus.UNEXPECTED,
               scannedAt: new Date(),
@@ -1518,21 +1556,20 @@ export async function recordAuditScan(
             },
           });
 
-          auditAssetId = existingAuditAsset.id;
-
-          // Only count it if it was not already counted as unexpected.
-          if (existingAuditAsset.status !== AuditAssetStatus.UNEXPECTED) {
+          // Only count it if it was not already counted as unexpected. A row a
+          // concurrent scanner just inserted is already UNEXPECTED and already
+          // counted by them, so this correctly contributes nothing.
+          if (auditAssetRow.status !== AuditAssetStatus.UNEXPECTED) {
             unexpectedDelta = 1;
           }
         }
 
-        // Link the scan to the audit asset so we can query it later
-        if (auditAssetId) {
-          await tx.auditScan.update({
-            where: { id: scan.id },
-            data: { auditAssetId },
-          });
-        }
+        // Link the scan to the audit asset so we can query it later. Always
+        // resolvable now: every branch above either found or created the row.
+        await tx.auditScan.update({
+          where: { id: scan.id },
+          data: { auditAssetId },
+        });
 
         // Update the audit session counts.
         //
@@ -1572,7 +1609,7 @@ export async function recordAuditScan(
             entityType: "AUDIT",
             entityId: auditSessionId,
             auditSessionId,
-            auditAssetId: auditAssetId ?? undefined,
+            auditAssetId,
             assetId,
             meta: { isExpected },
           },
