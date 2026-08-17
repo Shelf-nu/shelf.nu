@@ -58,6 +58,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` is published by exactly one rule below, gated on `main`.
+          # The default `latest=auto` would ALSO emit it for `type=match`, so a
+          # release tag would move `latest` — and tagging an older commit for a
+          # hotfix would drag `latest` backwards with it.
+          flavor: |
+            latest=false
           # `type=ref,event=tag` would emit the git tag verbatim, but a Docker tag
           # cannot contain `@` — `shelf@2.1.2` is sanitised into something that is
           # not the version anyone was told to pull. Match the version out of the
