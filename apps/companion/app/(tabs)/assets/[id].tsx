@@ -159,6 +159,15 @@ export default function AssetDetailScreen() {
 
   // Bookings this asset appears in — lazy, only once the section is opened.
   const assetBookings = useAssetBookings(asset?.id, currentOrg?.id);
+
+  /** Collapsed by default: the recent few, not the whole history. */
+  const [showAllBookings, setShowAllBookings] = useState(false);
+  const BOOKINGS_PREVIEW_COUNT = 3;
+  const visibleBookings = showAllBookings
+    ? assetBookings.bookings
+    : assetBookings.bookings.slice(0, BOOKINGS_PREVIEW_COUNT);
+  const hiddenBookingCount =
+    assetBookings.bookings.length - visibleBookings.length;
   const [showBookings, setShowBookings] = useState(false);
 
   // Image upload
@@ -757,7 +766,7 @@ export default function AssetDetailScreen() {
                     This asset has never been booked.
                   </Text>
                 ) : (
-                  assetBookings.bookings.map((b: AssetBookingRow) => (
+                  visibleBookings.map((b: AssetBookingRow) => (
                     <TouchableOpacity
                       key={b.id}
                       style={styles.bookingRow}
@@ -789,6 +798,33 @@ export default function AssetDetailScreen() {
                     </TouchableOpacity>
                   ))
                 )}
+
+                {/* why a cap: this sits on the densest screen in the app, and an
+                    asset that gets booked weekly has dozens of rows. Twenty of
+                    them buried the QR code and the activity feed below. The
+                    first few answer "what is it on now"; the rest are history,
+                    so they are one tap away rather than always on screen.
+                    Without this the list also ended at 20 with nothing saying
+                    so, which is worse than showing fewer on purpose. */}
+                {hiddenBookingCount > 0 ? (
+                  <TouchableOpacity
+                    style={styles.bookingsMore}
+                    onPress={() => setShowAllBookings(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${hiddenBookingCount} older bookings`}
+                  >
+                    <Text style={styles.bookingsMoreText}>
+                      {`Show ${hiddenBookingCount} older`}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {assetBookings.hasLoaded &&
+                assetBookings.totalCount > assetBookings.bookings.length ? (
+                  <Text style={styles.bookingsEmpty}>
+                    {`Showing the ${assetBookings.bookings.length} most recent of ${assetBookings.totalCount}. Open this asset on the web app to see them all.`}
+                  </Text>
+                ) : null}
               </View>
             )}
           </View>
@@ -1258,6 +1294,15 @@ const useStyles = createStyles((colors, shadows) => ({
   bookingCustodian: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  bookingsMore: {
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+  },
+  bookingsMoreText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
   },
   bookingStatusPill: {
     paddingHorizontal: spacing.sm,
