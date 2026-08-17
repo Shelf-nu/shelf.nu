@@ -128,8 +128,16 @@ function buildAsset() {
   return {
     id: "asset-1",
     title: "Bolts",
+    sequentialId: "SAM-0017",
     description: null,
     status: "IN_CUSTODY",
+    // Selected with the image columns so the shaper can resolve the cover-image
+    // cascade; the response must expose the NAME only.
+    assetModel: {
+      name: "M8 Hex Bolt",
+      image: "https://example.test/model.jpg",
+      thumbnailImage: "https://example.test/model-thumb.jpg",
+    },
     mainImage: null,
     mainImageExpiration: null,
     thumbnailImage: null,
@@ -309,5 +317,77 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     expect(body.asset.custodyListOthersCount).toBe(0);
     // Legacy custody stays the primary (oldest) record
     expect(body.asset.custody.custodian.id).toBe("tm-alice");
+  });
+});
+
+/**
+ * The response is assembled by destructuring fields OFF the row and re-attaching
+ * narrowed copies — the projection shape this repo gets wrong most often, and
+ * one typecheck cannot see: dropping a key from the destructure or the return
+ * literal leaves `validate` green and the field simply gone from the wire.
+ */
+describe("GET /api/mobile/assets/:assetId — payload projection", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    (requireMobileAuth as any).mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    });
+    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: false,
+      canUseAudits: false,
+      canSeeAllCustody: true,
+    });
+    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+  });
+
+  it("sends the SAM ID, which the scanner's manual entry accepts", async () => {
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    const body = await (result as unknown as Response).json();
+
+    expect(body.asset.sequentialId).toBe("SAM-0017");
+  });
+
+  it("sends the model NAME only — no id, no image columns", async () => {
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    const body = await (result as unknown as Response).json();
+
+    // Exactly `{ name }`: an id has nothing to navigate to on mobile, and the
+    // image columns would be a second source of truth for a cascade the shaper
+    // has already resolved into mainImage/thumbnailImage.
+    expect(body.asset.assetModel).toEqual({ name: "M8 Hex Bolt" });
+  });
+
+  it("returns a null model rather than omitting the field when the asset has none", async () => {
+    (db.asset.findUnique as any).mockResolvedValue({
+      ...buildAsset(),
+      assetModel: null,
+    });
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    const body = await (result as unknown as Response).json();
+
+    expect(body.asset.assetModel).toBeNull();
   });
 });
