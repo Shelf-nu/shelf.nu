@@ -67,6 +67,19 @@ export const AUDIT_STATUS_LABELS = Object.freeze({
   ARCHIVED: "Archived",
 });
 
+// Who may act on an audit that has no specific assignee. One idea, three
+// registers — a compact card line, the screen-reader variant that gets joined
+// into a comma-separated announcement, and the prose used where there is room
+// to explain (the web's "Not assigned" tooltip). They live together so the
+// three can never say different things about who is allowed to scan; before
+// this, the sentence was hand-copied to six call sites across both apps.
+export const AUDIT_UNASSIGNED_LABELS = Object.freeze({
+  SHORT: "Unassigned · admins can scan",
+  A11Y: "unassigned, admins can scan",
+  DETAIL:
+    "Workspace admins and owners can perform this audit because it has no specific assignee.",
+});
+
 // Per-asset audit status (AuditAssetStatus in the Prisma schema).
 //
 // PENDING is deliberately "Not scanned", not "Expected"/"Pending"/"Remaining":
@@ -88,6 +101,28 @@ export const AUDIT_ASSET_STATUS_LABELS = Object.freeze({
 });
 
 /**
+ * The ONE derivation of the "is this audit concluded?" flag every audit label
+ * depends on. Read `completedAt`, never `status`.
+ *
+ * why: `completedAt` is the provenance — it is written only by the completion
+ * flow and survives everything that happens afterwards. `status` does not:
+ * archiving a completed audit rewrites it to ARCHIVED while keeping the
+ * timestamp and the finalised counts, so a status check silently relabels
+ * genuinely missing assets as "Not scanned" the moment someone archives. The
+ * inverse holds too — an archived-CANCELLED audit was never concluded, and
+ * `completedAt` correctly keeps it on the open-audit wording.
+ *
+ * Both apps and every surface within them must agree, so the rule lives here
+ * next to the strings it feeds rather than being re-derived per component.
+ *
+ * @param {{ completedAt?: Date | string | null } | null | undefined} audit
+ * @returns {boolean}
+ */
+export function isAuditCompleted(audit) {
+  return audit?.completedAt != null;
+}
+
+/**
  * Resolves the user-facing label for an expected-but-unscanned asset.
  *
  * Nothing is "missing" until the audit is closed: while it is still running the
@@ -95,7 +130,7 @@ export const AUDIT_ASSET_STATUS_LABELS = Object.freeze({
  * lives here next to the strings rather than in either app.
  *
  * @param {"PENDING"|"FOUND"|"MISSING"|"UNEXPECTED"} status
- * @param {boolean} isAuditCompleted
+ * @param {boolean} isAuditCompleted - derive with {@link isAuditCompleted}
  * @returns {string}
  */
 export function auditAssetStatusLabel(status, isAuditCompleted) {

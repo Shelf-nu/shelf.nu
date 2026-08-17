@@ -1,6 +1,7 @@
 import {
   AUDIT_ASSET_STATUS_LABELS,
   auditAssetStatusLabel,
+  isAuditCompleted,
 } from "@shelf/labels";
 import { describe, expect, it } from "vitest";
 
@@ -103,7 +104,7 @@ describe("audit filter utils", () => {
 
   describe("getAuditStatusLabel", () => {
     describe("on active/pending audit (isAuditCompleted = false)", () => {
-      it("returns Expected when audit data is null", () => {
+      it("returns Not scanned when audit data is null", () => {
         const status = getAuditStatusLabel(null);
         expect(status).toBe(AUDIT_ASSET_STATUS_LABELS.PENDING);
       });
@@ -132,7 +133,7 @@ describe("audit filter utils", () => {
         expect(status).toBe(AUDIT_ASSET_STATUS_LABELS.UNEXPECTED);
       });
 
-      it("returns Expected for expected asset with PENDING status", () => {
+      it("returns Not scanned for expected asset with PENDING status", () => {
         const status = getAuditStatusLabel({
           expected: true,
           auditStatus: "PENDING",
@@ -140,7 +141,7 @@ describe("audit filter utils", () => {
         expect(status).toBe(AUDIT_ASSET_STATUS_LABELS.PENDING);
       });
 
-      it("returns Expected for edge case of non-expected FOUND", () => {
+      it("returns Not scanned for edge case of non-expected FOUND", () => {
         // Edge case: asset marked as found but not expected
         // This shouldn't happen in practice, but tests defensive behavior
         const status = getAuditStatusLabel({
@@ -150,7 +151,7 @@ describe("audit filter utils", () => {
         expect(status).toBe(AUDIT_ASSET_STATUS_LABELS.PENDING);
       });
 
-      it("returns Expected for edge case of non-expected MISSING", () => {
+      it("returns Not scanned for edge case of non-expected MISSING", () => {
         // Edge case: asset marked as missing but not expected
         // This shouldn't happen in practice, but tests defensive behavior
         const status = getAuditStatusLabel({
@@ -212,6 +213,73 @@ describe("audit filter utils", () => {
         expect(status).toBe(AUDIT_ASSET_STATUS_LABELS.UNEXPECTED);
       });
     });
+  });
+});
+
+describe("isAuditCompleted (shared with the companion app)", () => {
+  /**
+   * Minimal stand-in for an audit session row. Built through a helper rather
+   * than passed as an inline literal so the cases can carry the `status` that
+   * makes them meaningful without tripping excess-property checking.
+   */
+  const auditSession = (session: {
+    status: string;
+    completedAt: Date | string | null;
+  }) => session;
+
+  // why: every audit label in both apps hangs off this one boolean, and the
+  // whole point is that it reads `completedAt` and NOT `status`. Nothing else
+  // in the suite pins that — `auditAssetStatusLabel` is handed the flag
+  // already computed — so "simplifying" this back to a status check used to be
+  // a fully-green change. These cases are the ones that would break.
+  it("is false for an audit that is still running", () => {
+    expect(
+      isAuditCompleted(auditSession({ status: "ACTIVE", completedAt: null }))
+    ).toBe(false);
+  });
+
+  it("is true once the audit has been completed", () => {
+    expect(
+      isAuditCompleted(
+        auditSession({ status: "COMPLETED", completedAt: new Date() })
+      )
+    ).toBe(true);
+  });
+
+  it("stays true after a completed audit is ARCHIVED", () => {
+    // Archiving rewrites status to ARCHIVED but keeps `completedAt` and the
+    // finalised counts. A `status === "COMPLETED"` check flips to false here
+    // and relabels genuinely missing assets as "Not scanned".
+    expect(
+      isAuditCompleted(
+        auditSession({ status: "ARCHIVED", completedAt: new Date() })
+      )
+    ).toBe(true);
+  });
+
+  it("stays false after a CANCELLED audit is ARCHIVED", () => {
+    // The mirror case: archived, but never concluded, so its unscanned assets
+    // must keep the open-audit wording.
+    expect(
+      isAuditCompleted(auditSession({ status: "ARCHIVED", completedAt: null }))
+    ).toBe(false);
+  });
+
+  it("accepts the ISO string the companion receives over JSON", () => {
+    expect(
+      isAuditCompleted(
+        auditSession({
+          status: "COMPLETED",
+          completedAt: "2026-08-17T10:00:00.000Z",
+        })
+      )
+    ).toBe(true);
+  });
+
+  it("is false for a missing or absent audit", () => {
+    expect(isAuditCompleted(null)).toBe(false);
+    expect(isAuditCompleted(undefined)).toBe(false);
+    expect(isAuditCompleted({})).toBe(false);
   });
 });
 

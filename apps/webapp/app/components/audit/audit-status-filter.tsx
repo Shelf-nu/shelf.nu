@@ -11,14 +11,23 @@ import {
 
 type AuditStatusFilterProps = {
   /**
-   * Filter value -> the words shown for it. The KEY is what goes in the URL,
-   * so it must stay the enum name; the VALUE is display text only.
+   * URL value -> the words shown for it. The KEY is what goes in the URL, so
+   * it must stay the enum name; the VALUE is final display text, rendered
+   * verbatim.
    *
    * why: this used to be a value->value map rendered by de-underscoring the
    * enum, which meant the dropdown could only ever say "Missing" while the
    * statistics tile beside it said "Not scanned" for the same rows.
+   *
+   * why the name `statusOptions` and not `statusItems`: the sibling
+   * `~/components/booking/status-filter` takes a `statusItems` prop with the
+   * OPPOSITE contract (values are the URL params, keys are ignored). Both are
+   * `Record<string, string>`, so the compiler cannot tell them apart — passing
+   * one shape to the other component would silently put display text in the
+   * URL and 400 in the loader's Zod enum. A distinct prop name is the only
+   * thing that makes the mix-up a compile error.
    */
-  statusItems: Record<string, string>;
+  statusOptions: Record<string, string>;
   name?: string;
 };
 
@@ -28,7 +37,7 @@ type AuditStatusFilterProps = {
  * Default filter is ALL (shows all assets).
  */
 export function AuditStatusFilter(props: AuditStatusFilterProps) {
-  const { statusItems, name = "auditStatus" } = props;
+  const { statusOptions, name = "auditStatus" } = props;
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -42,6 +51,9 @@ export function AuditStatusFilter(props: AuditStatusFilterProps) {
       } else {
         prev.set(name, value);
       }
+      // Reset pagination when the filter changes — a stale `page` offset can
+      // otherwise land on an empty page. Mirrors the booking StatusFilter.
+      prev.delete("page");
       return prev;
     });
   }
@@ -66,14 +78,19 @@ export function AuditStatusFilter(props: AuditStatusFilterProps) {
           align="start"
         >
           <div className="max-h-[320px] overflow-auto">
-            {[["ALL", "All"] as const, ...Object.entries(statusItems)].map(
+            {[["ALL", "All"] as const, ...Object.entries(statusOptions)].map(
               ([value, itemLabel]) => (
                 <SelectItem
                   value={value}
                   key={value}
                   className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
                 >
-                  <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
+                  {/* why: no `lowercase first-letter:uppercase` here. That
+                      transform existed to sentence-case a RAW ENUM; the prop
+                      now carries final display text, and lowercasing it would
+                      mangle any label with a deliberate internal capital
+                      ("QR code", a proper noun). */}
+                  <span className="mr-4 block text-[14px] text-gray-700">
                     {itemLabel}
                   </span>
                 </SelectItem>

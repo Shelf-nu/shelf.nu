@@ -28,7 +28,9 @@ import { useDateFormatter } from "@/lib/use-date-formatter";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
   auditAssetStatusLabel,
+  isAuditCompleted,
 } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -49,14 +51,32 @@ const ASSET_FILTERS = [
 type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
 
 /**
- * Whether an asset-status filter is meaningful for an audit in the given
- * session status. A live (PENDING/ACTIVE) audit has Pending items but no
- * Missing ones; a COMPLETED audit is the reverse. Shared by the filter pills
- * and the derived `effectiveFilter` (which clamps a now-hidden selection) so
- * the visible pills and the applied filter never drift.
+ * What the list says when a filter matches nothing.
+ *
+ * why a per-filter phrase and not `No ${label.toLowerCase()} assets`: that
+ * template read "No not scanned assets" for the PENDING pill — and PENDING is
+ * the pill a field worker lands on at the END of every audit, when everything
+ * has been scanned. The other filters happened to survive the template, which
+ * is exactly why it went unnoticed. Wording mirrors the web's
+ * `getAuditFilterMetadata` empty states.
+ */
+const ASSET_FILTER_EMPTY_TEXT: Record<AssetFilterValue, string> = {
+  ALL: "No assets in this audit",
+  PENDING: "Nothing left to scan",
+  FOUND: "No assets found yet",
+  MISSING: "No missing assets",
+  UNEXPECTED: "No unexpected assets",
+};
+
+/**
+ * Whether an asset-status filter is meaningful for the given audit. An audit
+ * that has not been CONCLUDED has "Not scanned" items but no Missing ones; a
+ * completed one is the reverse. Shared by the filter pills and the derived
+ * `effectiveFilter` (which clamps a now-hidden selection) so the visible pills
+ * and the applied filter never drift.
  *
  * @param value - the filter being considered
- * @param status - the audit session status
+ * @param audit - the audit session, read for its `completedAt` only
  * @returns true if the filter should be shown / is a valid selection
  */
 function isAssetFilterVisible(
@@ -69,7 +89,7 @@ function isAssetFilterVisible(
   // status PENDING/ACTIVE hid it on an archived-cancelled audit that was still
   // showing "Not scanned" rows under All. Archiving a completed audit has the
   // mirror problem: the status changes but those assets are still missing.
-  const isCompleted = audit.completedAt != null;
+  const isCompleted = isAuditCompleted(audit);
   return value === "MISSING"
     ? isCompleted
     : value === "PENDING"
@@ -297,7 +317,7 @@ function AuditDetailContent() {
     // why: `completedAt`, not `status === "COMPLETED"` — archiving a completed
     // audit switches the status to ARCHIVED while keeping the completion
     // timestamp, and those assets are still genuinely missing.
-    const notFoundStatus: AuditAssetStatus = audit.completedAt
+    const notFoundStatus: AuditAssetStatus = isAuditCompleted(audit)
       ? "MISSING"
       : "PENDING";
 
@@ -501,7 +521,7 @@ function AuditDetailContent() {
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
   // Completion provenance survives archiving; the status does not. See
   // `notFoundStatus` above.
-  const isCompleted = audit.completedAt != null;
+  const isCompleted = isAuditCompleted(audit);
   const progress =
     audit.expectedAssetCount > 0
       ? audit.foundAssetCount / audit.expectedAssetCount
@@ -680,7 +700,7 @@ function AuditDetailContent() {
                       // Administrator / Base / Self service only).
                       numberOfLines={2}
                     >
-                      Unassigned · admins can scan
+                      {AUDIT_UNASSIGNED_LABELS.SHORT}
                     </Text>
                   )}
                 </View>
@@ -892,14 +912,7 @@ function AuditDetailContent() {
               color={colors.border}
             />
             <Text style={styles.emptyListText}>
-              {/* why: read the word from the same map the pills use. Lowercasing
-                  the raw filter value produced "No pending assets" next to a
-                  pill labelled "Not scanned". */}
-              {effectiveFilter === "ALL"
-                ? "No assets in this audit"
-                : `No ${AUDIT_ASSET_STATUS_LABELS[
-                    effectiveFilter
-                  ].toLowerCase()} assets`}
+              {ASSET_FILTER_EMPTY_TEXT[effectiveFilter]}
             </Text>
           </View>
         }

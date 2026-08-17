@@ -22,7 +22,7 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
-import { formatDue } from "@/lib/audit-format";
+import { auditOwnership, formatDue } from "@/lib/audit-format";
 import { useDateFormatter, useFormatPrefs } from "@/lib/use-date-formatter";
 import { userHasPermission } from "@/lib/permissions";
 import {
@@ -569,39 +569,17 @@ const AuditCard = memo(function AuditCard({
       ? colors.warning
       : colors.mutedLight;
 
-  // Same ownership model the Audits list uses: 0 assignees = open for
-  // anyone to scan, otherwise yours or someone else's. `null` when the
-  // dashboard payload predates these fields (older/not-yet-deployed
-  // webapp) — we hide the row entirely rather than render "undefined
-  // assigned". The list endpoint already ships these fields, so the list
-  // shows ownership today; Home lights up once the dashboard deploy lands.
-  const ownership: "open" | "mine" | "others" | null =
-    audit.assigneeCount == null
-      ? null
-      : audit.assigneeCount === 0
-      ? "open"
-      : audit.isAssignedToMe
-      ? "mine"
-      : "others";
+  // Same ownership model the Audits list uses, resolved by the shared helper
+  // so the two screens state it identically: 0 assignees = open for anyone to
+  // scan, otherwise yours or someone else's. `ownership` is null when the
+  // dashboard payload predates these fields (older/not-yet-deployed webapp) —
+  // and so are both labels, so there is no branch that can render "undefined
+  // assigned" if a future edit drops the guard below.
+  const { ownership, label: ownershipLabel, a11yLabel } = auditOwnership(audit);
 
   const statusLabel =
     AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
     audit.status;
-
-  // why: ONE source for the ownership sentence. `accessibilityLabel` on the
-  // card replaces the concatenated child text, so anything not repeated here is
-  // simply never announced — a screen-reader user was told the name, status and
-  // counts but never who is allowed to scan.
-  const ownershipLabel =
-    ownership === "open"
-      ? "Unassigned · admins can scan"
-      : ownership === "mine"
-      ? audit.assigneeCount === 1
-        ? "Assigned to you"
-        : `You + ${(audit.assigneeCount ?? 1) - 1} other${
-            (audit.assigneeCount ?? 1) - 1 === 1 ? "" : "s"
-          }`
-      : `${audit.assigneeCount} assigned`;
 
   return (
     <TouchableOpacity
@@ -611,10 +589,14 @@ const AuditCard = memo(function AuditCard({
         onPress();
       }}
       activeOpacity={0.6}
+      // why: `a11yLabel`, not the visible `label` — the announcement is a
+      // comma-joined sentence, so it wants the spoken-prose variant
+      // ("assigned to you and 2 others") rather than the card's terse
+      // "You + 2 others", which reads as arithmetic when spoken.
       accessibilityLabel={`Audit: ${audit.name}, ${statusLabel}, ${
         audit.foundAssetCount
       } of ${audit.expectedAssetCount} found${
-        ownership ? `, ${ownershipLabel}` : ""
+        a11yLabel ? `, ${a11yLabel}` : ""
       }`}
       accessibilityRole="button"
     >

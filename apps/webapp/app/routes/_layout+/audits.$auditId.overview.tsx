@@ -1,7 +1,9 @@
 import { OrganizationRoles } from "@prisma/client";
 import {
   AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
   auditAssetStatusLabel,
+  isAuditCompleted,
 } from "@shelf/labels";
 import type {
   ActionFunctionArgs,
@@ -63,11 +65,11 @@ const label = "Audit";
  * an expected asset is only "missing" once the audit is closed. Keys stay the
  * enum names so existing filtered links keep working.
  */
-function buildAuditStatusItems(isAuditCompleted: boolean) {
+function buildAuditStatusItems(auditIsCompleted: boolean) {
   return {
     EXPECTED: "Expected",
     FOUND: AUDIT_ASSET_STATUS_LABELS.FOUND,
-    MISSING: auditAssetStatusLabel("PENDING", isAuditCompleted),
+    MISSING: auditAssetStatusLabel("PENDING", auditIsCompleted),
     UNEXPECTED: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED,
   };
 }
@@ -314,19 +316,15 @@ export default function AuditOverview() {
   // Labelling it "Missing" told users a brand-new audit was already missing
   // every one of its assets. The asset rows have always been completion-aware
   // (getAuditStatusLabel); this makes the tile agree with them.
-  // why: NOT `status === COMPLETED`. Archiving a completed audit rewrites the
-  // status to ARCHIVED but keeps `completedAt` and the finalised counts, so a
-  // status check would relabel genuinely missing assets as "Not scanned" the
-  // moment someone archives the audit. `completedAt` is the provenance: it is
-  // set only by completion, so an archived-cancelled audit (never concluded)
-  // correctly keeps the open-audit wording.
-  const isAuditCompleted = session.completedAt !== null;
-  const unscannedLabel = auditAssetStatusLabel("PENDING", isAuditCompleted);
+  // The `completedAt`-not-`status` rule lives in `@shelf/labels` so every
+  // surface in both apps derives it identically — see `isAuditCompleted`.
+  const auditIsCompleted = isAuditCompleted(session);
+  const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
   const unexpectedCount = session.unexpectedAssetCount || 0;
 
   const filterMetadata = getAuditFilterMetadata(
     currentFilter,
-    isAuditCompleted
+    auditIsCompleted
   );
 
   return (
@@ -467,8 +465,7 @@ export default function AuditOverview() {
                           iconClassName="size-4"
                           content={
                             <p className="text-sm text-gray-600">
-                              Workspace admins and owners can perform this audit
-                              because it has no specific assignee.
+                              {AUDIT_UNASSIGNED_LABELS.DETAIL}
                             </p>
                           }
                         />
@@ -591,7 +588,7 @@ export default function AuditOverview() {
           slots={{
             "left-of-search": (
               <AuditStatusFilter
-                statusItems={buildAuditStatusItems(isAuditCompleted)}
+                statusOptions={buildAuditStatusItems(auditIsCompleted)}
               />
             ),
           }}
