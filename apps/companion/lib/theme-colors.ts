@@ -5,6 +5,11 @@
  * via the ThemeProvider. Status-badge and shadow maps are also duplicated
  * per theme for convenience.
  */
+import {
+  AUDIT_ASSET_STATUS_TONES,
+  AUDIT_STATUS_TONES,
+  type StatusTone,
+} from "@shelf/labels";
 
 // ────────────────────────────── Light palette ──────────────────────────────
 
@@ -187,22 +192,44 @@ export const darkStatusBadge = buildStatusBadge(darkColors);
 export const lightBookingStatusBadge = buildBookingStatusBadge(lightColors);
 export const darkBookingStatusBadge = buildBookingStatusBadge(darkColors);
 
-function buildAuditStatusBadge(c: Colors) {
+/**
+ * Resolves a shared {@link StatusTone} against this theme's palette.
+ *
+ * The tone-per-status decision lives in `@shelf/labels` next to the words, so
+ * this app and the webapp cannot disagree about which status carries which
+ * weight. Only the colour VALUES are app-owned, because the companion resolves
+ * every tone twice (light and dark) while the webapp has one fixed palette.
+ *
+ * Keep this visually equivalent to the webapp's `toneBadgeColors`
+ * (`apps/webapp/app/utils/status-tone-colors.ts`).
+ */
+function buildToneBadge(
+  c: Colors
+): Record<StatusTone, { bg: string; text: string }> {
   return {
-    PENDING: { bg: c.warningBg, text: c.warning },
-    ACTIVE: { bg: c.inCustodyBg, text: c.inCustody },
-    COMPLETED: { bg: c.successBg, text: c.success },
-    CANCELLED: { bg: c.borderLight, text: c.muted },
-  } as Record<string, { bg: string; text: string }>;
+    neutral: { bg: c.borderLight, text: c.muted },
+    info: { bg: c.inCustodyBg, text: c.inCustody },
+    success: { bg: c.successBg, text: c.success },
+    warning: { bg: c.warningBg, text: c.warning },
+    danger: { bg: c.errorBg, text: c.error },
+  };
+}
+
+function buildAuditStatusBadge(c: Colors) {
+  const tone = buildToneBadge(c);
+  return Object.fromEntries(
+    Object.entries(AUDIT_STATUS_TONES).map(([status, t]) => [status, tone[t]])
+  ) as Record<string, { bg: string; text: string }>;
 }
 
 function buildAuditAssetStatusBadge(c: Colors) {
-  return {
-    PENDING: { bg: c.borderLight, text: c.muted },
-    FOUND: { bg: c.successBg, text: c.success },
-    MISSING: { bg: c.errorBg, text: c.error },
-    UNEXPECTED: { bg: c.warningBg, text: c.warning },
-  } as Record<string, { bg: string; text: string }>;
+  const tone = buildToneBadge(c);
+  return Object.fromEntries(
+    Object.entries(AUDIT_ASSET_STATUS_TONES).map(([status, t]) => [
+      status,
+      tone[t],
+    ])
+  ) as Record<string, { bg: string; text: string }>;
 }
 
 export const lightAuditStatusBadge = buildAuditStatusBadge(lightColors);

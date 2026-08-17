@@ -78,6 +78,9 @@ export declare const AUDIT_ASSET_STATUS_LABELS: {
 /** Enum keys of {@link AUDIT_ASSET_STATUS_LABELS} — the Prisma status values. */
 export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;
 
+/** Enum keys of {@link AUDIT_STATUS_LABELS} — the Prisma AuditStatus values. */
+export type AuditStatusKey = keyof typeof AUDIT_STATUS_LABELS;
+
 /** The user-facing strings those keys resolve to. */
 export type AuditAssetStatusLabel =
   (typeof AUDIT_ASSET_STATUS_LABELS)[AuditAssetStatusKey];
@@ -139,3 +142,20 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
  * a checked-out asset can still be pulled off a live booking.
  */
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
+
+ * Semantic colour weight shared by both apps. Each app maps a tone onto its own
+ * palette (the webapp's fixed hex `BADGE_COLORS`, the companion's light/dark
+ * theme), so the colour VALUES stay app-owned while the DECISION is shared.
+ *
+ * neutral → grey · info → blue · success → green · warning → amber · danger → red
+ */
+export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+/** Tone per audit status. PENDING is neutral; "Overdue" is a separate badge. */
+export declare const AUDIT_STATUS_TONES: Record<AuditStatusKey, StatusTone>;
+
+/** Tone per per-asset audit status. MISSING is danger; UNEXPECTED is warning. */
+export declare const AUDIT_ASSET_STATUS_TONES: Record<
+  AuditAssetStatusKey,
+  StatusTone
+>;

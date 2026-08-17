@@ -1,15 +1,7 @@
 import type { AuditStatus } from "@prisma/client";
-import { AUDIT_STATUS_LABELS } from "@shelf/labels";
-import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
+import { AUDIT_STATUS_LABELS, AUDIT_STATUS_TONES } from "@shelf/labels";
+import { toneBadgeColors } from "~/utils/status-tone-colors";
 import { Badge } from "../shared/badge";
-
-const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
-  PENDING: BADGE_COLORS.gray,
-  ACTIVE: BADGE_COLORS.violet,
-  COMPLETED: BADGE_COLORS.green,
-  CANCELLED: BADGE_COLORS.gray,
-  ARCHIVED: BADGE_COLORS.gray,
-};
 
 /**
  * Badge component for displaying audit status with appropriate colors.
@@ -21,7 +13,7 @@ const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
  * @param status - The audit status from Prisma enum
  */
 export function AuditStatusBadge({ status }: { status: AuditStatus }) {
-  const colors = auditStatusColorMap[status];
+  const colors = toneBadgeColors(AUDIT_STATUS_TONES[status]);
 
   return (
     <Badge color={colors.bg} textColor={colors.text} withDot={false}>

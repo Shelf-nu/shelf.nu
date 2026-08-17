@@ -185,3 +185,61 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 // reconciles the asset's status when it happens).
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
+
+/**
+ * Semantic colour TONE for each audit status, and for each per-asset status.
+ *
+ * Why tones and not colours: the two apps cannot share colour values. The
+ * webapp uses one fixed hex palette (`BADGE_COLORS`); the companion resolves
+ * every colour twice, once for light mode and once for dark. What they CAN
+ * share — and what actually drifted — is the decision about which status
+ * deserves which weight.
+ *
+ * This is the same fix already applied to the words above. Those were pulled
+ * in here so the two apps "can never show a different one", but the colours
+ * were left duplicated in `apps/webapp/.../audit-status-badge.tsx` and
+ * `apps/companion/lib/theme-colors.ts`, and duly drifted: Missing and
+ * Unexpected had opposite alarm colours, and Pending and Active disagreed too.
+ *
+ * Each app maps a tone to its own palette. They must stay visually equivalent:
+ *   neutral → grey      (no signal; nothing has happened yet)
+ *   info    → blue      (in progress, nothing wrong)
+ *   success → green     (the good outcome)
+ *   warning → amber     (worth attention, nothing lost)
+ *   danger  → red       (something is wrong and costs money)
+ */
+
+/** @typedef {"neutral"|"info"|"success"|"warning"|"danger"} StatusTone */
+
+/**
+ * Tone per audit status.
+ *
+ * PENDING is neutral, NOT amber: an audit nobody has started yet is not a
+ * problem, and both apps render a separate "Overdue" badge for the case that
+ * actually needs chasing. Colouring every pending audit amber spends the
+ * warning colour on the normal case and leaves nothing for the abnormal one.
+ */
+export const AUDIT_STATUS_TONES = {
+  PENDING: "neutral",
+  ACTIVE: "info",
+  COMPLETED: "success",
+  CANCELLED: "neutral",
+  ARCHIVED: "neutral",
+};
+
+/**
+ * Tone per per-asset audit status.
+ *
+ * MISSING outranks UNEXPECTED, which is the pairing that was inverted between
+ * the apps. An asset that should be here and is not may be lost or stolen and
+ * someone must act — that is danger. An unexpected asset is a surprise, but it
+ * is physically in the auditor's hands and merely filed wrong — that is a
+ * warning. The four together read as one escalating scale: neutral, success,
+ * warning, danger.
+ */
+export const AUDIT_ASSET_STATUS_TONES = {
+  PENDING: "neutral",
+  FOUND: "success",
+  MISSING: "danger",
+  UNEXPECTED: "warning",
+};
