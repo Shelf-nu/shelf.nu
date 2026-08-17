@@ -1223,6 +1223,16 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
+            {/* why visible rather than only in an alert: the disabled Reserve
+                  button was a dead control - tapping it produced nothing on
+                  device, so the one thing a user needs (what to fix) was
+                  unreachable. Stating it here does not depend on a tap firing,
+                  and it is readable before you even reach for the button. */}
+            {booking.status === "DRAFT" && reserveBlockedReason ? (
+              <Text style={styles.reserveBlockedNote}>
+                {reserveBlockedReason}
+              </Text>
+            ) : null}
 
             {/* Action buttons */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(
@@ -2098,6 +2108,13 @@ const useStyles = createStyles((colors, shadows) => ({
   manageRow: {
     flexDirection: "row",
     gap: spacing.sm,
+  },
+  reserveBlockedNote: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.xs,
+    lineHeight: 16,
   },
   actionButtonDisabled: {
     opacity: 0.45,
