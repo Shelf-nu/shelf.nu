@@ -38,6 +38,7 @@ import {
   createAssetScanNote,
   createAuditCreationNote,
   createAuditStartedNote,
+  createAuditResumedNote,
   createAuditCompletedNote,
   createAuditUpdateNote,
   createDueDateChangedNote,
@@ -180,8 +181,13 @@ export type RecordAuditScanInput = {
   qrId: string;
   /** The ID of the asset that was scanned */
   assetId: string;
-  /** Whether this asset was expected in the audit (true) or unexpected (false) */
-  isExpected: boolean;
+  /**
+   * Deliberately absent: whether the asset was expected is NOT an input.
+   * A scanning device's copy of the expected list goes stale, so
+   * `recordAuditScan` derives it from the audit's own AuditAsset row inside
+   * the transaction. Callers may still accept an `isExpected` flag on the
+   * wire for older clients, but must not forward it.
+   */
   /** The ID of the user who performed the scan */
   userId: string;
   /** The organization ID for security validation */
@@ -1202,8 +1208,7 @@ function isAuditAssetFkViolation(cause: unknown): boolean {
 export async function recordAuditScan(
   input: RecordAuditScanInput
 ): Promise<RecordAuditScanResult> {
-  const { auditSessionId, qrId, assetId, isExpected, userId, organizationId } =
-    input;
+  const { auditSessionId, qrId, assetId, userId, organizationId } = input;
 
   try {
     // Verify the audit session exists and belongs to the organization
@@ -1304,37 +1309,118 @@ export async function recordAuditScan(
     // Record the scan in a transaction
     const result = await db.$transaction(
       async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it
+        // Activate a PENDING audit on its first scan.
+        //
+        // Gated on the pre-transaction snapshot so an already-ACTIVE audit —
+        // i.e. every scan after the first — issues no session-status writes at
+        // all. Ungated, both updates below match zero rows on every one of
+        // them, so auditing several hundred assets paid two wasted round-trips
+        // per scan inside this 15s transaction.
+        //
+        // The concurrency case the claim exists for is *both* scanners seeing
+        // PENDING in their own snapshot, so gating on the snapshot does not
+        // weaken it: whoever sees PENDING still has to win the claim.
         if (session.status === AuditStatus.PENDING) {
-          await tx.auditSession.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
-            where: { id: auditSessionId },
+          // The claim is a guarded updateMany INSIDE the transaction, not a
+          // read from the pre-transaction `session` snapshot: two scanners
+          // hitting a fresh audit at the same moment would both see
+          // PENDING/startedAt null and both write a start note and an
+          // AUDIT_STARTED event. Only the row that actually matches
+          // `startedAt: null` can win, so exactly one of them records the
+          // first start.
+          //
+          // Scoping the update to `status: PENDING` also stops a scan in
+          // flight from resurrecting an audit someone cancelled or completed a
+          // moment earlier — an unconditional update would have overwritten
+          // that.
+          //
+          // `startedAt` is stamped only by this claim, so an audit that returns
+          // to PENDING and is scanned again keeps the moment it truly began.
+          // Production data showed one audit carrying three "started the audit"
+          // entries, with both surfaces reporting only the latest as "Started".
+          const firstStartClaim = await tx.auditSession.updateMany({
+            where: {
+              id: auditSessionId,
+              organizationId,
+              status: AuditStatus.PENDING,
+              startedAt: null,
+            },
             data: {
               status: AuditStatus.ACTIVE,
               startedAt: new Date(),
             },
           });
 
-          // Create automatic note for audit being started
-          await createAuditStartedNote({
-            auditSessionId,
-            userId,
-            tx,
-            prefetchedUser: scannerUser,
-          });
-
-          // Activity event — AUDIT_STARTED.
-          await recordEvent(
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "AUDIT_STARTED",
-              entityType: "AUDIT",
-              entityId: auditSessionId,
+          if (firstStartClaim.count === 1) {
+            // Automatic note for the audit being started. Guarded by the
+            // claim, so the activity feed cannot show one audit starting
+            // several times.
+            await createAuditStartedNote({
               auditSessionId,
-            },
-            tx
-          );
+              userId,
+              tx,
+              prefetchedUser: scannerUser,
+            });
+
+            // Activity event — AUDIT_STARTED.
+            await recordEvent(
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "AUDIT_STARTED",
+                entityType: "AUDIT",
+                entityId: auditSessionId,
+                auditSessionId,
+              },
+              tx
+            );
+          } else {
+            // Still PENDING but already carrying a startedAt: it was started
+            // before. Bring it back to ACTIVE without restamping the original
+            // start or re-noting it.
+            const resumeClaim = await tx.auditSession.updateMany({
+              where: {
+                id: auditSessionId,
+                organizationId,
+                status: AuditStatus.PENDING,
+              },
+              data: { status: AuditStatus.ACTIVE },
+            });
+
+            // PENDING -> ACTIVE is a tracked status transition, so it needs a
+            // trail of its own: without one the audit silently reappears as
+            // ACTIVE with nothing in the feed or the event stream explaining
+            // it. Reported as a status change rather than a second
+            // AUDIT_STARTED, which stays reserved for the genuine first start
+            // so reports can still count how many audits ever began.
+            //
+            // Guarded on the claim so the scanner that lost this race — the
+            // audit was flipped to ACTIVE a moment ago by someone else — does
+            // not add a duplicate entry.
+            if (resumeClaim.count === 1) {
+              await createAuditResumedNote({
+                auditSessionId,
+                userId,
+                tx,
+                prefetchedUser: scannerUser,
+              });
+
+              await recordEvent(
+                {
+                  organizationId,
+                  actorUserId: userId,
+                  action: "AUDIT_UPDATED",
+                  entityType: "AUDIT",
+                  entityId: auditSessionId,
+                  auditSessionId,
+                  field: "status",
+                  fromValue: AuditStatus.PENDING,
+                  toValue: AuditStatus.ACTIVE,
+                },
+                tx
+              );
+            }
+          }
         }
 
         // Create the scan record
@@ -1348,16 +1434,102 @@ export async function recordAuditScan(
           },
         });
 
-        let auditAssetId: string | null = null;
+        // Whether this asset was expected is derived from the audit's own
+        // rows, never taken from the request body.
+        //
+        // A scanning device sends the flag from the expected list it cached at
+        // audit start, and that copy goes stale: an admin can remove an asset
+        // from a still-PENDING audit (`removeAssetFromAudit`) after the device
+        // loaded it. Trusting the flag then matched zero rows on the
+        // expected-asset update, so the scan got no AuditAsset row at all —
+        // notes and photos could never attach to it — while the session counts
+        // still moved, driving `missingAssetCount` negative and reporting a
+        // found asset that is no longer part of the audit.
+        //
+        // AuditAsset is unique on (auditSessionId, assetId), so that one row is
+        // the authority on whether this asset belongs to the audit.
+        let auditAssetRow = await tx.auditAsset.findUnique({
+          where: { auditSessionId_assetId: { auditSessionId, assetId } },
+          select: { id: true, expected: true, status: true },
+        });
 
-        // Update or create the audit asset record
-        if (isExpected) {
-          // Expected asset - update its status to FOUND
-          await tx.auditAsset.updateMany({
+        // Session-count movements for this scan, applied as relative
+        // increments below. 0 means "this scan does not move that count".
+        let foundDelta = 0;
+        let missingDelta = 0;
+        let unexpectedDelta = 0;
+
+        // Tracks whether THIS scan is the one that inserted the row, which is
+        // what decides who owns the unexpected count.
+        let insertedUnexpectedRow = false;
+
+        if (!auditAssetRow) {
+          // The asset is not part of the audit yet — add it as unexpected,
+          // idempotently.
+          //
+          // The read above and this write are not atomic, and the
+          // duplicate-scan short-circuit runs OUTSIDE the transaction, so the
+          // row can appear in between: another scanner recording the same
+          // unexpected asset, or an admin adding it to the still-PENDING audit
+          // as expected (`addAssetsToAudit`). A plain `create` then raises
+          // Prisma P2002 on the (auditSessionId, assetId) unique — which
+          // neither `isLikeShelfError` nor `isAuditAssetFkViolation` (P2003
+          // only) recognises, so it surfaced as a captured 500 and rolled the
+          // whole scan back.
+          //
+          // `skipDuplicates` compiles to ON CONFLICT DO NOTHING, which does not
+          // abort the transaction, and its `count` is exactly the "did WE
+          // insert it" signal the count below needs.
+          const created = await tx.auditAsset.createMany({
+            data: [
+              {
+                auditSessionId,
+                assetId,
+                expected: false,
+                status: AuditAssetStatus.UNEXPECTED,
+                scannedAt: new Date(),
+                scannedById: userId,
+              },
+            ],
+            skipDuplicates: true,
+          });
+          insertedUnexpectedRow = created.count === 1;
+
+          // Re-read rather than trust what we tried to write: on a conflict the
+          // winner's row is what persisted, and it may be an EXPECTED row.
+          // ON CONFLICT DO NOTHING waits for the conflicting transaction, so by
+          // now that row is committed and visible to this statement.
+          auditAssetRow = await tx.auditAsset.findUniqueOrThrow({
+            where: { auditSessionId_assetId: { auditSessionId, assetId } },
+            select: { id: true, expected: true, status: true },
+          });
+        }
+
+        const isExpected = auditAssetRow.expected;
+        const auditAssetId = auditAssetRow.id;
+
+        if (insertedUnexpectedRow) {
+          // We created the row, already UNEXPECTED and stamped with this scan.
+          unexpectedDelta = 1;
+        } else if (auditAssetRow.expected) {
+          // Expected asset - update its status to FOUND.
+          //
+          // Reached either normally, or when the insert above lost to an admin
+          // adding this asset to the audit as expected mid-transaction. Both
+          // want the same outcome: a scanned asset must not be left PENDING, or
+          // completion would report it missing.
+          //
+          // Scoped to a row that is not already FOUND so the counts move
+          // exactly once: the duplicate-scan short-circuit above runs outside
+          // the transaction, so two scanners can both reach this point for the
+          // same asset. Without the status guard the second one decrements
+          // `missingAssetCount` again and it goes negative.
+          const foundClaim = await tx.auditAsset.updateMany({
             where: {
               auditSessionId,
               assetId,
               expected: true,
+              status: { not: AuditAssetStatus.FOUND },
             },
             data: {
               status: AuditAssetStatus.FOUND,
@@ -1366,54 +1538,54 @@ export async function recordAuditScan(
             },
           });
 
-          // Get the audit asset ID for return
-          const updatedAsset = await tx.auditAsset.findFirst({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            select: { id: true },
-          });
-
-          auditAssetId = updatedAsset?.id ?? null;
+          if (foundClaim.count === 1) {
+            foundDelta = 1;
+            missingDelta = -1;
+          }
         } else {
-          // Unexpected asset - create a new audit asset record
-          const auditAsset = await tx.auditAsset.create({
+          // An unexpected row already exists for this asset — its scan was
+          // removed but the row survived, or a concurrent scanner just inserted
+          // it. The unique constraint rules out a second row, so reuse this one
+          // and refresh its scan metadata.
+          await tx.auditAsset.update({
+            where: { id: auditAssetRow.id },
             data: {
-              auditSessionId,
-              assetId,
-              expected: false,
               status: AuditAssetStatus.UNEXPECTED,
               scannedAt: new Date(),
               scannedById: userId,
             },
           });
-          auditAssetId = auditAsset.id;
+
+          // Only count it if it was not already counted as unexpected. A row a
+          // concurrent scanner just inserted is already UNEXPECTED and already
+          // counted by them, so this correctly contributes nothing.
+          if (auditAssetRow.status !== AuditAssetStatus.UNEXPECTED) {
+            unexpectedDelta = 1;
+          }
         }
 
-        // Link the scan to the audit asset so we can query it later
-        if (auditAssetId) {
-          await tx.auditScan.update({
-            where: { id: scan.id },
-            data: { auditAssetId },
-          });
-        }
+        // Link the scan to the audit asset so we can query it later. Always
+        // resolvable now: every branch above either found or created the row.
+        await tx.auditScan.update({
+          where: { id: scan.id },
+          data: { auditAssetId },
+        });
 
-        // Update the audit session counts
+        // Update the audit session counts.
+        //
+        // Every field is written as a RELATIVE increment, 0 for the ones this
+        // scan does not move. `session` is a pre-transaction snapshot, so
+        // writing its absolute values back for the untouched fields let two
+        // concurrent scanners clobber each other: an unexpected scan committing
+        // `unexpectedAssetCount` 0 -> 1 was immediately undone by an expected
+        // scan writing its own stale `unexpectedAssetCount: 0` back.
         const updatedSession = await tx.auditSession.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditSessionId },
           data: {
-            foundAssetCount: isExpected
-              ? { increment: 1 }
-              : session.foundAssetCount,
-            missingAssetCount: isExpected
-              ? { decrement: 1 }
-              : session.missingAssetCount,
-            unexpectedAssetCount: !isExpected
-              ? { increment: 1 }
-              : session.unexpectedAssetCount,
+            foundAssetCount: { increment: foundDelta },
+            missingAssetCount: { increment: missingDelta },
+            unexpectedAssetCount: { increment: unexpectedDelta },
           },
         });
 
@@ -1437,7 +1609,7 @@ export async function recordAuditScan(
             entityType: "AUDIT",
             entityId: auditSessionId,
             auditSessionId,
-            auditAssetId: auditAssetId ?? undefined,
+            auditAssetId,
             assetId,
             meta: { isExpected },
           },

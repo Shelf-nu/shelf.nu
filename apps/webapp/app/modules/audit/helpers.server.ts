@@ -1,3 +1,5 @@
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
@@ -171,6 +173,74 @@ export async function createAssetScanRemovedNote({
   });
 }
 
+/** The actor fields a lifecycle note needs, when fetched outside the transaction. */
+type PrefetchedNoteActor = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+} | null;
+
+/**
+ * Writes one audit-lifecycle UPDATE note attributed to the acting user.
+ *
+ * Shared by the start / resume wrappers below: they differ only in the sentence
+ * that follows the user link, so the user lookup, the missing-user early return
+ * and the note write live here once.
+ *
+ * @param auditSessionId - The audit the note belongs to
+ * @param userId - The user who performed the action
+ * @param sentence - Predicate appended after the user link, e.g. "started the audit."
+ * @param tx - Prisma transaction client, so the note commits with the status change
+ * @param prefetchedUser - Optional actor fetched outside the transaction
+ */
+async function createAuditLifecycleNote({
+  auditSessionId,
+  userId,
+  sentence,
+  tx,
+  prefetchedUser,
+}: {
+  auditSessionId: string;
+  userId: string;
+  sentence: string;
+  // why: narrowed to the transaction-client shape (mirrors the precedent in
+  // modules/user/service.server.ts) rather than the `tx: any` this file's older
+  // exports use. The exported wrappers keep `any` to match their siblings;
+  // migrating all of them is a file-wide change, not this one's business.
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  prefetchedUser?: PrefetchedNoteActor;
+}) {
+  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  const actor =
+    prefetchedUser ??
+    (await tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      },
+    }));
+
+  if (!actor) {
+    return; // Skip note creation if user not found
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: actor.id,
+      type: "UPDATE",
+      content: `${wrapUserLinkForNote({
+        id: actor.id,
+        firstName: actor.firstName,
+        lastName: actor.lastName,
+      })} ${sentence}`,
+    },
+  });
+}
+
 /**
  * Creates an automatic note when an audit is started (activated from PENDING status).
  * This note records who performed the first scan that activated the audit.
@@ -184,40 +254,47 @@ export async function createAuditStartedNote({
   auditSessionId: string;
   userId: string;
   tx: any; // Prisma transaction client
-  prefetchedUser?: {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  prefetchedUser?: PrefetchedNoteActor;
 }) {
-  // Use pre-fetched data if available, otherwise fetch inside the transaction
-  const starter =
-    prefetchedUser ??
-    (await tx.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      },
-    }));
+  await createAuditLifecycleNote({
+    auditSessionId,
+    userId,
+    sentence: "started the audit.",
+    tx,
+    prefetchedUser,
+  });
+}
 
-  if (!starter) {
-    return; // Skip note creation if user not found
-  }
-
-  await tx.auditNote.create({
-    data: {
-      auditSessionId,
-      userId: starter.id,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: starter.id,
-        firstName: starter.firstName,
-        lastName: starter.lastName,
-      })} started the audit.`,
-    },
+/**
+ * Creates an automatic note when a previously-started audit is brought back to
+ * ACTIVE by a scan.
+ *
+ * Distinct from {@link createAuditStartedNote}: the audit already has a
+ * `startedAt` and that moment is never rewritten, so the feed must say the
+ * audit was resumed rather than claim a second start.
+ *
+ * @param auditSessionId - The audit being resumed
+ * @param userId - The user whose scan resumed it
+ * @param tx - Prisma transaction client, so the note commits with the status change
+ * @param prefetchedUser - Optional user record fetched outside the transaction
+ */
+export async function createAuditResumedNote({
+  auditSessionId,
+  userId,
+  tx,
+  prefetchedUser,
+}: {
+  auditSessionId: string;
+  userId: string;
+  tx: any; // Prisma transaction client
+  prefetchedUser?: PrefetchedNoteActor;
+}) {
+  await createAuditLifecycleNote({
+    auditSessionId,
+    userId,
+    sentence: "resumed the audit.",
+    tx,
+    prefetchedUser,
   });
 }
 

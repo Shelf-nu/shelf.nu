@@ -30,7 +30,8 @@ import {
  *   - auditSessionId: string — the audit session being scanned
  *   - qrId: string — the QR code or barcode value that was scanned
  *   - assetId: string — the resolved asset ID
- *   - isExpected: boolean — whether the asset was expected in the audit
+ *   - isExpected: boolean (optional, ignored) — accepted so shipped builds keep
+ *     working; the server derives expectedness from the audit's own rows
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -60,12 +61,16 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     const body = await request.json();
-    const { auditSessionId, qrId, assetId, isExpected } = z
+    const { auditSessionId, qrId, assetId } = z
       .object({
         auditSessionId: z.string().min(1),
         qrId: z.string().min(1),
         assetId: z.string().min(1),
-        isExpected: z.boolean(),
+        // Accepted for wire compatibility with shipped app builds, but never
+        // forwarded: `recordAuditScan` derives expectedness from the audit's
+        // own AuditAsset row. A device queues scans offline, so its cached
+        // expected list can be hours out of date by the time they land.
+        isExpected: z.boolean().optional(),
       })
       .parse(body);
 
@@ -85,7 +90,6 @@ export async function action({ request }: ActionFunctionArgs) {
         auditSessionId,
         qrId,
         assetId,
-        isExpected,
         userId: user.id,
         organizationId,
       });

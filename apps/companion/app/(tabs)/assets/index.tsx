@@ -257,10 +257,10 @@ function AssetsListContent() {
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            quantityLabel ? `, quantity ${quantityLabel}` : ""
-          }${item.category ? `, ${item.category.name}` : ""}${
-            item.location ? `, ${item.location.name}` : ""
-          }`}
+            item.sequentialId ? `, ${item.sequentialId}` : ""
+          }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
+            item.category ? `, ${item.category.name}` : ""
+          }${item.location ? `, ${item.location.name}` : ""}`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -280,6 +280,15 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
+              {/* Search accepts a SAM ID, so a hit has to be able to show WHICH
+                  id it is — otherwise the row identifies itself by title only
+                  and the user has to open it to find out. Absent on older
+                  servers, where the row renders exactly as before. */}
+              {item.sequentialId ? (
+                <Text style={styles.assetSequentialId} numberOfLines={1}>
+                  {item.sequentialId}
+                </Text>
+              ) : null}
               {item.category && (
                 <Text style={styles.assetCategory} numberOfLines={1}>
                   {item.category.name}
@@ -657,6 +666,12 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  assetSequentialId: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Tabular so a column of SAM ids lines up while scanning the list.
+    fontVariant: ["tabular-nums"],
   },
 
   // Status badge — pill shape like webapp
