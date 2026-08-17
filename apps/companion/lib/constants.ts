@@ -11,6 +11,7 @@ import {
   ASSET_STATUS_LABELS,
   ASSET_QTY_STATUS_LABELS,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
   BOOKING_STATUS_LABELS,
 } from "@shelf/labels";
 
@@ -112,17 +113,25 @@ export function formatStatus(status: string) {
       return BOOKING_STATUS_LABELS.OVERDUE;
     case "COMPLETE":
       return BOOKING_STATUS_LABELS.COMPLETE;
+    // These two keys are shared with AuditStatus. Both maps spell them the
+    // same way, so one case serves both — if that ever stops being true, split
+    // them rather than letting audits silently inherit booking wording.
     case "ARCHIVED":
       return BOOKING_STATUS_LABELS.ARCHIVED;
     case "CANCELLED":
       return BOOKING_STATUS_LABELS.CANCELLED;
-    // ── Audit statuses (companion-only; no web asset-badge equivalent) ──
+    // ── Audit statuses (web canonical: AuditStatusBadge) ──
+    // Only the three keys that do not collide with a booking status appear
+    // here; AuditStatus.CANCELLED / .ARCHIVED are handled by the booking cases
+    // above, whose labels are the same words in AUDIT_STATUS_LABELS. Prefer
+    // AUDIT_STATUS_LABELS directly on audit surfaces — this branch exists for
+    // the generic badge helper, which is handed a bare status string.
     case "PENDING":
-      return "Pending";
+      return AUDIT_STATUS_LABELS.PENDING;
     case "ACTIVE":
-      return "Active";
+      return AUDIT_STATUS_LABELS.ACTIVE;
     case "COMPLETED":
-      return "Completed";
+      return AUDIT_STATUS_LABELS.COMPLETED;
     // Fallback: sentence-case (capitalize first word only)
     default: {
       const words = status.replace(/_/g, " ").toLowerCase();
