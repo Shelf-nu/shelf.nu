@@ -47,6 +47,7 @@ import {
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
+import { getLocationKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
@@ -1417,68 +1418,14 @@ export async function getLocationKits(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    const kitWhere: Prisma.KitWhereInput = {
+    // Shared with `resolveLocationKitIds` so a "select all" removal resolves
+    // exactly the rows this list renders.
+    const kitWhere = getLocationKitsWhereInput({
       organizationId,
       locationId: id,
-    };
-
-    if (teamMemberIds && teamMemberIds.length) {
-      kitWhere.OR = [
-        ...(kitWhere.OR ?? []),
-        {
-          custody: { custodianId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianTeamMemberId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianUserId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
-    if (search) {
-      kitWhere.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
+      search,
+      teamMemberIds,
+    });
 
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({

@@ -459,14 +459,31 @@ async function handleSCIMTransition(
   try {
     if (!desiredRole) {
       // User has no valid SCIM groups, revoke access
-      await db.userOrganization.delete({
-        where: {
-          userId_organizationId: {
-            userId,
-            organizationId: organization.id,
-          },
-        },
+      const deleted = await deleteMembershipUnlessOwner({
+        userId,
+        organizationId: organization.id,
       });
+
+      if (deleted === 0) {
+        /**
+         * The workspace owner lost their SCIM groups. Removing them would
+         * strand the workspace with no owner and no way back, and this runs
+         * during SSO login — throwing would lock the owner out of their own
+         * workspace on the way in. Keep the access and make the divergence
+         * loud instead; an operator must transfer ownership before the IdP
+         * can deprovision them.
+         */
+        Logger.warn({
+          message:
+            "SCIM would have revoked the workspace owner's access; kept it and skipped the revocation",
+          additionalData: { userId, organizationId: organization.id },
+        });
+
+        transition.transitionType = "ROLE_CHANGE";
+        transition.newRole = currentRoles[0];
+
+        return transition;
+      }
 
       transition.transitionType = "ACCESS_REVOKED";
 
@@ -1435,6 +1452,46 @@ export async function createUserAccountForTesting(
   return authSession;
 }
 
+/**
+ * Deletes a user's membership row unless they own the workspace.
+ *
+ * A workspace must always have an owner, and deleting the owner's
+ * `UserOrganization` row is a one-way door: it is the record
+ * `transferOwnership` looks up to hand ownership on. Once gone,
+ * `Organization.userId` still names the ex-owner but they have no membership,
+ * so they get a 403 and no transfer path can run.
+ *
+ * The owner condition lives **in the DELETE itself** rather than in a preceding
+ * read. A check-then-delete loses to an ownership transfer that commits in
+ * between: the read sees ADMIN, the transfer promotes them to OWNER, and the
+ * unqualified delete removes the new owner anyway. As a conditional delete this
+ * is a compare-and-set — Postgres re-evaluates the qualification against the
+ * committed row version, so the race arm matches nothing.
+ *
+ * @param args - The membership to remove
+ * @param client - Transaction client, when the caller needs this to commit with
+ *   other writes
+ * @returns Number of rows deleted: 0 means the user owns the workspace or has
+ *   no membership — the caller must decide which and how to react
+ */
+async function deleteMembershipUnlessOwner(
+  {
+    userId,
+    organizationId,
+  }: { userId: User["id"]; organizationId: Organization["id"] },
+  client: Omit<ExtendedPrismaClient, ITXClientDenyList> = db
+) {
+  const { count } = await client.userOrganization.deleteMany({
+    where: {
+      userId,
+      organizationId,
+      NOT: { roles: { has: OrganizationRoles.OWNER } },
+    },
+  });
+
+  return count;
+}
+
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
@@ -1444,6 +1501,32 @@ export async function revokeAccessToOrganization({
 }) {
   try {
     /**
+     * Read first purely so the common case gets an actionable message instead
+     * of a generic failure. {@link deleteMembershipUnlessOwner} is what
+     * actually enforces the rule — this read can go stale.
+     *
+     * This mirrors `changeUserRole`, which already refuses to touch the OWNER
+     * and points the caller at ownership transfer.
+     */
+    const targetUserOrg = await db.userOrganization.findFirst({
+      where: { userId, organizationId },
+      select: { roles: true },
+    });
+
+    if (targetUserOrg?.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Cannot revoke the owner's access",
+        message:
+          "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+        additionalData: { userId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
      * if I want to revokeAccess access, i simply need to:
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
@@ -1452,25 +1535,50 @@ export async function revokeAccessToOrganization({
       where: { userId, organizationId },
     });
 
-    const result = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(teamMember?.id && {
-          teamMembers: {
-            disconnect: {
-              id: teamMember.id,
+    const result = await db.$transaction(async (tx) => {
+      const deleted = await deleteMembershipUnlessOwner(
+        { userId, organizationId },
+        tx
+      );
+
+      if (deleted === 0) {
+        /**
+         * Either they became the owner since the read above (the race this
+         * conditional delete exists to catch) or they were never a member.
+         * Re-read inside the transaction to tell those apart, so a genuine
+         * ownership race is reported rather than passing silently.
+         */
+        const survivor = await tx.userOrganization.findFirst({
+          where: { userId, organizationId },
+          select: { roles: true },
+        });
+
+        if (survivor) {
+          throw new ShelfError({
+            cause: null,
+            title: "Cannot revoke the owner's access",
+            message:
+              "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+            additionalData: { userId, organizationId },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(teamMember?.id && {
+            teamMembers: {
+              disconnect: {
+                id: teamMember.id,
+              },
             },
-          },
-        }),
-        userOrganizations: {
-          delete: {
-            userId_organizationId: {
-              userId,
-              organizationId,
-            },
-          },
+          }),
         },
-      },
+      });
     });
 
     // Clear lastSelectedOrganizationId if it points to the revoked org.
@@ -1494,6 +1602,12 @@ export async function revokeAccessToOrganization({
 
     return result;
   } catch (cause) {
+    // Preserve our own errors — the owner guard above is a 400 the user needs
+    // to read, and rewrapping would turn it into a generic captured 500.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to revoke user access to organization",
