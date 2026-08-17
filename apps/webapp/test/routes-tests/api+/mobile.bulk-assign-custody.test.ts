@@ -138,7 +138,9 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
 
     const result = await action(createActionArgs({ request }));
 
-    expect((result as unknown as Response).status).not.toBe(200);
+    // 400, not 500: an expected client error must not be reported as a server
+    // outage, or it drowns in Sentry alongside real faults.
+    expect((result as unknown as Response).status).toBe(400);
     // The write must never be reached
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
@@ -153,7 +155,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
 
     const result = await action(createActionArgs({ request }));
 
-    expect((result as unknown as Response).status).not.toBe(200);
+    expect((result as unknown as Response).status).toBe(400);
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
 

@@ -70,7 +70,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    const body = BodySchema.parse(await request.json());
+    // safeParse, not parse — see the asset bulk endpoints: a raw ZodError
+    // becomes a captured 500, and the select-all rejection is an expected
+    // client error.
+    const parsedBody = BodySchema.safeParse(
+      await request.json().catch(() => null)
+    );
+
+    if (!parsedBody.success) {
+      throw new ShelfError({
+        cause: parsedBody.error,
+        message: "Invalid request body",
+        additionalData: { validationErrors: parsedBody.error.flatten() },
+        label: "Kit",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const body = parsedBody.data;
 
     await requireMobilePermission({
       userId: user.id,
