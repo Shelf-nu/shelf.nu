@@ -654,7 +654,10 @@ export default function AssetDetailScreen() {
               // has to be able to tell you what an asset's SAM ID is. Web has
               // always shown it as "Asset ID".
               <InfoRow
-                icon="pricetag-outline"
+                // `barcode-outline` rather than `pricetag-outline`: the Category
+                // row above already owns the pricetag, and it also matches the
+                // scanner affordance this row exists for.
+                icon="barcode-outline"
                 label="Asset ID"
                 value={asset.sequentialId}
               />

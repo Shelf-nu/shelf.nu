@@ -2,10 +2,14 @@ import { AuditStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { sendAuditCancelledEmails } from "./email-helpers";
-import { createAuditStartedNote } from "./helpers.server";
+import {
+  createAuditResumedNote,
+  createAuditStartedNote,
+} from "./helpers.server";
 import {
   createAuditSession,
   addAssetsToAudit,
@@ -32,6 +36,7 @@ vi.mock("~/utils/storage.server", () => ({
 vi.mock("./helpers.server", () => ({
   createAuditCreationNote: vi.fn(),
   createAuditStartedNote: vi.fn(),
+  createAuditResumedNote: vi.fn(),
   createAssetScanNote: vi.fn(),
   createAssetsAddedToAuditNote: vi.fn(),
   createAssetRemovedFromAuditNote: vi.fn(),
@@ -75,13 +80,15 @@ vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
       create: vi.fn(),
-      // why: the first-start claim is a guarded updateMany inside the tx.
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       findFirstOrThrow: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      // why: recordAuditScan claims the audit's first start with a guarded
+      // updateMany inside the tx, and reactivates a previously-started audit
+      // with a second one. Both tests below assert on these calls.
       updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
@@ -101,12 +108,14 @@ vi.mock("~/database/db.server", () => {
     auditAsset: {
       createMany: vi.fn(),
       findMany: vi.fn(),
+      // why: recordAuditScan reads the (auditSessionId, assetId) row to decide
+      // whether the asset was expected, then marks it FOUND. Without these the
+      // transaction rejects partway, and a test that only inspects earlier
+      // calls would still pass.
       findUnique: vi.fn(),
-      // why: recordAuditScan marks the expected asset FOUND and then reads it
-      // back. Without these the transaction rejects partway, and a test that
-      // only inspects earlier calls would still pass.
       findFirst: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
@@ -159,6 +168,7 @@ const mockDb = db as unknown as {
     createMany: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
@@ -2193,7 +2203,6 @@ describe("audit service", () => {
       auditSessionId: "audit-1",
       qrId: "qr-1",
       assetId: "asset-1",
-      isExpected: true,
       userId: "user-1",
       organizationId: "org-1",
     };
@@ -2203,15 +2212,29 @@ describe("audit service", () => {
      * a rejected call and asserting on writes that happened before the failure
      * would let these tests pass on a broken scan.
      *
-     * @param claimWins - whether the guarded first-start updateMany matches a
-     *   row, i.e. whether this scan is the audit's genuine first start
+     * The two session `updateMany` calls are stubbed per-call, in the order the
+     * service issues them, because that ORDER is what the tests distinguish:
+     * a lost first-start claim followed by a won reactivation is a resume, and
+     * two lost claims mean another scanner got there first.
+     *
+     * @param claims - `first` = does the guarded first-start claim match a row;
+     *   `resume` = does the follow-up PENDING -> ACTIVE update match one
+     * @param startedAt - the audit's existing start time, if it has one
      */
-    function mockPendingSession(claimWins: boolean) {
+    function mockPendingSession({
+      first,
+      resume = 0,
+      startedAt = null,
+    }: {
+      first: 0 | 1;
+      resume?: 0 | 1;
+      startedAt?: Date | null;
+    }) {
       mockDb.auditSession.findFirst.mockResolvedValue({
         id: "audit-1",
         organizationId: "org-1",
         status: AuditStatus.PENDING,
-        startedAt: claimWins ? null : new Date("2026-06-15T09:19:00.000Z"),
+        startedAt,
         foundAssetCount: 0,
         unexpectedAssetCount: 0,
         missingAssetCount: 0,
@@ -2228,25 +2251,46 @@ describe("audit service", () => {
         title: "Camera",
         organizationId: "org-1",
       });
-      // The claim itself: count 1 only when this scan really is the first.
-      mockDb.auditSession.updateMany.mockResolvedValue({
-        count: claimWins ? 1 : 0,
-      });
+      // why: `vi.clearAllMocks()` clears recorded calls but NOT queued
+      // `mockResolvedValueOnce` values, so an unconsumed one from the previous
+      // test would answer this test's first claim. Reset drains the queue.
+      mockDb.auditSession.updateMany.mockReset();
+      mockDb.auditSession.updateMany
+        .mockResolvedValueOnce({ count: first })
+        .mockResolvedValueOnce({ count: resume });
       mockDb.auditScan.create.mockResolvedValue({ id: "scan-1" });
+      // The asset IS expected in this audit — the service derives that from
+      // this row rather than from the request body.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        expected: true,
+        status: "PENDING",
+      });
       mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
-      mockDb.auditAsset.findFirst.mockResolvedValue({ id: "audit-asset-1" });
       mockDb.auditSession.update.mockResolvedValue({
         foundAssetCount: 1,
         unexpectedAssetCount: 0,
       });
     }
 
-    /** The guarded claim — the update that decides the first start. */
+    /** The guarded claim — the update that stamps the first start. */
     function firstStartClaim() {
       return (
         mockDb.auditSession.updateMany.mock
           .calls as AuditSessionUpdateManyCall[]
-      ).find((call) => call[0]?.data?.status === AuditStatus.ACTIVE);
+      ).find((call) => call[0]?.data?.startedAt !== undefined);
+    }
+
+    /** The follow-up update that brings a started audit back to ACTIVE. */
+    function reactivation() {
+      return (
+        mockDb.auditSession.updateMany.mock
+          .calls as AuditSessionUpdateManyCall[]
+      ).find(
+        (call) =>
+          call[0]?.data?.status === AuditStatus.ACTIVE &&
+          call[0]?.data?.startedAt === undefined
+      );
     }
 
     beforeEach(() => {
@@ -2257,7 +2301,7 @@ describe("audit service", () => {
     });
 
     it("stamps startedAt and records the start once, on a genuine first scan", async () => {
-      mockPendingSession(true);
+      mockPendingSession({ first: 1 });
 
       // Not caught: a rejection here must fail the test.
       const result = await recordAuditScan(scanInput);
@@ -2272,40 +2316,195 @@ describe("audit service", () => {
         organizationId: "org-1",
       });
       expect(createAuditStartedNote).toHaveBeenCalledTimes(1);
+      // A first start is not also a resume.
+      expect(createAuditResumedNote).not.toHaveBeenCalled();
     });
 
     it("keeps the original startedAt when a started audit is scanned again", async () => {
       // why: production data showed one audit with three "started the audit"
       // entries, its Started field moving to the latest each time. The moment
       // an audit actually began must not be rewritten.
-      mockPendingSession(false);
+      mockPendingSession({
+        first: 0,
+        resume: 1,
+        startedAt: new Date("2026-06-15T09:19:00.000Z"),
+      });
 
       const result = await recordAuditScan(scanInput);
 
       expect(result.scanId).toBe("scan-1");
-      // It is still re-activated, but without a timestamp or a start record.
-      const reactivation = (
-        mockDb.auditSession.updateMany.mock
-          .calls as AuditSessionUpdateManyCall[]
-      ).find(
-        (call) =>
-          call[0]?.data?.status === AuditStatus.ACTIVE &&
-          call[0]?.data?.startedAt === undefined
-      );
-      expect(reactivation).toBeDefined();
+      // It is still re-activated, but without a timestamp...
+      expect(reactivation()).toBeDefined();
+      expect(reactivation()?.[0].data?.startedAt).toBeUndefined();
+      // ...and it reads as a resume, not a second start.
       expect(createAuditStartedNote).not.toHaveBeenCalled();
+      expect(createAuditResumedNote).toHaveBeenCalledTimes(1);
+      // A PENDING -> ACTIVE transition is tracked state, so it leaves an event.
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "AUDIT_UPDATED",
+          field: "status",
+          fromValue: AuditStatus.PENDING,
+          toValue: AuditStatus.ACTIVE,
+        }),
+        expect.anything()
+      );
     });
 
-    it("does not record a first start when another scanner won the claim", async () => {
-      // why: two scanners hitting a fresh audit at once both saw PENDING in the
-      // pre-transaction snapshot. Only the one whose guarded update matches a
-      // row may write the note and the AUDIT_STARTED event.
-      mockPendingSession(true);
-      mockDb.auditSession.updateMany.mockResolvedValue({ count: 0 });
+    it("records neither a start nor a resume when another scanner won the claim", async () => {
+      // why: two scanners hitting the same audit at once both saw PENDING in
+      // their pre-transaction snapshot. The loser's first-start claim AND its
+      // reactivation both match zero rows — the audit is already ACTIVE — so it
+      // must stay silent rather than add a duplicate feed entry.
+      mockPendingSession({ first: 0, resume: 0 });
 
       await recordAuditScan(scanInput);
 
       expect(createAuditStartedNote).not.toHaveBeenCalled();
+      expect(createAuditResumedNote).not.toHaveBeenCalled();
+    });
+
+    it("issues no session-status writes at all for an already-ACTIVE audit", async () => {
+      // why: the activation block is gated on the snapshot status. Ungated,
+      // both updates match zero rows on EVERY scan after the first, so a
+      // 500-asset audit paid 1000 wasted round-trips inside a 15s transaction.
+      mockPendingSession({ first: 0, resume: 0 });
+      mockDb.auditSession.findFirst.mockResolvedValue({
+        id: "audit-1",
+        organizationId: "org-1",
+        status: AuditStatus.ACTIVE,
+        startedAt: new Date("2026-06-15T09:19:00.000Z"),
+        foundAssetCount: 0,
+        unexpectedAssetCount: 0,
+        missingAssetCount: 0,
+      });
+
+      await recordAuditScan(scanInput);
+
+      expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("recordAuditScan expectedness and counts", () => {
+    /** Runs the callback straight against the mock db, as $transaction would. */
+    type TransactionCallback = (tx: typeof mockDb) => unknown;
+
+    const scanInput = {
+      auditSessionId: "audit-1",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    };
+
+    /** The count-moving update on the session (increments only). */
+    function countUpdateData() {
+      return mockDb.auditSession.update.mock.calls[0]?.[0]?.data;
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockDb.$transaction.mockImplementation((cb: TransactionCallback) =>
+        cb(mockDb)
+      );
+      // An ACTIVE audit mid-scan, with counts already moved by earlier scans —
+      // the snapshot values that used to be written back verbatim.
+      mockDb.auditSession.findFirst.mockResolvedValue({
+        id: "audit-1",
+        organizationId: "org-1",
+        status: AuditStatus.ACTIVE,
+        startedAt: new Date("2026-06-15T09:19:00.000Z"),
+        expectedAssetCount: 10,
+        foundAssetCount: 4,
+        missingAssetCount: 6,
+        unexpectedAssetCount: 3,
+      });
+      mockDb.auditScan.findFirst.mockResolvedValue(null);
+      mockDb.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "Scan",
+        lastName: "User",
+        displayName: "Scan User",
+      });
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Camera",
+        organizationId: "org-1",
+      });
+      mockDb.auditScan.create.mockResolvedValue({ id: "scan-1" });
+      mockDb.auditSession.update.mockResolvedValue({
+        foundAssetCount: 5,
+        unexpectedAssetCount: 3,
+      });
+    });
+
+    it("never writes a snapshot count back — every field is a relative increment", async () => {
+      // why: `session` is read OUTSIDE the transaction, so writing its absolute
+      // values back for the fields this scan does not move let two concurrent
+      // scanners clobber each other: an unexpected scan's committed
+      // `unexpectedAssetCount` 3 -> 4 was undone by an expected scan writing
+      // its own stale 3 back.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        expected: true,
+        status: "PENDING",
+      });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+
+      await recordAuditScan(scanInput);
+
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 1 },
+        missingAssetCount: { increment: -1 },
+        // The untouched field is a no-op increment, NOT the stale literal 3.
+        unexpectedAssetCount: { increment: 0 },
+      });
+    });
+
+    it("treats an asset with no audit row as unexpected, whatever the client believed", async () => {
+      // why: an admin can remove an asset from a still-PENDING audit after a
+      // device cached the expected list. The device then posts isExpected:true,
+      // which used to match zero rows — the scan got no AuditAsset row while
+      // the counts still moved, driving missingAssetCount negative.
+      mockDb.auditAsset.findUnique.mockResolvedValue(null);
+      mockDb.auditAsset.create.mockResolvedValue({ id: "audit-asset-new" });
+
+      const result = await recordAuditScan(scanInput);
+
+      // It becomes a real unexpected row, so notes and photos can attach.
+      expect(mockDb.auditAsset.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ expected: false }),
+        })
+      );
+      expect(result.auditAssetId).toBe("audit-asset-new");
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 0 },
+        // Crucially NOT decremented — the asset is not missing, it is not part
+        // of the audit at all.
+        missingAssetCount: { increment: 0 },
+        unexpectedAssetCount: { increment: 1 },
+      });
+    });
+
+    it("does not move the counts twice when a concurrent scan already marked the asset FOUND", async () => {
+      // why: the duplicate-scan short-circuit runs OUTSIDE the transaction, so
+      // two scanners can both reach the FOUND update for the same asset. The
+      // status-guarded updateMany matches for only one of them.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        expected: true,
+        status: "PENDING",
+      });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 0 });
+
+      await recordAuditScan(scanInput);
+
+      expect(countUpdateData()).toEqual({
+        foundAssetCount: { increment: 0 },
+        missingAssetCount: { increment: 0 },
+        unexpectedAssetCount: { increment: 0 },
+      });
     });
   });
 

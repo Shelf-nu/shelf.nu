@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
@@ -59,15 +60,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // SAM ID"), but no mobile screen could show you one because this
         // payload never carried it.
         sequentialId: true,
-        // Superset of ASSET_MODEL_IMAGE_SELECT: the shaper resolves the cover
-        // image cascade from image/thumbnailImage, and the detail screen shows
-        // the model NAME, which web has always shown and mobile never did.
+        /**
+         * `name` drives the detail screen's Model row, which web has always
+         * shown and mobile never did; the image columns feed the shaper's
+         * cover-image cascade.
+         *
+         * Merged into ONE key with a spread of the shared constant rather than
+         * re-listing the image columns — same reasoning as
+         * `modules/asset/fields.ts`. Hardcoding them here would silently drop a
+         * future third image column on this surface only, while every other
+         * surface kept resolving the cascade.
+         */
         assetModel: {
           select: {
-            id: true,
             name: true,
-            image: true,
-            thumbnailImage: true,
+            ...ASSET_MODEL_IMAGE_SELECT.assetModel.select,
           },
         },
         mainImageExpiration: true,
@@ -183,6 +190,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       id: asset.id,
       title: asset.title,
       status: asset.status,
+      // Part of the helper's param shape. This route serves its own copy from
+      // `assetData` below, so the helper's is unused here.
+      sequentialId: asset.sequentialId,
       mainImage: asset.mainImage,
       // Passed through so the helper can resolve the model-image cascade —
       // the detail screen renders the model's cover image for an asset that
@@ -274,15 +284,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ...assetData
     } = asset;
 
+    // The model's name only. The detail screen renders it as read-only text —
+    // unlike web, mobile has no asset-model screen to link to — so shipping an
+    // id nothing navigates to would work against the single-source-of-truth
+    // narrowing the destructure above exists for.
+    const assetModel = detailAssetModel
+      ? { name: detailAssetModel.name }
+      : null;
+
     // Custody visibility parity (server-side, since mobile clients are
     // untrusted): when the caller lacks custody-view permission, filter
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's QuantityCustodyList filter + hidden-count
     // (quantity-custody-list.tsx:121-126).
-    const assetModel = detailAssetModel
-      ? { id: detailAssetModel.id, name: detailAssetModel.name }
-      : null;
-
     const { custodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
@@ -320,7 +334,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,
-        // Identity only (no image fields — see the destructure above).
+        // Name only (no id, no image fields — see the destructure above).
         assetModel,
         // why: re-attach the detail-shape custody (with createdAt +
         // custodian.user) — the helper's narrower shape drops both.

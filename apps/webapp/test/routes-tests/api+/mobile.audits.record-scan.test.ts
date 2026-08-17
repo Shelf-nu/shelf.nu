@@ -135,11 +135,14 @@ describe("POST /api/mobile/audits/record-scan", () => {
     expect(body.foundAssetCount).toBe(5);
     expect(body.unexpectedAssetCount).toBe(1);
 
+    // why: the body's `isExpected` is accepted for wire compatibility with
+    // shipped app builds but must NOT be forwarded — the service derives
+    // expectedness from the audit's own AuditAsset row, because a device that
+    // queues scans offline can hold an hours-stale expected list.
     expect(recordAuditScan).toHaveBeenCalledWith({
       auditSessionId: "session-1",
       qrId: "qr-abc",
       assetId: "asset-1",
-      isExpected: true,
       userId: "user-1",
       organizationId: "org-1",
     });

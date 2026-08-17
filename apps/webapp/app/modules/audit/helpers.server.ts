@@ -222,6 +222,65 @@ export async function createAuditStartedNote({
 }
 
 /**
+ * Creates an automatic note when a previously-started audit is brought back to
+ * ACTIVE by a scan.
+ *
+ * Distinct from {@link createAuditStartedNote}: the audit already has a
+ * `startedAt` and that moment is never rewritten, so the feed must say the
+ * audit was resumed rather than claim a second start.
+ *
+ * @param auditSessionId - The audit being resumed
+ * @param userId - The user whose scan resumed it
+ * @param tx - Prisma transaction client, so the note commits with the status change
+ * @param prefetchedUser - Optional user record fetched outside the transaction
+ */
+export async function createAuditResumedNote({
+  auditSessionId,
+  userId,
+  tx,
+  prefetchedUser,
+}: {
+  auditSessionId: string;
+  userId: string;
+  tx: any; // Prisma transaction client
+  prefetchedUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+}) {
+  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  const resumer =
+    prefetchedUser ??
+    (await tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      },
+    }));
+
+  if (!resumer) {
+    return; // Skip note creation if user not found
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: resumer.id,
+      type: "UPDATE",
+      content: `${wrapUserLinkForNote({
+        id: resumer.id,
+        firstName: resumer.firstName,
+        lastName: resumer.lastName,
+      })} resumed the audit.`,
+    },
+  });
+}
+
+/**
  * Creates a COMMENT note when an audit is completed.
  * The note includes completion stats, receipt link, and any user-provided note/images.
  * Using COMMENT type for better layout (header with user info, content below without indentation).
