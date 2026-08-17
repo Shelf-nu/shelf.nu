@@ -1,0 +1,71 @@
+# Audits — the unexpected count on the Scanned tab is a FILTER, not decoration
+#
+# An asset scanned into an audit it does not belong to is the finding an audit
+# exists to produce. It used to render in scan order in muted grey, so on a
+# long audit it was only discoverable by reading every row.
+#
+# It is deliberately NOT sorted to the top: the scanned list is newest-first so
+# the row you just scanned confirms the scan, and pinning exceptions above it
+# pushes a fresh scan below the fold during rapid scanning. The count badge is
+# the affordance instead — tapping it filters the list to exceptions only, and
+# tapping it again restores the full feed.
+#
+# Fixture: SHELF_TEST_UNEXPECTED_SAM is an asset that is NOT among the audit's
+# expected assets. The scan persists, so the run resets it afterward.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_AUDIT_NAME
+#      SHELF_TEST_UNEXPECTED_SAM (lowercase ok) / SHELF_TEST_UNEXPECTED_TITLE
+#      SHELF_TEST_EXPECTED_TITLE (a title already Found in the same audit)
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+- tapOn: "Home"
+- tapOn: "Audits"
+- scrollUntilVisible:
+    element: ".*${SHELF_TEST_AUDIT_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: ".*${SHELF_TEST_AUDIT_NAME}.*"
+- extendedWaitUntil:
+    visible: "Start scanning assets|Continue scanning assets"
+    timeout: 15000
+- tapOn: "Start scanning assets|Continue scanning assets"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 15000
+
+# ── Scan an asset that is NOT on this audit ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_UNEXPECTED_SAM}
+- pressKey: Enter
+
+# The row states the finding in words, not a muted status chip.
+- extendedWaitUntil:
+    visible: ".*${SHELF_TEST_UNEXPECTED_TITLE}.*"
+    timeout: 20000
+- assertVisible: ".*Not on this audit.*"
+- takeScreenshot: audit-unexpected-row
+
+# ── The count badge filters ──
+# Its a11y label names the action, which is what makes it discoverable as a
+# control rather than a number.
+- assertVisible: ".*not on this audit. Show only these.*"
+- tapOn: ".*not on this audit. Show only these.*"
+
+# Filtered: the exception stays, an already-Found asset drops out.
+- assertVisible: ".*${SHELF_TEST_UNEXPECTED_TITLE}.*"
+- assertNotVisible: ".*${SHELF_TEST_EXPECTED_TITLE}.*"
+- takeScreenshot: audit-unexpected-filtered
+
+# ── Tapping again restores the full feed ──
+- tapOn: ".*not on this audit. Showing only these.*"
+- assertVisible: ".*${SHELF_TEST_EXPECTED_TITLE}.*"
+- assertVisible: ".*${SHELF_TEST_UNEXPECTED_TITLE}.*"
