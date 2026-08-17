@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useLoaderData } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { NON_FILTER_PARAMS } from "~/utils/filter-params";
 import { tw } from "~/utils/tw";
@@ -56,12 +57,22 @@ export const EmptyState = ({
   const viewHidesArchived = archivedParam !== "archived" && archivedParam !== "all";
   const searchMayBeHidingArchived = plural === "assets" && viewHidesArchived;
 
+  /**
+   * Only ADMIN / OWNER get the Archived tab (see `useCanArchiveAssets`), so
+   * only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
+   * their role does not render would be worse than the original wording, so
+   * they get the same fact plus the action actually open to them.
+   */
+  const canArchiveAssets = useCanArchiveAssets();
+
   const filteredTexts = hasSearch
     ? {
         title: `No ${plural} found`,
-        p: searchMayBeHidingArchived
+        p: !searchMayBeHidingArchived
+          ? `Your search for "${search}" did not match any ${plural} in the database.`
+          : canArchiveAssets
           ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Check the Archived tab.`
-          : `Your search for "${search}" did not match any ${plural} in the database.`,
+          : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }
     : {
         title: `No ${plural} found`,

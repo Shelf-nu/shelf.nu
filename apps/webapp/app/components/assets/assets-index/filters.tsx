@@ -12,6 +12,7 @@ import {
   useSearchParamHasValue,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -42,6 +43,7 @@ export function AssetIndexFilters({
   const hasFiltersToClear = useSearchParamHasValue(...filterParams);
   const clearFilters = useClearValueFromParams(...filterParams);
   const { roles } = useUserRoleHelper();
+  const canArchiveAssets = useCanArchiveAssets();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 
@@ -59,8 +61,11 @@ export function AssetIndexFilters({
             <div className="flex items-center gap-2">
               <StatusFilter statusItems={AssetStatus} />
               {/* Global Active/Archived/All dimension, separate from the
-                  per-status filter above (issue #382). */}
-              <ArchivedViewToggle />
+                  per-status filter above (issue #382). Only for roles that can
+                  archive — see canArchiveAssets. */}
+              <When truthy={canArchiveAssets}>
+                <ArchivedViewToggle />
+              </When>
             </div>
           ),
           "right-of-search": (
@@ -188,14 +193,19 @@ export function AssetIndexFilters({
 }
 
 function AdvancedAssetIndexFilters() {
+  const canArchiveAssets = useCanArchiveAssets();
+
   return (
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
         "right-of-search": (
           <div className="flex items-center gap-2">
-            {/* Active/Archived/All view dimension (issue #382). */}
-            <ArchivedViewToggle />
+            {/* Active/Archived/All view dimension (issue #382). Only for roles
+                that can archive — see canArchiveAssets. */}
+            <When truthy={canArchiveAssets}>
+              <ArchivedViewToggle />
+            </When>
             <AvailabilityViewToggle modeIsSimple={false} />
           </div>
         ),
