@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { mobileBulkIdsSchema } from "./mobile-bulk-ids.server";
+import { mobileBulkIdsSchema, mobileIdSchema } from "./mobile-bulk-ids.server";
 
 // @vitest-environment node
 
@@ -70,5 +70,40 @@ describe("mobileBulkIdsSchema", () => {
     expect(schema.parse(["all-selected-but-not-really"])).toEqual([
       "all-selected-but-not-really",
     ]);
+  });
+});
+
+describe("mobileIdSchema", () => {
+  const single = mobileIdSchema("assetId");
+
+  it("accepts an explicit id", () => {
+    expect(single.parse("a1")).toBe("a1");
+  });
+
+  it("rejects the sentinel", () => {
+    // The scalar case is the one that looks safe and is not: the endpoint wraps
+    // it as `assetIds: [assetId]`, and `["all-selected"]` satisfies
+    // `includes(ALL_SELECTED_KEY)` exactly as a longer list does.
+    expect(single.safeParse(ALL_SELECTED_KEY).success).toBe(false);
+  });
+
+  it("still rejects an empty string", () => {
+    expect(single.safeParse("").success).toBe(false);
+  });
+
+  it("explains itself in the error", () => {
+    const result = single.safeParse(ALL_SELECTED_KEY);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toMatch(/select all/i);
+      expect(result.error.issues[0].message).toContain("assetId");
+    }
+  });
+
+  it("does not reject an id that merely contains the sentinel as a substring", () => {
+    expect(single.parse("all-selected-but-not-really")).toBe(
+      "all-selected-but-not-really"
+    );
   });
 });

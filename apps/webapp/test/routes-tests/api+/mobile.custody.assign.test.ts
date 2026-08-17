@@ -162,4 +162,41 @@ describe("POST /api/mobile/custody/assign", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
   });
+
+  /**
+   * The SCALAR field is the one that looks safe and is not. The route wraps it
+   * as `assetIds: [assetId]`, and `["all-selected"]` satisfies
+   * `bulkCheckOutAssets`'s `includes(ALL_SELECTED_KEY)` check exactly as a
+   * longer list does. Mobile hardcodes `currentSearchParams: ""`, so it expands
+   * against an EMPTY filter — every available asset in the organization.
+   *
+   * SELF_SERVICE holds `asset:custody`, so a restricted role can reach it.
+   *
+   * The bulk siblings were fixed first; this one was missed because a single-id
+   * field does not read as a bulk operation.
+   */
+  it("rejects the select-all sentinel in the scalar assetId field", async () => {
+    const request = createCustodyAssignRequest({
+      assetId: "all-selected",
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    // The assertion that matters: the org-wide write is never reached.
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty assetId", async () => {
+    const request = createCustodyAssignRequest({
+      assetId: "",
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
 });

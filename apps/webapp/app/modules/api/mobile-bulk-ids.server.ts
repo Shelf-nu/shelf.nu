@@ -41,3 +41,27 @@ export function mobileBulkIdsSchema(field: string) {
       message: `${field} must contain explicit ids. "Select all" is not supported on mobile.`,
     });
 }
+
+/**
+ * A single explicit entity id for a mobile endpoint that wraps it into an array
+ * before handing it to a sentinel-aware service (e.g. `assetIds: [assetId]`).
+ *
+ * A scalar field looks safe and is not: `["all-selected"]` satisfies
+ * `includes(ALL_SELECTED_KEY)` exactly as a multi-item list does, so a
+ * single-asset endpoint expands to the whole organization just as readily as a
+ * bulk one. `/api/mobile/custody/assign` was reachable this way.
+ *
+ * Use this — not a bare `z.string().min(1)` — for any scalar id that ends up in
+ * an array argument to a service that understands the sentinel.
+ *
+ * @param field - Field name used in the validation message (e.g. `assetId`)
+ * @returns A Zod schema for the single id
+ */
+export function mobileIdSchema(field: string) {
+  return z
+    .string()
+    .min(1)
+    .refine((id) => id !== ALL_SELECTED_KEY, {
+      message: `${field} must be an explicit id. "Select all" is not supported on mobile.`,
+    });
+}
