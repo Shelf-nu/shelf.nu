@@ -47,6 +47,48 @@ export function getPrimaryKit<TKit>(
 }
 
 /**
+ * Returns true when the asset's kit membership should block booking it
+ * directly (outside of its kit).
+ *
+ * Only `INDIVIDUAL` assets are blocked. An INDIVIDUAL asset lives entirely
+ * inside its kit — the `enforce_individual_asset_single_kit` trigger caps it
+ * at one membership — so booking it standalone would double-book the very
+ * same physical unit.
+ *
+ * `QUANTITY_TRACKED` assets are NOT blocked: each `AssetKit` row claims only a
+ * *slice* of the pool (`AssetKit.quantity`), and a QT asset may belong to
+ * several kits at once while still keeping free-pool units. Those free units
+ * are legitimately bookable on their own — which is exactly what the booking
+ * page's asset picker already allows. Over-allocation is caught server-side by
+ * the windowed availability guards in `createBooking` / `updateBookingAssets`,
+ * so this client-side check stays purely advisory.
+ *
+ * Accepts either projection of kit membership we load today: the `assetKits`
+ * pivot rows (asset detail, scanner drawers) or the flattened `kit` scalar
+ * (assets index rows).
+ *
+ * @param asset - An asset-like object carrying `type` plus `assetKits` and/or `kit`
+ * @returns true when direct booking must be disabled because of a kit
+ */
+export function isDirectBookingBlockedByKit(
+  asset?: {
+    type?: AssetType | string | null;
+    assetKits?: Array<unknown> | null;
+    kit?: unknown;
+    // Index signature so loosely-typed list rows (`ListItemData`, which is
+    // `{ id: string; [x: string]: any }`) are assignable — without it TS's
+    // weak-type check rejects them for having "no properties in common".
+    [key: string]: unknown;
+  } | null
+): boolean {
+  if (!asset) return false;
+
+  const isPartOfKit = (asset.assetKits?.length ?? 0) > 0 || !!asset.kit;
+
+  return isPartOfKit && !isQuantityTracked(asset);
+}
+
+/**
  * Returns the asset's primary location (or null) from the
  * `AssetLocation` pivot.
  *

@@ -6,7 +6,10 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { recordAuditScan } from "~/modules/audit/service.server";
+import {
+  recordAuditScan,
+  requireAuditAssignee,
+} from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -33,7 +36,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canUseAudits } = await getMobileUserContext(
+    const { canUseAudits, role } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -65,6 +68,17 @@ export async function action({ request }: ActionFunctionArgs) {
         isExpected: z.boolean(),
       })
       .parse(body);
+
+    // Scanning writes audit data, so it is gated exactly like note, photo and
+    // complete: ADMIN/OWNER act on any audit, BASE/SELF_SERVICE must be
+    // assignees. Without this gate a scan is recorded (and can start the
+    // audit) for users whose evidence uploads are then rejected.
+    await requireAuditAssignee({
+      auditSessionId,
+      organizationId,
+      userId: user.id,
+      isSelfServiceOrBase: role === "SELF_SERVICE" || role === "BASE",
+    });
 
     const { scanId, auditAssetId, foundAssetCount, unexpectedAssetCount } =
       await recordAuditScan({

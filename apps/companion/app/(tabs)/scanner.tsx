@@ -752,10 +752,12 @@ function ScannerContent() {
                 : null;
 
             if (unclaimedQrId && canManageQrCodes) {
-              // Admin/owner: native takeover of the web claim flow. Both
-              // actions claim the code into the CURRENT workspace first,
-              // then continue in-app (create form links on submit; the
-              // picker links an existing asset).
+              // Admin/owner: native takeover of the web claim flow. The two
+              // actions claim at DIFFERENT points, deliberately: "Create New
+              // Asset" claims up front (the create form needs an owned code),
+              // while "Link Existing Asset" does not claim at all here — the
+              // link endpoint claims inline, so abandoning the picker leaves
+              // the label unclaimed for anyone. See each action below.
               setScanResult({
                 type: "not_found",
                 title: "Unclaimed Code",

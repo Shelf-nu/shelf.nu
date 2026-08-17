@@ -1153,25 +1153,69 @@ export async function getTeamMembersForQuantityCustody({
   organizationId,
   request,
   userId,
-  isSelfService,
+  role,
+  canSeeAllCustody,
 }: {
   organizationId: string;
   request: Request;
   userId: string;
-  isSelfService: boolean;
+  /**
+   * Caller's role. Takes the place of an `isSelfService` boolean, which was a
+   * ROLE check where a RULE was needed: it is false for BASE, so the scope
+   * below collapsed to `undefined` and the whole roster shipped to a BASE user
+   * — who cannot assign custody at all (`asset: [read]`).
+   */
+  role: OrganizationRoles;
+  /** Resolved by `resolveCanSeeAllCustody`, for the shared scope resolver. */
+  canSeeAllCustody: boolean;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
+
+    /**
+     * This seeds an ASSIGNMENT picker, so the assignment rule governs, not the
+     * custody read rule: BASE may not assign at all, SELF_SERVICE only to
+     * themselves. Same resolver the search endpoint uses for
+     * `custodyPurpose: "custody-assignment"`, so the seed and the list the user
+     * gets after typing cannot disagree.
+     */
+    const scope = resolveCustodianPickerScope({
+      purpose: "custody-assignment",
+      role,
+      canSeeAllCustody,
+      userId,
+    });
+
     const where = {
       deletedAt: null,
       organizationId,
-      userId: isSelfService ? userId : undefined,
+      ...(scope.mode === "self" ? { userId: scope.userId } : {}),
+      // An id no row carries — `mode: "none"` must match NOTHING. Omitting the
+      // clause would widen this back to the whole roster.
+      ...(scope.mode === "none" ? { id: CUSTODY_FILTER_REFUSED } : {}),
     };
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
       db.teamMember.findMany({
         where,
-        include: { user: true },
+        // Only what `resolveTeamMemberName(item, true)` renders. `include: {
+        // user: true }` shipped the entire User row — email, Stripe
+        // `customerId`, `tierId`, `hasUnpaidInvoice` and every other billing
+        // flag — for all 12 roster entries.
+        select: {
+          id: true,
+          name: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              email: true,
+              profilePicture: true,
+            },
+          },
+        },
         orderBy: { userId: "asc" },
         take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       }),

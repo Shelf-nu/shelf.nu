@@ -185,8 +185,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                             // iterating (`kitId: kit.id`), so the DB never
                             // needs to supply it.
                             custodianUserId: true,
-                            custodianTeamMember: true,
-                            custodianUser: true,
+                            // Narrowed from `true` on both: that shipped the
+                            // whole TeamMember row and the ENTIRE User row —
+                            // email, Stripe `customerId`, billing flags — to
+                            // render a name and an avatar on the availability
+                            // calendar.
+                            custodianTeamMember: {
+                              select: { id: true, name: true, userId: true },
+                            },
+                            custodianUser: {
+                              select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                displayName: true,
+                                profilePicture: true,
+                              },
+                            },
                           },
                         },
                       },

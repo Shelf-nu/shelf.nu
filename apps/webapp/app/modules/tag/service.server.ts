@@ -21,6 +21,46 @@ import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Tag";
 
+/**
+ * Builds the Prisma filter for a tag list.
+ *
+ * Shared deliberately between {@link getTags}, which renders the list, and
+ * {@link bulkDeleteTags}, which acts on a "select all" over that same list. Two
+ * separate builders is how the equivalent locations helper drifted out of sync
+ * with its list query — the list matched on name, description and address while
+ * "select all" matched on name only, so a bulk action silently missed rows the
+ * user could see. Keeping one function means the two cannot disagree.
+ *
+ * @param args - Organization scope plus the raw filter values from the list
+ * @returns A where-clause always scoped to the organization
+ */
+function buildTagsWhereInput({
+  organizationId,
+  search,
+  useFor,
+}: {
+  organizationId: Organization["id"];
+  search?: string | null;
+  useFor?: string | null;
+}): Prisma.TagWhereInput {
+  /** Default value of where. Takes the items belonging to current user */
+  const where: Prisma.TagWhereInput = { organizationId };
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    where.name = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  if (useFor) {
+    where.useFor = { has: useFor as TagUseFor };
+  }
+
+  return where;
+}
+
 export async function getTags(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -39,20 +79,7 @@ export async function getTags(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.TagWhereInput = { organizationId };
-
-    /** If the search string exists, add it to the where object */
-    if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
-
-    if (useFor) {
-      where.useFor = { has: useFor as TagUseFor };
-    }
+    const where = buildTagsWhereInput({ organizationId, search, useFor });
 
     const [tags, totalTags] = await Promise.all([
       /** Get the items */
@@ -274,18 +301,45 @@ export async function updateTag({
   }
 }
 
+/**
+ * Deletes tags in bulk, either by explicit ids or across a filtered list.
+ *
+ * When `tagIds` carries the `ALL_SELECTED_KEY` sentinel the user picked "select
+ * all" on a list they were looking at, so the delete must reproduce that list's
+ * filters. Ignoring them deletes every tag in the workspace while the UI reports
+ * the filtered count — permanent data loss the user was actively told would not
+ * happen. `currentSearchParams` is what carries those filters over; the bulk
+ * dialog has always submitted it.
+ *
+ * @param args - Ids (or the select-all sentinel), org scope, and the list's
+ *   filters as a raw query string
+ * @returns Prisma's batch payload, whose `count` is the number actually deleted
+ * @throws {ShelfError} If the delete fails
+ */
 export async function bulkDeleteTags({
   tagIds,
   organizationId,
+  currentSearchParams,
 }: {
   tagIds: Tag["id"][];
   organizationId: Organization["id"];
+  currentSearchParams?: string | null;
 }) {
   try {
+    if (!tagIds.includes(ALL_SELECTED_KEY)) {
+      return await db.tag.deleteMany({
+        where: { id: { in: tagIds }, organizationId },
+      });
+    }
+
+    const searchParams = new URLSearchParams(currentSearchParams ?? "");
+
     return await db.tag.deleteMany({
-      where: tagIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
-        : { id: { in: tagIds }, organizationId },
+      where: buildTagsWhereInput({
+        organizationId,
+        search: searchParams.get("s"),
+        useFor: searchParams.get("useFor"),
+      }),
     });
   } catch (cause) {
     throw new ShelfError({

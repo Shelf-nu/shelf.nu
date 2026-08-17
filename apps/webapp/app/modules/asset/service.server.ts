@@ -44,6 +44,11 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // the reports `*.server.test.ts` files import this module via
 // `refreshExpiredAssetImages`). See the leaf's header doc.
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertStockNotBelowManualPlacements,
+  reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
+} from "~/modules/asset/placement-reconcile.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
@@ -2001,13 +2006,21 @@ export async function updateAsset({
      * locations" subtraction (those rows get cleared in the transaction
      * below). INDIVIDUAL submissions ignore the qty — write path forces
      * it to 1.
+     *
+     * The bound is the total this patch LEAVES BEHIND, not the one it found:
+     * a single request can carry both a new `quantity` and a placement, and
+     * measuring against the stale total refuses valid edits in both
+     * directions (raising 10 → 100 while placing 50, or lowering 100 → 50
+     * while moving locations). The in-transaction check re-runs this against
+     * the locked row; this one exists to produce the friendly message before
+     * any write.
      */
     if (
       isSettingNewQuantity &&
       newLocationId &&
       assetForValidation?.type === AssetType.QUANTITY_TRACKED
     ) {
-      const totalQty = assetForValidation.quantity ?? 0;
+      const totalQty = quantity ?? assetForValidation.quantity ?? 0;
       if (
         typeof newLocationQuantity === "number" &&
         newLocationQuantity > totalQty
@@ -2434,12 +2447,30 @@ export async function updateAsset({
       // asset row first so the read-then-write is race-safe (mirrors
       // `adjustQuantity` and the booking write guards). Also covers the CSV
       // update-existing import, which routes through `updateAsset`.
-      if (quantity != null) {
+      //
+      // The lock is also taken for a placement-only patch: the pivot rewrite
+      // below raises the manual `AssetLocation` sum, and
+      // `asset_location_sum_within_total` validating at COMMIT only covers one
+      // interleaving. Without the lock a concurrent stock decrease can read
+      // the pre-rewrite placements, decide they fit, and commit a lower total
+      // that no trigger re-checks. Single-asset only, so it cannot deadlock
+      // against the multi-asset lockers in the booking paths.
+      if (quantity != null || shouldUpdatePlacement) {
         const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
-        quantityBeforeUpdate = locked.quantity ?? 0;
-        lockedAssetType = locked.type;
+        if (quantity != null) {
+          quantityBeforeUpdate = locked.quantity ?? 0;
+          lockedAssetType = locked.type;
+        }
+
+        /**
+         * The total this patch leaves behind — the submitted `quantity` when
+         * the patch carries one, otherwise the asset's current total.
+         */
+        const effectiveTotal = quantity ?? locked.quantity ?? 0;
+
         if (
           locked.type === AssetType.QUANTITY_TRACKED &&
+          quantity != null &&
           quantity < (locked.quantity ?? 0)
         ) {
           await assertAssetQuantityNotBelowReservations({
@@ -2450,6 +2481,69 @@ export async function updateAsset({
             assetTitle: locked.title,
             unitOfMeasure: locked.unitOfMeasure,
           });
+        }
+
+        if (locked.type === AssetType.QUANTITY_TRACKED) {
+          /**
+           * Placement axis, which the reservations guard does not cover
+           * (custody / kits / bookings are overlapping claims on the same
+           * units; placement carries its own `sum <= Asset.quantity`).
+           *
+           * WHICH placements to measure depends on whether this same patch
+           * rewrites them. `shouldUpdatePlacement` means the transaction below
+           * deletes every manual row and creates at most one new one, so the
+           * pre-patch rows are about to stop existing — validating against
+           * them refuses edits whose end state is perfectly valid (lower the
+           * total to 50 and move the asset to another location in one save,
+           * which the asset edit form submits as a single request).
+           */
+          if (shouldUpdatePlacement) {
+            // Mirror of the pivot write below: one row at `newLocationId` with
+            // `resolveNewLocationQuantity` against the POST-patch total, or no
+            // manual row at all when the location is being cleared.
+            const resultingManualSum = newLocationId
+              ? resolveNewLocationQuantity(
+                  { type: locked.type, quantity: effectiveTotal },
+                  newLocationQuantity
+                )
+              : 0;
+
+            if (resultingManualSum > effectiveTotal) {
+              throw new ShelfError({
+                cause: null,
+                title: "Quantity exceeds available pool",
+                message: `Cannot place ${resultingManualSum} ${
+                  locked.unitOfMeasure || "units"
+                } at this location — "${
+                  locked.title
+                }" will only have ${effectiveTotal} in total.`,
+                additionalData: {
+                  assetId: id,
+                  organizationId,
+                  resultingManualSum,
+                  effectiveTotal,
+                },
+                label,
+                status: 400,
+                shouldBeCaptured: false,
+              });
+            }
+          } else if (quantity != null && quantity < (locked.quantity ?? 0)) {
+            /**
+             * No placement rewrite in this patch, so the existing manual rows
+             * are what the new total has to accommodate. Refusing (rather than
+             * trimming a location) keeps the choice of WHICH location loses
+             * units with the person who knows.
+             */
+            await assertStockNotBelowManualPlacements({
+              assetId: id,
+              organizationId,
+              tx,
+              newTotal: quantity,
+              assetTitle: locked.title,
+              unitOfMeasure: locked.unitOfMeasure,
+            });
+          }
         }
       }
 
@@ -3214,14 +3308,19 @@ export async function replaceAssetPlacements({
   placements: Array<{ locationId: string; quantity: number }>;
 }) {
   try {
-    // 1. Fetch the asset's current state — total qty, type, manual
-    //    placements only (kit-driven rows are owned by the kit's flow
-    //    and stay read-only from this dialog), and the kit-driven
-    //    placements separately so the sum-within-total math accounts
-    //    for them. Manual placements coexist with kit-driven rows on
-    //    different `assetKitId` values — the manage-placements dialog
-    //    edits manual rows only, kit-driven rows are owned by the
-    //    kit's flow.
+    // 1. Fetch the asset's shape — type, total and the labels the notes need.
+    //    The placement rows themselves are NOT read here: the diff is computed
+    //    inside the transaction against the row-locked state (step 7), so a
+    //    snapshot taken now would only be a stale second copy.
+    //
+    //    Kit-driven rows never enter any of the checks below. Since
+    //    `20260602100000_assetlocation_sum_exclude_kit_driven`,
+    //    `enforce_asset_location_sum_within_total` sums manual rows only, and
+    //    the kit axis is bounded separately by
+    //    `enforce_asset_kit_sum_within_total`. That migration exists precisely
+    //    so a fully-placed asset can still be added to a kit — counting both
+    //    axes here would refuse placement edits on an asset the database
+    //    considers perfectly valid.
     const asset = await db.asset.findUniqueOrThrow({
       where: { id: assetId, organizationId },
       select: {
@@ -3232,28 +3331,8 @@ export async function replaceAssetPlacements({
         // unitOfMeasure labels the qty-tracked unit count in per-row
         // placement notes ("placed 50 boxes at L").
         unitOfMeasure: true,
-        assetLocations: {
-          select: {
-            locationId: true,
-            quantity: true,
-            assetKitId: true,
-            location: { select: { id: true, name: true } },
-          },
-        },
       },
     });
-
-    // Split manual vs kit-driven. The diff math below operates only on
-    // manual rows; the kit-driven sum is added to the sum-within-total
-    // pre-check so a submitted set that "fits" against manual rows
-    // alone but exceeds Asset.quantity once kit rows are counted gets
-    // rejected up-front instead of failing at the DEFERRED trigger.
-    const manualPlacements = asset.assetLocations.filter(
-      (al) => al.assetKitId === null
-    );
-    const kitDrivenSum = asset.assetLocations
-      .filter((al) => al.assetKitId !== null)
-      .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
 
     // 3. Shape validation — duplicate ids + per-row qty bounds.
     const seenLocationIds = new Set<string>();
@@ -3310,30 +3389,23 @@ export async function replaceAssetPlacements({
       placements = placements.map((p) => ({ ...p, quantity: 1 }));
     }
 
-    // 5. Sum-within-total — explicit pre-check so the user gets a
-    //    nice message; the DEFERRED trigger is the ultimate guard.
-    //    Includes the kit-driven sum because those rows survive this
-    //    update — the submitted manual set plus the unchanged kit-
-    //    driven rows must together fit within `Asset.quantity`.
+    // 5. Sum-within-total — explicit pre-check so the user gets a nice
+    //    message; the in-transaction re-check against the locked row (step 8)
+    //    and the DEFERRED trigger are the real guards. Manual rows only, to
+    //    match what the trigger actually bounds.
     if (asset.type === AssetType.QUANTITY_TRACKED) {
       const total = asset.quantity ?? 0;
       const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
-      const projectedSum = submittedSum + kitDrivenSum;
-      if (projectedSum > total) {
+      if (submittedSum > total) {
         throw new ShelfError({
           cause: null,
           title: "Quantity exceeds available pool",
-          message:
-            kitDrivenSum > 0
-              ? `Submitted manual placements (${submittedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum} but the asset has only ${total} units total.`
-              : `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
+          message: `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
           status: 400,
           label: "Assets",
           additionalData: {
             assetId,
             submittedSum,
-            kitDrivenSum,
-            projectedSum,
             total,
           },
           shouldBeCaptured: false,
@@ -3368,34 +3440,129 @@ export async function replaceAssetPlacements({
       for (const l of orgLocations) submittedLocations.set(l.id, l);
     }
 
-    // 7. Compute diff against current MANUAL pivot rows only. Kit-
-    //    driven rows aren't editable from this dialog; they're indexed
-    //    by `assetKitId` and survive untouched. A submitted entry at
-    //    the same location as a kit-driven row creates a SECOND row
-    //    (manual, `assetKitId = null`) — the two coexist.
-    const currentByLocation = new Map(
-      manualPlacements.map((al) => [al.locationId, al])
-    );
-    const submittedByLocation = new Map(
-      placements.map((p) => [p.locationId, p])
-    );
-
-    const toCreate = placements.filter(
-      (p) => !currentByLocation.has(p.locationId)
-    );
-    const toDelete = manualPlacements.filter(
-      (al) => !submittedByLocation.has(al.locationId)
-    );
-    const toUpdate = placements.filter((p) => {
-      const existing = currentByLocation.get(p.locationId);
-      return existing != null && existing.quantity !== p.quantity;
-    });
+    /**
+     * 7. The diff, computed INSIDE the transaction below against the locked
+     *    state. Declared out here because the per-row notes are emitted after
+     *    the commit and describe what actually changed.
+     *
+     *    Computing it from the pre-transaction read would apply a stale diff:
+     *    two saves that both read the same placement set serialize on the lock
+     *    but the second one's `toDelete` was built from rows that no longer
+     *    describe the asset, so a row the first save created survives a
+     *    submission that was meant to replace the whole manual set.
+     */
+    type ManualRow = {
+      locationId: string;
+      quantity: number;
+      location: { id: string; name: string };
+    };
+    let toCreate: Array<{ locationId: string; quantity: number }> = [];
+    let toUpdate: Array<{ locationId: string; quantity: number }> = [];
+    let toDelete: ManualRow[] = [];
+    let manualByLocation = new Map<string, ManualRow>();
 
     // 8. Apply the diff in one tx. The DEFERRED sum-within-total
     //    trigger re-checks at COMMIT — covers any race where another
     //    request modified `Asset.quantity` between our validation and
     //    the write.
     await db.$transaction(async (tx) => {
+      /**
+       * Take the SAME row lock every stock-lowering path takes
+       * (`updateAsset`, `adjustQuantity`, custody release, booking check-in),
+       * so a save from THIS dialog and a stock decrease serialize instead of
+       * interleaving.
+       *
+       * The DEFERRED trigger alone only covers one ordering. If this tx
+       * commits FIRST, its trigger validates against the pre-decrement
+       * `Asset.quantity` and passes; the stock tx then commits a lower total,
+       * and no trigger fires on an `Asset` write — so its reconcile has
+       * already run against placements that no longer exist. Blocking on the
+       * lock removes that window: whichever side goes second reads what the
+       * first actually committed.
+       *
+       * Mirrors `moveAssetLocationUnits` step 2, which locks for the same
+       * reason. `updateAsset`'s placement path and the mobile
+       * `asset.update-location` route now lock too.
+       *
+       * KNOWN GAP: `updateLocationAssets` (the location page's "manage
+       * assets" flow) writes manual rows for many assets at once and does NOT
+       * lock, so the race above survives through it. Adding a per-asset lock
+       * there needs a deterministic acquisition order to avoid deadlocking
+       * against the multi-asset lockers in the booking check-in paths, which
+       * is why it is not done here.
+       */
+      const locked = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
+
+      /**
+       * Re-run the sum check against the freshly-locked total. Step 5 read
+       * `Asset.quantity` outside any transaction, so it can be stale by now;
+       * this turns what would be a raw trigger abort into an explained
+       * failure.
+       *
+       * A 409, deliberately NOT the 400 step 5 returns: the submission was
+       * valid when it was made and the asset changed underneath it, so this is
+       * a conflict to retry rather than input to correct.
+       *
+       * Manual rows only — same axis the trigger bounds (see the note at the
+       * manual/kit split above).
+       */
+      if (locked.type === AssetType.QUANTITY_TRACKED) {
+        const lockedTotal = locked.quantity ?? 0;
+        const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
+        if (submittedSum > lockedTotal) {
+          throw new ShelfError({
+            cause: null,
+            title: "Quantity exceeds available pool",
+            message: `The asset's total changed to ${lockedTotal} while you were editing. Submitted placements sum to ${submittedSum}. Reopen the dialog to see the current numbers.`,
+            status: 409,
+            label: "Assets",
+            additionalData: {
+              assetId,
+              submittedSum,
+              lockedTotal,
+            },
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      /**
+       * Diff against the MANUAL rows as they exist under the lock, not as
+       * they looked when the request started. Kit-driven rows aren't editable
+       * from this dialog; they're indexed by `assetKitId` and survive
+       * untouched. A submitted entry at the same location as a kit-driven row
+       * creates a SECOND row (manual, `assetKitId = null`) — the two coexist.
+       */
+      const lockedManual = await tx.assetLocation.findMany({
+        where: { assetId, assetKitId: null },
+        select: {
+          locationId: true,
+          quantity: true,
+          location: { select: { id: true, name: true } },
+        },
+      });
+
+      const currentByLocation = new Map(
+        lockedManual.map((al) => [al.locationId, al])
+      );
+      manualByLocation = currentByLocation;
+      const submittedByLocation = new Map(
+        placements.map((p) => [p.locationId, p])
+      );
+
+      toCreate = placements.filter((p) => !currentByLocation.has(p.locationId));
+      toDelete = lockedManual.filter(
+        (al) => !submittedByLocation.has(al.locationId)
+      );
+      toUpdate = placements.filter((p) => {
+        const existing = currentByLocation.get(p.locationId);
+        return existing != null && existing.quantity !== p.quantity;
+      });
+
       if (toDelete.length > 0) {
         // Manual-row only delete. Kit-driven rows at the same
         // (assetId, locationId) aren't on the diff set (we never
@@ -3492,13 +3659,10 @@ export async function replaceAssetPlacements({
       const firstName = user?.firstName ?? "";
       const lastName = user?.lastName ?? "";
 
-      // Resolve location ids for the toUpdate set (same locations as
-      // their pre-update manual rows; they survived the diff). We pull
-      // names from the manualPlacements snapshot so we don't need a
-      // second query.
-      const manualByLocation = new Map(
-        manualPlacements.map((al) => [al.locationId, al])
-      );
+      // Location ids for the toUpdate set resolve against `manualByLocation`,
+      // which the transaction populated from the LOCKED rows — so the
+      // "from X to Y" note quotes the quantity the update actually replaced,
+      // not one a concurrent save had already changed.
 
       // The qty-change note is inline (not via `createLocationChangeNote`)
       // because the helper handles add / move / remove, not a "same
@@ -8324,25 +8488,13 @@ export async function releaseQuantity({
        * both of which subtract `inCustody` from `total` — which is why no
        * reservation guard is required either.
        *
-       * `AssetLocation` placements are deliberately NOT adjusted, matching
-       * the booking check-in CONSUME path (the booking service makes no
-       * `assetLocation` write at all). Placement is an orthogonal axis and we
-       * cannot know which location the consumed units came off.
-       *
-       * Be aware this leaves the location axis able to drift ABOVE the total:
+       * Lowering the total can push the location axis out of bounds, so the
+       * placement sum is reconciled below — nothing else catches it.
        * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
        * DELETE ON "AssetLocation"` (see
-       * `20260519143054_add_asset_location_pivot`), so it does not fire on an
-       * `Asset` write and nothing aborts here — but
-       * `SUM(AssetLocation.quantity WHERE assetKitId IS NULL)` can end up
-       * exceeding `Asset.quantity`. Consume 10 of 100 placed units and the
-       * location page reads 100 while the asset reads 90; a later placement
-       * edit then trips the constraint on a write that is itself legitimate.
-       * `assertAssetQuantityNotBelowReservations` does not close this either
-       * — it queries custody / assetKit / bookingAsset / consumptionLog, not
-       * assetLocation — so the manual stock-lowering path drifts the same
-       * way. Reconciling the location axis on stock decrease is a separate
-       * piece of work across every path that lowers `Asset.quantity`.
+       * `20260519143054_add_asset_location_pivot`), so it never fires on an
+       * `Asset` write, and `assertAssetQuantityNotBelowReservations` queries
+       * custody / assetKit / bookingAsset / consumptionLog, not assetLocation.
        */
       if (consumedUnits > 0) {
         const beforeQuantity = asset.quantity ?? 0;
@@ -8373,6 +8525,38 @@ export async function releaseQuantity({
           },
           tx
         );
+
+        /**
+         * Restore the PRD's location-axis invariant
+         * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+         * Asset.quantity`). Destroying units lowers the total every claim is
+         * measured against, so a placement sum that was valid a moment ago can
+         * now exceed it. Nothing else catches that:
+         * `asset_location_sum_within_total` only fires on an `AssetLocation`
+         * write, so an `Asset` write slips past it silently until a later,
+         * legitimate placement edit is refused.
+         *
+         * Runs inside this tx so the reconcile commits with the decrement it
+         * corrects — a half-applied pair would leave exactly the drift this is
+         * here to prevent.
+         */
+        const reconcile = await reconcileManualPlacementsForStockDecrease({
+          assetId,
+          newTotal: beforeQuantity - consumedUnits,
+          tx,
+        });
+
+        /**
+         * Surface an unresolvable case rather than fabricating provenance.
+         * With several placements and no unplaced residual left, nothing
+         * records which location the consumed units came off, so the drift
+         * persists and is reported instead of being papered over with a guess.
+         */
+        reportAmbiguousPlacementReconcile({
+          result: reconcile,
+          context: "Consumed stock",
+          additionalData: { assetId, organizationId },
+        });
       }
 
       /**

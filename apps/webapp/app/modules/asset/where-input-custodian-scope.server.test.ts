@@ -136,3 +136,67 @@ describe("getKitsWhereInput custodian scoping", () => {
     expect(where.custody).toBeUndefined();
   });
 });
+
+describe("getAssetsWhereInput — a refusal survives sibling OR filters", () => {
+  /** Does the clause contain a top-level predicate nothing can satisfy? */
+  function hasUnsatisfiablePredicate(
+    where: ReturnType<typeof getAssetsWhereInput>
+  ): boolean {
+    const and = Array.isArray(where.AND)
+      ? where.AND
+      : where.AND
+      ? [where.AND]
+      : [];
+    return and.some(
+      (clause) =>
+        typeof clause === "object" &&
+        clause !== null &&
+        (clause as { id?: unknown }).id === CUSTODY_FILTER_REFUSED
+    );
+  }
+
+  // The three other filters that write to `where.OR`. Each one used to rescue
+  // a refused custodian filter: under OR semantics the refused branch matched
+  // nothing while the sibling matched plenty, so the query returned the
+  // sibling's rows instead of none.
+  const siblingOrFilters = [
+    ["uncategorized", `category=uncategorized`],
+    ["untagged", `tag=untagged`],
+    ["without-location", `location=without-location`],
+  ] as const;
+
+  it.each(siblingOrFilters)(
+    "refuses even when combined with the %s filter",
+    (_label, queryString) => {
+      const where = getAssetsWhereInput({
+        organizationId: ORG,
+        currentSearchParams: `teamMember=${COLLEAGUE}&${queryString}`,
+        allowedTeamMemberIds: [MINE],
+      });
+
+      expect(hasUnsatisfiablePredicate(where)).toBe(true);
+    }
+  );
+
+  it("adds no unsatisfiable predicate when the filter was NOT refused", () => {
+    const where = getAssetsWhereInput({
+      organizationId: ORG,
+      currentSearchParams: `teamMember=${MINE}&category=uncategorized`,
+      allowedTeamMemberIds: [MINE],
+    });
+
+    // Over-applying this would silently return nothing for a legitimate
+    // combined filter.
+    expect(hasUnsatisfiablePredicate(where)).toBe(false);
+  });
+
+  it("adds no unsatisfiable predicate when no custodian was requested", () => {
+    const where = getAssetsWhereInput({
+      organizationId: ORG,
+      currentSearchParams: "category=uncategorized",
+      allowedTeamMemberIds: [MINE],
+    });
+
+    expect(hasUnsatisfiablePredicate(where)).toBe(false);
+  });
+});
