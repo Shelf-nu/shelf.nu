@@ -694,10 +694,9 @@ function AuditDetailContent() {
                       ]}
                       // why: the ownership line is the one place that states
                       // WHO may act on an unassigned audit, so let it wrap
-                      // rather than truncate. "Admin" is the product's word for
-                      // this: the workspace OWNER passes the same server check
-                      // but is never shown as a role (the invite dialog offers
-                      // Administrator / Base / Self service only).
+                      // rather than truncate — it names both permitted roles
+                      // (see AUDIT_UNASSIGNED_LABELS) and that does not fit on
+                      // one line on a narrow device.
                       numberOfLines={2}
                     >
                       {AUDIT_UNASSIGNED_LABELS.SHORT}

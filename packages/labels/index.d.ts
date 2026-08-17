@@ -54,8 +54,8 @@ export declare const AUDIT_STATUS_LABELS: {
  * explanatory tooltip. Kept together so they can never disagree.
  */
 export declare const AUDIT_UNASSIGNED_LABELS: {
-  readonly SHORT: "Unassigned · admins can scan";
-  readonly A11Y: "unassigned, admins can scan";
+  readonly SHORT: "Unassigned · admins and owners can scan";
+  readonly A11Y: "unassigned, admins and owners can scan";
   readonly DETAIL: "Workspace admins and owners can perform this audit because it has no specific assignee.";
 };
 

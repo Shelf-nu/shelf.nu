@@ -1,5 +1,6 @@
 import {
   AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
   auditAssetStatusLabel,
   isAuditCompleted,
 } from "@shelf/labels";
@@ -329,5 +330,39 @@ describe("getAuditFilterMetadata — MISSING heading follows the audit state", (
       );
       expect(getAuditFilterMetadata("ALL", completed).label).toBe("All Assets");
     }
+  });
+});
+
+describe("AUDIT_UNASSIGNED_LABELS (shared with the companion app)", () => {
+  // why: the constant's own docstring promises the three registers "can never
+  // say different things about who is allowed to scan" — and nothing enforced
+  // it, so they shipped disagreeing: the terse two said "admins can scan"
+  // while the prose one said "admins and owners". A user on the phone was told
+  // they could not do a thing the same product told them they could on the
+  // web. The promise needs a check, not just a comment.
+  const registers = Object.entries(AUDIT_UNASSIGNED_LABELS);
+
+  it("names BOTH permitted roles in every register", () => {
+    // Ground truth is the server, not the copy: `requireAuditAssignee` returns
+    // early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
+    // are exactly the roles that may scan an unassigned audit.
+    for (const [name, text] of registers) {
+      const labelled = `${name}: ${text.toLowerCase()}`;
+      expect(labelled).toContain("admin");
+      expect(labelled).toContain("owner");
+    }
+  });
+
+  it("keeps each register in its own voice", () => {
+    // Sharing the FACTS does not mean sharing the phrasing: SHORT is a card
+    // meta line, A11Y is spliced into a comma-joined spoken sentence, and
+    // DETAIL is a tooltip. Collapsing them into one string would regress the
+    // announcement into reading a "·" aloud.
+    expect(AUDIT_UNASSIGNED_LABELS.SHORT).toContain("·");
+    expect(AUDIT_UNASSIGNED_LABELS.A11Y).not.toContain("·");
+    expect(AUDIT_UNASSIGNED_LABELS.A11Y).toBe(
+      AUDIT_UNASSIGNED_LABELS.A11Y.toLowerCase()
+    );
+    expect(AUDIT_UNASSIGNED_LABELS.DETAIL).toMatch(/\.$/);
   });
 });

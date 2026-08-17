@@ -73,9 +73,18 @@ export const AUDIT_STATUS_LABELS = Object.freeze({
 // to explain (the web's "Not assigned" tooltip). They live together so the
 // three can never say different things about who is allowed to scan; before
 // this, the sentence was hand-copied to six call sites across both apps.
+//
+// All three name BOTH roles because the server allows both: requireAuditAssignee
+// returns early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
+// are exactly the set who may scan an unassigned audit. Naming only admins was
+// an earlier reading — that the invite dialog never surfaces OWNER as a role, so
+// users would not recognise the word — but the web tooltip has always said
+// "admins and owners", which meant an owner on the phone was told they could not
+// do a thing the same product told them they could on the web.
+// Pinned by the AUDIT_UNASSIGNED_LABELS tests in the webapp.
 export const AUDIT_UNASSIGNED_LABELS = Object.freeze({
-  SHORT: "Unassigned · admins can scan",
-  A11Y: "unassigned, admins can scan",
+  SHORT: "Unassigned · admins and owners can scan",
+  A11Y: "unassigned, admins and owners can scan",
   DETAIL:
     "Workspace admins and owners can perform this audit because it has no specific assignee.",
 });
