@@ -117,13 +117,31 @@ describe("getTeamMemberForCustodianFilter", () => {
   });
 
   it("lists a revoked member's row when the picker allows NRMs", async () => {
-    await getTeamMemberForCustodianFilter({
+    // why: asserting only the `where` would pass even if later result
+    // processing dropped user-less rows, so stub the post-revocation shape
+    // and prove it survives all the way out to the caller.
+    // mockResolvedValueOnce (not mockResolvedValue) so the stub cannot leak
+    // into the second findMany or into another test.
+    const revokedRow = {
+      id: "tm-revoked",
+      name: "Jane Doe",
+      userId: null,
+      user: null,
+    };
+    dbMocks.findMany
+      .mockResolvedValueOnce([revokedRow])
+      .mockResolvedValueOnce([]);
+
+    const { teamMembers } = await getTeamMemberForCustodianFilter({
       organizationId: ORGANIZATION_ID,
       userId: USER_ID,
     });
 
     expect(rowsWhere().user).toBeUndefined();
     expect(rowsWhere().deletedAt).toBeNull();
+    expect(teamMembers).toContainEqual(
+      expect.objectContaining({ id: "tm-revoked", user: null })
+    );
   });
 
   /**

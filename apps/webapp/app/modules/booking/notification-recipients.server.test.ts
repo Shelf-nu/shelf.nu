@@ -508,7 +508,9 @@ describe("getBookingNotificationRecipients", () => {
         organizationId: "org-1",
       });
 
-      expect(recipients.map((r) => r.email)).not.toContain("jane@university.edu");
+      expect(recipients.map((r) => r.email)).not.toContain(
+        "jane@university.edu"
+      );
     });
 
     it("is dropped from a booking's own recipient list", async () => {
@@ -524,12 +526,14 @@ describe("getBookingNotificationRecipients", () => {
         organizationId: "org-1",
       });
 
-      expect(recipients.map((r) => r.email)).not.toContain("jane@university.edu");
+      expect(recipients.map((r) => r.email)).not.toContain(
+        "jane@university.edu"
+      );
     });
 
-    it("still notifies them while the group claim holds", async () => {
-      // Guards the assertions above against passing for the wrong reason:
-      // the same fixture WITH the user link must still be notified.
+    it("still notifies them via the always-notify list while the group claim holds", async () => {
+      // Guards the always-notify assertion against passing for the wrong
+      // reason: the same fixture WITH the user link must still be notified.
       mockedGetSettings.mockResolvedValue({
         ...defaultSettings(),
         alwaysNotifyTeamMembers: [activeTeamMember],
@@ -537,6 +541,25 @@ describe("getBookingNotificationRecipients", () => {
 
       const recipients = await getBookingNotificationRecipients({
         booking: buildMockBooking(),
+        eventType: "CHECKIN",
+        organizationId: "org-1",
+      });
+
+      expect(recipients.map((r) => r.email)).toContain("jane@university.edu");
+    });
+
+    it("still notifies them via the booking's own recipient list while the group claim holds", async () => {
+      // The paired control for the booking-recipient drop above. Without it
+      // that assertion also passes if `notificationRecipients` were ignored
+      // entirely, so this proves the null `user` link is what excludes them.
+      const booking = buildMockBooking({
+        notificationRecipients: [
+          activeTeamMember,
+        ] as unknown as BookingForEmail["notificationRecipients"],
+      });
+
+      const recipients = await getBookingNotificationRecipients({
+        booking,
         eventType: "CHECKIN",
         organizationId: "org-1",
       });
