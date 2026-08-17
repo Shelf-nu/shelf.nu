@@ -171,13 +171,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: ADMIN/OWNER may complete any audit,
+      // BASE/SELF_SERVICE only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -438,7 +437,7 @@ export default function AuditOverview() {
                           iconClassName="size-4"
                           content={
                             <p className="text-sm text-gray-600">
-                              Any user with access can perform this audit
+                              Workspace admins and owners can perform this audit
                               because it has no specific assignee.
                             </p>
                           }

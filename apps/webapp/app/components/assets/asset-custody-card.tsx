@@ -25,11 +25,13 @@ export function CustodyCard({
 }: {
   booking:
     | (Pick<Booking, "id" | "name" | "from"> & {
-        custodianUser: Pick<
-          User,
-          "firstName" | "lastName" | "profilePicture" | "email"
+        custodianUser: Partial<
+          Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
         > | null;
-        custodianTeamMember: TeamMember | null;
+        // Only `name` is read (see the branch below). Declaring the whole
+        // `TeamMember` forced the loader selects to fetch the whole row, which
+        // is how the entire record ended up in the payload.
+        custodianTeamMember: Pick<TeamMember, "name"> | null;
       })
     | null
     | undefined;

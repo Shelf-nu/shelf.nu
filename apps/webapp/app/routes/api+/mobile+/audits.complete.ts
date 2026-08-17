@@ -72,8 +72,8 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    // Only assignees can complete the audit (matches webapp behavior).
-    // Exception: admins/owners can complete if audit has no assignees.
+    // Assignee-gated (matches webapp behavior): ADMIN/OWNER may complete any
+    // audit, BASE/SELF_SERVICE only when assigned.
     await requireAuditAssignee({
       auditSessionId: sessionId,
       organizationId,
