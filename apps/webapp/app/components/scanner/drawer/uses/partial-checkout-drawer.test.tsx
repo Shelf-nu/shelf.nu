@@ -578,7 +578,7 @@ describe("PartialCheckoutDrawer", () => {
    * object that must be physically confirmed). Already-checked-out
    * individuals are dropped from the pending bucket entirely.
    */
-  it("exposes 'Check out without scanning' only on pending qty-tracked rows", () => {
+  it("exposes 'Check out without scanning' on pending individual and qty-tracked rows", () => {
     const assets: BookingExpectedAsset[] = [
       individualExpected({ id: "asset-ind-1", title: "Camera body" }),
       qtyExpected({ id: "asset-qty-1", title: "Battery" }),
@@ -599,16 +599,16 @@ describe("PartialCheckoutDrawer", () => {
     const buttons = screen.queryAllByRole("button", {
       name: /check out without scanning/i,
     });
-    // Exactly one — the qty-tracked pending row.
-    expect(buttons).toHaveLength(1);
+    // Both pending individual and qty-tracked rows have it.
+    expect(buttons).toHaveLength(2);
 
-    // The pending-qty row title must be adjacent to the button.
-    const row = buttons[0].closest("tr");
-    expect(row).not.toBeNull();
-    expect(within(row!).getByText("Battery")).toBeInTheDocument();
+    const row1 = buttons[0].closest("tr");
+    expect(row1).not.toBeNull();
+    expect(within(row1!).getByText("Camera body")).toBeInTheDocument();
 
-    // The pending INDIVIDUAL row still renders, but exposes no button.
-    expect(screen.getByText("Camera body")).toBeInTheDocument();
+    const row2 = buttons[1].closest("tr");
+    expect(row2).not.toBeNull();
+    expect(within(row2!).getByText("Battery")).toBeInTheDocument();
   });
 
   /**
