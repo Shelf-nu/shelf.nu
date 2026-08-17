@@ -5,6 +5,11 @@ on:
     branches:
       - main
       - dev
+    # Release tags are `shelf@X.Y.Z`. Without this the workflow never runs for a
+    # release, so the version-pinned image the release notes tell self-hosted
+    # operators to pull is never built.
+    tags:
+      - "shelf@*"
 
 permissions:
   actions: write
@@ -18,7 +23,7 @@ env:
 jobs:
   build:
     name: 🐳 Build
-    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
@@ -53,10 +58,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `type=ref,event=tag` would emit the git tag verbatim, but a Docker tag
+          # cannot contain `@` — `shelf@2.1.2` is sanitised into something that is
+          # not the version anyone was told to pull. Match the version out of the
+          # tag instead, so a release publishes a plain `2.1.2` image alongside
+          # `latest`.
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=ref,enable=${{ github.ref_type != 'tag' }},suffix=-{{sha}},event=branch
-            type=ref,event=tag
+            type=match,pattern=shelf@(.*),group=1
 
       - name: 🛠 Build and push Docker image
         uses: docker/build-push-action@v5
