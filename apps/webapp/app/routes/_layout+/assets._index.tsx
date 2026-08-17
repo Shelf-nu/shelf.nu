@@ -14,6 +14,7 @@ import Header from "~/components/layout/header";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
+import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -346,10 +347,38 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
+/**
+ * Empty-state copy per Active/Archived/All view (issue #382).
+ *
+ * The Archived tab needs its own: falling through to the default would either
+ * blame filters the user never applied, or urge someone with a full inventory
+ * to "create your first asset". Neither is true, and the archived one is the
+ * moment a worried user most needs to be told their asset is safe.
+ */
+function useAssetsEmptyState() {
+  const [searchParams] = useSearchParams();
+  const archivedView = searchParams.get("archived");
+
+  if (archivedView === "archived") {
+    return {
+      title: "Nothing archived",
+      text: "Archiving hides an asset from your lists and reports without deleting it. Its history, ID and QR code stay intact, and you can reinstate it at any time.",
+    };
+  }
+
+  return {
+    title: "No assets yet",
+    text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
+    newButtonRoute: "/assets/new",
+    newButtonContent: "Create your first asset",
+  };
+}
+
 export default function AssetIndexPage() {
   const { roles } = useUserRoleHelper();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
+  const emptyStateContent = useAssetsEmptyState();
 
   return (
     <div className="relative">
@@ -368,12 +397,7 @@ export default function AssetIndexPage() {
         </When>
       </Header>
       <AssetsList
-        customEmptyStateContent={{
-          title: "No assets yet",
-          text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "Create your first asset",
-        }}
+        customEmptyStateContent={emptyStateContent}
       />
     </div>
   );
