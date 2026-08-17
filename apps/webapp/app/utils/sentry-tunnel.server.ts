@@ -1,0 +1,139 @@
+/**
+ * Sentry tunnel destination pinning.
+ *
+ * The tunnel (`/api/sentry-tunnel`) exists so error envelopes reach Sentry
+ * through our own domain instead of being blocked by ad-blockers. It is a
+ * server-side proxy, so the question of WHERE it forwards to is a security
+ * boundary, not a detail.
+ *
+ * It originally read the destination host out of the DSN in the client's own
+ * envelope. That made the host fully attacker-controlled: any authenticated
+ * user could make the server POST to an arbitrary address and read the
+ * response back — a full-read SSRF, and one that reached internal-only hosts
+ * (cloud metadata, RFC1918, localhost) via a redirect from an attacker-owned
+ * public host.
+ *
+ * The fix is to stop deriving the destination from input at all. The server
+ * already knows the only Sentry project it may talk to — its own `SENTRY_DSN`.
+ * So the envelope's DSN is now only ever COMPARED against that; the URL the
+ * tunnel fetches is built entirely from server-side configuration.
+ *
+ * This is deliberately stricter than {@link file://./ssrf.server.ts}'s
+ * `safeFetch`, which blocks private/reserved addresses but still permits any
+ * globally-routable host. That is the right boundary for user-supplied image
+ * URLs, where arbitrary public hosts are the feature. Here they are not: the
+ * tunnel has exactly one legitimate destination, so an allow-list of one is
+ * both safer and simpler than filtering the internet.
+ *
+ * @see {@link file://./../routes/api+/sentry-tunnel.ts} — the only consumer
+ * @see {@link file://./ssrf.server.ts} — the general-purpose SSRF guard
+ */
+
+import { SENTRY_DSN } from "~/utils/env";
+
+/** The ingest destination a Sentry DSN points at. */
+export type SentryIngestTarget = {
+  /** Ingest hostname, lower-cased by the URL parser. */
+  host: string;
+  /** Numeric Sentry project id (the DSN's final path segment). */
+  projectId: string;
+};
+
+/**
+ * Parses a Sentry DSN (`https://<publicKey>@<host>/<projectId>`) into the
+ * pieces that identify its ingest endpoint.
+ *
+ * The public key is deliberately ignored: it is not a secret (it ships in the
+ * client bundle), it rotates, and it is not what we are authorizing on. Host
+ * and project id are what decide where bytes go.
+ *
+ * Fails closed — anything unparseable, non-http(s), or missing a project id
+ * returns `null` rather than a partially-trusted result.
+ *
+ * @param dsn - A Sentry DSN, or nullish when Sentry is not configured
+ * @returns The ingest target, or `null` if the DSN is absent or unusable
+ */
+export function parseSentryDsn(
+  dsn: string | undefined | null
+): SentryIngestTarget | null {
+  if (!dsn) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(dsn);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return null;
+  }
+
+  // The project id is the LAST path segment. Self-hosted Sentry can sit under
+  // a path prefix, and the previous `pathname.replace("/", "")` stripped only
+  // the first slash — which would have yielded "some/path/456".
+  const projectId = url.pathname.split("/").filter(Boolean).pop() ?? "";
+
+  if (!url.hostname || !projectId) {
+    return null;
+  }
+
+  return { host: url.hostname, projectId };
+}
+
+/**
+ * The single destination the tunnel is permitted to forward to, derived from
+ * the server's own `SENTRY_DSN`.
+ *
+ * `SENTRY_DSN` is optional (self-hosters may run without Sentry), so this
+ * returns `null` when the tunnel has no legitimate destination at all — in
+ * which case the route refuses to proxy anything rather than falling back to
+ * whatever the client asked for.
+ *
+ * @returns The configured ingest target, or `null` if Sentry is not configured
+ */
+export function getConfiguredSentryTarget(): SentryIngestTarget | null {
+  return parseSentryDsn(SENTRY_DSN);
+}
+
+/**
+ * Whether an envelope's DSN addresses exactly the configured Sentry project.
+ *
+ * Compares parsed URL components, never substrings. Substring matching on a
+ * host is trivially bypassed from both ends — `evil-o123.ingest.sentry.io`
+ * ends with ours, `o123.ingest.sentry.io.evil.com` contains it, and
+ * `https://o123.ingest.sentry.io@evil.com/` hides ours in the userinfo where a
+ * naive check reads it as the host.
+ *
+ * @param dsn - The DSN taken from the client's envelope header (untrusted)
+ * @param target - The server's configured ingest target
+ * @returns `true` only if both host and project id match exactly
+ */
+export function envelopeDsnMatches(
+  dsn: string,
+  target: SentryIngestTarget
+): boolean {
+  const parsed = parseSentryDsn(dsn);
+
+  return (
+    parsed !== null &&
+    parsed.host === target.host &&
+    parsed.projectId === target.projectId
+  );
+}
+
+/**
+ * Builds the ingest URL for a target.
+ *
+ * Takes a {@link SentryIngestTarget} rather than a string precisely so a raw,
+ * client-supplied DSN cannot be passed here by mistake — the only way to get
+ * one is through {@link getConfiguredSentryTarget}.
+ *
+ * @param target - The configured ingest target
+ * @returns The absolute envelope endpoint URL
+ */
+export function buildSentryEnvelopeUrl(target: SentryIngestTarget): string {
+  return `https://${target.host}/api/${target.projectId}/envelope/`;
+}
