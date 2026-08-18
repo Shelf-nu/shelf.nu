@@ -17,7 +17,7 @@ import {
   getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
-import { getLocationUpdateNoteContent } from "~/modules/asset/utils.server";
+import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import {
   getAssetModel,
   getAssetModels,
@@ -322,30 +322,14 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       }),
     ];
 
-    // The note only references the single primary placement set at creation
-    // time; qty-tracked assets can hold multiple AssetLocation rows but only one
-    // is primary. The row (not just its location) is what we need —
-    // `AssetLocation.quantity` is the multiplier the phrasing uses for a
-    // QUANTITY_TRACKED asset.
-    //
-    // The sentence, the link and the QT-aware "placed 50 units at X" variant are
-    // owned by `getLocationUpdateNoteContent`, which every later placement
-    // change also goes through. Hand-rolling it here is what made a QT asset
-    // read "set the location to X" on create and "moved 50 units …" ever after.
-    const primaryPlacement = asset.assetLocations?.[0] ?? null;
-    if (primaryPlacement?.location) {
+    // Shared with the mobile create route — the primary-placement selection, the
+    // QT-aware phrasing and the actor mapping all live in the helper, so the two
+    // routes cannot drift on how they name the person or count the units.
+    const placementNote = getInitialPlacementNoteContent(asset);
+    if (placementNote) {
       postCreationTasks.push(
         createNote({
-          content: getLocationUpdateNoteContent({
-            newLocation: primaryPlacement.location,
-            userId: asset.user.id,
-            firstName: asset.user.firstName ?? "",
-            lastName: asset.user.lastName ?? "",
-            displayName: asset.user.displayName,
-            type: asset.type,
-            unitOfMeasure: asset.unitOfMeasure,
-            quantity: primaryPlacement.quantity,
-          }),
+          content: placementNote,
           type: "UPDATE",
           userId: authSession.userId,
           assetId: asset.id,

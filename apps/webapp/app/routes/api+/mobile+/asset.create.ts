@@ -27,7 +27,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
-import { getLocationUpdateNoteContent } from "~/modules/asset/utils.server";
+import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
@@ -231,31 +231,19 @@ export async function action({ request }: ActionFunctionArgs) {
     // set one.
     const actor = wrapUserLinkForNote(asset.user);
 
-    // Mirrors web: only the single primary placement is named, since a
-    // quantity-tracked asset can hold several AssetLocation rows. The row (not
-    // just its location) is what we need — `AssetLocation.quantity` is the
-    // multiplier the note phrasing uses for a QUANTITY_TRACKED asset.
-    const primaryPlacement = asset.assetLocations?.[0] ?? null;
+    // Each note carries its kind so a failure can name which one failed. Tagged
+    // at construction rather than by loop index: a third note added later would
+    // silently inherit the wrong label from a positional check.
+    const notes: { kind: "creation" | "placement"; content: string }[] = [
+      { kind: "creation", content: `Asset was created by ${actor}.` },
+    ];
 
-    const noteContents = [`Asset was created by ${actor}.`];
-
-    if (primaryPlacement?.location) {
-      // The sentence, the link and the QT-aware "placed 50 units at X" variant
-      // are all owned by this helper, which every later placement change also
-      // goes through. Hand-rolling the string here is what made a QT asset read
-      // "set the location to X" on create and "moved 50 units …" ever after.
-      noteContents.push(
-        getLocationUpdateNoteContent({
-          newLocation: primaryPlacement.location,
-          userId: asset.user.id,
-          firstName: asset.user.firstName ?? "",
-          lastName: asset.user.lastName ?? "",
-          displayName: asset.user.displayName,
-          type: asset.type,
-          unitOfMeasure: asset.unitOfMeasure,
-          quantity: primaryPlacement.quantity,
-        })
-      );
+    // Shared with the web create route — the primary-placement selection, the
+    // QT-aware phrasing and the actor mapping all live in the helper, so the two
+    // routes cannot drift on how they name the person or count the units.
+    const placementNote = getInitialPlacementNoteContent(asset);
+    if (placementNote) {
+      notes.push({ kind: "placement", content: placementNote });
     }
 
     // why: the asset and its ASSET_CREATED event are already committed by the
@@ -271,7 +259,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // same millisecond, which showed the placement above the creation. Failures
     // are swallowed per note, so a failed placement note cannot also cost us the
     // creation note.
-    for (const content of noteContents) {
+    for (const { kind, content } of notes) {
       try {
         await createNote({
           content,
@@ -284,9 +272,16 @@ export async function action({ request }: ActionFunctionArgs) {
         Logger.error(
           new ShelfError({
             cause,
-            message: "Failed to write the creation note for a new asset",
+            message: "Failed to write an activity note for a new asset",
             label: "Assets",
-            additionalData: { assetId: asset.id, userId: user.id },
+            // Both notes throw from this one line with one message, so Sentry
+            // groups them into a single issue — `noteKind` is the only thing
+            // that tells an on-call engineer which of the two actually failed.
+            additionalData: {
+              assetId: asset.id,
+              userId: user.id,
+              noteKind: kind,
+            },
           })
         );
       }

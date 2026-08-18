@@ -167,6 +167,26 @@ function assetLocationRow(
   } as unknown as CreatedAsset["assetLocations"][number];
 }
 
+/**
+ * One `user` row. `createAsset` includes `user: true`, so the real type is the
+ * full Prisma User (~14 scalars). The cast is confined here — same pattern as
+ * `assetLocationRow` — so call sites stay typed and a typo in a name field is
+ * still a compile error.
+ */
+function assetUserRow(
+  overrides: Partial<
+    Pick<CreatedAsset["user"], "id" | "displayName" | "firstName" | "lastName">
+  > = {}
+): CreatedAsset["user"] {
+  return {
+    id: "user-1",
+    displayName: null,
+    firstName: "Carlos",
+    lastName: "Virreira",
+    ...overrides,
+  } as unknown as CreatedAsset["user"];
+}
+
 function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
   return {
     id: "asset-1",
@@ -174,12 +194,7 @@ function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
     // The full User row, as createAsset's `user: true` include returns it —
     // `displayName` included, because the note wrapper prefers it and a fixture
     // without the field cannot show that the route drops it.
-    user: {
-      id: "user-1",
-      displayName: null,
-      firstName: "Carlos",
-      lastName: "Virreira",
-    },
+    user: assetUserRow(),
     type: "INDIVIDUAL",
     unitOfMeasure: null,
     assetLocations: [],
@@ -362,14 +377,7 @@ describe("POST /api/mobile/asset/create", () => {
       // `wrapUserLinkForNote` prefers displayName; the route used to hand-pick
       // first+last past it, renaming anyone who had one.
       vi.mocked(createAsset).mockResolvedValue(
-        createdAsset({
-          user: {
-            id: "user-1",
-            displayName: "Dr. Smith",
-            firstName: "Carlos",
-            lastName: "Virreira",
-          },
-        } as unknown as Partial<CreatedAsset>)
+        createdAsset({ user: assetUserRow({ displayName: "Dr. Smith" }) })
       );
 
       await action(
@@ -393,7 +401,7 @@ describe("POST /api/mobile/asset/create", () => {
           type: "QUANTITY_TRACKED",
           unitOfMeasure: "boxes",
           assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
-        } as unknown as Partial<CreatedAsset>)
+        })
       );
 
       await action(
@@ -466,7 +474,7 @@ describe("POST /api/mobile/asset/create", () => {
           type: "QUANTITY_TRACKED",
           unitOfMeasure: '{% link to="javascript:alert(1)" text="x" /%}',
           assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
-        } as unknown as Partial<CreatedAsset>)
+        })
       );
 
       await action(
