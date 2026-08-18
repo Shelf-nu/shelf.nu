@@ -7,8 +7,11 @@ vi.mock("~/database/db.server", () => ({
     auditNote: {
       create: vi.fn(),
       findFirst: vi.fn(),
+      findFirstOrThrow: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
+      deleteMany: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
     },
@@ -140,7 +143,10 @@ describe("audit asset details service", () => {
       };
 
       vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.update).mockResolvedValue(updatedNote as any);
+      vi.mocked(db.auditNote.updateMany).mockResolvedValue({ count: 1 });
+      vi.mocked(db.auditNote.findFirstOrThrow).mockResolvedValue(
+        updatedNote as any
+      );
 
       const result = await updateAuditAssetNote({
         noteId: "note-1",
@@ -158,22 +164,28 @@ describe("audit asset details service", () => {
         },
       });
 
-      expect(db.auditNote.update).toHaveBeenCalledWith({
-        where: { id: "note-1" },
-        data: { content: "Updated content" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              email: true,
-              profilePicture: true,
-            },
-          },
+      // The predicate rides on the mutation, not just the lookup before it.
+      expect(db.auditNote.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "note-1",
+          userId: "user-1",
+          auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
+        data: { content: "Updated content" },
       });
+
+      // The author comes from a re-read carrying the same scope, since
+      // updateMany cannot `include` a relation.
+      expect(db.auditNote.findFirstOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "note-1",
+            userId: "user-1",
+            auditSession: { organizationId: "org-1" },
+          },
+        })
+      );
 
       expect(result.content).toBe("Updated content");
     });
@@ -190,7 +202,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(db.auditNote.updateMany).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
@@ -206,7 +218,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(db.auditNote.updateMany).not.toHaveBeenCalled();
     });
 
     it("only allows updating asset-specific notes (auditAssetId not null)", async () => {
@@ -247,7 +259,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toMatchObject({ status: 404 });
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
     });
 
     it("successfully deletes a note owned by the user", async () => {
@@ -263,7 +275,7 @@ describe("audit asset details service", () => {
       };
 
       vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.delete).mockResolvedValue(existingNote as any);
+      vi.mocked(db.auditNote.deleteMany).mockResolvedValue({ count: 1 });
 
       const result = await deleteAuditAssetNote({
         noteId: "note-1",
@@ -280,11 +292,18 @@ describe("audit asset details service", () => {
         },
       });
 
-      expect(db.auditNote.delete).toHaveBeenCalledWith({
-        where: { id: "note-1" },
+      expect(db.auditNote.deleteMany).toHaveBeenCalledWith({
+        where: {
+          id: "note-1",
+          userId: "user-1",
+          auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
+        },
       });
 
-      expect(result).toEqual(existingNote);
+      // deleteMany reports a count; the row itself is gone, so echoing it back
+      // would be inventing a value.
+      expect(result).toEqual({ count: 1 });
     });
 
     it("throws 404 error when note is not found", async () => {
@@ -298,7 +317,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
@@ -312,7 +331,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
     });
   });
 

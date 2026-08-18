@@ -102,9 +102,37 @@ export async function updateAuditAssetNote({
       });
     }
 
-    return await db.auditNote.update({
-      where: { id: noteId },
+    // The lookup above authorizes a PAST state; writing by id alone would act
+    // on whatever the row is now. updateMany carries the same predicate into
+    // the mutation, so authorization and write are one statement.
+    const updated = await db.auditNote.updateMany({
+      where: {
+        id: noteId,
+        userId,
+        auditAssetId: { not: null },
+        auditSession: { organizationId },
+      },
       data: { content },
+    });
+
+    if (updated.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Asset note not found or you don't have permission to update it",
+        additionalData: { noteId, userId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    // Re-read with the same scope — the caller needs the note with its author.
+    return await db.auditNote.findFirstOrThrow({
+      where: {
+        id: noteId,
+        userId,
+        auditSession: { organizationId },
+      },
       include: {
         user: {
           select: {
@@ -174,9 +202,29 @@ export async function deleteAuditAssetNote({
       });
     }
 
-    return await db.auditNote.delete({
-      where: { id: noteId },
+    // Same as the update path: the predicate belongs on the mutation, not only
+    // on the lookup that precedes it.
+    const deleted = await db.auditNote.deleteMany({
+      where: {
+        id: noteId,
+        userId,
+        auditAssetId: { not: null },
+        auditSession: { organizationId },
+      },
     });
+
+    if (deleted.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Asset note not found or you don't have permission to delete it",
+        additionalData: { noteId, userId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    return deleted;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;

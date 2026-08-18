@@ -107,13 +107,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        sendNotification({
-          title: "Note deleted",
-          message: "Your audit note has been deleted successfully",
-          icon: { name: "trash", variant: "error" },
-          senderId: authSession.userId,
-        });
-
         // deleteMany, not delete: `delete` needs a unique where, and the
         // organization scope has to come through the parent audit session
         // (AuditNote has no organizationId column).
@@ -135,6 +128,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: 403,
           });
         }
+
+        // After the zero-count check, not before: a refused cross-org delete
+        // would otherwise report success while returning 403.
+        sendNotification({
+          title: "Note deleted",
+          message: "Your audit note has been deleted successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
+        });
 
         return data(payload(null));
       }
