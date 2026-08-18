@@ -116,6 +116,37 @@ describe("Color Contrast Utilities", () => {
   });
 
   describe("WCAG Compliance Tests", () => {
+    /**
+     * Covers EVERY entry in BADGE_COLORS, not a hand-picked few.
+     *
+     * The per-badge tests below name the surfaces each colour serves and are
+     * worth keeping as documentation, but they only ever asserted 5 of the 10
+     * tokens — and the five they skipped were exactly the ones that failed
+     * (orange 2.82:1, brown 3.84:1, amber 4.07:1). A palette-wide loop cannot
+     * develop that blind spot: adding a colour to BADGE_COLORS adds a case.
+     */
+    describe("Every BADGE_COLORS entry", () => {
+      it.each(Object.entries(BADGE_COLORS))(
+        "%s meets WCAG AA for normal text",
+        (name, { bg, text }) => {
+          const ratio = getContrastRatio(text, bg);
+
+          console.log(
+            `${name}: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+              ratio >= 4.5 ? "✓" : "✗"
+            })`
+          );
+          expect(
+            ratio,
+            `BADGE_COLORS.${name} is ${ratio.toFixed(
+              2
+            )}:1 — badge text needs 4.5:1. Darken \`text\`, not \`bg\`.`
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(meetsWCAG_AA(text, bg)).toBe(true);
+        }
+      );
+    });
+
     describe("Asset Status Badge Colors", () => {
       it("IN_CUSTODY badge should meet WCAG AA", () => {
         const { bg, text } = BADGE_COLORS.blue;

@@ -15,7 +15,10 @@ export const BADGE_COLORS = {
   },
   orange: {
     bg: "#FFF3E0",
-    text: "#E76F51",
+    // Darkened to meet WCAG AA. #E76F51 was 2.82:1 on this background —
+    // below even the 3:1 large-text floor. #B54708 (5.0:1) is the shade the
+    // rest of the design system already uses for brand-orange text.
+    text: "#B54708",
   },
   red: {
     bg: "#FFEBEE",
@@ -23,7 +26,10 @@ export const BADGE_COLORS = {
   },
   amber: {
     bg: "#FFF8E1",
-    text: "#A66E00",
+    // Darkened to meet WCAG AA. #A66E00 was 4.07:1 on this background.
+    // #92400E (6.7:1) is the same hex the companion app uses for amber badge
+    // text, so the two apps now match on the `warning` tone as well.
+    text: "#92400E",
   },
   green: {
     bg: "#E8F5E9",
@@ -43,10 +49,15 @@ export const BADGE_COLORS = {
   },
   pink: {
     bg: "#FCE4EC",
-    text: "#D81B60",
+    // Darkened to meet WCAG AA. #D81B60 was 4.11:1 on this background —
+    // close enough to the bar that only a measurement catches it, which is
+    // why the palette-wide test in color-contrast.test.ts now covers every
+    // entry rather than a hand-picked few. #AD1457 is 5.8:1.
+    text: "#AD1457",
   },
   brown: {
     bg: "#FFE0B2",
-    text: "#A85E32",
+    // Darkened to meet WCAG AA. #A85E32 was 3.84:1 on this background.
+    text: "#8A4A22",
   },
 } as const;
