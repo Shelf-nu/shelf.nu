@@ -810,26 +810,37 @@ export async function transferOwnership({
       },
     });
 
+    /**
+     * The organization's CURRENT owner — i.e. the user losing ownership.
+     *
+     * This is deliberately NOT the requesting user: it is the record that gets
+     * demoted to ADMIN below, whose subscription is optionally transferred, and
+     * who receives the "you are no longer the owner" email. A Shelf platform
+     * admin can drive this flow without being a member of the organization at
+     * all, so the two identities must stay separate.
+     */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
       userOrg.roles.includes(OrganizationRoles.OWNER)
     );
-    /** Validate if the current user is a member of the organization */
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
         cause: null,
-        message: "Current user is not a member of the organization.",
+        message: "Organization does not have an owner.",
         label,
       });
     }
 
     /**
-     * Validate if the current user is the owner of organization
-     * or is a Shelf admin
+     * Validate that the REQUESTING user may transfer ownership: either they are
+     * the current owner, or they are a Shelf platform admin.
+     *
+     * Comparing identities is the entire check. A workspace ADMIN passes
+     * `requirePermission` on the settings route because ADMIN and OWNER share
+     * every permission, so this is the only place the two are distinguished —
+     * previously this compared the owner's role against itself, which is always
+     * true, and let any ADMIN take over the workspace.
      */
-    if (
-      !currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER) &&
-      !isCurrentUserShelfAdmin
-    ) {
+    if (currentOwnerUserOrg.user.id !== userId && !isCurrentUserShelfAdmin) {
       throw new ShelfError({
         cause: null,
         message: "Current user is not the owner of the organization.",

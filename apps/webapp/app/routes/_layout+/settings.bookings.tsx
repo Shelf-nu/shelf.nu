@@ -432,7 +432,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        await deleteWorkingHoursOverride(overrideId);
+        await deleteWorkingHoursOverride(overrideId, organizationId);
 
         sendNotification({
           title: "Override deleted",

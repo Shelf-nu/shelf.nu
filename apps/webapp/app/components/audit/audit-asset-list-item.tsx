@@ -12,6 +12,7 @@
  * @see {@link file://./../../routes/_layout+/audits.$auditId.overview.tsx}
  */
 
+import { isAuditCompleted } from "@shelf/labels";
 import { useLoaderData } from "react-router";
 
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
@@ -75,10 +76,13 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
     currentFilter === null ||
     currentFilter === "ALL" ||
     currentFilter === "EXPECTED";
-  const isAuditCompleted = session.status === "COMPLETED";
+  // why: the shared `completedAt` rule, NOT `status === "COMPLETED"`. Archiving
+  // a completed audit rewrites the status while keeping the timestamp, so the
+  // status check made these rows read "Not scanned" beside a tile still saying
+  // "Missing" — the same divergence this PR removes elsewhere.
   const auditStatusLabel = getAuditStatusLabel(
     item.auditData,
-    isAuditCompleted
+    isAuditCompleted(session)
   );
 
   const canReadCustody = userHasPermission({

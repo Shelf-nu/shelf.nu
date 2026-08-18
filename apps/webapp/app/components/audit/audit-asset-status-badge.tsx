@@ -9,7 +9,7 @@ interface AuditAssetStatusBadgeProps {
 
 const auditStatusColorMap = (status: AuditStatusLabel): BadgeColorScheme => {
   switch (status) {
-    case "Expected":
+    case "Not scanned":
       return BADGE_COLORS.gray;
     case "Found":
       return BADGE_COLORS.green;

@@ -338,6 +338,10 @@ export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
+  // The workspace-visible identifier ("SAM-0017"). Web shows it on the asset
+  // overview and the scanner invites you to type one, so every mobile surface
+  // that names an asset needs to be able to show WHICH id it is.
+  sequentialId: true,
   mainImage: true,
   thumbnailImage: true,
   // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
@@ -487,6 +491,8 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Workspace-visible identifier, e.g. "SAM-0017". Null until one is assigned. */
+  sequentialId: string | null;
   /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
   assetModelId?: string | null;
   /**
@@ -559,6 +565,7 @@ export function shapeMobileAssetResponse(asset: {
   id: string;
   title: string;
   status: string;
+  sequentialId: string | null;
   mainImage: string | null;
   thumbnailImage: string | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;

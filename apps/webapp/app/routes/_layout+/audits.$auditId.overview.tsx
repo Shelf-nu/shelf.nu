@@ -1,4 +1,10 @@
 import { OrganizationRoles } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
+  auditAssetStatusLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -52,12 +58,21 @@ import { resolveUserDisplayName } from "~/utils/user";
 
 const label = "Audit";
 
-const AUDIT_STATUS_ITEMS = {
-  EXPECTED: "EXPECTED",
-  FOUND: "FOUND",
-  MISSING: "MISSING",
-  UNEXPECTED: "UNEXPECTED",
-};
+/**
+ * Audit-status filter options: URL value -> the words the user reads.
+ *
+ * MISSING is completion-aware for the same reason the statistics tile is —
+ * an expected asset is only "missing" once the audit is closed. Keys stay the
+ * enum names so existing filtered links keep working.
+ */
+function buildAuditStatusItems(auditIsCompleted: boolean) {
+  return {
+    EXPECTED: "Expected",
+    FOUND: AUDIT_ASSET_STATUS_LABELS.FOUND,
+    MISSING: auditAssetStatusLabel("PENDING", auditIsCompleted),
+    UNEXPECTED: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED,
+  };
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "Audit Overview" },
@@ -171,13 +186,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: ADMIN/OWNER may complete any audit,
+      // BASE/SELF_SERVICE only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -296,9 +310,22 @@ export default function AuditOverview() {
   const expectedCount = session.expectedAssetCount || 0;
   const foundCount = session.foundAssetCount || 0;
   const missingCount = session.missingAssetCount || 0;
+  // why: `missingAssetCount` is seeded with the FULL expected count when the
+  // audit is created and only decrements as assets are found, so before the
+  // audit is completed it is the not-yet-scanned count, not a missing count.
+  // Labelling it "Missing" told users a brand-new audit was already missing
+  // every one of its assets. The asset rows have always been completion-aware
+  // (getAuditStatusLabel); this makes the tile agree with them.
+  // The `completedAt`-not-`status` rule lives in `@shelf/labels` so every
+  // surface in both apps derives it identically — see `isAuditCompleted`.
+  const auditIsCompleted = isAuditCompleted(session);
+  const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
   const unexpectedCount = session.unexpectedAssetCount || 0;
 
-  const filterMetadata = getAuditFilterMetadata(currentFilter);
+  const filterMetadata = getAuditFilterMetadata(
+    currentFilter,
+    auditIsCompleted
+  );
 
   return (
     <div className="mt-8 flex flex-col gap-6">
@@ -318,19 +345,19 @@ export default function AuditOverview() {
               isActive={currentFilter === "EXPECTED"}
             />
             <StatCard
-              label="Found"
+              label={AUDIT_ASSET_STATUS_LABELS.FOUND}
               value={foundCount}
               filterType="FOUND"
               isActive={currentFilter === "FOUND"}
             />
             <StatCard
-              label="Missing"
+              label={unscannedLabel}
               value={missingCount}
               filterType="MISSING"
               isActive={currentFilter === "MISSING"}
             />
             <StatCard
-              label="Unexpected"
+              label={AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
               value={unexpectedCount}
               filterType="UNEXPECTED"
               isActive={currentFilter === "UNEXPECTED"}
@@ -438,8 +465,7 @@ export default function AuditOverview() {
                           iconClassName="size-4"
                           content={
                             <p className="text-sm text-gray-600">
-                              Any user with access can perform this audit
-                              because it has no specific assignee.
+                              {AUDIT_UNASSIGNED_LABELS.DETAIL}
                             </p>
                           }
                         />
@@ -561,7 +587,9 @@ export default function AuditOverview() {
           className="responsive-filters mb-2"
           slots={{
             "left-of-search": (
-              <AuditStatusFilter statusItems={AUDIT_STATUS_ITEMS} />
+              <AuditStatusFilter
+                statusOptions={buildAuditStatusItems(auditIsCompleted)}
+              />
             ),
           }}
         />
