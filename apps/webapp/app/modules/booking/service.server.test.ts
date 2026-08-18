@@ -270,6 +270,14 @@ vitest.mock("~/database/db.server", () => ({
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    // why: a check-in that CONSUMEs/LOSEs/DAMAGEs units lowers `Asset.quantity`,
+    // so `reconcileManualPlacementsForStockDecrease` reads the manual placement
+    // rows to keep `SUM(AssetLocation.quantity) <= Asset.quantity` true. Default
+    // to no placements — tests that model placement drift override it.
+    assetLocation: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      update: vitest.fn().mockResolvedValue({}),
+    },
   },
 }));
 
@@ -8190,6 +8198,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   /** Booking id + common params reused across scenarios in this block. */
@@ -8666,6 +8680,48 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("trims the single placement when a partial CONSUME pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // Same invariant as full check-in, different code path: the partial
+    // check-in loop decrements the pool per disposition, so it drifts the
+    // location axis exactly the same way if left unreconciled.
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("writes no placement when a partial CONSUME is absorbed by the unplaced residual", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+  });
+
   it("runs the low-stock notifier for the asset whose pool a CONSUME decremented", async () => {
     expect.assertions(1);
 
@@ -8858,6 +8914,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     (db.asset.update as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({});
+    (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
   });
 
   const mockBookingId = "booking-c1";
@@ -8981,6 +9043,45 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("trims the single placement when a CONSUME check-in pushes it above the new total", async () => {
+    expect.assertions(1);
+
+    // All 100 owned units sit in one location, so destroying 10 on check-in
+    // would leave SUM(AssetLocation) = 100 against Asset.quantity = 90. The
+    // location trigger never fires on an `Asset` write, so nothing else
+    // catches this — the next legitimate placement edit is what gets refused.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 100 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).toHaveBeenCalledWith({
+      where: { id: "al-pens" },
+      data: { quantity: 90 },
+    });
+  });
+
+  it("leaves placements alone on a CONSUME check-in the unplaced residual absorbs", async () => {
+    expect.assertions(1);
+
+    // 40 of 100 placed, so consuming 10 shrinks the residual from 60 to 50.
+    // Nothing is asserted about the location, so nothing is written to it.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { id: "al-pens", locationId: "loc-store", quantity: 40 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
   });
 
   it("auto-defaults to RETURN for TWO_WAY assets and leaves the pool untouched", async () => {
@@ -9210,6 +9311,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["bk-arch-1", "bk-arch-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Service no longer wraps the updateMany + notes in an interactive
@@ -9256,6 +9358,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9299,6 +9402,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9320,6 +9424,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9353,6 +9458,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["r1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
     expect(db.booking.updateMany).not.toHaveBeenCalled();
@@ -9376,6 +9482,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["o1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9404,6 +9511,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["c1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // COMPLETE rows archive without the flag…
@@ -9453,6 +9561,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -9513,6 +9622,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
@@ -9576,6 +9686,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-canc-1", "bk-canc-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
       hints: mockClientHints,
     });
 
@@ -9837,7 +9948,28 @@ describe("getAvailableAssetsIdsForBooking", () => {
     ).resolves.toEqual(["asset-1", "asset-2"]);
   });
 
-  it("rejects a kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
+  it("returns a QUANTITY_TRACKED kit member — its free pool stays directly bookable", async () => {
+    // A QT asset allocates only a slice of its pool per kit (and may sit in
+    // several kits at once), so the remaining units are legitimately bookable
+    // on their own. Rejecting on mere membership 400'd the "Book" actions on
+    // the asset overview page for a customer with free standalone units.
+    // why: stub the org-scoped lookup to return one QT asset that IS a kit
+    // member — the branch that must NOT reject.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        status: AssetStatus.AVAILABLE,
+        type: AssetType.QUANTITY_TRACKED,
+        assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+      },
+    ]);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(["asset-1"], "org-1")
+    ).resolves.toEqual(["asset-1"]);
+  });
+
+  it("rejects an INDIVIDUAL kit-member asset as a handled 400, not a captured 500 (SHELF-WEBAPP-21Y)", async () => {
     // A selected asset that belongs to a kit is user-input validation, not a
     // server fault, so it must be a 400 kept out of the Sentry error pipeline.
     // why: stub the org-scoped lookup to return one asset that IS a kit member
@@ -9846,6 +9978,7 @@ describe("getAvailableAssetsIdsForBooking", () => {
       {
         id: "asset-1",
         status: AssetStatus.AVAILABLE,
+        type: AssetType.INDIVIDUAL,
         assetKits: [{ kitId: "kit-1" }],
       },
     ]);

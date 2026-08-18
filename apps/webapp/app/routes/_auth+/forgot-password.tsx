@@ -155,7 +155,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: verifyError,
             message: "Invalid or expired verification code",
-            additionalData: { email, otp },
+            // The OTP is deliberately NOT included. It is a live
+            // account-takeover credential until it expires, and additionalData
+            // is written straight to the log line.
+            additionalData: { email },
             label: "Auth",
             shouldBeCaptured: false,
           });
