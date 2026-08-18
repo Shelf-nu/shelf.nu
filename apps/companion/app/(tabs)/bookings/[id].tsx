@@ -17,6 +17,8 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
+import { formatPersonName } from "@/lib/person-name";
+import { TagChip } from "@/components/tag-chip";
 import {
   consumeBookingDirty,
   markBookingsListDirty,
@@ -924,12 +926,11 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  const creatorName = formatPersonName(booking.creator);
+
   const custodianName =
     booking.custodianTeamMember?.name ||
-    [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
-      .filter(Boolean)
-      .join(" ") ||
-    null;
+    formatPersonName(booking.custodianUser);
 
   // Lifecycle counts for the progress bar: every asset is in exactly one of three
   // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
@@ -1107,7 +1108,34 @@ export default function BookingDetailScreen() {
                     <Text style={styles.infoValue}>{custodianName}</Text>
                   </View>
                 )}
+
+                {/* why: web shows who created the booking on this same screen,
+                    and the field was already in the payload — fetched, then
+                    dropped. Custodian and creator are different people often
+                    enough that showing only one is misleading. */}
+                {creatorName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons
+                      name="create-outline"
+                      size={15}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.infoLabel}>Created by</Text>
+                    <Text style={styles.infoValue}>{creatorName}</Text>
+                  </View>
+                ) : null}
               </View>
+
+              {/* Tag names were already in the payload and shown by web; the
+                  colour they are keyed by was not, and was added with the
+                  chip so the phone can tell two tags apart the way web can. */}
+              {booking.tags?.length ? (
+                <View style={styles.tagRow}>
+                  {booking.tags.map((tag) => (
+                    <TagChip key={tag.id} tag={tag} />
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
@@ -1970,6 +1998,12 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     color: colors.muted,
     lineHeight: 20,
+  },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
   },
   infoRows: {
     gap: spacing.sm,
