@@ -20,8 +20,13 @@ import { describe, expect, it } from "vitest";
 import {
   bookingWriteScopeClause,
   canSeeBooking,
+  resolveMostPrivilegedRole,
   validateBookingOwnership,
 } from "./booking-authorization.server";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 const ME = "user-me";
 const SOMEONE_ELSE = "user-victim";
@@ -292,5 +297,51 @@ describe("bookingWriteScopeClause", () => {
       OrganizationRoles.OWNER,
       OrganizationRoles.SELF_SERVICE,
     ]);
+  });
+});
+
+describe("resolveMostPrivilegedRole", () => {
+  it("prefers OWNER over anything else", () => {
+    expect(
+      resolveMostPrivilegedRole([
+        OrganizationRoles.SELF_SERVICE,
+        OrganizationRoles.OWNER,
+        OrganizationRoles.ADMIN,
+      ])
+    ).toBe(OrganizationRoles.OWNER);
+  });
+
+  it("prefers ADMIN when it is not first in the array", () => {
+    // The bug this exists for: `roles[0]` on a [SELF_SERVICE, ADMIN]
+    // membership resolves to SELF_SERVICE, and the ownership guard then
+    // refuses an actual admin.
+    expect(
+      resolveMostPrivilegedRole([
+        OrganizationRoles.SELF_SERVICE,
+        OrganizationRoles.ADMIN,
+      ])
+    ).toBe(OrganizationRoles.ADMIN);
+  });
+
+  it("returns the single role when there is only one", () => {
+    expect(resolveMostPrivilegedRole([OrganizationRoles.BASE])).toBe(
+      OrganizationRoles.BASE
+    );
+  });
+
+  it("falls back to BASE for an empty membership rather than undefined", () => {
+    expect(resolveMostPrivilegedRole([])).toBe(OrganizationRoles.BASE);
+  });
+
+  it("shares its order with SSO, minus OWNER", () => {
+    // SSO must never confer ownership — pinned so the exclusion cannot be
+    // "tidied away" when someone edits the shared order.
+    expect(ROLE_PRECEDENCE[0]).toBe(OrganizationRoles.OWNER);
+    expect(SSO_ASSIGNABLE_ROLE_PRECEDENCE).not.toContain(
+      OrganizationRoles.OWNER
+    );
+    expect([...SSO_ASSIGNABLE_ROLE_PRECEDENCE]).toEqual(
+      ROLE_PRECEDENCE.filter((r) => r !== OrganizationRoles.OWNER)
+    );
   });
 });
