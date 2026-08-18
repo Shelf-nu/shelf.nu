@@ -70,7 +70,10 @@ const useStyles = createStyles((colors) => ({
   },
   progressUnexpected: {
     fontSize: fontSize.xs,
-    color: colors.warning,
+    // why: NOT `warning` — that is the badge FILL token and reads 2.29:1 as
+    // text on this panel. `warningText` is its foreground twin (7.09:1) and
+    // aliases `warning` in dark mode, so dark is unchanged.
+    color: colors.warningText,
     fontWeight: "500",
   },
   progressPercent: {
