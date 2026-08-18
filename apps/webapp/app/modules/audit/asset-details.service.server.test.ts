@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the database
@@ -130,13 +131,30 @@ describe("audit asset details service", () => {
         updatedAt: new Date(),
       };
 
-      const updatedNote = {
+      // Typed against the query rather than `as any`: the re-read selects
+      // `displayName`, and a loose fixture silently omitted it.
+      const updatedNote: Prisma.AuditNoteGetPayload<{
+        include: {
+          user: {
+            select: {
+              id: true;
+              firstName: true;
+              lastName: true;
+              displayName: true;
+              email: true;
+              profilePicture: true;
+            };
+          };
+        };
+      }> = {
         ...existingNote,
+        type: "COMMENT",
         content: "Updated content",
         user: {
           id: "user-1",
           firstName: "John",
           lastName: "Doe",
+          displayName: "John Doe",
           email: "john@example.com",
           profilePicture: null,
         },
@@ -144,9 +162,7 @@ describe("audit asset details service", () => {
 
       vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
       vi.mocked(db.auditNote.updateMany).mockResolvedValue({ count: 1 });
-      vi.mocked(db.auditNote.findFirstOrThrow).mockResolvedValue(
-        updatedNote as any
-      );
+      vi.mocked(db.auditNote.findFirstOrThrow).mockResolvedValue(updatedNote);
 
       const result = await updateAuditAssetNote({
         noteId: "note-1",
@@ -188,6 +204,28 @@ describe("audit asset details service", () => {
       );
 
       expect(result.content).toBe("Updated content");
+    });
+
+    it("throws 404 when the scoped update matches nothing", async () => {
+      // The lookup can pass and the mutation still match zero rows — that is
+      // the whole point of moving the predicate onto the write. Nothing had
+      // covered this path.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue({
+        id: "note-1",
+        userId: "user-1",
+      } as never);
+      vi.mocked(db.auditNote.updateMany).mockResolvedValue({ count: 0 });
+
+      await expect(
+        updateAuditAssetNote({
+          noteId: "note-1",
+          content: "Updated content",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
+
+      expect(db.auditNote.findFirstOrThrow).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when note is not found", async () => {
@@ -304,6 +342,24 @@ describe("audit asset details service", () => {
       // deleteMany reports a count; the row itself is gone, so echoing it back
       // would be inventing a value.
       expect(result).toEqual({ count: 1 });
+    });
+
+    it("throws 404 when the scoped delete matches nothing", async () => {
+      // The lookup can pass and the mutation still match zero rows — that is
+      // the point of moving the predicate onto the write. Nothing covered it.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue({
+        id: "note-1",
+        userId: "user-1",
+      } as never);
+      vi.mocked(db.auditNote.deleteMany).mockResolvedValue({ count: 0 });
+
+      await expect(
+        deleteAuditAssetNote({
+          noteId: "note-1",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it("throws 404 error when note is not found", async () => {
