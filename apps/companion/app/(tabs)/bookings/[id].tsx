@@ -1,3 +1,4 @@
+import { ASSET_STATUS_LABELS, BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { useState, useCallback, useRef } from "react";
 import {
   View,
@@ -74,15 +75,19 @@ function getBookingAssetState({
   const checkedOut = booked - clampedOut; // units taken from the workspace
   const checkedIn = booked - clampedIn; // units reconciled back in
 
+  // why: the labels that name a real status read from @shelf/labels. The
+  // fraction forms and "Returned" stay bespoke — they are booking-scoped
+  // progress, not statuses, so the package has no entry for them.
   if (booked <= 0 || checkedOut <= 0) {
     return bookingStatus === "DRAFT"
-      ? { key: "DRAFT", label: "Draft" }
-      : { key: "RESERVED", label: "Reserved" };
+      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
+      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
   }
   if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
   if (checkedIn > 0)
     return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
-  if (checkedOut >= booked) return { key: "ONGOING", label: "Checked out" };
+  if (checkedOut >= booked)
+    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
   return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
 }
 
