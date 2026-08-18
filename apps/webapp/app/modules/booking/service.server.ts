@@ -149,6 +149,8 @@ import type {
   SchedulerData,
 } from "./types";
 import {
+  assertBookingIsCheckinable,
+  assertBookingIsOpen,
   createBookingConflictConditions,
   getBulkBookingsWhereInput,
   isBookingExpired,
@@ -2541,6 +2543,19 @@ export async function checkoutBooking({
         });
       });
 
+    // Not a reported finding — the twin of D084 on the check-out side, swept
+    // in because it is the same missing guard. Deliberately rejects only the
+    // CLOSED statuses: an existing pinned test checks out a DRAFT booking, so
+    // narrowing this to RESERVED would be a behaviour change rather than a
+    // fix. Re-running a FULL checkout on an ONGOING booking is a separate
+    // integrity problem (it re-processes every asset and duplicates events)
+    // and is left alone here for the same reason.
+    assertBookingIsOpen({
+      status: bookingFound.status,
+      operation: "check out",
+      bookingId: id,
+    });
+
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
     // pre-remediation cross-org link would otherwise (a) leak the foreign
@@ -4281,6 +4296,13 @@ export async function checkinBooking({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // `dataToUpdate` below sets COMPLETE unconditionally. Without this guard a
+    // direct POST against a DRAFT or RESERVED booking marked it COMPLETE while
+    // checking in nothing: the asset filter keeps only CHECKED_OUT assets, and
+    // on those statuses there are none. The booking then reads as finished
+    // although it never happened. (detail.dev D084)
+    assertBookingIsCheckinable({ status: bookingFound.status, bookingId: id });
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.COMPLETE,
@@ -8223,6 +8245,17 @@ export async function updateBookingAssets({
           from: true,
           to: true,
         },
+      });
+
+      // The four callers each validate the status before getting here, but
+      // every one of them does so in a read of its own — so a booking
+      // completed between their check and this write was still modified.
+      // Re-asserting on the row THIS transaction just read closes that window
+      // by construction. (detail.dev D055)
+      assertBookingIsOpen({
+        status: b.status,
+        operation: "change the items on",
+        bookingId: id,
       });
 
       const slices = kitSlices ?? [];
@@ -12556,6 +12589,20 @@ async function addScannedAssetsToBookingWithinTx(
     },
     tx
   );
+
+  // This path had NO booking-status check anywhere — not in the route action,
+  // not here. The scan-assets loader computes `canUserManageBookingAssets`,
+  // but that only decides what to render, so a direct POST could add assets to
+  // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
+  const scanTargetBooking = await tx.booking.findUniqueOrThrow({
+    where: { id: bookingId, organizationId },
+    select: { status: true },
+  });
+  assertBookingIsOpen({
+    status: scanTargetBooking.status,
+    operation: "add scanned items to",
+    bookingId,
+  });
 
   /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
