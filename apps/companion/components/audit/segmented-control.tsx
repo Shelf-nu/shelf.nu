@@ -117,7 +117,14 @@ const useStyles = createStyles((colors) => ({
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 9,
-    backgroundColor: colors.warning,
+    // why: `warning` is a FILL token — white on it is 2.35:1, well under the
+    // 4.5:1 this repo requires. The badge counts UNEXPECTED assets, so it now
+    // wears the same pale-amber-with-dark-amber-text the UNEXPECTED status
+    // wears everywhere else (6.79:1 light, 7.35:1 dark). The border carries
+    // the pill's shape, which a pale fill alone cannot do on a light tab.
+    backgroundColor: colors.warningBg,
+    borderWidth: 1,
+    borderColor: colors.warningText,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -130,7 +137,7 @@ const useStyles = createStyles((colors) => ({
   unexpectedPillText: {
     fontSize: fontSize.xs,
     fontWeight: "700",
-    color: colors.white,
+    color: colors.warningText,
   },
   segmentedControl: {
     flexDirection: "row",

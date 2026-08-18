@@ -233,12 +233,18 @@ const useStyles = createStyles((colors) => ({
   scannedItemMeta: {
     flexShrink: 1,
     fontSize: fontSize.xs,
-    color: colors.mutedLight,
+    // why: `mutedLight` is the icon/large-text grey (4.35:1 light, 3.77:1
+    // dark) — it misses 4.5:1 at this 12px size. `muted` keeps the second
+    // line quieter than the name and still clears the bar in both themes.
+    color: colors.muted,
   },
   scannedItemUnexpected: {
     fontSize: fontSize.xs,
     fontWeight: "600",
-    color: colors.warning,
+    // why: NOT `warning` — that is the badge FILL token and reads 2.35:1 as
+    // text on the white row. `warningText` is the foreground twin (7.09:1
+    // light) and aliases `warning` in dark mode, so dark is unchanged.
+    color: colors.warningText,
   },
   addEvidenceChip: {
     flexDirection: "row",
