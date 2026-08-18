@@ -59,7 +59,14 @@ export const lightColors = {
   // text bar and the 3:1 non-text bar), so small amber labels/icons (e.g.
   // the low-stock indicator) must use this deeper shade instead. Mirrors
   // `primaryText`'s relationship to `primary`. WCAG AA 7.1:1 on white.
-  warningText: "#92400E",
+  warningText: "#92400E", // amber-800 — 6.79:1 on warningBg (AA)
+  // why: `success` (#12B76A) and `error` (#F04438) are 2.49:1 and 3.46:1 on
+  // their own badge backgrounds, both below the 4.5:1 the repo requires. They
+  // stay as-is for icons and bars, where AA does not apply the same way; badge
+  // TEXT uses these darker foregrounds instead. errorText is the same hex the
+  // webapp already uses for red badge text, so the two apps also match visually.
+  successText: "#05603A", // green-800 — 7.26:1 on successBg (AA)
+  errorText: "#B42318", // red-700 — 6.05:1 on errorBg (AA)
   success: "#12B76A",
   successBg: "#ECFDF3",
 
@@ -136,6 +143,10 @@ export const darkColors: Colors = {
   // #161B22), so the text token matches `warning` here — same pattern as
   // dark `primaryText` matching `primary`.
   warningText: "#F0A020",
+  // Dark mode already clears AA on its own backgrounds (6.20:1 and 5.18:1), so
+  // these alias the base colours rather than darkening them further.
+  successText: "#3FB950",
+  errorText: "#F85149",
   success: "#3FB950",
   successBg: "#0D2818",
 
@@ -209,9 +220,9 @@ function buildToneBadge(
   return {
     neutral: { bg: c.borderLight, text: c.muted },
     info: { bg: c.inCustodyBg, text: c.inCustody },
-    success: { bg: c.successBg, text: c.success },
-    warning: { bg: c.warningBg, text: c.warning },
-    danger: { bg: c.errorBg, text: c.error },
+    success: { bg: c.successBg, text: c.successText },
+    warning: { bg: c.warningBg, text: c.warningText },
+    danger: { bg: c.errorBg, text: c.errorText },
   };
 }
 

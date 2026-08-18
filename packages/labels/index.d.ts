@@ -143,6 +143,7 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
  */
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
+/**
  * Semantic colour weight shared by both apps. Each app maps a tone onto its own
  * palette (the webapp's fixed hex `BADGE_COLORS`, the companion's light/dark
  * theme), so the colour VALUES stay app-owned while the DECISION is shared.
