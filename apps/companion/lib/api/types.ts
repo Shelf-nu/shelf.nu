@@ -602,6 +602,8 @@ export type BookingAsset = {
   id: string;
   title: string;
   status: string;
+  /** False when the asset is flagged unavailable for bookings. */
+  availableToBook?: boolean;
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
@@ -701,6 +703,16 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * True when any asset on this booking is already booked for the same window
+   * — the third rule web's Reserve button disables on, and the one the client
+   * cannot derive from `assets` (it needs the overlapping-booking query).
+   *
+   * Sent for DRAFT bookings only, since Reserve is its sole consumer. Optional
+   * because a not-yet-updated server (rolling deploy) omits it; treat absent
+   * as `false` rather than blocking Reserve.
+   */
+  hasAlreadyBookedAssets?: boolean;
   /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview

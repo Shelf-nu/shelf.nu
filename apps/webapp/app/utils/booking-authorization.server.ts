@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
+import { ROLE_PRECEDENCE } from "./role-precedence";
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -162,15 +163,11 @@ interface ValidateBookingOwnershipParams {
 export function resolveMostPrivilegedRole(
   roles: OrganizationRoles[]
 ): OrganizationRoles {
-  if (roles.includes(OrganizationRoles.OWNER)) {
-    return OrganizationRoles.OWNER;
-  }
-
-  if (roles.includes(OrganizationRoles.ADMIN)) {
-    return OrganizationRoles.ADMIN;
-  }
-
-  return roles[0] ?? OrganizationRoles.BASE;
+  return (
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    roles[0] ??
+    OrganizationRoles.BASE
+  );
 }
 
 export function validateBookingOwnership({

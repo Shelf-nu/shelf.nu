@@ -1,4 +1,8 @@
-import { ASSET_STATUS_LABELS, BOOKING_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_STATUS_LABELS,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+  BOOKING_STATUS_LABELS,
+} from "@shelf/labels";
 import { useState, useCallback, useRef } from "react";
 import {
   View,
@@ -926,6 +930,33 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  /**
+   * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
+   * the web form's disable rules so the app never offers a tap the server
+   * refuses: a booking with neither assets nor model reservations reserves
+   * nothing, an asset flagged unavailable is unavailable on either surface,
+   * and an asset already booked for this window conflicts on either surface.
+   *
+   * The first two are decided from rows this screen already holds. The third
+   * cannot be — it needs the overlapping-booking query — so the server sends
+   * it as a flag. `?? false` keeps a not-yet-updated server (rolling deploy,
+   * field absent) on the old behavior rather than blocking Reserve outright.
+   *
+   * All three are enforced server-side too: the first two in
+   * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
+   * check, which names the offending assets.
+   *
+   * `booking` is non-null here — the early return above already handled it.
+   */
+  const reserveBlockedReason: string | null =
+    booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
+      ? BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
+      : booking.assets.some((a) => a.availableToBook === false)
+      ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
+      : booking.hasAlreadyBookedAssets ?? false
+      ? BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
+      : null;
+
   const creatorName = formatPersonName(booking.creator);
 
   const custodianName =
@@ -1241,6 +1272,16 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
+            {/* why visible rather than only in an alert: the disabled Reserve
+                  button was a dead control - tapping it produced nothing on
+                  device, so the one thing a user needs (what to fix) was
+                  unreachable. Stating it here does not depend on a tap firing,
+                  and it is readable before you even reach for the button. */}
+            {booking.status === "DRAFT" && reserveBlockedReason ? (
+              <Text style={styles.reserveBlockedNote}>
+                {reserveBlockedReason}
+              </Text>
+            ) : null}
 
             {/* Action buttons */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(
@@ -1265,9 +1306,22 @@ export default function BookingDetailScreen() {
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.manageRowItem]}
+                    style={[
+                      styles.actionButton,
+                      styles.manageRowItem,
+                      reserveBlockedReason ? styles.actionButtonDisabled : null,
+                    ]}
+                    // why: `disabled` is the real prop. Setting only
+                    // `accessibilityState={{ disabled }}` ALSO disables the
+                    // touchable — RN's `_createPressabilityConfig` falls back
+                    // to it — which silently made an onPress fallback here
+                    // unreachable. RN copies this prop back into
+                    // `accessibilityState`, so screen readers still announce
+                    // the disabled state without setting it by hand.
+                    disabled={!!reserveBlockedReason}
                     onPress={handleReserve}
                     accessibilityLabel="Reserve this booking"
+                    accessibilityHint={reserveBlockedReason ?? undefined}
                     accessibilityRole="button"
                   >
                     <Ionicons
@@ -2111,6 +2165,25 @@ const useStyles = createStyles((colors, shadows) => ({
   manageRow: {
     flexDirection: "row",
     gap: spacing.sm,
+  },
+  // The blocking reason is the ONLY thing that tells the user why Reserve is
+  // greyed out, so it is styled as a warning callout rather than as incidental
+  // metadata. `warningText` is the token picked for WCAG AA contrast on light
+  // surfaces (see theme-colors.ts); `muted` at xs read as a caption nobody
+  // looked at.
+  reserveBlockedNote: {
+    fontSize: fontSize.sm,
+    color: colors.warningText,
+    backgroundColor: colors.warningBg,
+    borderRadius: 8,
+    padding: spacing.sm,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    lineHeight: 16,
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
   },
   manageRowItem: {
     flex: 1,
