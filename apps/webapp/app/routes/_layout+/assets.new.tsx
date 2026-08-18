@@ -17,7 +17,7 @@ import {
   getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
-import { getPrimaryLocation } from "~/modules/asset/utils";
+import { getLocationUpdateNoteContent } from "~/modules/asset/utils.server";
 import {
   getAssetModel,
   getAssetModels,
@@ -42,7 +42,7 @@ import {
   getRefererPath,
   parseData,
 } from "~/utils/http.server";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -299,11 +299,10 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       unitOfMeasure,
     });
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: asset.user.firstName,
-      lastName: asset.user.lastName,
-    });
+    // `asset.user` is the full User row (createAsset includes `user: true`), so
+    // it is passed whole: `wrapUserLinkForNote` prefers `displayName`, and
+    // hand-picking first+last renamed anyone who had set one.
+    const actor = wrapUserLinkForNote(asset.user);
 
     // Run independent post-creation tasks in parallel
     const postCreationTasks: Promise<unknown>[] = [
@@ -323,17 +322,30 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       }),
     ];
 
-    // The note only references the single primary location set at creation time;
-    // qty-tracked assets can hold multiple AssetLocation rows but only one is primary.
-    const primaryLocation = getPrimaryLocation(asset);
-    if (primaryLocation) {
-      const locationLink = wrapLinkForNote(
-        `/locations/${primaryLocation.id}`,
-        primaryLocation.name.trim()
-      );
+    // The note only references the single primary placement set at creation
+    // time; qty-tracked assets can hold multiple AssetLocation rows but only one
+    // is primary. The row (not just its location) is what we need —
+    // `AssetLocation.quantity` is the multiplier the phrasing uses for a
+    // QUANTITY_TRACKED asset.
+    //
+    // The sentence, the link and the QT-aware "placed 50 units at X" variant are
+    // owned by `getLocationUpdateNoteContent`, which every later placement
+    // change also goes through. Hand-rolling it here is what made a QT asset
+    // read "set the location to X" on create and "moved 50 units …" ever after.
+    const primaryPlacement = asset.assetLocations?.[0] ?? null;
+    if (primaryPlacement?.location) {
       postCreationTasks.push(
         createNote({
-          content: `${actor} set the location to ${locationLink}.`,
+          content: getLocationUpdateNoteContent({
+            newLocation: primaryPlacement.location,
+            userId: asset.user.id,
+            firstName: asset.user.firstName ?? "",
+            lastName: asset.user.lastName ?? "",
+            displayName: asset.user.displayName,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
+            quantity: primaryPlacement.quantity,
+          }),
           type: "UPDATE",
           userId: authSession.userId,
           assetId: asset.id,

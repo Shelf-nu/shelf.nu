@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import { action } from "~/routes/api+/mobile+/asset.create";
 import { createActionArgs } from "@mocks/remix";
 
@@ -111,6 +112,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { createAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
+import { Logger } from "~/utils/logger";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
@@ -149,16 +151,19 @@ function createRequest(
 type CreatedAsset = Awaited<ReturnType<typeof createAsset>>;
 
 /**
- * One `assetLocations` row. The route only reads `location.id` and
- * `location.name` (via getPrimaryLocation), so the cast is confined here
- * rather than repeated at every call site.
+ * One `assetLocations` row. The route reads `location.id`, `location.name` and
+ * the row's own `quantity` (the multiplier the note phrasing uses for a
+ * quantity-tracked asset), so the cast is confined here rather than repeated at
+ * every call site.
  */
 function assetLocationRow(
   id: string,
-  name: string
+  name: string,
+  quantity = 1
 ): CreatedAsset["assetLocations"][number] {
   return {
     location: { id, name },
+    quantity,
   } as unknown as CreatedAsset["assetLocations"][number];
 }
 
@@ -166,7 +171,17 @@ function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
   return {
     id: "asset-1",
     title: "New Laptop",
-    user: { id: "user-1", firstName: "Carlos", lastName: "Virreira" },
+    // The full User row, as createAsset's `user: true` include returns it —
+    // `displayName` included, because the note wrapper prefers it and a fixture
+    // without the field cannot show that the route drops it.
+    user: {
+      id: "user-1",
+      displayName: null,
+      firstName: "Carlos",
+      lastName: "Virreira",
+    },
+    type: "INDIVIDUAL",
+    unitOfMeasure: null,
     assetLocations: [],
     ...overrides,
     // The fixture carries only the fields this route reads. The single cast
@@ -174,6 +189,11 @@ function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
     // error, which is what would have caught the missing `user` in the first
     // place.
   } as unknown as CreatedAsset;
+}
+
+/** The `content` of each note the route wrote, in the order it wrote them. */
+function noteContents(): string[] {
+  return vi.mocked(createNote).mock.calls.map(([args]) => args.content);
 }
 
 describe("POST /api/mobile/asset/create", () => {
@@ -275,7 +295,167 @@ describe("POST /api/mobile/asset/create", () => {
       const body = await (result as unknown as Response).json();
       expect(body.asset.id).toBe("asset-1");
       expect(createAsset).toHaveBeenCalledTimes(1);
+      // The other half of "fail quietly but visibly": without this assertion,
+      // deleting the whole catch block from the route still passes the test.
+      expect(Logger.error).toHaveBeenCalledTimes(1);
     });
+
+    it("still writes the creation note when the location note fails", async () => {
+      // Notes go out one at a time and are swallowed individually, so the note
+      // that matters most can't be lost to the one that matters least.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A")],
+        })
+      );
+      vi.mocked(createNote)
+        .mockResolvedValueOnce({ id: "note-1" } as never)
+        .mockRejectedValueOnce(new Error("note insert failed"));
+
+      const result = await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect((result as unknown as Response).status).toBe(200);
+      expect(createNote).toHaveBeenCalledTimes(2);
+      expect(noteContents()[0]).toContain("Asset was created by");
+      expect(Logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it("finishes the creation note before starting the placement note", async () => {
+      // Both notes used to be issued in the same tick; two inserts landing in
+      // the same millisecond let the feed (ordered by createdAt desc) show the
+      // placement above the creation it describes. Asserting on overlap rather
+      // than on call order — `mock.calls` is in argument order either way, so
+      // it cannot tell concurrent from sequential.
+      const timeline: string[] = [];
+      vi.mocked(createNote).mockImplementation(async ({ content }) => {
+        const label = content.includes("created by") ? "creation" : "placement";
+        timeline.push(`start:${label}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        timeline.push(`end:${label}`);
+        return { id: label } as never;
+      });
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A")],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect(timeline).toEqual([
+        "start:creation",
+        "end:creation",
+        "start:placement",
+        "end:placement",
+      ]);
+    });
+
+    it("names the user by displayName when they have set one", async () => {
+      // `wrapUserLinkForNote` prefers displayName; the route used to hand-pick
+      // first+last past it, renaming anyone who had one.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          user: {
+            id: "user-1",
+            displayName: "Dr. Smith",
+            firstName: "Carlos",
+            lastName: "Virreira",
+          },
+        } as unknown as Partial<CreatedAsset>)
+      );
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            'Asset was created by {% link to="/settings/team/users/user-1" text="Dr. Smith" /%}.',
+        })
+      );
+    });
+
+    it("counts the units when a quantity-tracked asset is placed", async () => {
+      // The shared helper's QT phrasing. The hand-rolled sentence said "set the
+      // location to X" at creation and "moved 50 boxes …" on every later move
+      // of the very same asset.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          type: "QUANTITY_TRACKED",
+          unitOfMeasure: "boxes",
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
+        } as unknown as Partial<CreatedAsset>)
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "Screws", locationId: "loc-1" }),
+        })
+      );
+
+      expect(createNote).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          content:
+            '{% link to="/settings/team/users/user-1" text="Carlos Virreira" /%} placed 50 boxes at {% link to="/locations/loc-1" text="Warehouse A" /%}.',
+        })
+      );
+    });
+
+    // `Location.name` is free-form workspace input spliced into Markdoc note
+    // content. Asserted on the PARSE rather than the string: a substring check
+    // misses payloads that only become a tag after concatenation.
+    it.each([
+      ["closes the wrapper", 'A {% link to="javascript:alert(1)" text="x" /%}'],
+      [
+        "closes the tag first",
+        'A /%} {% link to="javascript:alert(1)" text="x" /%}',
+      ],
+      [
+        "pre-encodes its quotes",
+        "A&quot; to=&quot;javascript:alert(1)&quot; x=&quot;",
+      ],
+      [
+        "doubles the delimiter",
+        'A{{% link to="javascript:alert(1)" text="x" /%}',
+      ],
+    ])(
+      "cannot inject a Markdoc tag via a location name that %s",
+      async (_label, evilName) => {
+        vi.mocked(createAsset).mockResolvedValue(
+          createdAsset({
+            assetLocations: [assetLocationRow("loc-1", evilName)],
+          })
+        );
+
+        await action(
+          createActionArgs({
+            request: createRequest({
+              title: "New Laptop",
+              locationId: "loc-1",
+            }),
+          })
+        );
+
+        const tags = [...Markdoc.parse(noteContents()[1]).walk()].filter(
+          (node) => node.type === "tag"
+        );
+        // Exactly the two links we meant to emit, both pointing in-app — an
+        // escaped payload adds a third tag or an off-site `to`.
+        expect(tags).toHaveLength(2);
+        for (const tag of tags) {
+          expect(String(tag.attributes.to)).toMatch(/^\//);
+        }
+      }
+    );
 
     it("writes only the creation note when the asset has no location", async () => {
       vi.mocked(createAsset).mockResolvedValue(createdAsset());

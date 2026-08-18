@@ -35,6 +35,10 @@ import type { Column } from "../asset-index-settings/helpers";
  * @param userId - Acting user id (for the actor link)
  * @param firstName - Acting user's first name
  * @param lastName - Acting user's last name
+ * @param displayName - Acting user's `User.displayName`, when the caller has
+ *   it. `wrapUserLinkForNote` prefers it over first+last, so a caller holding
+ *   the full user row should pass it or the note names the person differently
+ *   from every other surface that renders them.
  * @param isRemoving - When true, render the removal phrasing
  * @param type - Asset type; only QUANTITY_TRACKED gets a unit count
  * @param unitOfMeasure - Optional unit label ("boxes", defaults to "units")
@@ -47,7 +51,7 @@ export function getLocationUpdateNoteContent({
   userId,
   firstName,
   lastName,
-
+  displayName,
   isRemoving,
   type,
   unitOfMeasure,
@@ -58,6 +62,8 @@ export function getLocationUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isRemoving?: boolean;
   /** Asset type — only QUANTITY_TRACKED triggers the unit-count phrasing. */
   type?: AssetType;
@@ -71,6 +77,7 @@ export function getLocationUpdateNoteContent({
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName,
     firstName,
     lastName,
   });

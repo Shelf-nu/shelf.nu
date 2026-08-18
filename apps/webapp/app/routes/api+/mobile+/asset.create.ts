@@ -27,14 +27,14 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
-import { getPrimaryLocation } from "~/modules/asset/utils";
+import { getLocationUpdateNoteContent } from "~/modules/asset/utils.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
@@ -224,36 +224,36 @@ export async function action({ request }: ActionFunctionArgs) {
     // step, but the human-readable feed on the asset page was not: an asset
     // created from the phone opened with an empty history while the identical
     // asset created on the website said who made it and where they put it.
-    const actor = wrapUserLinkForNote({
-      id: user.id,
-      firstName: asset.user.firstName,
-      lastName: asset.user.lastName,
-    });
+    //
+    // `asset.user` is the full User row (createAsset's include is `user: true`),
+    // so it is passed whole: `wrapUserLinkForNote` prefers `displayName` over
+    // first+last, and hand-picking the two name fields renamed anyone who had
+    // set one.
+    const actor = wrapUserLinkForNote(asset.user);
 
-    const notes: Promise<unknown>[] = [
-      createNote({
-        content: `Asset was created by ${actor}.`,
-        type: "UPDATE",
-        userId: user.id,
-        assetId: asset.id,
-        organizationId,
-      }),
-    ];
+    // Mirrors web: only the single primary placement is named, since a
+    // quantity-tracked asset can hold several AssetLocation rows. The row (not
+    // just its location) is what we need — `AssetLocation.quantity` is the
+    // multiplier the note phrasing uses for a QUANTITY_TRACKED asset.
+    const primaryPlacement = asset.assetLocations?.[0] ?? null;
 
-    // Mirrors web: only the single primary location is named, since a
-    // quantity-tracked asset can hold several AssetLocation rows.
-    const primaryLocation = getPrimaryLocation(asset);
-    if (primaryLocation) {
-      notes.push(
-        createNote({
-          content: `${actor} set the location to ${wrapLinkForNote(
-            `/locations/${primaryLocation.id}`,
-            primaryLocation.name.trim()
-          )}.`,
-          type: "UPDATE",
-          userId: user.id,
-          assetId: asset.id,
-          organizationId,
+    const noteContents = [`Asset was created by ${actor}.`];
+
+    if (primaryPlacement?.location) {
+      // The sentence, the link and the QT-aware "placed 50 units at X" variant
+      // are all owned by this helper, which every later placement change also
+      // goes through. Hand-rolling the string here is what made a QT asset read
+      // "set the location to X" on create and "moved 50 units …" ever after.
+      noteContents.push(
+        getLocationUpdateNoteContent({
+          newLocation: primaryPlacement.location,
+          userId: asset.user.id,
+          firstName: asset.user.firstName ?? "",
+          lastName: asset.user.lastName ?? "",
+          displayName: asset.user.displayName,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: primaryPlacement.quantity,
         })
       );
     }
@@ -265,12 +265,25 @@ export async function action({ request }: ActionFunctionArgs) {
     // QR while the first asset kept the scanned one, so the label in the user's
     // hand pointed at the wrong row. A missing note costs far less than that.
     // Same shape as the sibling mobile routes (asset.adjust-quantity.ts).
-    const noteResults = await Promise.allSettled(notes);
-    for (const result of noteResults) {
-      if (result.status === "rejected") {
+    //
+    // Written one at a time rather than concurrently: the feed orders by
+    // `createdAt` and two inserts issued in the same tick routinely land in the
+    // same millisecond, which showed the placement above the creation. Failures
+    // are swallowed per note, so a failed placement note cannot also cost us the
+    // creation note.
+    for (const content of noteContents) {
+      try {
+        await createNote({
+          content,
+          type: "UPDATE",
+          userId: user.id,
+          assetId: asset.id,
+          organizationId,
+        });
+      } catch (cause) {
         Logger.error(
           new ShelfError({
-            cause: result.reason,
+            cause,
             message: "Failed to write the creation note for a new asset",
             label: "Assets",
             additionalData: { assetId: asset.id, userId: user.id },
