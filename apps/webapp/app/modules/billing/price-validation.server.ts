@@ -27,8 +27,9 @@
  * @see {@link file://./../stripe-webhook/helpers.server.ts} `isAddonSubscription`
  */
 
-import type Stripe from "stripe";
+import Stripe from "stripe";
 
+import type { AdditionalData } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripe } from "~/utils/stripe.server";
 
@@ -36,6 +37,51 @@ const label = "Stripe" as const;
 
 /** The add-ons Shelf sells, as written in Stripe product metadata. */
 export type AddonType = "barcodes" | "audits";
+
+/**
+ * Retrieves a price with its product expanded, mapping ONLY a genuine
+ * unknown-id response to a client error.
+ *
+ * The distinction matters operationally. An unconditional catch here would turn
+ * a Stripe outage, a rate-limit, or rejected server credentials into an
+ * uncaptured 400 telling the user their plan does not exist — hiding a billing
+ * failure from error monitoring and misclassifying a retryable server fault as
+ * the caller's mistake. Anything that is not "no such price" is rethrown so the
+ * surrounding handler reports it as a captured 500.
+ *
+ * Mirrors the existing detection in `~/utils/stripe.server`.
+ *
+ * @param priceId - The price id supplied by the client
+ * @param additionalData - Context attached to the 400, for debugging
+ * @returns The resolved Stripe price, product expanded
+ * @throws {ShelfError} 400 when Stripe reports no such price
+ * @throws The original error for every other Stripe failure
+ */
+async function retrievePriceWithProduct(
+  priceId: string,
+  additionalData: AdditionalData
+): Promise<Stripe.Price> {
+  try {
+    return await stripe!.prices.retrieve(priceId, { expand: ["product"] });
+  } catch (cause) {
+    const isUnknownPrice =
+      cause instanceof Stripe.errors.StripeInvalidRequestError &&
+      (cause.code === "resource_missing" || cause.statusCode === 404);
+
+    if (!isUnknownPrice) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message: "The selected plan could not be found.",
+      additionalData,
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
 
 /**
  * Whether a Stripe product is the add-on product for `addonType`.
@@ -95,18 +141,10 @@ export async function assertPriceIsForAddon({
     });
   }
 
-  const price = await stripe.prices
-    .retrieve(priceId, { expand: ["product"] })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "The selected plan could not be found.",
-        additionalData: { priceId, addonType },
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    });
+  const price = await retrievePriceWithProduct(priceId, {
+    priceId,
+    addonType,
+  });
 
   // An inactive price is not purchasable; accepting one would create a
   // subscription against a price the operator has retired.
@@ -162,18 +200,10 @@ export async function assertPriceMatchesTier({
     });
   }
 
-  const price = await stripe.prices
-    .retrieve(priceId, { expand: ["product"] })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "The selected plan could not be found.",
-        additionalData: { priceId, shelfTier },
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    });
+  const price = await retrievePriceWithProduct(priceId, {
+    priceId,
+    shelfTier,
+  });
 
   const product = price.product;
   const priceTier =

@@ -12,7 +12,7 @@
  * @see {@link file://./price-validation.server.ts}
  */
 
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: Stripe SDK makes external API calls
@@ -32,6 +32,14 @@ import {
 } from "./price-validation.server";
 
 // @vitest-environment node
+
+/** The error Stripe raises for an id that does not exist. */
+function missingResourceError() {
+  return new Stripe.errors.StripeInvalidRequestError({
+    message: "No such price",
+    code: "resource_missing",
+  });
+}
 
 /** A Stripe product carrying the given metadata. */
 function product(metadata: Record<string, string>) {
@@ -152,11 +160,35 @@ describe("assertPriceIsForAddon", () => {
   it("turns an unknown price into a 400, not a 500", async () => {
     // A bad id is caller error. Letting Stripe's own throw escape would make
     // it a captured 500 and page someone for a crafted request.
-    mockStripe.prices.retrieve.mockRejectedValue(new Error("No such price"));
+    mockStripe.prices.retrieve.mockRejectedValue(missingResourceError());
 
     await expect(
       assertPriceIsForAddon({ priceId: "nope", addonType: "barcodes" })
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it.each([
+    [
+      "a rate limit",
+      new Stripe.errors.StripeRateLimitError({ message: "slow down" }),
+    ],
+    [
+      "bad server credentials",
+      new Stripe.errors.StripeAuthenticationError({ message: "bad key" }),
+    ],
+    [
+      "an outage",
+      new Stripe.errors.StripeConnectionError({ message: "unreachable" }),
+    ],
+  ])("does NOT disguise %s as a client error", async (_label, stripeError) => {
+    // These are our problem, not the caller's. Converting them to an uncaptured
+    // 400 "plan not found" would hide a billing outage from error monitoring
+    // and tell users their plan does not exist.
+    mockStripe.prices.retrieve.mockRejectedValue(stripeError);
+
+    await expect(
+      assertPriceIsForAddon({ priceId: "price_1", addonType: "barcodes" })
+    ).rejects.toBe(stripeError);
   });
 });
 
@@ -214,5 +246,30 @@ describe("assertPriceMatchesTier", () => {
     await expect(
       assertPriceMatchesTier({ priceId: "price_old", shelfTier: "tier_2" })
     ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("assertPriceMatchesTier — Stripe failure classification", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("turns an unknown price into a 400", async () => {
+    mockStripe.prices.retrieve.mockRejectedValue(missingResourceError());
+
+    await expect(
+      assertPriceMatchesTier({ priceId: "nope", shelfTier: "tier_2" })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("lets a Stripe outage propagate so it is captured", async () => {
+    const outage = new Stripe.errors.StripeConnectionError({
+      message: "unreachable",
+    });
+    mockStripe.prices.retrieve.mockRejectedValue(outage);
+
+    await expect(
+      assertPriceMatchesTier({ priceId: "price_t2", shelfTier: "tier_2" })
+    ).rejects.toBe(outage);
   });
 });
