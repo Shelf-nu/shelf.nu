@@ -81,6 +81,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         creator: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
           },
@@ -88,6 +89,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianUser: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
             profilePicture: true,
@@ -100,7 +102,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         tags: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, color: true },
         },
         // Walk the BookingAsset pivot to reach assets. `quantity` +
         // `assetKitId` per row let the loader below collapse multi-row
