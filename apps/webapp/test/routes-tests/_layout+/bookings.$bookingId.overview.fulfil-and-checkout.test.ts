@@ -130,16 +130,32 @@ describe("fulfil-and-checkout action", () => {
   });
 
   it("refuses a SELF_SERVICE user checking out someone else's booking", async () => {
-    await post({ roles: [OrganizationRoles.SELF_SERVICE] });
+    const result = await post({ roles: [OrganizationRoles.SELF_SERVICE] });
 
-    // The assertion that matters: the checkout never happens.
+    // Assert the STATUS, not merely that the sink went uncalled: a refusal test
+    // that only checks "not called" passes for any earlier failure — a bad
+    // payload, a thrown mock — and would keep passing if the guard vanished but
+    // something else broke first.
+    expect((result as unknown as Response).status).toBe(403);
     expect(fulfilMock).not.toHaveBeenCalled();
   });
 
-  it("allows a SELF_SERVICE user to check out their own booking", async () => {
+  it("allows a SELF_SERVICE user who CREATED the booking", async () => {
+    // Split from the custodian case: setting both fields to the caller tests
+    // neither path on its own, so a guard checking only one would still pass.
     await post({
       roles: [OrganizationRoles.SELF_SERVICE],
       creatorId: "user-1",
+      custodianUserId: "someone-else",
+    });
+
+    expect(fulfilMock).toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE user who is the CUSTODIAN of the booking", async () => {
+    await post({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      creatorId: "someone-else",
       custodianUserId: "user-1",
     });
 

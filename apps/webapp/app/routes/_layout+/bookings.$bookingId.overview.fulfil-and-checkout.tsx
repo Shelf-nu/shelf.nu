@@ -156,6 +156,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // `canUserManageBookingAssets` takes only (status, from, to) plus an
+    // is-self-service flag — it never sees `userId`, so it cannot answer "is
+    // this MY booking". Without this, a SELF_SERVICE user could load another
+    // member's booking, its model requests and its asset data through this
+    // screen, even though the action would refuse the checkout. Read access is
+    // the leak; the write guard does not cover it.
+    if (isSelfService) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "check out",
+      });
+    }
+
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
     if (!canManageAssets) {
