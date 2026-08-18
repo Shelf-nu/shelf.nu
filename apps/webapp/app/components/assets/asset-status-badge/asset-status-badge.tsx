@@ -88,9 +88,12 @@ export function AssetStatusBadge({
   // exists for INDIVIDUAL assets only).
   const isQtyTracked = asset ? isQuantityTracked(asset) : false;
 
+  const hasInlineBookingSlices =
+    (inlineQuantityData?.bookingAssets?.length ?? 0) > 0;
+
   /**
-   * Lazy-fetch the breakdown for qty-tracked assets that didn't get
-   * `bookingAssets` from the loader (asset index, picker rows, scanner
+   * Lazy-fetch the breakdown for qty-tracked assets that didn't get the
+   * booking slices from the loader (asset index, picker rows, scanner
    * drawer, etc.). The fetch is gated on `hasInteracted` so unhovered
    * rows on a 100-row index don't fan out N parallel requests. Once
    * the cursor enters the badge we kick the request off — by the time
@@ -101,7 +104,7 @@ export function AssetStatusBadge({
   // told us they don't want the qty-aware breakdown, paying the network
   // cost would be wasted bandwidth (the data isn't rendered).
   const needsLazyBreakdown =
-    isQtyTracked && !inlineQuantityData && !suppressQtyAware;
+    isQtyTracked && !hasInlineBookingSlices && !suppressQtyAware;
   const { data: lazyAsset } = useApiQuery<QuantityAwareAsset>({
     api: `/api/assets/${id}/quantity-breakdown`,
     enabled: needsLazyBreakdown && hasInteracted,
@@ -110,7 +113,8 @@ export function AssetStatusBadge({
     () => getQuantityData(lazyAsset ?? null),
     [lazyAsset]
   );
-  const quantityData = inlineQuantityData ?? lazyQuantityData;
+  const quantityData =
+    lazyQuantityData ?? (hasInlineBookingSlices ? inlineQuantityData : null);
 
   // Fetch the ongoing booking from API when asset is CHECKED_OUT.
   // Skip for quantity-tracked assets — they handle multi-booking

@@ -15,8 +15,15 @@
  *    `assetStatusColorMap` mapping carries the violet pseudo-status
  *    treatment regardless of which branch renders it.
  *  - When `suppressQtyAware` is left at its default (`false`), the
- *    existing qty-aware branch is preserved for QT assets (hover-card +
- *    "Partial custody"/"Partially checked out" relabels).
+ *    qty-aware branch remains active for QT assets (hover-card +
+ *    "Partially checked out"/"Partial custody" relabels), but only when
+ *    the inline breakdown is COMPLETE — i.e. it ships `bookingAssets`.
+ *    Index / picker / scanner-drawer fragments ship custody without
+ *    booking slices, so the badge renders the caller status until the
+ *    lazy `/quantity-breakdown` fetch resolves, and once resolved the
+ *    lazy data wins over the incomplete inline snapshot (issue #2875:
+ *    the index must not infer "Partial custody" while units are out on
+ *    a booking).
  *  - When `suppressQtyAware` is set, the lazy
  *    `/api/assets/:id/quantity-breakdown` fetch is skipped — booking
  *    rows render 50+ rows at a time and must not fan out per-row HTTP
@@ -43,6 +50,13 @@ import type { QuantityAwareAsset } from "./quantity-data";
  */
 const apiQueryCalls: Array<{ api: string; enabled: boolean }> = [];
 
+/**
+ * Injectable response for the `/api/assets/:id/quantity-breakdown` endpoint.
+ * Tests set this to simulate a resolved lazy breakdown (the endpoint applies
+ * the effective checked-out math index fragments can't).
+ */
+let mockBreakdownData: QuantityAwareAsset | undefined;
+
 // why: AssetStatusBadge uses `useApiQuery` for two endpoints
 // (`/api/assets/:id/quantity-breakdown` and
 // `/api/assets/:id/ongoing-booking`). We mock the hook so the test
@@ -52,7 +66,11 @@ const apiQueryCalls: Array<{ api: string; enabled: boolean }> = [];
 vi.mock("~/hooks/use-api-query", () => ({
   default: ({ api, enabled }: { api: string; enabled?: boolean }) => {
     apiQueryCalls.push({ api, enabled: !!enabled });
-    return { data: undefined, isLoading: false, error: undefined };
+    return {
+      data: api.includes("/quantity-breakdown") ? mockBreakdownData : undefined,
+      isLoading: false,
+      error: undefined,
+    };
   },
 }));
 
@@ -67,8 +85,23 @@ vi.mock("../../shared/hover-card", () => ({
   HoverCardContent: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@radix-ui/react-hover-card", () => ({
+  HoverCardPortal: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+// why: the tooltip renders booking links via react-router `Link`, which
+// needs router context the badge unit test doesn't set up. The tooltip
+// content is exercised by its own tests; here we only need the badge's
+// label/relabel contract.
+vi.mock("./quantity-tooltip-content", () => ({
+  QuantityTooltipContent: ({ data }: { data: { total: number } }) => (
+    <div data-testid="quantity-tooltip">{data.total}</div>
+  ),
+}));
+
 beforeEach(() => {
   apiQueryCalls.length = 0;
+  mockBreakdownData = undefined;
 });
 
 /**
@@ -89,6 +122,37 @@ function makeQtAssetWithCustodyElsewhere(): QuantityAwareAsset {
     assetKits: [],
   };
 }
+
+/**
+ * Builds the issue-#2875 repro shape: an asset with units both in
+ * custody and checked out on an ONGOING booking — as shipped by the
+ * asset detail page loader (full `bookingAssets`, effective quantities
+ * pre-applied) and by the `/quantity-breakdown` lazy endpoint.
+ */
+function makeQtAssetInCustodyAndCheckedOut(): QuantityAwareAsset {
+  return {
+    type: "QUANTITY_TRACKED",
+    quantity: 29,
+    custody: [{ quantity: 20 }],
+    bookingAssets: [
+      {
+        quantity: 5,
+        assetKitId: null,
+        booking: { id: "booking-1", name: "Q3 event", status: "ONGOING" },
+      },
+    ],
+    assetKits: [],
+  };
+}
+
+/** Cursor-enter on the badge trigger span, arming the lazy fetch path. */
+function hoverBadge(container: HTMLElement) {
+  const root = container.querySelector("span");
+  if (root) fireEvent.mouseEnter(root);
+}
+
+const breakdownCalls = () =>
+  apiQueryCalls.filter((call) => call.api.includes("/quantity-breakdown"));
 
 describe("AssetStatusBadge", () => {
   describe("suppressQtyAware (booking-row escape hatch)", () => {
@@ -133,13 +197,16 @@ describe("AssetStatusBadge", () => {
       expect(screen.getByText("Partially checked out")).toBeInTheDocument();
     });
 
-    it("preserves the qty-aware hover-card branch when suppressQtyAware is left at its default (false)", () => {
-      // Case (c): regression guard for non-booking surfaces (asset
-      // index, asset overview, scanner drawer). With the default
-      // (`suppressQtyAware=false`), a QT asset with custody elsewhere
-      // must still relabel to "Partial custody" via the qty-aware
-      // branch — that's the whole point of the global breakdown.
-      render(
+    it("does not relabel a custody-only inline snapshot and arms the lazy fetch instead", () => {
+      // Case (c): index-surface regression guard (asset index, picker
+      // rows, scanner drawer). Those loaders ship custody but no
+      // `bookingAssets`, so the inline breakdown is INCOMPLETE: reading
+      // it as authoritative would report `checkedOut = 0` and infer
+      // "Partial custody" even when units are out on a booking
+      // (issue #2875). The badge must render the caller status until
+      // the lazy `/quantity-breakdown` fetch resolves, and must arm
+      // that fetch on hover.
+      const { container } = render(
         <AssetStatusBadge
           id="asset-qt-3"
           status="AVAILABLE"
@@ -148,12 +215,59 @@ describe("AssetStatusBadge", () => {
         />
       );
 
-      expect(screen.getByText("Partial custody")).toBeInTheDocument();
-      expect(screen.queryByText("Available")).not.toBeInTheDocument();
+      expect(screen.getByText("Available")).toBeInTheDocument();
+      expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
+
+      hoverBadge(container);
+      expect(breakdownCalls().some((call) => call.enabled)).toBe(true);
+    });
+
+    it("prefers the lazy breakdown over an incomplete custody-only inline snapshot once it resolves", () => {
+      // Case (d): the issue-#2875 repro. The index ships custody-only
+      // inline data; the lazy endpoint resolves with the booking slices
+      // (5 checked out) and the badge must converge to the same label
+      // as the asset detail page — "Partially checked out".
+      mockBreakdownData = makeQtAssetInCustodyAndCheckedOut();
+
+      const { container } = render(
+        <AssetStatusBadge
+          id="asset-qt-3"
+          status="AVAILABLE"
+          availableToBook
+          asset={makeQtAssetWithCustodyElsewhere()}
+        />
+      );
+
+      expect(screen.getByText("Partially checked out")).toBeInTheDocument();
+      expect(screen.queryByText(/partial custody/i)).not.toBeInTheDocument();
+
+      hoverBadge(container);
+      expect(breakdownCalls().some((call) => call.enabled)).toBe(true);
+    });
+
+    it("keeps inline data authoritative when it ships booking slices (asset detail page)", () => {
+      // Case (e): the asset detail page ships the full `bookingAssets`
+      // with effective quantities pre-applied — no lazy fetch is armed,
+      // and the inline breakdown drives the label directly.
+      const { container } = render(
+        <AssetStatusBadge
+          id="asset-qt-3"
+          status="AVAILABLE"
+          availableToBook
+          asset={makeQtAssetInCustodyAndCheckedOut()}
+        />
+      );
+
+      expect(screen.getByText("Partially checked out")).toBeInTheDocument();
+
+      hoverBadge(container);
+      expect(breakdownCalls().every((call) => call.enabled === false)).toBe(
+        true
+      );
     });
 
     it("does not enable the lazy /quantity-breakdown fetch when suppressQtyAware is set on a QT asset", () => {
-      // Case (d): perf guard. Booking rows render many QT assets at
+      // Case (f): perf guard. Booking rows render many QT assets at
       // once; enabling the lazy fetch (even on hover) would fan out
       // one HTTP request per row. The asset has NO inline
       // `bookingAssets`, so without suppression the badge would arm
@@ -176,19 +290,16 @@ describe("AssetStatusBadge", () => {
 
       // Fire the cursor-enter event that would normally arm the lazy
       // fetch — we want to prove suppression survives it.
-      const root = container.querySelector("span");
-      if (root) fireEvent.mouseEnter(root);
-
-      const breakdownCalls = apiQueryCalls.filter((call) =>
-        call.api.includes("/quantity-breakdown")
-      );
+      hoverBadge(container);
       // The hook is invoked unconditionally (React rules of hooks),
       // but it must NEVER be `enabled` for a suppressed QT row.
-      expect(breakdownCalls.every((call) => call.enabled === false)).toBe(true);
+      expect(breakdownCalls().every((call) => call.enabled === false)).toBe(
+        true
+      );
     });
 
     it("is a no-op for INDIVIDUAL assets (the qty-aware branch never applied to them)", () => {
-      // Case (e): defensive — flipping the flag on an INDIVIDUAL
+      // Case (g): defensive — flipping the flag on an INDIVIDUAL
       // asset must not change the rendered output. INDIVIDUAL assets
       // always render via the standard status path.
       const individualAsset: QuantityAwareAsset = {
