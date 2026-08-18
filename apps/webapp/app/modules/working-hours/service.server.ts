@@ -218,6 +218,7 @@ export async function createWorkingHoursOverride({
 
 export async function updateWorkingHoursOverride({
   overrideId,
+  organizationId,
   date,
   isOpen,
   openTime,
@@ -225,6 +226,12 @@ export async function updateWorkingHoursOverride({
   reason,
 }: {
   overrideId: string;
+  /**
+   * Required for the same reason as on the delete path: the override carries
+   * no organizationId, so without scoping through its parent WorkingHours row
+   * any authenticated caller could edit another organization's override by id.
+   */
+  organizationId: string;
   date?: string; // YYYY-MM-DD format
   isOpen: boolean;
   openTime?: string; // HH:MM format
@@ -247,13 +254,33 @@ export async function updateWorkingHoursOverride({
       updateData.reason = reason;
     }
 
-    const updatedOverride = await db.workingHoursOverride.update({
-      where: { id: overrideId },
+    // updateMany, not update: `update` needs a unique where, and the scope
+    // comes through the parent WorkingHours row.
+    const updated = await db.workingHoursOverride.updateMany({
+      where: { id: overrideId, workingHours: { organizationId } },
       data: updateData,
     });
 
-    return updatedOverride;
+    if (updated.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Override not found or you don't have permission to edit it.",
+        additionalData: { overrideId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return await db.workingHoursOverride.findFirstOrThrow({
+      where: { id: overrideId, workingHours: { organizationId } },
+    });
   } catch (cause) {
+    // The 403 above is deliberate and user-facing; re-wrapping it would hide a
+    // refused cross-org write behind a generic 500.
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to update working hours override",
@@ -290,6 +317,12 @@ export async function deleteWorkingHoursOverride(
       });
     }
   } catch (cause) {
+    // The 403 above is deliberate and user-facing; re-wrapping it would hide a
+    // refused cross-org write behind a generic 500.
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to delete working hours override",
