@@ -927,6 +927,25 @@ export function assertBookingIsCheckinable({
 }
 
 /**
+ * The only capability {@link lockBookingForStatusCheck} needs from a client.
+ *
+ * Structural rather than `any`: the extended Prisma client has no exported
+ * interactive-transaction type, but the helper does not need one — it issues a
+ * single tagged-template raw query. Naming just that keeps the compiler able to
+ * reject anything that is not a query-capable client, which `any` cannot do.
+ *
+ * `unknown[]` for the interpolated values: they are bound as parameters, so
+ * their static types are irrelevant here, and `unknown` does not silently
+ * accept a value the caller meant to narrow.
+ */
+type RawQueryClient = {
+  $queryRaw<T = unknown>(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<T>;
+};
+
+/**
  * Takes a row-level lock on a booking, then returns its status.
  *
  * **Must be called inside a `db.$transaction()` interactive transaction**, and
@@ -952,8 +971,7 @@ export function assertBookingIsCheckinable({
  * @see {@link file://./../consumption-log/quantity-lock.server.ts} the asset equivalent
  */
 export async function lockBookingForStatusCheck(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  tx: RawQueryClient,
   bookingId: Booking["id"],
   organizationId: Booking["organizationId"]
 ): Promise<BookingStatus> {
