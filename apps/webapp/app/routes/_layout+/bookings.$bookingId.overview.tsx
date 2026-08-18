@@ -1380,8 +1380,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      archive: PermissionAction.update,
-      cancel: PermissionAction.update,
+      // archive/cancel have dedicated permissions, and BASE deliberately holds
+      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
+      // user archive or cancel bookings the role was never granted.
+      archive: PermissionAction.archive,
+      cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.extend,
@@ -1886,6 +1889,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
+        // Cross-user guard, mirroring api+/mobile+/bookings.archive.ts. The
+        // permission gate alone is not enough: SELF_SERVICE legitimately holds
+        // `booking:archive`, so without this they can archive anyone's booking.
+        // `archiveBooking` does not check ownership itself. No-op for
+        // ADMIN/OWNER.
+        if (isSelfServiceOrBase) {
+          validateBookingOwnership({
+            booking: await getBooking({ id, organizationId, request }),
+            userId,
+            role,
+            action: "archive",
+          });
+        }
+
         await archiveBooking({ id, organizationId, userId: user.id });
 
         sendNotification({
@@ -1905,6 +1922,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             additionalData: { userId, id, organizationId, role },
           }
         );
+        // Same guard as archive above — `cancelBooking` does not check
+        // ownership, and SELF_SERVICE holds `booking:cancel`.
+        if (isSelfServiceOrBase) {
+          validateBookingOwnership({
+            booking: await getBooking({ id, organizationId, request }),
+            userId,
+            role,
+            action: "cancel",
+          });
+        }
+
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
