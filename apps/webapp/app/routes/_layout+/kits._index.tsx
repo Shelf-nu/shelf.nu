@@ -48,6 +48,7 @@ import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -100,6 +101,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/kits?${cookieParams.toString()}`);
     }
 
+    /**
+     * Custody scope for the custodian picker, shared by its rows AND its count
+     * so the two cannot disagree — the same rule `custody-filter` resolves on
+     * the search endpoint.
+     */
+    const custodianFilterWhere = {
+      deletedAt: null,
+      organizationId,
+      userId: !canSeeAllCustody ? userId : undefined,
+    };
+
     let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
@@ -109,6 +121,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Governs `?teamMember=`: a viewer who may not see all custody may
+        // only ever filter this list by their own custody.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
           assetKits: {
@@ -169,8 +185,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                             // iterating (`kitId: kit.id`), so the DB never
                             // needs to supply it.
                             custodianUserId: true,
-                            custodianTeamMember: true,
-                            custodianUser: true,
+                            // Narrowed from `true` on both: that shipped the
+                            // whole TeamMember row and the ENTIRE User row —
+                            // email, Stripe `customerId`, billing flags — to
+                            // render a name and an avatar on the availability
+                            // calendar.
+                            custodianTeamMember: {
+                              select: { id: true, name: true, userId: true },
+                            },
+                            custodianUser: {
+                              select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                displayName: true,
+                                profilePicture: true,
+                              },
+                            },
                           },
                         },
                       },
@@ -186,11 +217,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       db.teamMember
         .findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-            userId: !canSeeAllCustody ? userId : undefined,
-          },
+          where: custodianFilterWhere,
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -204,7 +231,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             label: "Assets",
           });
         }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      // Same `where` as the rows above: counting unscoped while the rows are
+      // scoped puts the workspace's team-member total in a restricted user's
+      // loader payload, and makes the picker's "showing N out of M" disagree
+      // with what the search endpoint returns.
+      db.teamMember.count({ where: custodianFilterWhere }),
       getLocationsForCreateAndEdit({
         organizationId,
         request,
@@ -233,7 +264,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: kits,
+        // `TeamMemberBadge` only decides whether to DRAW the custodian; the
+        // name and `user.email` shipped in this payload regardless, so a
+        // restricted viewer read them straight out of `/kits.data` while the
+        // page showed "private". Redact server-side.
+        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
         page,
         totalItems: totalKits,
         totalPages,
@@ -321,7 +356,13 @@ export default function KitsIndexPage() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"

@@ -307,6 +307,46 @@ function getSqlString(sql: ReturnType<typeof generateWhereClause>): string {
   return sql.strings.join("?");
 }
 
+describe("generateWhereClause - search fail-closed", () => {
+  const orgId = "org-1";
+
+  it("matches nothing for typed input that yields zero terms", () => {
+    // why: `?s=%20` arrives untrimmed as " " — truthy but zero terms. The
+    // advanced path must fail closed like getAssets does in simple mode,
+    // or the same search box answers differently per index mode.
+    const result = generateWhereClause(orgId, "   ", []);
+    expect(getSqlString(result)).toContain("AND FALSE");
+  });
+
+  it("does not fail closed for a genuinely empty search", () => {
+    const result = generateWhereClause(orgId, null, []);
+    expect(getSqlString(result)).not.toContain("AND FALSE");
+  });
+
+  it("builds search conditions for real terms", () => {
+    const result = generateWhereClause(orgId, "tripod", []);
+    const sql = getSqlString(result);
+    expect(sql).toContain("ILIKE");
+    expect(sql).not.toContain("AND FALSE");
+  });
+});
+
+describe("generateWhereClause - search routes through the org-scoped UNION", () => {
+  const orgId = "org_1";
+
+  it("routes a search term through the org-scoped UNION (a.id IN (...))", () => {
+    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
+    // search now narrows by matching-id set, not an inline multi-table OR
+    expect(sql).toContain('a."id" IN (');
+    expect(sql).toContain("UNION");
+    // org-scoped inside the union
+    expect(sql).toContain('"organizationId"');
+    // the old top-level category/location ILIKE against the outer row is gone
+    expect(sql).not.toContain("c.name ILIKE");
+    expect(sql).not.toContain("l.name ILIKE");
+  });
+});
+
 describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
 
@@ -791,6 +831,29 @@ describe("assetQueryFragment", () => {
     return sql.strings.join("?");
   }
 
+  describe("asset model cover image", () => {
+    // why: raw SQL is opaque to typecheck — Prisma.sql is just a string, and the
+    // row type is a user-supplied cast. Asserting the column names is the only
+    // cheap regression guard, and it also catches a template literal that got
+    // truncated (e.g. by a stray backtick inside a SQL comment).
+    it("projects the model's image columns off the existing am join", () => {
+      const sql = getFragmentSqlString(assetQueryFragment());
+
+      expect(sql).toContain('am.image AS "assetModelImage"');
+      expect(sql).toContain(
+        'am."thumbnailImage" AS "assetModelThumbnailImage"'
+      );
+    });
+
+    it("keeps using the already-present AssetModel join", () => {
+      const joins = assetQueryJoins.strings.join("?");
+      const joinCount = joins.split('LEFT JOIN public."AssetModel" am').length;
+
+      // Exactly one join — the image columns must not add a second one.
+      expect(joinCount - 1).toBe(1);
+    });
+  });
+
   describe("custody output", () => {
     it("only includes booking custody when asset status is CHECKED_OUT", () => {
       const fragment = assetQueryFragment();
@@ -1094,18 +1157,12 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
    * from the cheap phase, so any tag reference in the WHERE clause must be a
    * self-contained per-asset EXISTS (not a bare `t.name`/`t.id` against an
    * outer join alias). These tests lock that shape.
+   *
+   * (Free-text search's own tag matching moved into the org-scoped UNION —
+   * see the "search routes through the org-scoped UNION" describe below and
+   * `search-union.server.test.ts` — so only filter-driven tag EXISTS-ification
+   * remains here.)
    */
-  it("EXISTS-ifies the tag-name search (per-asset scoped, not a fanning join)", () => {
-    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
-
-    // The tag search must be an EXISTS over _AssetToTag JOIN Tag scoped to the
-    // current asset — never a bare `t.name ILIKE` disjunct against an outer
-    // join that would force a GROUP BY.
-    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
-    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
-    expect(sql).toContain('WHERE att."A" = a.id AND t.name ILIKE');
-  });
-
   it("EXISTS-ifies a single-tag `contains` filter", () => {
     const filter: Filter = {
       name: "tags",
@@ -1195,7 +1252,6 @@ describe("buildAdvancedAssetsQuery", () => {
       withBookings: overrides?.withBookings ?? false,
       withBarcodes: overrides?.withBarcodes ?? false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
-      hasSearch: Boolean(search),
     });
   }
 
@@ -1249,16 +1305,27 @@ describe("buildAdvancedAssetsQuery", () => {
     );
   });
 
-  it("keeps Category/Location joins for text search even without a name sort", () => {
-    // The search predicate references c.name / l.name in the WHERE, so a search
-    // must resolve those joins (independent of any sort). `c.name ILIKE` only
-    // appears when a search is active, so it is the reliable signal.
-    expect(getQuerySqlString(build({ search: "widget" }))).toContain(
-      "c.name ILIKE"
+  it("omits the category/location joins when only search is active (default sort)", () => {
+    // Search now narrows via `a."id" IN (<UNION>)` in the WHERE clause (see
+    // generateWhereClause / buildAssetSearchUnion) instead of a top-level
+    // `c.name ILIKE` / `l.name ILIKE`, so the slim cheap phase no longer
+    // needs Category/Location joined just because a search is active.
+    // Isolate the cheap phase (everything before `sorted_asset_query`) the
+    // same way the name-sort gating test above does — the heavy per-row
+    // lateral projection always joins Category/Location for the final
+    // rendered row, so asserting on the full SQL would false-negative.
+    const sql = getQuerySqlString(build({ search: "widget" }));
+    const cheap = sql.slice(0, sql.indexOf("sorted_asset_query"));
+
+    // CHEAP_CATEGORY_JOIN / CHEAP_LOCATION_JOIN's emitted SQL (query.server.ts)
+    expect(cheap).not.toContain(
+      'LEFT JOIN public."Category" c ON a."categoryId" = c.id'
     );
-    expect(getQuerySqlString(build({ sortBy: [] }))).not.toContain(
-      "c.name ILIKE"
-    );
+    expect(cheap).not.toContain('SELECT l.id, l.name, l."parentId"');
+
+    // The search itself is still applied via the UNION in the WHERE clause.
+    expect(cheap).toContain('a."id" IN (');
+    expect(cheap).toContain("UNION");
   });
 
   it("injects the barcode sort-key selects only when a barcode sort is active", () => {

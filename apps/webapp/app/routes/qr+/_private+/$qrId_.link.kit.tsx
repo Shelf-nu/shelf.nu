@@ -36,7 +36,6 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitQrCode,
@@ -59,7 +58,6 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -86,12 +84,28 @@ export const loader = async ({
       });
     }
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.update,
     });
+
+    /**
+     * `requirePermission` above already throws (403) unless the caller has
+     * `qr:update`, so reaching this line guarantees it. We derive the flag
+     * here and pass it down as loader data instead of calling the
+     * client-only `userHasPermission` inside the component: that validator
+     * lives in `permission.validator.client.ts`, a `.client.ts` module whose
+     * exports React Router's Vite plugin stubs to `undefined` in the SSR
+     * bundle. Unlike routes nested under `_layout+/_layout` (which defer
+     * rendering until hydration for this exact reason), this `qr+/_private+`
+     * route has no such wrapper, so calling it directly during render
+     * crashed SSR with `TypeError: userHasPermission is not a function`
+     * (SHELF-WEBAPP-22B). See `assets.$assetId.overview.tsx` for the same
+     * pattern applied to `canEditAsset`.
+     */
+    const canManageQrLink = true;
 
     const searchParams = getCurrentSearchParams(request);
     const [
@@ -102,6 +116,11 @@ export const loader = async ({
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // This picker renders the custodian filter, so pass the resolved rule
+        // rather than a fixed answer — hardcoding `false` would refuse an
+        // admin's own filter.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           assetKits: {
             select: {
@@ -146,6 +165,7 @@ export const loader = async ({
         subHeading: "Choose an asset to link with this QR tag.",
       },
       qrId,
+      canManageQrLink,
       items: kits,
       search,
       page,
@@ -210,10 +230,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: css }];
 
 export default function QrLinkExisting() {
-  const { header } = useLoaderData<typeof loader>();
+  const { header, canManageQrLink } = useLoaderData<typeof loader>();
   const { qrId } = useParams();
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
-  const { roles } = useUserRoleHelper();
 
   /** The id of the asset the user selected to update */
   const [selectedKitId, setSelectedKitId] = useState<string>("");
@@ -233,13 +252,7 @@ export default function QrLinkExisting() {
 
       <Filters className="-mx-4 border-b px-4 py-3">
         <div className="flex flex-1 justify-center pt-3">
-          <When
-            truthy={userHasPermission({
-              roles,
-              entity: PermissionEntity.qr,
-              action: PermissionAction.update,
-            })}
-          >
+          <When truthy={canManageQrLink}>
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
@@ -247,7 +260,13 @@ export default function QrLinkExisting() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"

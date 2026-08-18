@@ -46,6 +46,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
@@ -210,18 +211,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "bulk-remove-assets": {
-        const { assetIds } = parseData(
+        // `currentSearchParams` comes from the submitted form, not `request.url`
+        // — the dialog posts to a bare action URL, so the request carries no
+        // query string and "select all" would match every asset here.
+        const { assetIds, currentSearchParams } = parseData(
           formData,
-          z.object({
-            assetIds: z.array(z.string()).min(1),
-          })
+          z
+            .object({
+              assetIds: z.array(z.string()).min(1),
+            })
+            .and(CurrentSearchParamsSchema)
         );
 
         const resolvedAssetIds = await resolveLocationAssetIds({
           ids: assetIds,
           organizationId,
           locationId,
-          request,
+          currentSearchParams,
         });
 
         if (resolvedAssetIds.length === 0) {
@@ -303,6 +309,8 @@ export default function LocationAssets() {
                       name: "teamMember",
                       queryKey: "name",
                       deletedAt: null,
+                      // A read FILTER — the workspace custody override governs.
+                      custodyPurpose: "custody-filter",
                     }}
                     label="Filter by custodian"
                     placeholder="Search team members"
@@ -394,6 +402,9 @@ const ListAssetContent = ({
   extraProps,
 }: {
   item: Asset & {
+    /** Cover image of the asset's model, rendered when the asset has no
+     * image of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
     category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
@@ -449,6 +460,7 @@ const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

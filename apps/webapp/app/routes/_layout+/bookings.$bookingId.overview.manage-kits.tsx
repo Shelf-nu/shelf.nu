@@ -60,6 +60,7 @@ import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -75,6 +76,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -151,13 +153,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const modelName = {
       singular: "kit",
@@ -213,6 +219,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         currentBookingId: bookingId,
+        // Only reaches `?teamMember=` here; pass the resolved rule so an
+        // admin's custodian filter still works on this dialog.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
           assetKits: {
@@ -289,7 +299,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       search,
-      items: kits,
+      // `KITS_INCLUDE_FIELDS` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER (above) does not shape the rows, so the
+      // identity has to be redacted here too. Not the literal `false` passed to
+      // the filter: that argument is deliberately fixed for a seed nothing
+      // renders, and reusing it would redact for ADMIN/OWNER as well.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       totalItems: totalKits,
       bookingKitIds,
       ...modelTabData,
@@ -445,17 +462,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `assetId`). This is what fixes the multi-kit-per-asset drop: a
     // qty-tracked asset in two kits added to one booking now yields two
     // kit-driven `BookingAsset` rows.
-    const kitSlices: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity: number;
-    }> = [];
+    const kitSlices: KitSliceSpec[] = [];
     for (const kit of selectedKits) {
       for (const ak of kit.assetKits) {
         if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
         kitSlices.push({
           assetId: ak.asset.id,
           assetKitId: ak.id,
+          // Durable provenance — persisted to `BookingAsset.sourceKitId`, which
+          // outlives the `AssetKit` row `assetKitId` points at.
+          kitId: kit.id,
           quantity: ak.quantity,
         });
       }

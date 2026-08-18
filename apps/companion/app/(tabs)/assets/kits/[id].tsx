@@ -38,6 +38,7 @@ import {
   formatCurrency,
 } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
@@ -345,6 +346,13 @@ export default function KitDetailScreen() {
                     bg: colors.backgroundTertiary,
                     text: colors.muted,
                   };
+                  // Only show the "×N" kit-quantity line when we have a
+                  // formatted value — never a bare "×". Mirrors the assets
+                  // list/detail screens, which render nothing when
+                  // formatQuantity returns null (missing/non-finite qty).
+                  const kitQuantityLabel = isQuantityTracked(asset)
+                    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
+                    : null;
                   return (
                     <TouchableOpacity
                       key={asset.id}
@@ -385,6 +393,11 @@ export default function KitDetailScreen() {
                         <Text style={styles.assetTitle} numberOfLines={1}>
                           {asset.title}
                         </Text>
+                        {kitQuantityLabel ? (
+                          <Text style={styles.assetMeta} numberOfLines={1}>
+                            {`×${kitQuantityLabel}`}
+                          </Text>
+                        ) : null}
                         <Text style={styles.assetMeta} numberOfLines={1}>
                           {asset.category?.name || "Uncategorized"}
                         </Text>

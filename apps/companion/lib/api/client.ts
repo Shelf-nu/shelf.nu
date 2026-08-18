@@ -121,7 +121,8 @@ export type ApiFetchOptions = RequestInit & { retry?: boolean };
  * Structured error payload from the mobile API's `{ error: { … } }` envelope.
  * `message` mirrors the flat `error` string consumers already display.
  * `reason` is an additive machine-readable discriminator some endpoints emit
- * (today: `"unclaimed"` on the QR resolve / link routes), with `qrId` echoing
+ * (today: `"unclaimed"` on the QR RESOLVE routes only — the link route claims
+ * unclaimed codes inline and no longer emits it), with `qrId` echoing
  * the scanned code id whenever `reason` is present. Branch on `reason`, never
  * on `message` text — messages are human copy and can change; the reason
  * field is the wire contract.

@@ -204,6 +204,26 @@ export class ShelfError extends Error {
 }
 
 /**
+ * Re-throws `cause` unchanged when it is a deliberate CLIENT-error ShelfError.
+ *
+ * Service wrappers typically catch everything and re-throw with a friendly
+ * "something went wrong, try again later" message. That is right for an
+ * internal fault, and wrong for a 4xx someone chose deliberately: it hands the
+ * user a 400 telling them to retry a request that can never succeed.
+ *
+ * 4xx means a human wrote that message for a user; 5xx means something broke.
+ * `status` is optional on ShelfError, so an unset status is treated as 500.
+ *
+ * @param cause - The caught value
+ * @throws The original error when it is a client-error ShelfError
+ */
+export function rethrowIfClientError(cause: unknown): void {
+  if (cause instanceof ShelfError && (cause.status ?? 500) < 500) {
+    throw cause;
+  }
+}
+
+/**
  * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
  */
 export function isLikeShelfError(cause: unknown): cause is ShelfError {
@@ -525,6 +545,40 @@ export function throwIfIndividualAssetAlreadyPlaced(
 }
 
 /**
+ * Substring embedded verbatim in the Prisma error message when Postgres raises
+ * SQLSTATE `53200` (`out_of_memory`) because its **cluster-wide shared lock
+ * table is full** — the "You might need to increase max_locks_per_transaction"
+ * hint. Prisma surfaces this as a `P2010` (raw query failed), a code far too
+ * broad to key off (a genuinely broken raw query is *also* `P2010`), so we
+ * match NARROWLY on this hint text, which appears only in this one condition.
+ *
+ * @see SHELF-WEBAPP-227 — the `/assets` advanced-filter raw query trips this on
+ * large workspaces under the per-request query fan-out.
+ */
+export const DB_LOCK_EXHAUSTION_MARKER = "max_locks_per_transaction";
+
+/**
+ * Detects Postgres shared-lock-table exhaustion (SQLSTATE `53200` /
+ * `max_locks_per_transaction`) anywhere in an error's `cause` chain — even when
+ * a service-layer `try/catch` already re-wrapped the raw Prisma error inside a
+ * generic `ShelfError` (as the assets query does before it reaches the route
+ * boundary). Mirrors the cause-chain walk used by the DB-trigger detectors.
+ *
+ * This is a **transient, load-dependent** resource exhaustion, not a bug in the
+ * query and not a connectivity failure: the statement failed while acquiring
+ * its locks under contention, before touching any row. It is therefore safe to
+ * present as a retryable 503 (see {@link makeShelfError}) and safe to re-run a
+ * READ against (see `withPrismaRetry` in `@shelf/database`).
+ *
+ * @param cause - Any thrown value (error, wrapper, or unknown).
+ * @returns `true` when the lock-exhaustion hint is present on any node of the
+ * cause chain; otherwise `false`.
+ */
+export function isDbResourceExhaustionError(cause: unknown): boolean {
+  return causeChainIncludesMessage(cause, DB_LOCK_EXHAUSTION_MARKER);
+}
+
+/**
  * Walks the cause chain of an error to detect if a transient
  * Prisma error is buried inside ShelfError wrappers.
  */
@@ -581,12 +635,47 @@ export function makeShelfError(
   // This prevents misleading messages like "User not found" when the
   // real issue is a connection pool timeout (P2024).
   if (hasTransientCause(cause)) {
+    // Merge the wrapper's additionalData (a service catch may have attached
+    // context like organizationId before re-throwing) so it survives into the
+    // logged/Sentry payload, mirroring the not-found + generic branches below.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
     return new ShelfError({
       cause,
       message:
         "We're experiencing temporary database connectivity issues. Please try again in a moment.",
       label: "DB",
-      additionalData,
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
+      shouldBeCaptured: true,
+      status: 503,
+    });
+  }
+
+  // Detect Postgres shared-lock-table exhaustion (SQLSTATE 53200 /
+  // max_locks_per_transaction) anywhere in the cause chain — even when a
+  // service catch block already re-wrapped it as a generic 5xx ShelfError
+  // (the assets advanced-filter query does exactly that). This is a transient,
+  // load-dependent overload on a READ, so it collapses to a friendly retryable
+  // 503 instead of a hard 500 crash screen. Kept captured (503 ≥ 500 so it
+  // stays in the Sentry error pipeline) so we can watch it recede as the
+  // durable per-request fan-out fix lands. See SHELF-WEBAPP-227.
+  if (isDbResourceExhaustionError(cause)) {
+    // Merge the wrapper's additionalData: on the assets path the cause is the
+    // "Failed to fetch…" ShelfError carrying { organizationId, paramsValues },
+    // which is exactly the load-dependent context (which workspace / which
+    // filters) needed to watch this recede. Mirrors the not-found branch.
+    const wrapper = isLikeShelfError(cause) ? cause : null;
+    return new ShelfError({
+      cause,
+      message:
+        "The server is temporarily overloaded and couldn't load this. Please try again in a moment.",
+      label: "DB",
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
       shouldBeCaptured: true,
       status: 503,
     });

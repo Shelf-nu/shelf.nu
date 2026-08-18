@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
@@ -112,10 +113,30 @@ export async function action({ request }: ActionFunctionArgs) {
     // INDIVIDUAL assets are always quantity 1. The ASSET_LOCATION_CHANGED
     // activity event is recorded atomically so reports + activity-event
     // aggregations include mobile-initiated location changes.
-    const pivotQuantity =
-      isQuantityTracked(asset) && asset.quantity != null ? asset.quantity : 1;
-
     const updatedAsset = await db.$transaction(async (tx) => {
+      /**
+       * Row-lock the asset before writing the pivot, the same lock every
+       * stock-lowering path takes. This write RAISES the manual
+       * `AssetLocation` sum for a QUANTITY_TRACKED asset, and
+       * `enforce_asset_location_sum_within_total` validating at COMMIT only
+       * covers one interleaving: a concurrent consume can read the
+       * pre-placement rows, conclude they fit under the reduced total, and
+       * commit an `Asset` write that fires no location trigger at all.
+       *
+       * Locking also makes `quantity` trustworthy — the pre-transaction read
+       * above can be stale by the time the row is written, which would place
+       * more units than the asset owns.
+       */
+      const locked = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
+      const pivotQuantity =
+        isQuantityTracked(locked) && locked.quantity != null
+          ? locked.quantity
+          : 1;
+
       await tx.assetLocation.deleteMany({ where: { assetId } });
       await tx.assetLocation.create({
         data: { assetId, locationId, organizationId, quantity: pivotQuantity },

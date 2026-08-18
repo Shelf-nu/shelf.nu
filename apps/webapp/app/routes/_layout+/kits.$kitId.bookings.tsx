@@ -49,12 +49,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllBookings } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.read,
+      });
 
     const searchParams = getCurrentSearchParams(request);
     const {
@@ -88,7 +89,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,
-          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+          extraInclude: {
+            tags: TAG_WITH_COLOR_SELECT,
+            // Same reason as the asset Bookings tab: this route renders the
+            // shared bookings row via `BookingsIndexPage`, and the
+            // unassigned-units pill reads `item.modelRequests`. Omitting it
+            // makes the pill vanish rather than read zero.
+            modelRequests: {
+              include: {
+                assetModel: { select: { id: true, name: true } },
+              },
+            },
+          },
         }),
 
         // TeamMember data for custodian
@@ -99,6 +111,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           userId,
+          // A FILTER. This passed no scoping argument at all, so a restricted
+          // user — /kits is gated on `kit:read`, which BASE holds — received
+          // the entire team roster here.
+          filterByUserId: !canSeeAllCustody,
         }),
         getTagsForBookingTagsFilter({
           organizationId,

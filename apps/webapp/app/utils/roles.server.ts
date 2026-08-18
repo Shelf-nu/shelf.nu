@@ -126,6 +126,46 @@ export function resolveCanSeeAllBookings({
   );
 }
 
+/**
+ * Whether the caller may see custody information for people other than
+ * themselves.
+ *
+ * ADMIN / OWNER always can. SELF_SERVICE and BASE only when the workspace has
+ * switched their respective override on. Exported so callers outside
+ * {@link requirePermission} — notably `/api/model-filters` — resolve it
+ * identically; a surface that invents its own rule ends up disagreeing with
+ * the loader that seeded it.
+ *
+ * This governs VIEWING only. It never grants the right to assign custody:
+ * SELF_SERVICE may assign only to themselves and BASE may not assign at all,
+ * regardless of this flag. See `resolveCustodianPickerScope`.
+ *
+ * @param args.role - Effective role from {@link resolveEffectiveRole}.
+ * @param args.currentOrganization - Workspace whose override settings apply.
+ * @returns `true` when custody reads should NOT be restricted to the caller.
+ */
+export function resolveCanSeeAllCustody({
+  role,
+  currentOrganization,
+}: {
+  role: OrganizationRoles;
+  currentOrganization: {
+    selfServiceCanSeeCustody: boolean;
+    baseUserCanSeeCustody: boolean;
+  };
+}): boolean {
+  return (
+    // Admin/Owner always can see all
+    !isSelfServiceOrBaseRole(role) ||
+    // SELF_SERVICE can see all if org setting allows
+    (role === OrganizationRoles.SELF_SERVICE &&
+      currentOrganization.selfServiceCanSeeCustody) ||
+    // BASE can see all if org setting allows
+    (role === OrganizationRoles.BASE &&
+      currentOrganization.baseUserCanSeeCustody)
+  );
+}
+
 export async function requirePermission({
   userId,
   request,
@@ -185,15 +225,10 @@ export async function requirePermission({
   });
 
   // Determine if user can see all custody information
-  const canSeeAllCustody =
-    // Admin/Owner always can see all
-    !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeCustody) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeCustody);
+  const canSeeAllCustody = resolveCanSeeAllCustody({
+    role,
+    currentOrganization,
+  });
 
   // Determine if user can use barcodes based on organization settings
   const canUseBarcodes = currentOrganization.barcodesEnabled ?? false;
@@ -213,6 +248,76 @@ export async function requirePermission({
     canUseBarcodes,
     canUseAudits,
   };
+}
+
+/**
+ * Whether the user holds OWNER in the given organization.
+ *
+ * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
+ * which returns `roles[0]` — a user carrying more than one role could be the
+ * owner without OWNER being first. This mirrors the check the loaders already
+ * use to decide whether to render the purchase UI, so the server gate and the
+ * UI gate cannot disagree.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @returns `true` if the caller owns this workspace
+ */
+export function isOrganizationOwner({
+  userOrganizations,
+  organizationId,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+}): boolean {
+  return (
+    userOrganizations
+      .find((o) => o.organization.id === organizationId)
+      ?.roles.includes(OrganizationRoles.OWNER) ?? false
+  );
+}
+
+/**
+ * Asserts the caller owns the workspace.
+ *
+ * `requirePermission(subscription, update)` is NOT sufficient for anything that
+ * spends money or burns a one-time entitlement: ADMIN short-circuits to
+ * allow-all in `hasPermission`, so it passes that gate. The add-on purchase UI
+ * is owner-only, but the actions behind it were not — letting an ADMIN burn the
+ * workspace's single free trial (an irreversible flag) and commit the workspace
+ * to a charge on the owner's card.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @param action - Verb phrase completing "Only the workspace owner can …"
+ * @throws {ShelfError} 403 if the caller is not the owner
+ */
+export function assertIsOrganizationOwner({
+  userOrganizations,
+  organizationId,
+  action,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+  action: string;
+}): void {
+  if (!isOrganizationOwner({ userOrganizations, organizationId })) {
+    throw new ShelfError({
+      cause: null,
+      title: "Owner only",
+      message: `Only the workspace owner can ${action}.`,
+      additionalData: { organizationId },
+      label: "Subscription",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
 }
 
 /**

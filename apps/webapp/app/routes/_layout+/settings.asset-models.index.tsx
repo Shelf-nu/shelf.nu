@@ -10,6 +10,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import AssetModelQuickActions from "~/components/asset-model/asset-model-quick-actions";
 import AssetModelBulkActionsDropdown from "~/components/asset-model/bulk-actions-dropdown";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
@@ -137,7 +138,10 @@ export default function AssetModelsIndexPage() {
 const AssetModelItem = ({
   item,
 }: {
-  item: Pick<AssetModel, "id" | "description" | "name"> & {
+  item: Pick<
+    AssetModel,
+    "id" | "description" | "name" | "image" | "thumbnailImage"
+  > & {
     _count: {
       assets: number;
     };
@@ -146,7 +150,25 @@ const AssetModelItem = ({
 }) => (
   <>
     <Td title={`Asset model: ${item.name}`} className="w-1/4">
-      {item.name}
+      {/*
+        Image + name in one cell, matching the kit and asset list rows: the
+        picture is the fastest way to confirm you're looking at the right
+        model, and it's the same picture its assets now show.
+      */}
+      <div className="flex items-center gap-3">
+        {item.image ? (
+          // `imageUrl` is required alongside `withPreview` — see the note at the
+          // matching call site in components/asset-model/form.tsx.
+          <ImageWithPreview
+            imageUrl={item.image}
+            thumbnailUrl={item.thumbnailImage ?? item.image}
+            alt={`${item.name} image`}
+            className="size-10 shrink-0 rounded border object-cover"
+            withPreview
+          />
+        ) : null}
+        <span className="word-break">{item.name}</span>
+      </div>
     </Td>
     <Td className="max-w-62 md:w-2/4">
       {item.description ? (

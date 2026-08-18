@@ -3,6 +3,8 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -246,6 +248,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderDirection: "asc",
           perPage: 8,
           extraInclude: {
+            // Model cover image for assets with no image of their own
+            ...ASSET_MODEL_IMAGE_SELECT,
             barcodes: {
               select: { id: true, value: true, type: true },
             },
@@ -364,7 +368,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             id: asset.id,
             title: asset.title,
             sequentialId: asset.sequentialId,
-            mainImage: asset.mainImage,
+            // Hand-written projection, so typecheck can't catch a dropped
+            // field — resolve the model-image cascade explicitly.
+            ...(() => {
+              const image = resolveAssetImage({
+                mainImage: asset.mainImage,
+                thumbnailImage: asset.thumbnailImage,
+                assetModel:
+                  (
+                    asset as unknown as {
+                      assetModel: {
+                        image: string | null;
+                        thumbnailImage: string | null;
+                      } | null;
+                    }
+                  ).assetModel ?? null,
+              });
+              const isPlaceholder = image.source === "placeholder";
+              return {
+                mainImage: isPlaceholder ? null : image.fullUrl,
+                thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+              };
+            })(),
             mainImageExpiration:
               asset.mainImageExpiration?.toISOString() ?? null,
             // `getAssets` widens its `extraInclude` arg to

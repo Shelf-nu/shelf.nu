@@ -7,6 +7,15 @@ export const BulkRemoveFromKitsSchema = z.object({
   assetIds: z.string().array().min(1),
 });
 
+/**
+ * why: no reserved-booking warning here, unlike the two kit-scoped removal
+ * surfaces (`kits.$kitId.assets.manage-assets` and the kit row's Remove
+ * dialog). This selection spans arbitrary kits — the operator never sees which
+ * kits are involved, so "removes them from N reserved bookings" has no kit to
+ * anchor it to; `BulkUpdateDialogContent` has no pre-submit data-loading hook
+ * to fetch the impact with; and the query would be the broadest of the three
+ * (every selected asset's memberships, plus the select-all path). Deferred.
+ */
 export default function BulkRemoveFromKits() {
   const zo = useZorm("BulkRemoveFromKits", BulkRemoveFromKitsSchema);
 

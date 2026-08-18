@@ -5,6 +5,11 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  serializeAssetImage,
+  type AssetImageSource,
+} from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -237,6 +242,14 @@ export async function getMobileUserContext(
   organizationId: string
 ): Promise<{
   role: OrganizationRoles;
+  /**
+   * Every role on this membership. `role` is `roles[0]`, which is wrong for
+   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
+   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
+   * Callers making a privilege decision should use this with
+   * `resolveMostPrivilegedRole`.
+   */
+  roles: OrganizationRoles[];
   canUseBarcodes: boolean;
   canUseAudits: boolean;
   canSeeAllCustody: boolean;
@@ -275,6 +288,7 @@ export async function getMobileUserContext(
 
   return {
     role,
+    roles: userOrg.roles,
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
     canSeeAllCustody: computeCanSeeAllCustody({
@@ -333,7 +347,16 @@ export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
+  // The workspace-visible identifier ("SAM-0017"). Web shows it on the asset
+  // overview and the scanner invites you to type one, so every mobile surface
+  // that names an asset needs to be able to show WHICH id it is.
+  sequentialId: true,
   mainImage: true,
+  thumbnailImage: true,
+  // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
+  // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
+  // so the companion inherits model images with no client release.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
@@ -477,9 +500,23 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Workspace-visible identifier, e.g. "SAM-0017". Null until one is assigned. */
+  sequentialId: string | null;
   /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
   assetModelId?: string | null;
+  /**
+   * Image to render, with the model-image cascade already resolved: the
+   * asset's own image, else its model's cover image, else `null` (the
+   * companion draws its own placeholder — the placeholder PATH is never sent).
+   */
   mainImage: string | null;
+  /** 108px counterpart of {@link mainImage}, resolved from the same tier. */
+  thumbnailImage: string | null;
+  /**
+   * Where {@link mainImage} came from. Additive — lets the companion label an
+   * inherited image later without a second request.
+   */
+  imageSource: AssetImageSource;
   availableToBook: boolean;
   category: { name: string } | null;
   kitId: string | null;
@@ -537,7 +574,10 @@ export function shapeMobileAssetResponse(asset: {
   id: string;
   title: string;
   status: string;
+  sequentialId: string | null;
   mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
   type: AssetType;
@@ -555,6 +595,14 @@ export function shapeMobileAssetResponse(asset: {
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  /**
+   * Collapse the model-image cascade before the row leaves the server. The
+   * companion reads `mainImage`/`thumbnailImage` directly and cannot be
+   * updated in lockstep with the API (native binary, no OTA for native
+   * changes), so resolving here is what makes inherited images work without a
+   * client release. `imageSource` is additive, for later provenance UI.
+   */
+  const image = serializeAssetImage(rest);
   // Aggregate custody rows by custodian so a holder with more than one row on
   // the same asset (e.g. a kit-driven row plus a standalone row) shows once
   // with their summed quantity rather than duplicated. Insertion order follows
@@ -579,9 +627,9 @@ export function shapeMobileAssetResponse(asset: {
     }
   }
   return {
-    // `...rest` carries the new scalar quantity fields (type, quantity,
-    // minQuantity, unitOfMeasure, consumptionType) through verbatim.
-    ...rest,
+    // `...image` carries `...rest` through verbatim (including the new scalar
+    // quantity fields) with the image cascade already resolved.
+    ...image,
     kitId: kit?.id ?? null,
     kit,
     location: assetLocations[0]?.location ?? null,

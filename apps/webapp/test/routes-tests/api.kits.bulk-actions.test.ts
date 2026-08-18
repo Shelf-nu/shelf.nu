@@ -48,6 +48,10 @@ vi.mock("~/modules/kit/service.server", () => ({
 // why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
+  // why: the custodian-filter narrowing has its own suite; here it only needs
+  // to avoid a database round trip. These tests all pass explicit `kitIds`, so
+  // no custodian filter is built and the return value is never consulted.
+  scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual notification sending during route tests

@@ -160,6 +160,9 @@ export function QuantityCustodyDialog({
                   name: "teamMember",
                   queryKey: "name",
                   deletedAt: null,
+                  // ASSET custody: SELF_SERVICE may only take custody itself
+                  // and BASE never.
+                  custodyPurpose: "custody-assignment",
                 }}
                 fieldName="teamMemberSelect"
                 contentLabel="Team members"

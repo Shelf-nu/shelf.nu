@@ -85,6 +85,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/permissions':
+        specifier: workspace:*
+        version: link:../../packages/permissions
       '@shelf/quantity-control':
         specifier: workspace:*
         version: link:../../packages/quantity-control
@@ -127,6 +130,9 @@ importers:
       expo-linking:
         specifier: ~8.0.11
         version: 8.0.11(expo@54.0.33)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+      expo-location:
+        specifier: ~19.0.8
+        version: 19.0.8(expo@54.0.33)
       expo-quick-actions:
         specifier: ^6.0.1
         version: 6.0.1(expo@54.0.33)
@@ -308,6 +314,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/permissions':
+        specifier: workspace:*
+        version: link:../../packages/permissions
       '@shelf/quantity-control':
         specifier: workspace:*
         version: link:../../packages/quantity-control
@@ -747,6 +756,21 @@ importers:
         version: 6.0.3
 
   packages/labels: {}
+
+  packages/permissions:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      '@types/node':
+        specifier: ^22.19.17
+        version: 22.19.17
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
 
   packages/quantity-control:
     devDependencies:
@@ -6910,6 +6934,11 @@ packages:
     peerDependencies:
       react: '*'
       react-native: '*'
+
+  expo-location@19.0.8:
+    resolution: {integrity: sha512-H/FI75VuJ1coodJbbMu82pf+Zjess8X8Xkiv9Bv58ZgPKS/2ztjC1YO1/XMcGz7+s9DrbLuMIw22dFuP4HqneA==}
+    peerDependencies:
+      expo: '*'
 
   expo-manifests@1.0.10:
     resolution: {integrity: sha512-oxDUnURPcL4ZsOBY6X1DGWGuoZgVAFzp6PISWV7lPP2J0r8u1/ucuChBgpK7u1eLGFp6sDIPwXyEUCkI386XSQ==}
@@ -17818,6 +17847,10 @@ snapshots:
     transitivePeerDependencies:
       - expo
       - supports-color
+
+  expo-location@19.0.8(expo@54.0.33):
+    dependencies:
+      expo: 54.0.33(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(graphql@16.13.2)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
 
   expo-manifests@1.0.10(expo@54.0.33):
     dependencies:

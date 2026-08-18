@@ -99,16 +99,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        await deleteNote({
+          id: noteId,
+          userId,
+          organizationId,
+        });
+
+        // After the delete, not before: it is org-scoped now and throws 403 on
+        // a refused cross-org attempt, so announcing success first would tell
+        // the user it worked while the response says otherwise.
         sendNotification({
           title: "Note deleted",
           message: "Your note has been deleted successfully",
           icon: { name: "trash", variant: "error" },
           senderId: authSession.userId,
-        });
-
-        await deleteNote({
-          id: noteId,
-          userId,
         });
 
         return payload(null);

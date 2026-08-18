@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
+import { getScanCoordinates } from "./scan-location";
 
 /**
  * Supported deep link patterns:
@@ -109,7 +110,14 @@ function parseDeepLink(url: string): ParsedLink {
  */
 async function resolveQrAndNavigate(qrId: string) {
   try {
-    const { data, error } = await api.qr(qrId);
+    // Best-effort scan geolocation: a /qr deep link usually means the user
+    // physically scanned the label with the OS camera, so the recorded scan
+    // gets the same "where" treatment as the in-app scanner. Read-only:
+    // getScanCoordinates never shows a permission prompt (only the scanner
+    // primes permission), returns within ~1.5s, and null simply means the
+    // scan is recorded without coordinates.
+    const coordinates = await getScanCoordinates();
+    const { data, error } = await api.qr(qrId, undefined, coordinates);
     if (!error && data?.qr?.asset?.id) {
       pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
       return;

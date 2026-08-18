@@ -118,6 +118,12 @@ export type AssetQuantityFields = {
 export type AssetListItem = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"). Lets a row show WHICH id matched a
+   * SAM-ID search instead of identifying itself by title alone. Absent on older
+   * servers.
+   */
+  sequentialId?: string | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -177,6 +183,12 @@ export type AssetQuantityBreakdown = {
 export type AssetDetail = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"); what the scanner accepts as a SAM
+   * ID. Absent on older servers — this app build ships before the webapp half
+   * reaches every self-hosted deployment.
+   */
+  sequentialId?: string | null;
   description: string | null;
   status: string;
   mainImage: string | null;
@@ -187,6 +199,13 @@ export type AssetDetail = {
   updatedAt: string;
   organizationId: string;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Name only — cover images arrive pre-resolved in mainImage/thumbnailImage,
+   * and there is no mobile asset-model screen to navigate to. Absent on older
+   * servers, and on the quantity-custody / adjust-quantity responses, which are
+   * shaped from the canonical mobile asset select rather than the detail one.
+   */
+  assetModel?: { name: string } | null;
   location: { id: string; name: string } | null;
   custody: {
     createdAt: string;
@@ -275,14 +294,15 @@ export type QrResponse = {
 };
 
 /**
- * Machine-readable failure discriminator carried by the QR resolve / link
- * error payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
+ * Machine-readable failure discriminator carried by the QR RESOLVE error
+ * payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
  * side via `apiFetch`'s `errorDetails`. Mirrors the server's
  * `ResolveMobileCodeFailureReason`.
  *
  * `"unclaimed"` — the QR row exists, has no organization yet (a printed
  * Shelf code nobody claimed) and is not linked to an asset or kit. The
- * scanner offers the native claim → create / link flow for it. Absence of a
+ * scanner offers the native claim → create / link flow for it. (The link
+ * route does not emit this: it claims an unclaimed code inline.) Absence of a
  * reason (plain not-found 404, wrong-org 403, or an orgless-but-linked
  * corrupted row the web claim flow refuses) MUST keep the existing dead-end /
  * web-bridge behaviour — never offer claim for those.
@@ -368,6 +388,11 @@ export type KitDetailAsset = {
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
+  // QT-aware fields (additive; absent on older servers). `kitQuantity` is the
+  // units of this asset held by the kit (AssetKit.quantity).
+  type?: AssetType;
+  kitQuantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 export type KitDetail = {
@@ -462,7 +487,24 @@ export type CustodyResponse = {
  */
 export type QuantityCustodyResponse = {
   success: boolean;
-  asset?: AssetDetail;
+  /**
+   * Refreshed viewer-shaped asset. The route always serializes the key and
+   * sends `null` when the post-commit refresh failed (the mutation itself
+   * still succeeded) — same wire contract as {@link AdjustQuantityResponse}.
+   */
+  asset?: AssetDetail | null;
+};
+
+/**
+ * Response of the mobile adjust-quantity endpoint — same envelope as the
+ * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset.
+ * The route always serializes the key and sends `null` when the post-commit
+ * refresh failed (the mutation itself still succeeded), so the type carries
+ * `| null` to match the wire truth.
+ */
+export type AdjustQuantityResponse = {
+  success: boolean;
+  asset?: AssetDetail | null;
 };
 
 export type UpdateLocationResponse = {
@@ -526,6 +568,14 @@ export type BookingListItem = {
    * for back-compat with an older server response.
    */
   outstandingModelCount?: number;
+  /**
+   * How many UNITS those reservations still need, summed across them. The
+   * count above answers "is anything outstanding?"; this answers "how much?",
+   * which is what the card shows next to the asset count so a booking holding
+   * reserved units never reads as empty. Optional for back-compat: installs
+   * running against an older server fall back to showing nothing extra.
+   */
+  outstandingModelUnitCount?: number;
 };
 
 export type BookingsResponse = {
@@ -534,6 +584,18 @@ export type BookingsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+/**
+ * One BookingAsset slice of a QUANTITY_TRACKED asset on a booking: its booked
+ * units and its source (a kit, or standalone when `kit` is null). Additive —
+ * absent on older servers, in which case the app renders the merged row.
+ */
+export type BookingAssetSlice = {
+  bookingAssetId: string;
+  quantity: number;
+  assetKitId: string | null;
+  kit: { id: string; name: string } | null;
 };
 
 export type BookingAsset = {
@@ -553,6 +615,8 @@ export type BookingAsset = {
   unitOfMeasure?: string | null;
   consumptionType?: ConsumptionType | null;
   assetKitId?: string | null;
+  /** Per-slice breakdown; present when the server sends it (see gap 1). */
+  slices?: BookingAssetSlice[];
   /** Units currently checked out on this booking that can still be checked in. */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
@@ -610,11 +674,15 @@ export type BookingDetail = {
   updatedAt: string;
   creator: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
   };
   custodianUser: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
@@ -623,7 +691,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
-  tags: { id: string; name: string }[];
+  tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;

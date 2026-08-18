@@ -6,9 +6,10 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -41,17 +42,32 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    const body = await request.json();
-    const { assetIds } = z
+    // safeParse, not parse: a raw ZodError reaches `makeShelfError`'s
+    // unknown branch and surfaces as a captured 500 "Sorry, something went
+    // wrong". A malformed body is a client error, and the select-all
+    // rejection below is an EXPECTED one — reporting it as a server outage
+    // would bury it in Sentry.
+    const parsed = z
       .object({
-        assetIds: z.array(z.string().min(1)).min(1),
+        assetIds: mobileBulkIdsSchema("assetIds"),
       })
-      .parse(body);
+      .safeParse(await request.json().catch(() => null));
 
-    const { role, canUseBarcodes } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    if (!parsed.success) {
+      throw new ShelfError({
+        cause: parsed.error,
+        message: "Invalid request body",
+        additionalData: { validationErrors: parsed.error.flatten() },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { assetIds } = parsed.data;
+
+    const { role, canUseBarcodes, canSeeAllCustody } =
+      await getMobileUserContext(user.id, organizationId);
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
@@ -72,6 +88,15 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams: "",
       settings,
+      /**
+       * Mobile sends no list filters (`currentSearchParams` is empty above), so
+       * this never narrows anything today — the where-builder returns before it
+       * is read. It still tracks the caller's real visibility so the day mobile
+       * starts forwarding filters, a restricted user does not silently gain a
+       * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
+       * they can still filter by their OWN custody.
+       */
+      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
     });
 
     // Additive: the service silently skips QUANTITY_TRACKED assets on mixed

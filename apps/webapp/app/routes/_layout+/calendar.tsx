@@ -72,7 +72,12 @@ export const handle = {
 
 /** One folded BookingAsset pivot slice on a collapsed availability bar.
  * `assetKitId === null` ⇒ standalone (free pool); non-null ⇒ kit-driven.
- * `quantity` is booked units (BookingAsset.quantity). Availability view only. */
+ * `quantity` is booked units (BookingAsset.quantity). Availability view only.
+ *
+ * why: out of this rule — no `sourceKitId` fallback for detached kit residue.
+ * This view is asset-centric (one bar per booking of ONE asset) rather than a
+ * grouping of a booking's rows by kit, so `kitName` is a per-slice annotation,
+ * not the structure a snapshot would restore. */
 export type AvailabilitySlice = {
   assetKitId: string | null;
   kitName: string | null;

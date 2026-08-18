@@ -1,3 +1,4 @@
+import { ASSET_STATUS_LABELS, BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { useState, useCallback, useRef } from "react";
 import {
   View,
@@ -16,6 +17,8 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
+import { formatPersonName } from "@/lib/person-name";
+import { TagChip } from "@/components/tag-chip";
 import {
   consumeBookingDirty,
   markBookingsListDirty,
@@ -74,15 +77,19 @@ function getBookingAssetState({
   const checkedOut = booked - clampedOut; // units taken from the workspace
   const checkedIn = booked - clampedIn; // units reconciled back in
 
+  // why: the labels that name a real status read from @shelf/labels. The
+  // fraction forms and "Returned" stay bespoke — they are booking-scoped
+  // progress, not statuses, so the package has no entry for them.
   if (booked <= 0 || checkedOut <= 0) {
     return bookingStatus === "DRAFT"
-      ? { key: "DRAFT", label: "Draft" }
-      : { key: "RESERVED", label: "Reserved" };
+      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
+      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
   }
   if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
   if (checkedIn > 0)
     return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
-  if (checkedOut >= booked) return { key: "ONGOING", label: "Checked out" };
+  if (checkedOut >= booked)
+    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
   return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
 }
 
@@ -828,17 +835,38 @@ export default function BookingDetailScreen() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            {item.type === "QUANTITY_TRACKED" && (
-              <QuantityBadge
-                value={item.quantity}
-                unitOfMeasure={item.unitOfMeasure}
-                label="booked"
-              />
-            )}
-            {item.kit && (
-              <Text style={styles.assetKit} numberOfLines={1}>
-                Kit: {item.kit.name}
-              </Text>
+            {item.type === "QUANTITY_TRACKED" &&
+            item.slices &&
+            item.slices.length > 1 ? (
+              <View style={styles.sliceList}>
+                {item.slices.map((slice) => (
+                  <View key={slice.bookingAssetId} style={styles.sliceRow}>
+                    <QuantityBadge
+                      value={slice.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    <Text style={styles.assetKit} numberOfLines={1}>
+                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
+                {item.type === "QUANTITY_TRACKED" && (
+                  <QuantityBadge
+                    value={item.quantity}
+                    unitOfMeasure={item.unitOfMeasure}
+                    label="booked"
+                  />
+                )}
+                {item.kit && (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    Kit: {item.kit.name}
+                  </Text>
+                )}
+              </>
             )}
             {item.category && (
               <Text style={styles.assetCategory} numberOfLines={1}>
@@ -898,12 +926,11 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  const creatorName = formatPersonName(booking.creator);
+
   const custodianName =
     booking.custodianTeamMember?.name ||
-    [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
-      .filter(Boolean)
-      .join(" ") ||
-    null;
+    formatPersonName(booking.custodianUser);
 
   // Lifecycle counts for the progress bar: every asset is in exactly one of three
   // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
@@ -1081,7 +1108,34 @@ export default function BookingDetailScreen() {
                     <Text style={styles.infoValue}>{custodianName}</Text>
                   </View>
                 )}
+
+                {/* why: web shows who created the booking on this same screen,
+                    and the field was already in the payload — fetched, then
+                    dropped. Custodian and creator are different people often
+                    enough that showing only one is misleading. */}
+                {creatorName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons
+                      name="create-outline"
+                      size={15}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.infoLabel}>Created by</Text>
+                    <Text style={styles.infoValue}>{creatorName}</Text>
+                  </View>
+                ) : null}
               </View>
+
+              {/* Tag names were already in the payload and shown by web; the
+                  colour they are keyed by was not, and was added with the
+                  chip so the phone can tell two tags apart the way web can. */}
+              {booking.tags?.length ? (
+                <View style={styles.tagRow}>
+                  {booking.tags.map((tag) => (
+                    <TagChip key={tag.id} tag={tag} />
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
@@ -1945,6 +1999,12 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
     lineHeight: 20,
   },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
   infoRows: {
     gap: spacing.sm,
   },
@@ -2191,6 +2251,14 @@ const useStyles = createStyles((colors, shadows) => ({
   assetKit: {
     fontSize: fontSize.xs,
     color: colors.checkedOut,
+  },
+  sliceList: {
+    gap: 2,
+  },
+  sliceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   assetCategory: {
     fontSize: fontSize.xs,

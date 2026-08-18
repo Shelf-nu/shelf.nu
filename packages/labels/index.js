@@ -57,3 +57,96 @@ export const BOOKING_STATUS_LABELS = Object.freeze({
   ARCHIVED: "Archived",
   CANCELLED: "Cancelled",
 });
+
+// Audit session status enum (AuditStatus in the Prisma schema).
+export const AUDIT_STATUS_LABELS = Object.freeze({
+  PENDING: "Pending",
+  ACTIVE: "Active",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  ARCHIVED: "Archived",
+});
+
+// Who may act on an audit that has no specific assignee. One idea, three
+// registers — a compact card line, the screen-reader variant that gets joined
+// into a comma-separated announcement, and the prose used where there is room
+// to explain (the web's "Not assigned" tooltip). They live together so the
+// three can never say different things about who is allowed to scan; before
+// this, the sentence was hand-copied to six call sites across both apps.
+//
+// All three name BOTH roles because the server allows both: requireAuditAssignee
+// returns early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
+// are exactly the set who may scan an unassigned audit. Naming only admins was
+// an earlier reading — that the invite dialog never surfaces OWNER as a role, so
+// users would not recognise the word — but the web tooltip has always said
+// "admins and owners", which meant an owner on the phone was told they could not
+// do a thing the same product told them they could on the web.
+// Pinned by the AUDIT_UNASSIGNED_LABELS tests in the webapp.
+export const AUDIT_UNASSIGNED_LABELS = Object.freeze({
+  SHORT: "Unassigned · admins and owners can scan",
+  A11Y: "unassigned, admins and owners can scan",
+  DETAIL:
+    "Workspace admins and owners can perform this audit because it has no specific assignee.",
+});
+
+// Per-asset audit status (AuditAssetStatus in the Prisma schema).
+//
+// PENDING is deliberately "Not scanned", not "Expected"/"Pending"/"Remaining":
+// all three were in use at once (web rows said "Expected", the web statistics
+// tile said "Missing", mobile said "Pending", the mobile scanner said
+// "Remaining") for one and the same set of assets. "Expected" was already
+// taken by the tile that counts EVERY expected asset, so the not-yet-scanned
+// subset needs a word of its own.
+//
+// MISSING is only true once the audit is completed — that is when the
+// completion flow turns unscanned rows into MISSING. Before completion, use
+// PENDING's label. `auditAssetStatusLabel` below encodes that rule; call it
+// instead of indexing this map directly.
+export const AUDIT_ASSET_STATUS_LABELS = Object.freeze({
+  PENDING: "Not scanned",
+  FOUND: "Found",
+  MISSING: "Missing",
+  UNEXPECTED: "Unexpected",
+});
+
+/**
+ * The ONE derivation of the "is this audit concluded?" flag every audit label
+ * depends on. Read `completedAt`, never `status`.
+ *
+ * why: `completedAt` is the provenance — it is written only by the completion
+ * flow and survives everything that happens afterwards. `status` does not:
+ * archiving a completed audit rewrites it to ARCHIVED while keeping the
+ * timestamp and the finalised counts, so a status check silently relabels
+ * genuinely missing assets as "Not scanned" the moment someone archives. The
+ * inverse holds too — an archived-CANCELLED audit was never concluded, and
+ * `completedAt` correctly keeps it on the open-audit wording.
+ *
+ * Both apps and every surface within them must agree, so the rule lives here
+ * next to the strings it feeds rather than being re-derived per component.
+ *
+ * @param {{ completedAt?: Date | string | null } | null | undefined} audit
+ * @returns {boolean}
+ */
+export function isAuditCompleted(audit) {
+  return audit?.completedAt != null;
+}
+
+/**
+ * Resolves the user-facing label for an expected-but-unscanned asset.
+ *
+ * Nothing is "missing" until the audit is closed: while it is still running the
+ * asset simply has not been reached yet. Both apps must apply this rule, so it
+ * lives here next to the strings rather than in either app.
+ *
+ * @param {"PENDING"|"FOUND"|"MISSING"|"UNEXPECTED"} status
+ * @param {boolean} isAuditCompleted - derive with {@link isAuditCompleted}
+ * @returns {string}
+ */
+export function auditAssetStatusLabel(status, isAuditCompleted) {
+  if (status === "PENDING") {
+    return isAuditCompleted
+      ? AUDIT_ASSET_STATUS_LABELS.MISSING
+      : AUDIT_ASSET_STATUS_LABELS.PENDING;
+  }
+  return AUDIT_ASSET_STATUS_LABELS[status];
+}
