@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import {
   bulkAssignKitCustody,
   bulkReleaseKitCustody,
@@ -39,16 +40,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("assign-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     custodianId: z.string().min(1),
   }),
   z.object({
     intent: z.literal("release-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
   }),
   z.object({
     intent: z.literal("update-location"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     newLocationId: z.string().min(1),
   }),
 ]);
@@ -69,7 +70,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    const body = BodySchema.parse(await request.json());
+    // safeParse, not parse — see the asset bulk endpoints: a raw ZodError
+    // becomes a captured 500, and the select-all rejection is an expected
+    // client error.
+    const parsedBody = BodySchema.safeParse(
+      await request.json().catch(() => null)
+    );
+
+    if (!parsedBody.success) {
+      throw new ShelfError({
+        cause: parsedBody.error,
+        message: "Invalid request body",
+        additionalData: { validationErrors: parsedBody.error.flatten() },
+        label: "Kit",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const body = parsedBody.data;
 
     await requireMobilePermission({
       userId: user.id,

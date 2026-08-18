@@ -118,6 +118,12 @@ export type AssetQuantityFields = {
 export type AssetListItem = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"). Lets a row show WHICH id matched a
+   * SAM-ID search instead of identifying itself by title alone. Absent on older
+   * servers.
+   */
+  sequentialId?: string | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -177,6 +183,12 @@ export type AssetQuantityBreakdown = {
 export type AssetDetail = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"); what the scanner accepts as a SAM
+   * ID. Absent on older servers — this app build ships before the webapp half
+   * reaches every self-hosted deployment.
+   */
+  sequentialId?: string | null;
   description: string | null;
   status: string;
   mainImage: string | null;
@@ -187,6 +199,13 @@ export type AssetDetail = {
   updatedAt: string;
   organizationId: string;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Name only — cover images arrive pre-resolved in mainImage/thumbnailImage,
+   * and there is no mobile asset-model screen to navigate to. Absent on older
+   * servers, and on the quantity-custody / adjust-quantity responses, which are
+   * shaped from the canonical mobile asset select rather than the detail one.
+   */
+  assetModel?: { name: string } | null;
   location: { id: string; name: string } | null;
   custody: {
     createdAt: string;

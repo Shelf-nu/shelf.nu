@@ -29,7 +29,7 @@ import type {
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
@@ -1332,9 +1332,9 @@ function ScannerContent() {
             setScanResult({
               type: "error",
               title: "Not Checked Out",
-              message: `"${asset.title}" is ${asset.status
-                .replace(/_/g, " ")
-                .toLowerCase()}, not checked out.`,
+              message: `"${asset.title}" is ${formatStatus(
+                asset.status
+              ).toLowerCase()}, not checked out.`,
             });
             finalizeScan();
             return;
@@ -1359,12 +1359,12 @@ function ScannerContent() {
 
         // ── VIEW mode: navigate to detail ──
         if (action === "view") {
-          const statusLabel =
-            asset.status === "IN_CUSTODY"
-              ? "In Custody"
-              : asset.status === "AVAILABLE"
-              ? "Available"
-              : asset.status.replace(/_/g, " ");
+          // why: the shared helper, not a local ternary. This hand-typed
+          // "In Custody" and fell back to `status.replace(/_/g, " ")`, which
+          // only swaps underscores — so a CHECKED_OUT asset flashed
+          // "CHECKED OUT" here and then "Checked out" on the detail screen it
+          // navigates to 950ms later.
+          const statusLabel = formatStatus(asset.status);
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

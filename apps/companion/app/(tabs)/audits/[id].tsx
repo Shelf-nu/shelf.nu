@@ -25,6 +25,13 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
+  auditAssetStatusLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -35,32 +42,59 @@ import { useReducedMotion, announce } from "@/lib/a11y";
 
 const ASSET_FILTERS = [
   { label: "All", value: "ALL" },
-  { label: "Pending", value: "PENDING" },
-  { label: "Found", value: "FOUND" },
-  { label: "Missing", value: "MISSING" },
-  { label: "Unexpected", value: "UNEXPECTED" },
+  { label: AUDIT_ASSET_STATUS_LABELS.PENDING, value: "PENDING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.FOUND, value: "FOUND" },
+  { label: AUDIT_ASSET_STATUS_LABELS.MISSING, value: "MISSING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED, value: "UNEXPECTED" },
 ] as const;
 
 type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
 
 /**
- * Whether an asset-status filter is meaningful for an audit in the given
- * session status. A live (PENDING/ACTIVE) audit has Pending items but no
- * Missing ones; a COMPLETED audit is the reverse. Shared by the filter pills
- * and the derived `effectiveFilter` (which clamps a now-hidden selection) so
- * the visible pills and the applied filter never drift.
+ * What the list says when a filter matches nothing.
+ *
+ * why a per-filter phrase and not `No ${label.toLowerCase()} assets`: that
+ * template read "No not scanned assets" for the PENDING pill — and PENDING is
+ * the pill a field worker lands on at the END of every audit, when everything
+ * has been scanned. The other filters happened to survive the template, which
+ * is exactly why it went unnoticed. Wording mirrors the web's
+ * `getAuditFilterMetadata` empty states.
+ */
+const ASSET_FILTER_EMPTY_TEXT: Record<AssetFilterValue, string> = {
+  ALL: "No assets in this audit",
+  PENDING: "Nothing left to scan",
+  FOUND: "No assets found yet",
+  MISSING: "No missing assets",
+  UNEXPECTED: "No unexpected assets",
+};
+
+/**
+ * Whether an asset-status filter is meaningful for the given audit. An audit
+ * that has not been CONCLUDED has "Not scanned" items but no Missing ones; a
+ * completed one is the reverse. Shared by the filter pills and the derived
+ * `effectiveFilter` (which clamps a now-hidden selection) so the visible pills
+ * and the applied filter never drift.
  *
  * @param value - the filter being considered
- * @param status - the audit session status
+ * @param audit - the audit session, read for its `completedAt` only
  * @returns true if the filter should be shown / is a valid selection
  */
 function isAssetFilterVisible(
   value: AssetFilterValue,
-  status: string
+  audit: { completedAt: string | null }
 ): boolean {
-  const active = status === "PENDING" || status === "ACTIVE";
-  const completed = status === "COMPLETED";
-  return value === "MISSING" ? completed : value === "PENDING" ? active : true;
+  // why: BOTH branches read `completedAt`, never the status, so the pills can
+  // never disagree with the rows. `displayAssets` classifies an unscanned asset
+  // as PENDING exactly when `completedAt` is null, so gating the pill on
+  // status PENDING/ACTIVE hid it on an archived-cancelled audit that was still
+  // showing "Not scanned" rows under All. Archiving a completed audit has the
+  // mirror problem: the status changes but those assets are still missing.
+  const isCompleted = isAuditCompleted(audit);
+  return value === "MISSING"
+    ? isCompleted
+    : value === "PENDING"
+    ? !isCompleted
+    : true;
 }
 
 // ── Combined asset type for display ─────────────────────
@@ -126,9 +160,7 @@ function AuditDetailContent() {
   // the `audit` object identity). When the filter becomes valid again the
   // selection naturally reapplies. (Codex + DonKoko review, PR #2583.)
   const effectiveFilter: AssetFilterValue =
-    audit && isAssetFilterVisible(assetFilter, audit.status)
-      ? assetFilter
-      : "ALL";
+    audit && isAssetFilterVisible(assetFilter, audit) ? assetFilter : "ALL";
 
   // Progress bar animation
   const reduceMotion = useReducedMotion();
@@ -277,13 +309,17 @@ function AuditDetailContent() {
       scanMap.set(scan.assetId, scan);
     }
 
-    // why: an expected asset that hasn't been scanned is "Pending" while the
+    // why: an expected asset that hasn't been scanned is "Not scanned" while the
     // audit is still active (the field worker may yet find it) but becomes
     // "Missing" once the audit is completed (it's a real discrepancy). This
-    // mirrors the unified web + companion vocabulary — "Missing" is reserved
-    // for completed audits, never shown mid-scan.
-    const notFoundStatus: AuditAssetStatus =
-      audit.status === "COMPLETED" ? "MISSING" : "PENDING";
+    // mirrors the unified web + companion vocabulary (@shelf/labels) — "Missing"
+    // is reserved for completed audits, never shown mid-scan.
+    // why: `completedAt`, not `status === "COMPLETED"` — archiving a completed
+    // audit switches the status to ARCHIVED while keeping the completion
+    // timestamp, and those assets are still genuinely missing.
+    const notFoundStatus: AuditAssetStatus = isAuditCompleted(audit)
+      ? "MISSING"
+      : "PENDING";
 
     const items: DisplayAsset[] = [];
 
@@ -346,14 +382,9 @@ function AuditDetailContent() {
         text: colors.muted,
       };
 
-      const statusLabel =
-        item.status === "FOUND"
-          ? "Found"
-          : item.status === "PENDING"
-          ? "Pending"
-          : item.status === "MISSING"
-          ? "Missing"
-          : "Unexpected";
+      // Status already encodes the audit state (PENDING while active, MISSING
+      // once completed), so the label map can be read directly.
+      const statusLabel = AUDIT_ASSET_STATUS_LABELS[item.status];
 
       // why: surfacing location / category / custodian inline removes
       // the field worker's reason to navigate away from the audit. Each
@@ -488,7 +519,9 @@ function AuditDetailContent() {
   };
 
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
-  const isCompleted = audit.status === "COMPLETED";
+  // Completion provenance survives archiving; the status does not. See
+  // `notFoundStatus` above.
+  const isCompleted = isAuditCompleted(audit);
   const progress =
     audit.expectedAssetCount > 0
       ? audit.foundAssetCount / audit.expectedAssetCount
@@ -504,7 +537,7 @@ function AuditDetailContent() {
   // Shares `isAssetFilterVisible` with the derived `effectiveFilter` above so
   // the visible pills and the applied selection can never disagree.
   const visibleFilters = ASSET_FILTERS.filter((f) =>
-    isAssetFilterVisible(f.value, audit.status)
+    isAssetFilterVisible(f.value, audit)
   );
 
   const isOverdue =
@@ -514,14 +547,11 @@ function AuditDetailContent() {
     .filter(Boolean)
     .join(" ");
 
+  // why: read from the shared map rather than a chain that fell through to
+  // "Cancelled" — an ARCHIVED audit was labelled Cancelled on this screen.
   const statusLabel =
-    audit.status === "PENDING"
-      ? "Pending"
-      : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status === "COMPLETED"
-      ? "Completed"
-      : "Cancelled";
+    AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
+    audit.status;
 
   const assets = filteredAssets();
 
@@ -662,9 +692,14 @@ function AuditDetailContent() {
                         // The leading icon keeps the brighter `primary`.
                         { color: colors.primaryText, fontWeight: "600" },
                       ]}
-                      numberOfLines={1}
+                      // why: the ownership line is the one place that states
+                      // WHO may act on an unassigned audit, so let it wrap
+                      // rather than truncate — it names both permitted roles
+                      // (see AUDIT_UNASSIGNED_LABELS) and that does not fit on
+                      // one line on a narrow device.
+                      numberOfLines={2}
                     >
-                      Unassigned · anyone can scan
+                      {AUDIT_UNASSIGNED_LABELS.SHORT}
                     </Text>
                   )}
                 </View>
@@ -755,7 +790,11 @@ function AuditDetailContent() {
                     ]}
                   />
                   <Text style={styles.heroStatText}>
-                    {notFoundCount} {isCompleted ? "missing" : "pending"}
+                    {notFoundCount}{" "}
+                    {auditAssetStatusLabel(
+                      "PENDING",
+                      isCompleted
+                    ).toLowerCase()}
                   </Text>
                 </View>
                 {audit.unexpectedAssetCount > 0 ? (
@@ -872,9 +911,7 @@ function AuditDetailContent() {
               color={colors.border}
             />
             <Text style={styles.emptyListText}>
-              {effectiveFilter === "ALL"
-                ? "No assets in this audit"
-                : `No ${effectiveFilter.toLowerCase()} assets`}
+              {ASSET_FILTER_EMPTY_TEXT[effectiveFilter]}
             </Text>
           </View>
         }
