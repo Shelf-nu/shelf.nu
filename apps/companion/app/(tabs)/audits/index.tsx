@@ -29,9 +29,18 @@ import { userCanSeeOrgWideAudits } from "@/lib/permissions";
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
 
+/**
+ * Status filter pills.
+ *
+ * why: chips that name a single status read from `@shelf/labels`; "Active" and
+ * "All" group several statuses, so they stay prose. The COMPLETED label matched
+ * its literal already — wiring it anyway means a wording change in the package
+ * moves this chip and the audit badges together, which is the point of having
+ * the package at all.
+ */
 const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "Active", value: "PENDING,ACTIVE" },
-  { label: "Completed", value: "COMPLETED" },
+  { label: AUDIT_STATUS_LABELS.COMPLETED, value: "COMPLETED" },
   { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
 ];
 
