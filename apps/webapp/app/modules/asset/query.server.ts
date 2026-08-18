@@ -34,6 +34,7 @@ const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
  *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
  *   preserve behavior for callers that don't supply it.
  * @param lowStockOnly - Restrict to low-stock QUANTITY_TRACKED assets (see below)
+ * @param archivedFilter - Active/Archived/All view dimension (issue #382)
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -43,9 +44,23 @@ export function generateWhereClause(
   assetIds?: string[],
   availableToBookOnly = false,
   timeZone: string = "UTC",
-  lowStockOnly = false
+  lowStockOnly = false,
+  /**
+   * Active/Archived/All view dimension (orthogonal to the per-status filter).
+   * Defaults to "active" so the advanced (raw-SQL) index hides archived assets
+   * just like the simple index, unless the caller opts in. See issue #382.
+   */
+  archivedFilter: "active" | "archived" | "all" = "active"
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
+
+  // Archived dimension. Kept here (not in `filters`) because it is a global
+  // view toggle, not a per-column advanced filter.
+  if (archivedFilter === "active") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NULL`;
+  } else if (archivedFilter === "archived") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NOT NULL`;
+  }
 
   if (availableToBookOnly) {
     whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
@@ -2093,6 +2108,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."minQuantity" AS "assetMinQuantity",
       a."consumptionType" AS "assetConsumptionType",
       a."availableToBook" AS "assetAvailableToBook",
+      a."archivedAt" AS "assetArchivedAt",
       k.id AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
@@ -2433,6 +2449,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'minQuantity', aq."assetMinQuantity",
           'consumptionType', aq."assetConsumptionType",
           'availableToBook', aq."assetAvailableToBook",
+          'archivedAt', aq."assetArchivedAt",
           'kitId', aq."assetKitId",
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
           'kits', COALESCE(aq.kits, '[]'::jsonb),

@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useLoaderData } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { NON_FILTER_PARAMS } from "~/utils/filter-params";
 import { tw } from "~/utils/tw";
@@ -32,7 +33,7 @@ export const EmptyState = ({
     modelName: modelNameData,
     hasActiveFilters,
   } = useLoaderData<SearchableIndexResponse>();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const singular = modelName?.singular || modelNameData.singular;
   const plural = modelName?.plural || modelNameData.plural;
 
@@ -42,10 +43,36 @@ export const EmptyState = ({
   const hasSearch = !!search;
   const isFiltered = hasSearch || !!hasActiveFilters;
 
+  /**
+   * On the asset index, "did not match any assets in the database" can be
+   * flatly untrue: an archived asset IS in the database, it is just hidden
+   * from the default Active view (issue #382). Someone who archived an asset
+   * and later searches for it was being told it does not exist — the exact
+   * fear archiving was built to remove. Say where it went instead.
+   *
+   * Kept to the assets model and to the views that actually hide something:
+   * the All view hides nothing, so the plain wording is right there.
+   */
+  const archivedParam = searchParams.get("archived");
+  const viewHidesArchived = archivedParam !== "archived" && archivedParam !== "all";
+  const searchMayBeHidingArchived = plural === "assets" && viewHidesArchived;
+
+  /**
+   * Only ADMIN / OWNER get the Archived tab (see `useCanArchiveAssets`), so
+   * only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
+   * their role does not render would be worse than the original wording, so
+   * they get the same fact plus the action actually open to them.
+   */
+  const canArchiveAssets = useCanArchiveAssets();
+
   const filteredTexts = hasSearch
     ? {
         title: `No ${plural} found`,
-        p: `Your search for "${search}" did not match any ${plural} in the database.`,
+        p: !searchMayBeHidingArchived
+          ? `Your search for "${search}" did not match any ${plural} in the database.`
+          : canArchiveAssets
+          ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Check the Archived tab.`
+          : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }
     : {
         title: `No ${plural} found`,

@@ -823,7 +823,7 @@ export default function AssetOverview() {
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
-  const canCustody = userHasPermission({
+  const hasCustodyPermission = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.custody,
@@ -832,7 +832,17 @@ export default function AssetOverview() {
     roles,
     organization: currentOrganization,
   });
-  const canEditAsset = canUpdateAvailability;
+  /**
+   * Archived assets are frozen: reinstate or permanently delete, nothing else
+   * (issue #382). Folding `archivedAt` in here rather than at each control
+   * means every inline editor, placement action, move-unit action and custody
+   * control on this route inherits the freeze from one place, and the page
+   * cannot drift as controls are added. Reinstate lives in the Actions
+   * dropdown, so it is unaffected.
+   */
+  const assetIsFrozen = !!asset?.archivedAt;
+  const canEditAsset = canUpdateAvailability && !assetIsFrozen;
+  const canCustody = hasCustodyPermission && !assetIsFrozen;
 
   return (
     <div>
@@ -1471,12 +1481,17 @@ export default function AssetOverview() {
                   <Switch
                     name={zo.fields.availableToBook()}
                     disabled={
-                      !canUpdateAvailability || isFormProcessing(fetcher.state)
-                    } // Disable for self service users
+                      !canUpdateAvailability ||
+                      isFormProcessing(fetcher.state) ||
+                      // Archived assets are frozen: no actions except reinstate.
+                      !!asset?.archivedAt
+                    } // Disable for self service users + archived assets
                     defaultChecked={asset?.availableToBook}
                     required
                     title={
-                      !canUpdateAvailability
+                      asset?.archivedAt
+                        ? "This asset is archived. Reinstate it to change availability."
+                        : !canUpdateAvailability
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }

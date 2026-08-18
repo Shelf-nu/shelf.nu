@@ -19,6 +19,8 @@ const dbMocks = vi.hoisted(() => {
     asset: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: action counts archived assets to block custody on them (issue #382).
+      count: vi.fn().mockResolvedValue(0),
       // why: the status guard now rides on the UPDATE itself
       // (`status: { not: CHECKED_OUT }`), so the action claims the asset with
       // `updateMany` and branches on the returned count. Default to a hit.
@@ -53,6 +55,7 @@ vi.mock("~/database/db.server", () => ({
     asset: {
       findUnique: dbMocks.asset.findUnique,
       update: dbMocks.asset.update,
+      count: dbMocks.asset.count,
       findFirst: dbMocks.asset.findFirst,
       updateMany: dbMocks.asset.updateMany,
     },
@@ -396,6 +399,9 @@ describe("assets.$assetId.overview.assign-custody action", () => {
         id: "asset-123",
         organizationId: "org-1",
         status: { not: AssetStatus.CHECKED_OUT },
+        // The archived guard rides the claim itself, so an archive that lands
+        // between the pre-check and this write cannot slip through (issue #382).
+        archivedAt: null,
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });
@@ -565,6 +571,7 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
         id: TEST_ASSET_ID,
         organizationId: TEST_ORG_ID,
         status: { not: AssetStatus.CHECKED_OUT },
+        archivedAt: null,
       },
       data: { status: AssetStatus.IN_CUSTODY },
     });

@@ -94,6 +94,9 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   ...ASSET_MODEL_IMAGE_SELECT,
   status: true,
   availableToBook: true,
+  // Archived assets keep showing in the kit they belong to, flagged with the
+  // "Archived" badge (issue #382).
+  archivedAt: true,
   type: true,
   quantity: true,
   unitOfMeasure: true,

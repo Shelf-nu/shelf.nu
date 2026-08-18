@@ -1059,6 +1059,67 @@ describe("computeAssetDiffs", () => {
     expect(result.skippedAssets[0].reason).toBe("No changes detected");
   });
 
+  it("reports an archived asset as a failed row, not a pending update", () => {
+    // why: `updateAsset` refuses archived assets at apply time (issue #382).
+    // The preview exists to say what will happen BEFORE anything is saved, so
+    // counting an archived row as "to update" and then failing it makes the
+    // preview lie about its own outcome.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: new Date("2026-08-14T00:00:00Z"),
+        }),
+      ],
+    ]);
+
+    const csvData = [
+      ["Asset ID", "Name"],
+      ["SAM-0001", "New Name"],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.assetsToUpdate).toHaveLength(0);
+    expect(result.failedRows).toHaveLength(1);
+    expect(result.failedRows[0].reason).toBe(
+      "Asset is archived — reinstate it before updating"
+    );
+  });
+
+  it("still previews an update for an asset that is not archived", () => {
+    // why: guards against the archived branch swallowing ordinary rows —
+    // `archivedAt: null` must behave exactly as before.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: null,
+        }),
+      ],
+    ]);
+
+    const result = computeAssetDiffs({
+      csvData: [
+        ["Asset ID", "Name"],
+        ["SAM-0001", "New Name"],
+      ],
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.failedRows).toHaveLength(0);
+    expect(result.assetsToUpdate).toHaveLength(1);
+  });
+
   it("reports missing assets as failed rows", () => {
     const assets = new Map<string, AssetForUpdate>();
 

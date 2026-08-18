@@ -112,6 +112,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -631,6 +632,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const newAssetIds = assetIds.filter(
       (assetId) => !existingAssetIds.includes(assetId)
     );
+
+    /**
+     * Archived assets are frozen and cannot be booked (issue #382). The picker
+     * already hides them, but `assetIds` is raw form input — a crafted POST
+     * would otherwise put an archived asset straight into the booking. Guard
+     * the newly added ids only, so a booking that already holds an asset
+     * archived after the fact can still be saved and emptied.
+     */
+    await assertAssetsAreNotArchived({ assetIds: newAssetIds, organizationId });
 
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =

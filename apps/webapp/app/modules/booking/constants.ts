@@ -207,6 +207,9 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
+          // Archived assets keep showing in bookings they're already part of,
+          // flagged with the "Archived" badge (issue #382).
+          archivedAt: true,
           valuation: true,
           // `Asset.quantity` is the workspace stock pool — surfaced for QT
           // availability/headroom math, NOT for booking-value totals.

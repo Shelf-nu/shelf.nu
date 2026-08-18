@@ -1379,6 +1379,20 @@ interface IdleAssetsArgs {
 }
 
 /**
+ * Current-inventory snapshot reports (Idle, Distribution, Inventory) count only
+ * ACTIVE assets, so their numbers line up with the dashboard's active-inventory
+ * view (issue #382). Archived assets are out of circulation, so a "what do I
+ * have / how is it distributed / what's idle" snapshot must exclude them.
+ *
+ * Historical / timeframe reports (Activity, Utilization, Top Booked) deliberately
+ * do NOT apply this: an asset's past usage inside a window is real even after the
+ * asset is later archived, so those still include archived assets.
+ */
+const ACTIVE_INVENTORY_ASSET_FILTER: Prisma.AssetWhereInput = {
+  archivedAt: null,
+};
+
+/**
  * Generate the Idle Assets report (R4).
  *
  * Identifies assets that haven't been booked or checked out recently.
@@ -1406,9 +1420,10 @@ export async function idleAssetsReport(
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - idleThresholdDays);
 
-    // Build asset where clause
+    // Build asset where clause (active inventory only — issue #382)
     const assetWhere: Prisma.AssetWhereInput = {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     };
 
     if (categoryId) {
@@ -1655,10 +1670,14 @@ async function computeIdleAssetsKpis(
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Get total asset count for percentage
+  // Get total asset count for percentage.
+  // Archived assets are excluded here too (issue #382): the idle numerator
+  // rides on `assetWhere`, which excludes them, so an unfiltered denominator
+  // would quietly shrink the "% of Inventory" figure.
   const totalAssets = await db.asset.count({
     where: {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     },
   });
 
@@ -2871,7 +2890,7 @@ async function computeDistributionByCategory(
 ): Promise<AssetDistributionRow[]> {
   const assets = await db.asset.groupBy({
     by: ["categoryId"],
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     _count: { id: true },
     _sum: { valuation: true },
   });
@@ -2913,7 +2932,7 @@ async function computeDistributionByLocation(
   // contribute to several buckets; assets with no pivot rows fall into
   // "No Location".
   const assets = await db.asset.findMany({
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     select: {
       id: true,
       valuation: true,
@@ -2981,7 +3000,7 @@ async function computeDistributionByStatus(
 ): Promise<AssetDistributionRow[]> {
   const assets = await db.asset.groupBy({
     by: ["status"],
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     _count: { id: true },
     _sum: { valuation: true },
   });
@@ -3011,17 +3030,22 @@ async function computeDistributionKpis(
 ): Promise<ReportKpi[]> {
   const [totalAssets, totalValueRows, categoryCount, locationCount] =
     await Promise.all([
-      db.asset.count({ where: { organizationId } }),
+      db.asset.count({
+        where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
+      }),
       // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
       // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop to `$queryRaw`.
       // Column name is `value` (Asset.valuation is `@map("value")`). COALESCE
       // mirrors `getAssetTotalValue` (null quantity → 1, null value → 0).
       // No `::bigint` cast — it truncated fractional Float valuations.
+      // `archivedAt IS NULL` is the raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER
+      // (issue #382) so this KPI reconciles with the breakdowns above it.
       db.$queryRaw<{ total: number | null }[]>(
         Prisma.sql`
           SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
           FROM "Asset"
           WHERE "organizationId" = ${organizationId}
+            AND "archivedAt" IS NULL
         `
       ),
       db.category.count({ where: { organizationId } }),
@@ -3106,8 +3130,11 @@ export async function assetInventoryReport(
   const startTime = performance.now();
 
   try {
-    // Build where clause
-    const where: Prisma.AssetWhereInput = { organizationId };
+    // Build where clause (active inventory only — issue #382)
+    const where: Prisma.AssetWhereInput = {
+      organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
+    };
 
     if (categoryIds && categoryIds.length > 0) {
       where.categoryId = { in: categoryIds };
@@ -3267,6 +3294,11 @@ async function computeInventoryKpis(
   // category / location / status filters) the Prisma `where` carries.
   const filterFragments: Prisma.Sql[] = [
     Prisma.sql`"organizationId" = ${organizationId}`,
+    // Raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER, which `scopedWhere`
+    // carries (issue #382). Without it the Total Value KPI would count
+    // archived assets while the Total Assets count beside it does not, and
+    // the two numbers on the same card would disagree.
+    Prisma.sql`"archivedAt" IS NULL`,
   ];
   if (filters.categoryIds && filters.categoryIds.length > 0) {
     filterFragments.push(

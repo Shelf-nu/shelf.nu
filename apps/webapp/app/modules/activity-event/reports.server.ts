@@ -35,6 +35,7 @@ const ASSET_ACTIONS = [
   "ASSET_MIN_QUANTITY_CHANGED",
   "ASSET_CUSTOM_FIELD_CHANGED",
   "ASSET_ARCHIVED",
+  "ASSET_UNARCHIVED",
   "ASSET_DELETED",
 ] as const satisfies readonly ActivityAction[];
 

@@ -29,6 +29,10 @@ vi.mock("~/database/db.server", () => ({
     },
     asset: {
       findMany: vi.fn(),
+      // why: the action refuses to add archived assets to a booking
+      // (issue #382) via a count on the newly added ids. Default 0 = none
+      // archived, so these tests reach the behaviour they are about.
+      count: vi.fn().mockResolvedValue(0),
     },
     // Phase 3c: the quantity-reduction guardrail groupBys over ConsumptionLog
     // to figure out how many units have already been dispositioned on this

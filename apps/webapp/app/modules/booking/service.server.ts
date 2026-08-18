@@ -30,6 +30,7 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
@@ -94,6 +95,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertKitsBelongToOrg,
@@ -791,6 +793,19 @@ export async function createBooking({
     // free-pool standalone slice may legitimately coexist with kit slices), so
     // we only pay for a type lookup when there is an actual overlap.
     const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+
+    /**
+     * Archived assets can't be booked (issue #382). Guarding the UNION here,
+     * not just the standalone bucket, is the point: a kit carries its members
+     * in as `kitSlices`, so a kit holding an archived asset would otherwise
+     * walk one straight into a booking that can then be reserved and checked
+     * out. Every "create a booking with assets" route lands here.
+     */
+    /** Locked and re-checked inside the transaction below. */
+    const archiveGuardAssetIds = [
+      ...new Set([...dedupedAssetIds, ...kitSliceAssetIds]),
+    ];
+
     const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
     );
@@ -840,6 +855,25 @@ export async function createBooking({
 
     // Use transaction to ensure booking creation and activity events are atomic
     const createdBooking = await db.$transaction(async (tx) => {
+      /**
+       * Archived assets can't be booked (issue #382). Both the lock and the
+       * check live INSIDE the transaction: a check before it could pass and
+       * then have an archive commit before this booking's rows are written.
+       * The archive services take the same lock, so the two serialize.
+       */
+      await lockAssetsForArchiveGuard(
+        tx,
+        archiveGuardAssetIds,
+        booking.organizationId
+      );
+      await assertAssetsAreNotArchived(
+        {
+          assetIds: archiveGuardAssetIds,
+          organizationId: booking.organizationId,
+        },
+        tx
+      );
+
       // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
       // member ID all originate from request/form input. Before connecting
       // them to the new booking we must prove they belong to the booking's
@@ -8166,6 +8200,19 @@ export async function updateBookingAssets({
         ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
       ];
 
+      /**
+       * Archived assets can't be booked (issue #382). The union matters here
+       * too: a kit-add passes its members as `kitSlices` with an empty
+       * `assetIds`, so guarding only the standalone bucket would let a kit
+       * carry an archived asset into the booking. Read on `tx` so it sees the
+       * same snapshot as the write.
+       */
+      await lockAssetsForArchiveGuard(tx, uniqueAssetIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: uniqueAssetIds, organizationId },
+        tx
+      );
+
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and
       // submission. `type` is selected so we can enforce the standalone/
@@ -10030,6 +10077,7 @@ export async function getBookings(params: {
                   custody: true,
                   availableToBook: true,
                   status: true,
+                  archivedAt: true,
                   mainImage: true,
                   thumbnailImage: true,
                   // Model cover image for assets with no image of their own
@@ -12434,6 +12482,28 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
 
+  // Archived assets can't be added to a booking, even via scan (issue #382).
+  // Pickers hide them, but the scanner takes raw ids so the server enforces it.
+  if (allScannedAssetIds.length > 0) {
+    const archivedScannedCount = await tx.asset.count({
+      where: {
+        id: { in: allScannedAssetIds },
+        organizationId,
+        archivedAt: { not: null },
+      },
+    });
+    if (archivedScannedCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some scanned assets are archived and can't be added to a booking. Reinstate them first.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
   /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
    * when any scanned asset (standalone OR kit-driven) is already RESERVED
@@ -12970,7 +13040,10 @@ export async function getAvailableAssetsIdsForBooking(
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
       // cannot resolve / attach assets that live in another workspace.
-      where: { id: { in: assetIds }, organizationId },
+      // Archived assets (archivedAt set) are excluded so they can't be booked,
+      // even via a direct/crafted add — they're hidden from pickers but the
+      // server must enforce it too (issue #382).
+      where: { id: { in: assetIds }, organizationId, archivedAt: null },
       select: {
         status: true,
         id: true,

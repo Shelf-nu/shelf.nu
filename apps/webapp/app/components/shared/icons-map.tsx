@@ -77,6 +77,7 @@ export type IconType =
   | "plus"
   | "trash"
   | "archive"
+  | "reinstate"
   | "mail"
   | "search"
   | "spinner"
@@ -154,6 +155,7 @@ export const iconsMap: IconsMap = {
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,
+  reinstate: <RefreshIcon />,
   mail: <MailIcon />,
   search: <SearchIcon />,
   spinner: <Spinner />,

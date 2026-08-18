@@ -87,6 +87,13 @@ afterAll(() => {
 
 // Mock dependencies
 // why: testing booking service business logic without executing actual database operations
+// why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
+// the guard's own behaviour is what these suites assert on.
+vitest.mock("~/modules/asset/archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
+}));
+
 vitest.mock("~/database/db.server", () => ({
   db: {
     // why: handles both callback-style and array-style $transaction
@@ -121,6 +128,9 @@ vitest.mock("~/database/db.server", () => ({
           Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
         );
       }),
+      // why: addScannedAssetsToBookingWithinTx counts archived scanned assets
+      // (issue #382 guard). Default 0 = none archived, so happy-path scans pass.
+      count: vitest.fn().mockResolvedValue(0),
       // why: the windowed QT availability guard (`getAssetAvailability` →
       // `computeAvailableQuantity`, kept REAL by the consumption-log
       // partial-mock below) reads `Asset.quantity` via

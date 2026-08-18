@@ -88,6 +88,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const baseWhere: Prisma.AssetWhereInput = {
       organizationId,
+      // Hide archived assets from the mobile list (parity with the web index
+      // default; issue #382). The mobile app has no archived view yet.
+      archivedAt: null,
       ...(myCustody
         ? {
             // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for

@@ -1070,6 +1070,9 @@ export async function getAssetsForAuditSession({
       select: {
         id: true,
         title: true,
+        // Surfaced so the audit row can flag an archived asset with the
+        // "Archived" badge (issue #382).
+        archivedAt: true,
         mainImage: true,
         thumbnailImage: true,
         // Model cover image for assets with no image of their own

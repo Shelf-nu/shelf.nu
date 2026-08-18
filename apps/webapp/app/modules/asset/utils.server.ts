@@ -519,6 +519,52 @@ export const CurrentSearchParamsSchema = z.object({
 });
 
 /**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";
+
+/**
+ * Reads the `archived` view dimension from URL search params. Defaults to
+ * `active` so every list hides archived assets unless explicitly asked.
+ *
+ * @param searchParams - The request's search params.
+ * @returns The resolved {@link ArchivedFilter}.
+ */
+export function getArchivedFilterFromParams(
+  searchParams: URLSearchParams
+): ArchivedFilter {
+  const value = searchParams.get("archived");
+  if (value === "archived" || value === "all") {
+    return value;
+  }
+  return "active";
+}
+
+/**
+ * Applies an {@link ArchivedFilter} to a Prisma asset `where` clause.
+ * Mutates and returns the passed `where` for chaining.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param archivedFilter - The resolved view dimension.
+ */
+export function applyArchivedFilter(
+  where: Prisma.AssetWhereInput,
+  archivedFilter: ArchivedFilter
+): Prisma.AssetWhereInput {
+  if (archivedFilter === "active") {
+    where.archivedAt = null;
+  } else if (archivedFilter === "archived") {
+    where.archivedAt = { not: null };
+  }
+  // "all" → leave the archived dimension unconstrained.
+  return where;
+}
+
+/**
  * Which custodian ids a caller may filter a "select all" query by.
  *
  * `"all"` means the caller has already been proven allowed to see everyone's
@@ -580,11 +626,16 @@ export function getAssetsWhereInput({
   const where: Prisma.AssetWhereInput = { organizationId };
 
   if (!currentSearchParams) {
+    // No params at all means the default "active" view — hide archived assets.
+    where.archivedAt = null;
     return where;
   }
 
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
+
+  // Active/Archived/All dimension (defaults to active = hide archived).
+  applyArchivedFilter(where, getArchivedFilterFromParams(searchParams));
 
   const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
 

@@ -134,6 +134,7 @@ import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertCustomFieldsBelongToOrg,
   assertKitsBelongToOrg,
@@ -147,6 +148,7 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -184,6 +186,9 @@ import {
   detectPotentialChanges,
   detectCustomFieldChanges,
   type CustomFieldChangeInfo,
+  applyArchivedFilter,
+  getArchivedFilterFromParams,
+  type ArchivedFilter,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -612,6 +617,11 @@ export async function getAssets(params: {
   hideUnavailableToAddToKit?: boolean;
   assetKitFilter?: string | null;
   availableToBookOnly?: boolean;
+  /**
+   * Active/Archived/All view dimension (orthogonal to `status`). Defaults to
+   * `active`, so every caller hides archived assets unless it opts in.
+   */
+  archivedFilter?: ArchivedFilter;
 }) {
   let {
     organizationId,
@@ -632,6 +642,7 @@ export async function getAssets(params: {
     extraInclude,
     assetKitFilter,
     availableToBookOnly,
+    archivedFilter = "active",
   } = params;
 
   try {
@@ -639,6 +650,13 @@ export async function getAssets(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
     const where: Prisma.AssetWhereInput = { organizationId };
+
+    // Active/Archived/All dimension (defaults to active = hide archived).
+    // Sits on the top-level `where`, so it ANDs with the search `where.OR`
+    // below: the UNION resolves candidate ids across all assets, then Prisma
+    // filters them by archived state. The fallback-re-query bookkeeping that
+    // used to live here went away with the UNION rewrite (#2849).
+    applyArchivedFilter(where, archivedFilter);
 
     if (availableToBookOnly) {
       where.availableToBook = true;
@@ -1062,7 +1080,10 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       assetIds,
       availableToBookOnly,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // Active/Archived/All dimension — keeps the advanced (raw-SQL) index in
+      // sync with the simple index's default-hide-archived behavior.
+      getArchivedFilterFromParams(searchParams)
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -1918,8 +1939,20 @@ export async function updateAsset({
   minQuantity,
   consumptionType,
   unitOfMeasure,
+  allowArchived = false,
 }: UpdateAssetPayload) {
   try {
+    /**
+     * Archived assets are frozen: reinstate or permanently delete, nothing
+     * else (issue #382). The guard lives HERE rather than on each route
+     * because `updateAsset` is the single write chokepoint every surface goes
+     * through — web routes, the CSV import-update, and all of the companion
+     * app's asset writes. Guarding per-route left the mobile paths open.
+     */
+    if (!allowArchived) {
+      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+    }
+
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
      * The asset-overview "Update location" dialog surfaces a per-asset
@@ -2524,7 +2557,17 @@ export async function updateAsset({
       }
 
       const updated = await tx.asset.update({
-        where: { id, organizationId },
+        where: {
+          id,
+          organizationId,
+          // The `assertAssetsAreNotArchived` call at the top of this function
+          // is a read; an archive committed between it and this write would
+          // otherwise still mutate a frozen row. Riding the predicate on the
+          // UPDATE itself closes that window — no match becomes P2025, which
+          // the catch below reports as the archived conflict it almost always
+          // is. `allowArchived` callers (the signed-URL refresh) skip it.
+          ...(allowArchived ? {} : { archivedAt: null }),
+        },
         data,
         include: {
           assetLocations: { include: { location: true } },
@@ -3185,6 +3228,29 @@ export async function updateAsset({
       throw cause;
     }
 
+    /**
+     * The asset write carries `archivedAt: null` in its WHERE, so an archive
+     * that commits mid-transaction makes the row vanish from the predicate and
+     * Prisma raises P2025. Report it as the archived conflict rather than a
+     * generic write failure — the pre-check at the top of this function has
+     * already ruled out "not in this workspace" for every real caller.
+     */
+    if (
+      cause instanceof Prisma.PrismaClientKnownRequestError &&
+      cause.code === "P2025"
+    ) {
+      throw new ShelfError({
+        cause,
+        title: "Asset is archived",
+        message:
+          "This asset was archived while you were editing it. Reinstate it to make changes.",
+        additionalData: { userId, id, organizationId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
@@ -3235,6 +3301,526 @@ export async function deleteAsset({
       cause,
       message: "Something went wrong while deleting asset",
       additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Booking states in which an asset is still spoken for. Terminal states
+ * (COMPLETE / CANCELLED / ARCHIVED) are history and don't block anything.
+ *
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: the AVAILABLE
+ * status check alone does NOT cover this, because an asset sitting in a DRAFT
+ * or RESERVED booking is still AVAILABLE. Without this guard an asset could be
+ * archived and then reserved and checked out from the booking it was already
+ * in, which contradicts "archived assets can't be booked" (issue #382).
+ */
+const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Archives a single asset (soft "out of view").
+ *
+ * Archiving is orthogonal to `status`: it sets `archivedAt` so the asset drops
+ * out of default lists and can no longer be booked or assigned custody, while
+ * its live `status`, history and SAM-ID stay intact. It is fully reversible via
+ * {@link unarchiveAsset}.
+ *
+ * Guards (mirroring the agreed conditions in issue #382):
+ * - 404 if the asset doesn't exist in the caller's workspace.
+ * - 409 if it is already archived.
+ * - 400 for QUANTITY_TRACKED assets. Their `status` reads AVAILABLE even when
+ *   some units are out, so the status guard below can't be trusted for them,
+ *   and consumable-archiving semantics (stock across locations, consumption
+ *   history) are an open product decision. v1 archives INDIVIDUAL assets only.
+ * - 400 if the asset is IN_CUSTODY or CHECKED_OUT (actively held).
+ *
+ * The write is an atomic `updateMany` whose WHERE re-asserts every precondition,
+ * so a concurrent checkout/custody-assign cannot race an active asset into the
+ * archive.
+ *
+ * @param args.id - The asset to archive.
+ * @param args.organizationId - The caller's workspace (org-scopes the write).
+ * @param args.actorUserId - Optional user the ASSET_ARCHIVED event is attributed to.
+ * @returns The archived asset id and the archive timestamp.
+ * @throws {ShelfError} On a failed guard or a database error.
+ */
+export async function archiveAsset({
+  id,
+  organizationId,
+  actorUserId,
+}: Pick<Asset, "id"> & {
+  organizationId: Organization["id"];
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+}) {
+  try {
+    const asset = await db.asset.findFirst({
+      where: { id, organizationId },
+      select: { id: true, type: true, status: true, archivedAt: true },
+    });
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message:
+          "This asset does not exist or does not belong to your workspace.",
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Already archived",
+        message: "This asset is already archived.",
+        status: 409,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.type !== AssetType.INDIVIDUAL) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "Only individual assets can be archived. Quantity-tracked assets aren't supported yet.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.status !== AssetStatus.AVAILABLE) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "Assets that are checked out or in custody can't be archived. Check the asset back in first, then archive it.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const activeBookingCount = await db.bookingAsset.count({
+      where: {
+        assetId: id,
+        booking: { status: { in: ACTIVE_BOOKING_STATUSES } },
+      },
+    });
+
+    if (activeBookingCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "This asset is in a booking that hasn't finished yet. Remove it from that booking, then archive it.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const archivedAt = new Date();
+
+    await db.$transaction(async (tx) => {
+      // Serialize against concurrent booking writes. The booking services take
+      // this same lock before their archived check, so an archive and a
+      // booking-add can no longer both pass their own read and then commit.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+
+      // Atomic guard: the WHERE re-asserts every precondition so a concurrent
+      // checkout/custody-assign can't slip an active asset into the archive.
+      const { count } = await tx.asset.updateMany({
+        where: {
+          id,
+          organizationId,
+          type: AssetType.INDIVIDUAL,
+          status: AssetStatus.AVAILABLE,
+          archivedAt: null,
+          // The booking check above is a read, so a booking created between it
+          // and this write would slip through. Re-asserting it here makes the
+          // WHERE the authoritative guard: a raced booking lands in the
+          // count === 0 branch instead of archiving a booked asset.
+          bookingAssets: {
+            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+          },
+        },
+        data: { archivedAt },
+      });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Can't archive this asset",
+          message:
+            "The asset's status changed before it could be archived. Please refresh and try again.",
+          status: 409,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Activity event inside the tx for atomicity (wires the dormant action).
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_ARCHIVED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+    });
+
+    return { id, archivedAt };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while archiving the asset.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Reinstates (un-archives) a single asset, clearing `archivedAt`.
+ *
+ * Because archiving is only allowed from the AVAILABLE state, the asset's
+ * `status` was never changed — so reinstating simply makes it visible,
+ * bookable and custody-able again with no status restoration needed.
+ *
+ * @param args.id - The asset to reinstate.
+ * @param args.organizationId - The caller's workspace (org-scopes the write).
+ * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event is attributed to.
+ * @returns The reinstated asset id.
+ * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
+ */
+export async function unarchiveAsset({
+  id,
+  organizationId,
+  actorUserId,
+}: Pick<Asset, "id"> & {
+  organizationId: Organization["id"];
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+}) {
+  try {
+    const asset = await db.asset.findFirst({
+      where: { id, organizationId },
+      select: { id: true, archivedAt: true },
+    });
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message:
+          "This asset does not exist or does not belong to your workspace.",
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not archived",
+        message: "This asset is not archived.",
+        status: 409,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      const { count } = await tx.asset.updateMany({
+        where: { id, organizationId, archivedAt: { not: null } },
+        data: { archivedAt: null },
+      });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not archived",
+          message: "This asset is not archived.",
+          status: 409,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_UNARCHIVED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+    });
+
+    return { id };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reinstating the asset.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Bulk-archives assets (works for both simple and advanced index modes, plus
+ * "select all" via {@link resolveAssetIdsForBulkOperation}).
+ *
+ * Only INDIVIDUAL + AVAILABLE + not-already-archived assets are archived; any
+ * checked-out, in-custody, quantity-tracked or already-archived selections are
+ * silently skipped and reported via `skippedCount` (the same guard as
+ * {@link archiveAsset}). Emits one ASSET_ARCHIVED event per asset actually
+ * archived (bulk-event parity).
+ *
+ * @returns Counts of assets archived and skipped, for the success message.
+ * @throws {ShelfError} On a database error.
+ */
+export async function bulkArchiveAssets({
+  organizationId,
+  assetIds,
+  currentSearchParams,
+  settings,
+  actorUserId,
+  timeZone = "UTC",
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+}): Promise<{ archivedCount: number; skippedCount: number }> {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with the asset `update` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
+    });
+
+    // Fetch the eligible subset first so we can emit one event per asset
+    // actually archived and report how many were skipped.
+    const eligible = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        type: AssetType.INDIVIDUAL,
+        status: AssetStatus.AVAILABLE,
+        archivedAt: null,
+        // Same rule the single-asset path enforces: an asset still sitting in
+        // an unfinished booking is spoken for, and AVAILABLE alone does not
+        // say so (a DRAFT/RESERVED booking leaves the status untouched).
+        // Skipped rather than thrown — bulk reports counts, it doesn't fail
+        // the batch on one ineligible row.
+        bookingAssets: {
+          none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+        },
+      },
+      select: { id: true },
+    });
+    const eligibleIds = eligible.map((a) => a.id);
+
+    if (eligibleIds.length === 0) {
+      return { archivedCount: 0, skippedCount: resolvedIds.length };
+    }
+
+    const archivedAt = new Date();
+
+    /**
+     * Ids this call actually wrote. The eligibility query above is a read, so
+     * between it and the write an asset can be checked out, taken into custody,
+     * booked, or archived by another request. Emitting one event per *eligible*
+     * id would then write ASSET_ARCHIVED for assets this call never touched and
+     * report them as archived. The WHERE re-asserts every precondition and the
+     * ids are read back by this call's own `archivedAt` stamp, so both the
+     * events and the counts describe rows that really changed.
+     */
+    let archivedIds: string[] = [];
+
+    await db.$transaction(async (tx) => {
+      // Same lock the single-asset path and the booking services take, so a
+      // booking-add cannot land between this batch's eligibility read and its
+      // write. Sorted inside the helper, so overlapping batches can't deadlock.
+      await lockAssetsForArchiveGuard(tx, eligibleIds, organizationId);
+
+      await tx.asset.updateMany({
+        where: {
+          id: { in: eligibleIds },
+          organizationId,
+          type: AssetType.INDIVIDUAL,
+          status: AssetStatus.AVAILABLE,
+          archivedAt: null,
+          bookingAssets: {
+            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+          },
+        },
+        data: { archivedAt },
+      });
+
+      const written = await tx.asset.findMany({
+        where: { id: { in: eligibleIds }, organizationId, archivedAt },
+        select: { id: true },
+      });
+      archivedIds = written.map((a) => a.id);
+
+      if (archivedIds.length === 0) return;
+
+      await recordEvents(
+        archivedIds.map((assetId) => ({
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_ARCHIVED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+        })),
+        tx
+      );
+    });
+
+    return {
+      archivedCount: archivedIds.length,
+      skippedCount: resolvedIds.length - archivedIds.length,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while archiving the selected assets.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Bulk-reinstates (un-archives) assets. Mirrors {@link bulkArchiveAssets}:
+ * only currently-archived selections are reinstated; the rest are skipped.
+ * Emits one ASSET_UNARCHIVED event per asset actually reinstated.
+ *
+ * @returns Counts of assets reinstated and skipped, for the success message.
+ * @throws {ShelfError} On a database error.
+ */
+export async function bulkUnarchiveAssets({
+  organizationId,
+  assetIds,
+  currentSearchParams,
+  settings,
+  actorUserId,
+  timeZone = "UTC",
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+}): Promise<{ unarchivedCount: number; skippedCount: number }> {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with the asset `update` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
+    });
+
+    const eligible = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        archivedAt: { not: null },
+      },
+      select: { id: true },
+    });
+    const eligibleIds = eligible.map((a) => a.id);
+
+    if (eligibleIds.length === 0) {
+      return { unarchivedCount: 0, skippedCount: resolvedIds.length };
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
+        where: {
+          id: { in: eligibleIds },
+          organizationId,
+          archivedAt: { not: null },
+        },
+        data: { archivedAt: null },
+      });
+
+      await recordEvents(
+        eligibleIds.map((assetId) => ({
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_UNARCHIVED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+        })),
+        tx
+      );
+    });
+
+    return {
+      unarchivedCount: eligibleIds.length,
+      skippedCount: resolvedIds.length - eligibleIds.length,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reinstating the selected assets.",
+      additionalData: { organizationId },
       label,
     });
   }
@@ -3806,6 +4392,10 @@ export async function updateAssetMainImage({
       userId,
       organizationId,
       request,
+      // Signed-URL bookkeeping is a system write, not a user edit, so it is
+      // allowed on an archived asset (issue #382). Mirrors the DB freeze
+      // trigger's carve-out for the image columns.
+      allowArchived: true,
     });
 
     /**
@@ -4351,6 +4941,7 @@ export async function getPaginatedAndFilterableAssets({
         extraInclude,
         assetKitFilter,
         availableToBookOnly: isSelfService,
+        archivedFilter: getArchivedFilterFromParams(searchParams),
       }),
     ]);
 
@@ -5350,6 +5941,9 @@ export async function updateAssetBookingAvailability({
   organizationId,
 }: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
   try {
+    // Archived assets are frozen (issue #382): availability can't be toggled.
+    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+
     return await db.asset.update({
       where: { id, organizationId },
       data: { availableToBook },
@@ -6020,6 +6614,9 @@ export async function bulkCheckOutAssets({
       timeZone,
     });
 
+    // Archived assets are frozen (issue #382): can't be assigned custody.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
@@ -6527,6 +7124,9 @@ export async function bulkUpdateAssetLocation({
       timeZone,
     });
 
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
@@ -6848,6 +7448,9 @@ export async function bulkUpdateAssetCategory({
       return true;
     }
 
+    // Archived assets are frozen (issue #382): can't change their category.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     // Fetch before-state so we can emit per-asset events and notes only for
     // assets whose category actually changes.
     const newCategoryId = categoryId || null;
@@ -7030,6 +7633,9 @@ export async function bulkUpdateAssetModel({
       allowedTeamMemberIds: "all",
     });
 
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
     /** An empty `assetModelId` is the "remove from asset model" request. */
     const newAssetModelId = assetModelId || null;
     const linked = newAssetModelId !== null;
@@ -7194,6 +7800,9 @@ export async function bulkAssignAssetTags({
     if (resolvedIds.length === 0) {
       return true;
     }
+
+    // Archived assets are frozen (issue #382): can't add/remove their tags.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     // Validate that every tag id belongs to this organization before
     // wiring it into the `connect`/`disconnect` payload. Prisma's nested
@@ -7365,6 +7974,9 @@ export async function bulkMarkAvailability({
       allowedTeamMemberIds: "all",
       timeZone,
     });
+
+    // Archived assets are frozen (issue #382): can't change availability.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     // Simple, consistent where clause
     await db.asset.updateMany({

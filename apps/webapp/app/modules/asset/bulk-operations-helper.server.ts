@@ -5,7 +5,10 @@ import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
-import { getAssetsWhereInput } from "./utils.server";
+import {
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
+} from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
 const label = "Assets";
@@ -108,7 +111,10 @@ async function getAdvancedFilteredAssetIds({
       undefined, // no specific assetIds filter
       availableToBookOnly,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // Respect the Active/Archived view so advanced select-all matches the
+      // simple path (getAssetsWhereInput) — archived hidden unless requested.
+      getArchivedFilterFromParams(searchParams)
     );
 
     // Minimal query: only SELECT id, but include the same joins the main

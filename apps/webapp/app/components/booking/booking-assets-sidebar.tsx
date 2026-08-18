@@ -75,6 +75,7 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             availableToBook: true;
             custody: true;
             status: true;
+            archivedAt: true;
             mainImage: true;
             thumbnailImage: true;
             mainImageExpiration: true;
@@ -570,6 +571,7 @@ function AssetTitleAndStatus({
           status={effectiveStatus}
           availableToBook={asset.availableToBook}
           asset={asset}
+          isArchived={!!asset.archivedAt}
         />
         {stockBadgeVariant === "insufficient" ? (
           <InsufficientStockBadge

@@ -102,6 +102,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/assets/${assetId}`);
     }
 
+    /** Archived assets can't be assigned custody (issue #382). */
+    if (asset?.archivedAt) {
+      return redirect(`/assets/${assetId}`);
+    }
+
     const searchParams = getCurrentSearchParams(request);
 
     /** We get all the team members that are part of the user's personal organization */
@@ -252,6 +257,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * 2. Update the asset status to IN_CUSTODY
      * 3. Create a new custody record linked to the custodian
      */
+    // Archived assets can't be assigned custody (issue #382). Guard the action
+    // too (not just the loader) so a crafted POST can't bypass the redirect.
+    const archivedAssetCount = await db.asset.count({
+      where: { id: assetId, organizationId, archivedAt: { not: null } },
+    });
+    if (archivedAssetCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: "Reinstate this asset before assigning custody.",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
@@ -284,6 +306,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             id: assetId,
             organizationId,
             status: { not: AssetStatus.CHECKED_OUT },
+            // The archived check above is a read outside this claim, so an
+            // archive committed in between would otherwise still be handed a
+            // custodian. Riding the predicate on the UPDATE closes that gap;
+            // the zero-row branch below tells the two causes apart.
+            archivedAt: null,
           },
           data: { status: AssetStatus.IN_CUSTODY },
         });
@@ -291,8 +318,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         if (claimed.count === 0) {
           const blocked = await tx.asset.findFirst({
             where: { id: assetId, organizationId },
-            select: { title: true },
+            select: { title: true, archivedAt: true },
           });
+
+          if (blocked?.archivedAt) {
+            throw new ShelfError({
+              cause: null,
+              title: "Asset is archived",
+              message: `"${blocked.title}" was archived before custody could be assigned. Reinstate it first.`,
+              additionalData: { userId, assetId, custodianId },
+              label: "Assets",
+              shouldBeCaptured: false,
+              status: 400,
+            });
+          }
 
           throw new ShelfError({
             cause: null,
