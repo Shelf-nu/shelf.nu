@@ -59,8 +59,9 @@ describe("parseData redaction", () => {
       thrown = cause;
     }
 
-    const additionalData = (thrown as { additionalData: { data: any } })
-      .additionalData;
+    const { additionalData } = thrown as {
+      additionalData: { data: Record<string, unknown> };
+    };
 
     expect(additionalData.data.otp).toBe(REDACTED);
     expect(additionalData.data.password).toBe(REDACTED);
@@ -77,8 +78,9 @@ describe("parseData redaction", () => {
       thrown = cause;
     }
 
-    const additionalData = (thrown as { additionalData: { data: any } })
-      .additionalData;
+    const { additionalData } = thrown as {
+      additionalData: { data: Record<string, unknown> };
+    };
 
     expect(additionalData.data.email).toBe("user@example.com");
   });
@@ -117,7 +119,11 @@ describe("parseData redaction", () => {
     }
 
     const { validationErrors } = (
-      thrown as { additionalData: { validationErrors: any } }
+      thrown as {
+        additionalData: {
+          validationErrors: Record<string, { message: string }>;
+        };
+      }
     ).additionalData;
 
     expect(validationErrors.password.message).toBe("Password is too short.");

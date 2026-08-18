@@ -33,6 +33,15 @@ const SENSITIVE_KEY =
 /** Replacement written in place of a redacted value. */
 export const REDACTED = "[REDACTED]";
 
+/**
+ * Replacement for a subtree deeper than {@link MAX_DEPTH}.
+ *
+ * Returning such a subtree unchanged would defeat the whole function: a
+ * `password` nested five levels down would be written in plaintext. A redactor
+ * has to fail closed, so the depth limit truncates rather than waves through.
+ */
+export const TRUNCATED = "[TRUNCATED]";
+
 /** How deep to walk nested objects before giving up. */
 const MAX_DEPTH = 4;
 
@@ -45,16 +54,23 @@ const MAX_DEPTH = 4;
  *
  * Walks nested objects and arrays to a bounded depth so a payload shaped
  * `{ user: { password } }` is covered without risking a cycle or a pathological
- * structure. Anything deeper is returned as-is; the alternative (dropping it)
- * would silently lose debugging context that is usually not sensitive.
+ * structure. Anything deeper is replaced by {@link TRUNCATED} rather than
+ * returned as-is — an unwalked subtree is an unredacted one, and losing some
+ * debugging context is the right trade against writing a credential.
  *
  * @param value - Any value destined for `additionalData` or a log line
  * @param depth - Internal recursion counter; callers should omit it
  * @returns A redacted copy, or the original for primitives
  */
 export function redactSensitive<T>(value: T, depth = 0): T {
-  if (value === null || typeof value !== "object" || depth > MAX_DEPTH) {
+  if (value === null || typeof value !== "object") {
     return value;
+  }
+
+  // Past the limit we can no longer inspect what is in there, so we must not
+  // pass it through.
+  if (depth > MAX_DEPTH) {
+    return TRUNCATED as unknown as T;
   }
 
   if (Array.isArray(value)) {

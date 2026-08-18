@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { REDACTED, redactSensitive } from "./redact";
+import { REDACTED, TRUNCATED, redactSensitive } from "./redact";
 
 // @vitest-environment node
 
@@ -107,5 +107,22 @@ describe("redactSensitive", () => {
     }
 
     expect(() => redactSensitive(deep)).not.toThrow();
+  });
+
+  it("truncates past the depth limit rather than passing the subtree through", () => {
+    // Failing OPEN here would defeat the function: returning an unwalked
+    // subtree means returning an unredacted one.
+    let deep: Record<string, unknown> = { password: "hunter2" };
+    for (let i = 0; i < 50; i++) {
+      deep = { nested: deep };
+    }
+
+    expect(JSON.stringify(redactSensitive(deep))).not.toContain("hunter2");
+  });
+
+  it("marks what it truncated so the gap is visible in the log", () => {
+    const deep = { a: { b: { c: { d: { e: { secretless: "value" } } } } } };
+
+    expect(JSON.stringify(redactSensitive(deep))).toContain(TRUNCATED);
   });
 });
