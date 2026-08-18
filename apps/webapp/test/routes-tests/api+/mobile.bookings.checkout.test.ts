@@ -31,6 +31,9 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
   assertMobileCanUseBookings: vi.fn(),
+  // why: the cross-user ownership guard resolves the caller's role through
+  // this; mocking it is how each test picks SELF_SERVICE vs ADMIN.
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: external service — we mock the booking checkout to avoid database calls
@@ -61,6 +64,7 @@ import {
   requireOrganizationAccess,
   requireMobilePermission,
   assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
@@ -102,9 +106,15 @@ describe("POST /api/mobile/bookings/checkout", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    // Default: the caller owns the booking, so the ownership guard is a
+    // no-op and the pre-existing cases still test what they were written for.
+    (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
     (db.booking.findFirst as any).mockResolvedValue({
       from: BOOKING_FROM,
       to: BOOKING_TO,
+      // Owned by the caller so the ownership guard is a no-op here.
+      creatorId: "user-1",
+      custodianUserId: null,
     });
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
   });
@@ -169,5 +179,39 @@ describe("POST /api/mobile/bookings/checkout", () => {
     expect(body.error.message).toContain("Permission denied");
 
     expect(checkoutBooking).not.toHaveBeenCalled();
+  });
+
+  it("refuses a SELF_SERVICE user checking out someone else's booking", async () => {
+    // SELF_SERVICE holds `booking:checkout`, so the role gate above passes for
+    // ANY booking id in the organization. Only the ownership guard stops this.
+    (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
+    (db.booking.findFirst as any).mockResolvedValue({
+      from: BOOKING_FROM,
+      to: BOOKING_TO,
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createCheckoutRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    // The assertion that matters: the checkout never happens.
+    expect(checkoutBooking).not.toHaveBeenCalled();
+  });
+
+  it("still lets ADMIN check out a booking they do not own", async () => {
+    // The guard is a no-op for ADMIN/OWNER — it must not break admin workflows.
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (db.booking.findFirst as any).mockResolvedValue({
+      from: BOOKING_FROM,
+      to: BOOKING_TO,
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createCheckoutRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    expect(checkoutBooking).toHaveBeenCalled();
   });
 });

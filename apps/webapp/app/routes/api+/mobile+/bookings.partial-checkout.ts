@@ -1,12 +1,15 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -85,6 +88,33 @@ export async function action({ request }: ActionFunctionArgs) {
       ...getClientHint(request),
       ...(timeZone ? { timeZone } : {}),
     };
+
+    // Org-scoped, so a foreign-org id 404s before the ownership check runs.
+    const existingBooking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { creatorId: true, custodianUserId: true },
+    });
+
+    if (!existingBooking) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+
+    // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
+    // permission map, so the role gate above passes for ANY booking id in the
+    // organization — they may only check out bookings they created or are
+    // custodian of. No-op for ADMIN/OWNER. `partialCheckoutBooking` does not check
+    // ownership itself, so without this the route is more permissive than web.
+    // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role,
+      action: "check out",
+    });
 
     const result = await partialCheckoutBooking({
       id: bookingId,
