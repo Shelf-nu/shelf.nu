@@ -62,7 +62,14 @@ export function parseCompanionUserAgent(
       version: appVersion,
       major: undefined,
     },
-    device: { vendor, model, type: "mobile" },
+    // why: only iPad is reliably a tablet from this string. The Android token
+    // is a brand + model ("samsung SM-T870") that does not say form factor, so
+    // those stay "mobile" rather than being guessed at.
+    device: {
+      vendor,
+      model,
+      type: deviceToken === "iPad" ? "tablet" : "mobile",
+    },
     os: { name: osName, version: osVersion },
     engine: { name: undefined, version: undefined },
     cpu: { architecture: undefined },

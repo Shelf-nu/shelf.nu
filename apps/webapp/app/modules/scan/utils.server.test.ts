@@ -36,6 +36,10 @@ describe("parseCompanionUserAgent", () => {
     );
 
     expect(result?.device.model).toBe("iPad");
+    // why: ua-parser-js uses "tablet" for tablets, and downstream consumers
+    // read device.type. Reporting an iPad as "mobile" mislabels every scan
+    // from one.
+    expect(result?.device.type).toBe("tablet");
     expect(result?.browser.version).toBe("1.4.1");
   });
 
