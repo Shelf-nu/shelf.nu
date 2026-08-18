@@ -1,4 +1,9 @@
-import { AssetStatus, AssetType, OrganizationRoles } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -14,6 +19,7 @@ import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
   computeBookingAssetRemainingToCheckOut,
+  getBookingFlags,
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
@@ -118,6 +124,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // why: lets the app grey out Reserve for the same reason web
+                // does, instead of offering a tap the server will refuse.
+                // It reaches the client through the `serializeAssetImage(rest)`
+                // spread that builds each row — there is no explicit mapping to
+                // grep for, so do not assume it is unused.
+                availableToBook: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -485,6 +497,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 
+    /**
+     * The third rule web's Reserve button disables on, which the companion had
+     * no way to evaluate: whether any asset is already booked for this window.
+     * Unlike "no assets" and "unavailable asset", it cannot be derived from the
+     * rows in this response — it needs the overlapping-booking query — so
+     * without this flag the phone showed an enabled Reserve, the user tapped,
+     * confirmed, and only then got a 400 from `reserveBooking`'s conflict check.
+     *
+     * Computed for DRAFT bookings only: Reserve is the sole consumer and it is
+     * the only status that renders it, so no other request pays for the query.
+     */
+    const hasAlreadyBookedAssets =
+      booking.status === BookingStatus.DRAFT && booking.from && booking.to
+        ? (
+            await getBookingFlags({
+              id: booking.id,
+              organizationId,
+              assetIds: assetsForResponse.map((a) => a.id),
+              modelRequestCount,
+              from: booking.from,
+              to: booking.to,
+            })
+          ).hasAlreadyBookedAssets
+        : false;
+
     return data({
       booking: {
         id: booking.id,
@@ -506,6 +543,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequestCount,
         outstandingModelUnitCount,
         lifecycleProgress,
+        hasAlreadyBookedAssets,
       },
       checkedInAssetIds,
       canCheckout,

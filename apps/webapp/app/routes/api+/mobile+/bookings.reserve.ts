@@ -1,4 +1,5 @@
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { DateTime } from "luxon";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -11,7 +12,10 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { reserveBooking } from "~/modules/booking/service.server";
+import {
+  getBookingFlags,
+  reserveBooking,
+} from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -96,6 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
         custodianTeamMemberId: true,
         custodianTeamMember: { select: { id: true, name: true, userId: true } },
         tags: { select: { id: true } },
+        // Needed for the same Reserve eligibility check the web form runs.
+        bookingAssets: { select: { assetId: true } },
+        modelRequests: { select: { id: true } },
       },
     });
 
@@ -131,6 +138,79 @@ export async function action({ request }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Booking has no custodian. Add a custodian before reserving.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Status first, eligibility second.
+     *
+     * `reserveBooking` refuses anything that is not DRAFT anyway, but it does
+     * so AFTER this route's eligibility block. Two devices on one booking is
+     * the ordinary case: A reserves it, B's stale detail screen still shows
+     * DRAFT and B taps Reserve. If that booking also holds an unavailable
+     * asset, checking eligibility first sends B hunting for an asset to fix
+     * when the real answer is "someone already reserved this". Answering with
+     * the status also skips the eligibility queries on a request that cannot
+     * succeed.
+     */
+    if (booking.status !== BookingStatus.DRAFT) {
+      throw new ShelfError({
+        cause: null,
+        message: `This booking is already ${booking.status.toLowerCase()}. Only DRAFT bookings can be reserved.`,
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Reserve eligibility, matching the web form exactly.
+     *
+     * Web disables its Reserve button when a booking has neither assets nor
+     * model requests, or when it holds an asset marked unavailable. Those
+     * checks lived only in the web UI, so the phone could reserve a booking
+     * the website refuses — an empty reservation reserves nothing, and an
+     * unavailable asset is unavailable on either surface. The repo's own rule
+     * (see `bookings.checkin.ts`) is that the app must never be more
+     * permissive than the web, so this is enforced server-side where no client
+     * can skip it.
+     *
+     * Already-booked assets are NOT re-checked here: `reserveBooking` runs its
+     * own conflict validation inside the transaction, which is both the
+     * race-safe place for it and the one that can name the offending assets.
+     * The companion greys Reserve out for that case from the
+     * `hasAlreadyBookedAssets` flag on the booking detail payload, so this
+     * route refusing it a second time would only trade a precise message for
+     * a vague one.
+     */
+    const flags = await getBookingFlags({
+      id: booking.id,
+      organizationId,
+      assetIds: booking.bookingAssets.map((ba) => ba.assetId),
+      // A booking with no concrete assets but a model-level reservation is
+      // still a valid thing to reserve — same door web leaves open.
+      modelRequestCount: booking.modelRequests.length,
+      from: booking.from,
+      to: booking.to,
+    });
+
+    if (!flags.hasAssets && !flags.hasModelRequests) {
+      throw new ShelfError({
+        cause: null,
+        message: BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (flags.hasUnavailableAssets) {
+      throw new ShelfError({
+        cause: null,
+        message: BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS,
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,
@@ -215,6 +295,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
+    // why: message-only by contract. The companion's shared API client
+    // flattens every response to `json.error.message` (lib/api/client.ts) and
+    // supplies its own alert heading, so a `title` on the errors above would
+    // never reach a user. Keep refusal messages self-contained sentences
+    // rather than relying on a heading to complete them.
     return data(
       { error: { message: reason.message } },
       { status: reason.status }
