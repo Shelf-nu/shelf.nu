@@ -263,11 +263,32 @@ export async function updateWorkingHoursOverride({
   }
 }
 
-export async function deleteWorkingHoursOverride(overrideId: string) {
+export async function deleteWorkingHoursOverride(
+  overrideId: string,
+  /**
+   * Required: WorkingHoursOverride has no organizationId column, so without
+   * scoping through the parent WorkingHours row any authenticated caller could
+   * delete another organization's override by id.
+   */
+  organizationId: string
+) {
   try {
-    await db.workingHoursOverride.delete({
-      where: { id: overrideId },
+    // deleteMany, not delete: `delete` needs a unique where, and the scope
+    // comes through the parent WorkingHours row.
+    const deleted = await db.workingHoursOverride.deleteMany({
+      where: { id: overrideId, workingHours: { organizationId } },
     });
+
+    if (deleted.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Override not found or you don't have permission to delete it.",
+        additionalData: { overrideId, organizationId },
+        label,
+        status: 403,
+      });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,

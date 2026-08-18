@@ -146,6 +146,7 @@ describe("audit asset details service", () => {
         noteId: "note-1",
         content: "Updated content",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
       expect(db.auditNote.findFirst).toHaveBeenCalledWith({
@@ -153,6 +154,7 @@ describe("audit asset details service", () => {
           id: "note-1",
           userId: "user-1",
           auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
       });
 
@@ -184,6 +186,7 @@ describe("audit asset details service", () => {
           noteId: "nonexistent-note",
           content: "Updated content",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -199,6 +202,7 @@ describe("audit asset details service", () => {
           noteId: "note-1",
           content: "Updated content",
           userId: "wrong-user",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -214,6 +218,7 @@ describe("audit asset details service", () => {
           noteId: "note-1",
           content: "Updated content",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow();
 
@@ -228,6 +233,23 @@ describe("audit asset details service", () => {
   });
 
   describe("deleteAuditAssetNote", () => {
+    it("refuses a note belonging to another organization", async () => {
+      // The lookup is scoped through auditSession, so a note in org-2 simply
+      // is not found for a caller in org-1 -- previously `userId` alone let an
+      // author reach a note in an organization they had since left.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+
+      await expect(
+        deleteAuditAssetNote({
+          noteId: "note-in-another-org",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
+
+      expect(db.auditNote.delete).not.toHaveBeenCalled();
+    });
+
     it("successfully deletes a note owned by the user", async () => {
       const existingNote = {
         id: "note-1",
@@ -246,6 +268,7 @@ describe("audit asset details service", () => {
       const result = await deleteAuditAssetNote({
         noteId: "note-1",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
       expect(db.auditNote.findFirst).toHaveBeenCalledWith({
@@ -253,6 +276,7 @@ describe("audit asset details service", () => {
           id: "note-1",
           userId: "user-1",
           auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
       });
 
@@ -270,6 +294,7 @@ describe("audit asset details service", () => {
         deleteAuditAssetNote({
           noteId: "nonexistent-note",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -283,6 +308,7 @@ describe("audit asset details service", () => {
         deleteAuditAssetNote({
           noteId: "note-1",
           userId: "wrong-user",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 

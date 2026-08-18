@@ -7,6 +7,7 @@ import type {
   Note,
   Prisma,
   Tag,
+  Organization,
   User,
 } from "@prisma/client";
 import type { AssetType, ConsumptionType } from "@prisma/client";
@@ -184,12 +185,40 @@ export async function createNotes(
 export async function deleteNote({
   id,
   userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Note, "id"> & {
+  userId: User["id"];
+  /**
+   * Required, not optional: Note has no organizationId column, so the only
+   * scoping was `userId` -- which let an author delete a asset note belonging to
+   * an organization they are no longer part of. Making it required means the
+   * compiler, not a grep, finds every call site.
+   */
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.note.deleteMany({
-      where: { id, userId },
+    // Scoped through the parent asset, which is where organizationId lives.
+    // Still one query -- a relation filter, not an extra round trip.
+    const result = await db.note.deleteMany({
+      where: { id, userId, asset: { organizationId } },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, userId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the note",

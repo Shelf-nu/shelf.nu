@@ -1,4 +1,4 @@
-import type { AuditNote, AuditAsset, User } from "@prisma/client";
+import type { AuditNote, AuditAsset, User, Organization } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -68,10 +68,17 @@ export async function updateAuditAssetNote({
   noteId,
   content,
   userId,
+  organizationId,
 }: {
   noteId: AuditNote["id"];
   content: string;
   userId: User["id"];
+  /**
+   * Required: AuditNote has no organizationId column, so without scoping
+   * through the parent audit session an author could reach their note in an
+   * organization they had since left.
+   */
+  organizationId: Organization["id"];
 }) {
   try {
     // First verify the note exists and user owns it
@@ -80,6 +87,7 @@ export async function updateAuditAssetNote({
         id: noteId,
         userId,
         auditAssetId: { not: null }, // Ensure it's an asset-specific note
+        auditSession: { organizationId },
       },
     });
 
@@ -133,9 +141,16 @@ export async function updateAuditAssetNote({
 export async function deleteAuditAssetNote({
   noteId,
   userId,
+  organizationId,
 }: {
   noteId: AuditNote["id"];
   userId: User["id"];
+  /**
+   * Required: AuditNote has no organizationId column, so without scoping
+   * through the parent audit session an author could reach their note in an
+   * organization they had since left.
+   */
+  organizationId: Organization["id"];
 }) {
   try {
     // First verify the note exists and user owns it
@@ -144,6 +159,7 @@ export async function deleteAuditAssetNote({
         id: noteId,
         userId,
         auditAssetId: { not: null }, // Ensure it's an asset-specific note
+        auditSession: { organizationId },
       },
     });
 

@@ -114,12 +114,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        await db.auditNote.delete({
+        // deleteMany, not delete: `delete` needs a unique where, and the
+        // organization scope has to come through the parent audit session
+        // (AuditNote has no organizationId column).
+        const deleted = await db.auditNote.deleteMany({
           where: {
             id: noteId,
             userId, // Ensure user can only delete their own notes
+            auditSession: { organizationId },
           },
         });
+
+        if (deleted.count === 0) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "Note not found or you don't have permission to delete it.",
+            additionalData: { noteId, organizationId },
+            label: "Audit",
+            status: 403,
+          });
+        }
 
         return data(payload(null));
       }

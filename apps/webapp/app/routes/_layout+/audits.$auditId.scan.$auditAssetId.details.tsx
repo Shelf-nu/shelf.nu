@@ -257,8 +257,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       // Prevent deletion of auto-generated notes (UPDATE type)
-      const noteToDelete = await db.auditNote.findUnique({
-        where: { id: noteId },
+      const noteToDelete = await db.auditNote.findFirst({
+        where: { id: noteId, auditSession: { organizationId } },
         select: { type: true },
       });
 
@@ -272,11 +272,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      await db.auditNote.delete({
+      // deleteMany, not delete: `delete` requires a unique where, and the
+      // organization scope has to come through the parent audit session
+      // (AuditNote has no organizationId column). Before this, the delete was
+      // keyed on the note id ALONE -- any authenticated user who could reach
+      // this route could delete any audit note in any organization.
+      const deleted = await db.auditNote.deleteMany({
         where: {
           id: noteId,
+          auditSession: { organizationId },
         },
       });
+
+      if (deleted.count === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: "Note not found or you don't have permission to delete it.",
+          additionalData: { noteId, organizationId },
+          label: "Audit",
+          status: 403,
+        });
+      }
 
       return payload({ success: true });
     }

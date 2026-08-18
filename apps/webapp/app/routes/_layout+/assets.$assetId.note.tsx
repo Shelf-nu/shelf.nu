@@ -109,6 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await deleteNote({
           id: noteId,
           userId,
+          organizationId,
         });
 
         return payload(null);
