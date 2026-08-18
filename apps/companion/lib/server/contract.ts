@@ -51,6 +51,20 @@ export type ConfigParseResult =
 export const MIN_SERVER_MOBILE_API_VERSION = 1;
 
 /**
+ * Highest `mobileApiVersion` this build understands.
+ *
+ * why an upper bound at all: raising the minimum "in lockstep" only ever
+ * protects builds we ship AFTER the change. A self-hoster who upgrades their
+ * server to a future breaking version 2 cannot update the copies of the app
+ * already on their users' phones — so without this, those installs read the
+ * newer number, decide it clears the floor, and walk into a contract they do
+ * not implement. Failing closed turns that into the unsupported-version screen
+ * this type already models, which is the honest outcome: the phone is too old
+ * for that server and needs a store update.
+ */
+export const MAX_SERVER_MOBILE_API_VERSION = 1;
+
+/**
  * How long a domain → server resolution stays usable without re-checking.
  *
  * Without a TTL, a customer whose base URL changes would strand every already
@@ -204,7 +218,10 @@ export function parseServerConfigResponse(
     return { ok: false, reason: "malformed" };
   }
 
-  if (mobileApiVersion < MIN_SERVER_MOBILE_API_VERSION) {
+  if (
+    mobileApiVersion < MIN_SERVER_MOBILE_API_VERSION ||
+    mobileApiVersion > MAX_SERVER_MOBILE_API_VERSION
+  ) {
     return { ok: false, reason: "unsupported_version" };
   }
 

@@ -14,6 +14,7 @@ import {
   extractEmailDomain,
   isResolutionFresh,
   isSameOrigin,
+  MAX_SERVER_MOBILE_API_VERSION,
   normalizeBaseUrl,
   parseServerConfigResponse,
   RESOLUTION_CACHE_TTL_MS,
@@ -113,6 +114,28 @@ test("parseServerConfigResponse rejects a server below the version floor", () =>
     false
   );
   assert.deepEqual(result, { ok: false, reason: "unsupported_version" });
+});
+
+test("parseServerConfigResponse rejects a server above the version ceiling", () => {
+  // why: the floor alone cannot protect an install that already exists. A
+  // self-hoster upgrading to a future breaking version 2 leaves old phones in
+  // the field; without a ceiling they read "2 >= 1" and proceed into a
+  // contract they do not implement.
+  const result = parseServerConfigResponse(
+    { ...validBody, mobileApiVersion: MAX_SERVER_MOBILE_API_VERSION + 1 },
+    "https://acme.i.shelf.nu",
+    false
+  );
+  assert.deepEqual(result, { ok: false, reason: "unsupported_version" });
+});
+
+test("parseServerConfigResponse accepts a server at the version ceiling", () => {
+  const result = parseServerConfigResponse(
+    { ...validBody, mobileApiVersion: MAX_SERVER_MOBILE_API_VERSION },
+    "https://acme.i.shelf.nu",
+    false
+  );
+  assert.equal(result.ok, true);
 });
 
 test("parseServerConfigResponse rejects missing and empty fields", () => {
