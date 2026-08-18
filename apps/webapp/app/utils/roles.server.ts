@@ -9,6 +9,10 @@ import type {
   PermissionEntity,
 } from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
@@ -69,11 +73,18 @@ export function resolveEffectiveRole({
   }>;
   organizationId: string;
 }): OrganizationRoles {
-  const roles = userOrganizations.find(
-    (o) => o.organization.id === organizationId
-  )?.roles;
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
 
-  return roles?.[0] ?? OrganizationRoles.BASE;
+  // Most privileged, not roles[0]. Both callers use this to decide how much a
+  // user may see — the custodian picker's scope and booking visibility — so a
+  // membership ordered [SELF_SERVICE, ADMIN] would otherwise hand an actual
+  // admin the restricted view. Shares its ordering with SSO group resolution.
+  return (
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    OrganizationRoles.BASE
+  );
 }
 
 /**
@@ -388,14 +399,22 @@ export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles | null {
-  // We prioritize the admin group. If the user is in several, the highest role wins.
-  if (groupClaimMatches(ssoDetails.adminGroupId, groupIds)) {
-    return OrganizationRoles.ADMIN;
-  } else if (groupClaimMatches(ssoDetails.selfServiceGroupId, groupIds)) {
-    return OrganizationRoles.SELF_SERVICE;
-  } else if (groupClaimMatches(ssoDetails.baseUserGroupId, groupIds)) {
-    return OrganizationRoles.BASE;
-  } else {
-    return null;
-  }
+  // Which SsoDetails field configures the group for each role.
+  const groupField: Record<
+    (typeof SSO_ASSIGNABLE_ROLE_PRECEDENCE)[number],
+    string | null
+  > = {
+    [OrganizationRoles.ADMIN]: ssoDetails.adminGroupId,
+    [OrganizationRoles.SELF_SERVICE]: ssoDetails.selfServiceGroupId,
+    [OrganizationRoles.BASE]: ssoDetails.baseUserGroupId,
+  };
+
+  // Walk in precedence order so the highest matching role wins. The order is
+  // shared with the booking ownership guard (see role-precedence.ts) rather
+  // than restated here, so the two cannot drift.
+  return (
+    SSO_ASSIGNABLE_ROLE_PRECEDENCE.find((role) =>
+      groupClaimMatches(groupField[role], groupIds)
+    ) ?? null
+  );
 }
