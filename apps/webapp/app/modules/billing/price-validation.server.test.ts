@@ -42,10 +42,11 @@ function missingResourceError() {
 }
 
 /** A Stripe product carrying the given metadata. */
-function product(metadata: Record<string, string>) {
+function product(metadata: Record<string, string>, active = true) {
   return {
     id: "prod_1",
     deleted: false,
+    active,
     metadata,
   } as unknown as Stripe.Product;
 }
@@ -106,6 +107,7 @@ describe("assertPriceIsForAddon", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_1",
       active: true,
+      type: "recurring",
       product: BARCODE_PRODUCT,
     });
 
@@ -125,6 +127,7 @@ describe("assertPriceIsForAddon", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_tier",
       active: true,
+      type: "recurring",
       product: TIER_PRODUCT,
     });
 
@@ -137,6 +140,7 @@ describe("assertPriceIsForAddon", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_audits",
       active: true,
+      type: "recurring",
       product: AUDIT_PRODUCT,
     });
 
@@ -149,6 +153,7 @@ describe("assertPriceIsForAddon", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_old",
       active: false,
+      type: "recurring",
       product: BARCODE_PRODUCT,
     });
 
@@ -201,6 +206,7 @@ describe("assertPriceMatchesTier", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_t2",
       active: true,
+      type: "recurring",
       product: TIER_PRODUCT,
     });
 
@@ -213,6 +219,7 @@ describe("assertPriceMatchesTier", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_t1",
       active: true,
+      type: "recurring",
       product: product({ shelf_tier: "tier_1" }),
     });
 
@@ -228,6 +235,7 @@ describe("assertPriceMatchesTier", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_barcodes",
       active: true,
+      type: "recurring",
       product: BARCODE_PRODUCT,
     });
 
@@ -240,6 +248,7 @@ describe("assertPriceMatchesTier", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_old",
       active: false,
+      type: "recurring",
       product: TIER_PRODUCT,
     });
 
@@ -271,5 +280,62 @@ describe("assertPriceMatchesTier — Stripe failure classification", () => {
     await expect(
       assertPriceMatchesTier({ priceId: "price_t2", shelfTier: "tier_2" })
     ).rejects.toBe(outage);
+  });
+});
+
+describe("inactive products and non-recurring prices", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects an ARCHIVED add-on product", () => {
+    // The metadata still matches; only `active` says it is retired. Selling it
+    // would create a subscription against a product the operator withdrew.
+    expect(
+      isAddonProduct(
+        product({ product_type: "addon", addon_type: "barcodes" }, false),
+        "barcodes"
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a one-time add-on price", async () => {
+    // Every caller creates a SUBSCRIPTION.
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_once",
+      active: true,
+      type: "one_time",
+      product: BARCODE_PRODUCT,
+    });
+
+    await expect(
+      assertPriceIsForAddon({ priceId: "price_once", addonType: "barcodes" })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("rejects a one-time tier price", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_once",
+      active: true,
+      type: "one_time",
+      product: TIER_PRODUCT,
+    });
+
+    await expect(
+      assertPriceMatchesTier({ priceId: "price_once", shelfTier: "tier_2" })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("rejects an archived tier product", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_t2",
+      active: true,
+      type: "recurring",
+      product: product({ shelf_tier: "tier_2" }, false),
+    });
+
+    await expect(
+      assertPriceMatchesTier({ priceId: "price_t2", shelfTier: "tier_2" })
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

@@ -61,9 +61,11 @@ beforeEach(() => {
   mockStripe.prices.retrieve.mockResolvedValue({
     id: "price_123",
     active: true,
+    type: "recurring",
     product: {
       id: "prod_1",
       deleted: false,
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     },
   });
@@ -239,6 +241,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_month",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -246,6 +249,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_year",
       recurring: { interval: "year" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -253,6 +257,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_other",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "barcodes" },
       },
     };
@@ -271,6 +276,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_month",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -310,6 +316,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -326,6 +333,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -348,6 +356,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("trialing");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -368,6 +377,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -396,6 +406,7 @@ describe("linkAuditAddonToOrganization", () => {
       data: [linkedSub, unlinkedSub],
     });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -420,6 +431,7 @@ describe("linkAuditAddonToOrganization", () => {
     };
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -487,6 +499,7 @@ describe("getAuditSubscriptionInfo", () => {
       ],
     });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
 
@@ -680,9 +693,11 @@ describe("add-on price validation (entitlement bypass)", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_tier",
       active: true,
+      type: "recurring",
       product: {
         id: "prod_tier",
         deleted: false,
+        active: true,
         metadata: { shelf_tier: "tier_2" },
       },
     });
@@ -703,9 +718,11 @@ describe("add-on price validation (entitlement bypass)", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_tier",
       active: true,
+      type: "recurring",
       product: {
         id: "prod_tier",
         deleted: false,
+        active: true,
         metadata: { shelf_tier: "tier_2" },
       },
     });

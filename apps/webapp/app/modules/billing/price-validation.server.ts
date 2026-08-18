@@ -105,7 +105,11 @@ export function isAddonProduct(
     return false;
   }
 
+  // `active` matters as much as the metadata: an archived add-on product must
+  // not be sellable, and this predicate also filters the price lists the UI
+  // offers.
   return (
+    product.active === true &&
     product.metadata?.product_type === "addon" &&
     product.metadata?.addon_type === addonType
   );
@@ -147,8 +151,14 @@ export async function assertPriceIsForAddon({
   });
 
   // An inactive price is not purchasable; accepting one would create a
-  // subscription against a price the operator has retired.
-  if (!price.active || !isAddonProduct(price.product, addonType)) {
+  // subscription against a price the operator has retired. `recurring` because
+  // every caller creates a SUBSCRIPTION -- a one-time price would either fail
+  // at Stripe or produce a subscription that never renews.
+  if (
+    !price.active ||
+    price.type !== "recurring" ||
+    !isAddonProduct(price.product, addonType)
+  ) {
     throw new ShelfError({
       cause: null,
       // Deliberately does not describe what was wrong with the price — the
@@ -206,12 +216,14 @@ export async function assertPriceMatchesTier({
   });
 
   const product = price.product;
-  const priceTier =
-    !product || typeof product === "string" || product.deleted
-      ? undefined
-      : product.metadata?.shelf_tier;
+  const isUsableProduct =
+    !!product &&
+    typeof product !== "string" &&
+    !product.deleted &&
+    product.active === true;
+  const priceTier = isUsableProduct ? product.metadata?.shelf_tier : undefined;
 
-  if (!price.active || priceTier !== shelfTier) {
+  if (!price.active || price.type !== "recurring" || priceTier !== shelfTier) {
     throw new ShelfError({
       cause: null,
       message: "The selected plan is not available.",

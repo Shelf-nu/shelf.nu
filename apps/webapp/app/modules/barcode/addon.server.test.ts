@@ -54,9 +54,11 @@ beforeEach(() => {
   mockStripe.prices.retrieve.mockResolvedValue({
     id: "price_123",
     active: true,
+    type: "recurring",
     product: {
       id: "prod_1",
       deleted: false,
+      active: true,
       metadata: { product_type: "addon", addon_type: "barcodes" },
     },
   });
@@ -82,6 +84,7 @@ const baseTrialParams = {
 function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
   return {
     id: "prod_barcode",
+    active: true,
     metadata: { product_type: "addon", addon_type: "barcodes" },
     ...overrides,
   };
@@ -90,6 +93,7 @@ function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
 function makeNonBarcodeProduct() {
   return {
     id: "prod_other",
+    active: true,
     metadata: { product_type: "plan", addon_type: undefined },
   };
 }
@@ -662,9 +666,11 @@ describe("add-on price validation (entitlement bypass)", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_tier",
       active: true,
+      type: "recurring",
       product: {
         id: "prod_tier",
         deleted: false,
+        active: true,
         metadata: { shelf_tier: "tier_2" },
       },
     });
@@ -683,9 +689,11 @@ describe("add-on price validation (entitlement bypass)", () => {
     mockStripe.prices.retrieve.mockResolvedValue({
       id: "price_tier",
       active: true,
+      type: "recurring",
       product: {
         id: "prod_tier",
         deleted: false,
+        active: true,
         metadata: { shelf_tier: "tier_2" },
       },
     });
