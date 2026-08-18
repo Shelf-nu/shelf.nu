@@ -30,6 +30,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
+// why: React Router v7 single fetch — `data()` must return a real Response
+// so the action's error path has an assertable status.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };
@@ -63,10 +65,15 @@ vi.mock("~/modules/barcode/addon.server", () => ({
 const { mockGetSelectedOrganization } = vi.hoisted(() => ({
   mockGetSelectedOrganization: vi.fn(),
 }));
+// why: resolves the caller's memberships from the session and DB. Mocking it
+// is how this test chooses whether the caller is ADMIN or OWNER, which is the
+// entire variable under test.
 vi.mock("~/modules/organization/context.server", () => ({
   getSelectedOrganization: mockGetSelectedOrganization,
 }));
 
+// why: a DB read for the Stripe customer name fields; irrelevant to the owner
+// check and would otherwise need a database.
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn().mockResolvedValue({
     customerId: "cus_1",
@@ -76,12 +83,15 @@ vi.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: real Stripe calls. `customerHasPaymentMethod` returning false also
+// keeps the consent branch out of the way of the assertion.
 vi.mock("~/utils/stripe.server", () => ({
   getOrCreateCustomerId: vi.fn().mockResolvedValue("cus_1"),
   customerHasPaymentMethod: vi.fn().mockResolvedValue(false),
   getDomainUrl: vi.fn().mockReturnValue("https://app.shelf.nu"),
 }));
 
+// why: sends a real email on the success path.
 vi.mock("~/emails/stripe/barcode-trial-welcome", () => ({
   sendBarcodeTrialWelcomeEmail: vi.fn(),
 }));
