@@ -17,6 +17,7 @@ import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
 import { formatPersonName } from "@/lib/person-name";
+import { TagChip } from "@/components/tag-chip";
 import {
   consumeBookingDirty,
   markBookingsListDirty,
@@ -920,17 +921,11 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
-  const creatorName = formatPersonName(
-    booking?.creator?.firstName,
-    booking?.creator?.lastName
-  );
+  const creatorName = formatPersonName(booking.creator);
 
   const custodianName =
     booking.custodianTeamMember?.name ||
-    formatPersonName(
-      booking.custodianUser?.firstName,
-      booking.custodianUser?.lastName
-    );
+    formatPersonName(booking.custodianUser);
 
   // Lifecycle counts for the progress bar: every asset is in exactly one of three
   // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
@@ -1126,16 +1121,16 @@ export default function BookingDetailScreen() {
                 ) : null}
               </View>
 
-              {/* Tags were also already in the payload and shown by web. */}
-              {booking.tags.length > 0 && (
+              {/* Tag names were already in the payload and shown by web; the
+                  colour they are keyed by was not, and was added with the
+                  chip so the phone can tell two tags apart the way web can. */}
+              {booking.tags?.length ? (
                 <View style={styles.tagRow}>
                   {booking.tags.map((tag) => (
-                    <View key={tag.id} style={styles.tagChip}>
-                      <Text style={styles.tagChipText}>{tag.name}</Text>
-                    </View>
+                    <TagChip key={tag.id} tag={tag} />
                   ))}
                 </View>
-              )}
+              ) : null}
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
@@ -2004,18 +1999,6 @@ const useStyles = createStyles((colors, shadows) => ({
     flexWrap: "wrap",
     gap: spacing.xs,
     marginTop: spacing.sm,
-  },
-  tagChip: {
-    backgroundColor: colors.backgroundTertiary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  tagChipText: {
-    fontSize: fontSize.xs,
-    color: colors.foregroundSecondary,
   },
   infoRows: {
     gap: spacing.sm,
