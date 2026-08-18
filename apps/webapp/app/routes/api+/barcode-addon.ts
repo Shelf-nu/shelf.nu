@@ -16,7 +16,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import {
+  assertIsOrganizationOwner,
+  requirePermission,
+} from "~/utils/roles.server";
 import {
   customerHasPaymentMethod,
   getDomainUrl,
@@ -49,8 +52,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const { organizationId, currentOrganization } =
+    const { organizationId, currentOrganization, userOrganizations } =
       await getSelectedOrganization({ userId, request });
+
+    // `subscription:update` is not enough here. ADMIN short-circuits to
+    // allow-all in `hasPermission`, so it clears that gate -- but this spends
+    // money on the owner's card and burns the workspace's ONE free trial, an
+    // irreversible flag. The purchase UI is owner-only; this makes the action
+    // agree with it.
+    assertIsOrganizationOwner({
+      userOrganizations,
+      organizationId,
+      action: "start or buy the barcodes add-on",
+    });
 
     const user = await getUserByID(userId, {
       select: {
