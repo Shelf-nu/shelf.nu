@@ -457,6 +457,33 @@ describe("POST /api/mobile/asset/create", () => {
       }
     );
 
+    it("cannot inject a Markdoc tag via a quantity-tracked asset's unit label", async () => {
+      // The QT phrasing splices `unitOfMeasure` in as LITERAL text, not inside a
+      // quoted attribute, so the escaping that protects the location name does
+      // not cover it — `sanitizeUnitOfMeasureLabel` stripping {, % and } does.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          type: "QUANTITY_TRACKED",
+          unitOfMeasure: '{% link to="javascript:alert(1)" text="x" /%}',
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
+        } as unknown as Partial<CreatedAsset>)
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "Screws", locationId: "loc-1" }),
+        })
+      );
+
+      const tags = [...Markdoc.parse(noteContents()[1]).walk()].filter(
+        (node) => node.type === "tag"
+      );
+      expect(tags).toHaveLength(2);
+      for (const tag of tags) {
+        expect(String(tag.attributes.to)).toMatch(/^\//);
+      }
+    });
+
     it("writes only the creation note when the asset has no location", async () => {
       vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
