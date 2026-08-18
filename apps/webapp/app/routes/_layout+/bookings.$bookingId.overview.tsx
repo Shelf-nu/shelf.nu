@@ -1500,7 +1500,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, from: true, to: true },
+          // creatorId/custodianUserId feed the ownership guard below.
+          select: {
+            id: true,
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
         }),
         getWorkingHoursForOrganization(organizationId),
         getBookingSettingsForOrganization(organizationId),
@@ -1537,6 +1545,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Cross-user guard for every mutating intent.
+     *
+     * Hoisted rather than repeated per case, deliberately: the route had one
+     * ownership check (inside `delete`) and fifteen intents, so each new intent
+     * silently arrived unguarded. SELF_SERVICE legitimately holds
+     * `booking:checkout`, `checkin`, `archive`, `cancel` and `extend`, and none
+     * of the services behind them checks ownership -- `checkoutBooking`,
+     * `checkinBooking`, `archiveBooking` and `cancelBooking` all have zero
+     * ownership references -- so this is the only thing standing between a
+     * restricted role and someone else's booking.
+     *
+     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
+     * before this point, with its own check, because it must not fetch the
+     * booking first. The compiler confirms it: `intent` has already narrowed to
+     * exclude it.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: intent,
       });
     }
 
@@ -1889,20 +1923,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
-        // Cross-user guard, mirroring api+/mobile+/bookings.archive.ts. The
-        // permission gate alone is not enough: SELF_SERVICE legitimately holds
-        // `booking:archive`, so without this they can archive anyone's booking.
-        // `archiveBooking` does not check ownership itself. No-op for
-        // ADMIN/OWNER.
-        if (isSelfServiceOrBase) {
-          validateBookingOwnership({
-            booking: await getBooking({ id, organizationId, request }),
-            userId,
-            role,
-            action: "archive",
-          });
-        }
-
         await archiveBooking({ id, organizationId, userId: user.id });
 
         sendNotification({
@@ -1922,17 +1942,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             additionalData: { userId, id, organizationId, role },
           }
         );
-        // Same guard as archive above — `cancelBooking` does not check
-        // ownership, and SELF_SERVICE holds `booking:cancel`.
-        if (isSelfServiceOrBase) {
-          validateBookingOwnership({
-            booking: await getBooking({ id, organizationId, request }),
-            userId,
-            role,
-            action: "cancel",
-          });
-        }
-
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
