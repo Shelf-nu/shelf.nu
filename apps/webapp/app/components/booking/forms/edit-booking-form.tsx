@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -335,13 +336,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets
                     ? {
+                        // Wording lives in @shelf/labels so the tooltip, the
+                        // mobile route's 400, the in-transaction guard and the
+                        // companion's inline note can never say four different
+                        // things about the same rule (they did, and this copy
+                        // carried an "unavailble" typo).
                         reason: bookingFlags?.hasUnavailableAssets
-                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
                           : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
-                          : "You need to add assets or reserve at least one model on your booking before you can reserve it",
+                          : BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
                       }
                     : false
                 }

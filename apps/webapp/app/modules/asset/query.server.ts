@@ -10,10 +10,8 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
-import {
-  CUSTOM_FIELD_SEARCH_PATHS,
-  splitAssetSearchTerms,
-} from "./search.server";
+import { buildAssetSearchUnion } from "./search-union.server";
+import { splitAssetSearchTerms } from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -67,76 +65,20 @@ export function generateWhereClause(
   }
 
   if (search) {
-    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
-    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
-    // cannot fan into unbounded OR groups in the generated SQL.
-    const words = splitAssetSearchTerms(search);
+    // Shared bounded parser (lowercasing matches buildAssetSearchUnion's
+    // precondition; ILIKE is case-insensitive anyway): caps the honored terms
+    // at MAX_ASSET_SEARCH_TERMS so a malformed comma paste cannot fan into
+    // unbounded UNION branches in the generated SQL.
+    const terms = splitAssetSearchTerms(search);
 
-    if (words.length > 0) {
-      // Create OR conditions for each search term, searching across multiple fields
-      const searchConditions = words.map(
-        (term) => Prisma.sql`(
-          a.title ILIKE ${`%${term}%`} OR
-          a.description ILIKE ${`%${term}%`} OR
-          a."sequentialId" ILIKE ${`%${term}%`} OR
-          c.name ILIKE ${`%${term}%`} OR
-          l.name ILIKE ${`%${term}%`} OR
-          EXISTS (
-            -- Tag-name search. Rewritten from the fanning join on
-            -- _AssetToTag + Tag with t.name ILIKE (which was the sole reason
-            -- the outer query needed a GROUP BY) to a per-asset EXISTS, so
-            -- the slim pagination phase can drop the tag joins and the GROUP
-            -- BY entirely. Any-tag-match semantics are preserved: the asset
-            -- matches iff at least one of its tags' names ILIKE the term
-            -- (EXISTS dedups the same way GROUP BY did).
-            SELECT 1 FROM public."_AssetToTag" att
-            JOIN public."Tag" t ON att."B" = t.id
-            WHERE att."A" = a.id AND t.name ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            -- Custodian search. Custody moved to the custody_agg LATERAL
-            -- (multi-custodian), so there is no top-level tm/u join to
-            -- reference here — match against ALL of the asset's
-            -- custodians via a per-asset scoped subquery instead.
-            SELECT 1 FROM public."Custody" cust
-            LEFT JOIN public."TeamMember" ctm ON cust."teamMemberId" = ctm.id
-            LEFT JOIN public."User" cusr ON ctm."userId" = cusr.id
-            WHERE cust."assetId" = a.id AND (
-              ctm.name ILIKE ${`%${term}%`} OR
-              cusr."firstName" ILIKE ${`%${term}%`} OR
-              cusr."lastName" ILIKE ${`%${term}%`}
-            )
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Qr" q
-            WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Barcode" b 
-            WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND (
-              ${Prisma.join(
-                CUSTOM_FIELD_SEARCH_PATHS.map(
-                  (jsonPath) =>
-                    Prisma.sql`acfv.value#>>${Prisma.raw(
-                      `'{${jsonPath}}'`
-                    )} ILIKE ${`%${term}%`}`
-                ),
-                " OR "
-              )}
-            )
-          )
-        )`
-      );
-
-      // Combine all search terms with OR
-      whereClause = Prisma.sql`${whereClause} AND (${Prisma.join(
-        searchConditions,
-        " OR "
-      )})`;
+    if (terms.length > 0) {
+      // Search = "asset id is in the org-scoped UNION of matching ids". Each
+      // of the 10 sources is its own index-driven, org-scoped branch inside
+      // the UNION (see buildAssetSearchUnion), replacing the old multi-table
+      // OR that forced cross-org seq scans.
+      whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(
+        { organizationId, terms }
+      )}`;
     } else {
       // Typed input yielding zero terms (whitespace / bare commas) matches
       // nothing — mirrors getAssets' fail-closed guard so the same search
@@ -2613,11 +2555,12 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
  * joins a given request actually needs. Each is a 1:1 join or LATERAL
  * primary-pick (no fan-out), a verbatim mirror of the corresponding join in
  * {@link assetQueryJoins}. Gated in {@link buildAdvancedAssetsQuery} on whether
- * the active sort references the joined name (kit/category/assetModel/location)
- * and — for category/location — whether a text search is active (the search
- * predicate references `c.name` / `l.name`). why: joining all four for every
- * matching asset even under the default `createdAt` sort was the residual O(N)
- * cost that kept the rewrite ~2× instead of ~10× faster.
+ * the active sort references the joined name (kit/category/assetModel/location).
+ * Search no longer needs Category/Location here — it narrows by
+ * `a."id" IN (<UNION>)` (see {@link generateWhereClause}), which never
+ * references `c.name` / `l.name` at this level. why: joining all four for
+ * every matching asset even under the default `createdAt` sort was the
+ * residual O(N) cost that kept the rewrite ~2× instead of ~10× faster.
  */
 const CHEAP_KIT_JOIN = Prisma.sql`
     LEFT JOIN LATERAL (
@@ -2760,12 +2703,6 @@ export type BuildAdvancedAssetsQueryParams = {
   withBarcodes: boolean;
   /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
   paginationClause: Prisma.Sql;
-  /**
-   * Whether a free-text search is active. The search predicate references
-   * `c.name` / `l.name`, so the cheap phase must join Category + Location even
-   * when no category/location sort is active.
-   */
-  hasSearch: boolean;
 };
 
 /**
@@ -2796,7 +2733,6 @@ export function buildAdvancedAssetsQuery({
   withBookings,
   withBarcodes,
   paginationClause,
-  hasSearch,
 }: BuildAdvancedAssetsQueryParams): Prisma.Sql {
   const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
 
@@ -2817,13 +2753,13 @@ export function buildAdvancedAssetsQuery({
   const custodyJoinsActive = custodyFilterActive || custodySort;
 
   // Base name-joins are gated so the slim phase stays O(1) joins under the
-  // common default sort. Category/Location are also needed for text search
-  // (its WHERE references c.name / l.name); the SELECT alias is only needed
-  // when the matching name sort is active (search reads c.name/l.name directly).
+  // common default sort. Search no longer references c.name / l.name at the
+  // top level (it goes through a.id IN (UNION)), so these joins are needed
+  // only when the matching name sort is active.
   const needKitJoin = kitNameSort;
-  const needCategoryJoin = categoryNameSort || hasSearch;
+  const needCategoryJoin = categoryNameSort;
   const needAssetModelJoin = assetModelNameSort;
-  const needLocationJoin = locationNameSort || hasSearch;
+  const needLocationJoin = locationNameSort;
 
   const kitNameSelect = kitNameSort
     ? Prisma.sql`,

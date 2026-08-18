@@ -118,6 +118,12 @@ export type AssetQuantityFields = {
 export type AssetListItem = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"). Lets a row show WHICH id matched a
+   * SAM-ID search instead of identifying itself by title alone. Absent on older
+   * servers.
+   */
+  sequentialId?: string | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -177,6 +183,12 @@ export type AssetQuantityBreakdown = {
 export type AssetDetail = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"); what the scanner accepts as a SAM
+   * ID. Absent on older servers — this app build ships before the webapp half
+   * reaches every self-hosted deployment.
+   */
+  sequentialId?: string | null;
   description: string | null;
   status: string;
   mainImage: string | null;
@@ -187,6 +199,13 @@ export type AssetDetail = {
   updatedAt: string;
   organizationId: string;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Name only — cover images arrive pre-resolved in mainImage/thumbnailImage,
+   * and there is no mobile asset-model screen to navigate to. Absent on older
+   * servers, and on the quantity-custody / adjust-quantity responses, which are
+   * shaped from the canonical mobile asset select rather than the detail one.
+   */
+  assetModel?: { name: string } | null;
   location: { id: string; name: string } | null;
   custody: {
     createdAt: string;
@@ -583,6 +602,8 @@ export type BookingAsset = {
   id: string;
   title: string;
   status: string;
+  /** False when the asset is flagged unavailable for bookings. */
+  availableToBook?: boolean;
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
@@ -655,11 +676,15 @@ export type BookingDetail = {
   updatedAt: string;
   creator: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
   };
   custodianUser: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
@@ -668,7 +693,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
-  tags: { id: string; name: string }[];
+  tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
@@ -678,6 +703,16 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * True when any asset on this booking is already booked for the same window
+   * — the third rule web's Reserve button disables on, and the one the client
+   * cannot derive from `assets` (it needs the overlapping-booking query).
+   *
+   * Sent for DRAFT bookings only, since Reserve is its sole consumer. Optional
+   * because a not-yet-updated server (rolling deploy) omits it; treat absent
+   * as `false` rather than blocking Reserve.
+   */
+  hasAlreadyBookedAssets?: boolean;
   /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview

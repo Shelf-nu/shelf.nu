@@ -1380,8 +1380,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      archive: PermissionAction.update,
-      cancel: PermissionAction.update,
+      // archive/cancel have dedicated permissions, and BASE deliberately holds
+      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
+      // user archive or cancel bookings the role was never granted.
+      archive: PermissionAction.archive,
+      cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.extend,
@@ -1497,7 +1500,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, from: true, to: true },
+          // creatorId/custodianUserId feed the ownership guard below.
+          select: {
+            id: true,
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
         }),
         getWorkingHoursForOrganization(organizationId),
         getBookingSettingsForOrganization(organizationId),
@@ -1534,6 +1545,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Cross-user guard for every mutating intent.
+     *
+     * Hoisted rather than repeated per case, deliberately: the route had one
+     * ownership check (inside `delete`) and fifteen intents, so each new intent
+     * silently arrived unguarded. SELF_SERVICE legitimately holds
+     * `booking:checkout`, `checkin`, `archive`, `cancel` and `extend`, and none
+     * of the services behind them checks ownership -- `checkoutBooking`,
+     * `checkinBooking`, `archiveBooking` and `cancelBooking` all have zero
+     * ownership references -- so this is the only thing standing between a
+     * restricted role and someone else's booking.
+     *
+     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
+     * before this point, with its own check, because it must not fetch the
+     * booking first. The compiler confirms it: `intent` has already narrowed to
+     * exclude it.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: intent,
       });
     }
 

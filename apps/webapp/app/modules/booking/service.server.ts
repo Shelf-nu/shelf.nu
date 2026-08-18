@@ -15,6 +15,10 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
+import {
+  BOOKING_EMPTY_RESERVED_MESSAGE,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+} from "@shelf/labels";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -36,7 +40,14 @@ import {
   getAssetAvailability,
 } from "~/modules/asset/availability.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
+} from "~/modules/asset/placement-reconcile.server";
+import {
+  isDirectBookingBlockedByKit,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
@@ -72,7 +83,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapAssetWithCountForNote,
@@ -139,7 +150,7 @@ import type {
 } from "./types";
 import {
   createBookingConflictConditions,
-  getBookingWhereInput,
+  getBulkBookingsWhereInput,
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -1551,6 +1562,12 @@ export async function reserveBooking({
                   ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
                     .asset.select,
                   status: true,
+                  // why: `availableToBook` is deliberately NOT selected here.
+                  // The availability guard reads it through `tx` immediately
+                  // before the status write (see the transaction below); this
+                  // outer read happens before the working-hours and settings
+                  // queries, so its copy would be stale at exactly the moment
+                  // it mattered.
                   // Needed for the QUANTITY_TRACKED windowed-availability
                   // guard's shortfall message (see the DRAFT → RESERVED
                   // transaction below).
@@ -1777,6 +1794,65 @@ export async function reserveBooking({
     );
 
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * Eligibility, re-read through `tx` immediately before the status write.
+       *
+       * The callers check this earlier - the web overview disables its Reserve
+       * button from loader flags, the mobile route refuses up front with a
+       * better message - but both read the booking before the working-hours and
+       * settings queries, so a concurrent edit could still land in RESERVED.
+       * `availableToBook` is the one that really moves: it is an asset-level
+       * flag toggled from the asset page, with nothing to do with this booking.
+       *
+       * This does not make the transition serializable on its own. Closing the
+       * window completely would mean locking every asset in the booking, which
+       * the QT path below already does for the assets whose pool is contested.
+       * This narrows it to the width of the transaction.
+       */
+      // Constant-cost probes, not a materialised list. Both questions are
+      // existence questions, and this runs inside the transaction that goes on
+      // to take a per-asset advisory lock for every QT asset below — loading N
+      // slices and their assets here would widen that lock window for nothing.
+      const sliceCount = await tx.bookingAsset.count({
+        where: { bookingId: id },
+      });
+
+      if (sliceCount === 0) {
+        const modelRequestCount = await tx.bookingModelRequest.count({
+          where: { bookingId: id },
+        });
+
+        if (modelRequestCount === 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Nothing to reserve",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      // Only worth asking when the booking actually holds assets.
+      if (sliceCount > 0) {
+        const unavailableSlice = await tx.bookingAsset.findFirst({
+          where: { bookingId: id, asset: { availableToBook: false } },
+          select: { id: true },
+        });
+
+        if (unavailableSlice) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Unavailable assets",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
       if (uniqueQtyTrackedAssetIds.length > 0) {
         const assetById = new Map(
           qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
@@ -4645,6 +4721,26 @@ export async function checkinBooking({
               fromValue: beforeQuantity,
               toValue: beforeQuantity - poolDecrement,
             });
+
+            /**
+             * Consumed / lost / damaged units are destroyed, which lowers the
+             * total the PRD's location-axis invariant is measured against
+             * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+             * Asset.quantity`). Reconcile in the same tx, or a placement sum
+             * that was valid before check-in silently exceeds the total and
+             * blocks the next legitimate placement edit.
+             */
+            const reconcile = await reconcileManualPlacementsForStockDecrease({
+              assetId: slice.assetId,
+              newTotal: beforeQuantity - poolDecrement,
+              tx,
+            });
+
+            reportAmbiguousPlacementReconcile({
+              result: reconcile,
+              context: "Check-in",
+              additionalData: { assetId: slice.assetId, bookingId: id },
+            });
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -5945,6 +6041,23 @@ export async function partialCheckinBooking({
             field: "quantity",
             fromValue: beforeQuantity,
             toValue: beforeQuantity - poolDecrement,
+          });
+
+          /**
+           * Same reconcile as the full check-in path above: destroyed units
+           * lower the total the location-axis invariant is measured against,
+           * so bring the placement sum back inside it within this tx.
+           */
+          const reconcile = await reconcileManualPlacementsForStockDecrease({
+            assetId: disp.assetId,
+            newTotal: beforeQuantity - poolDecrement,
+            tx,
+          });
+
+          reportAmbiguousPlacementReconcile({
+            result: reconcile,
+            context: "Partial check-in",
+            additionalData: { assetId: disp.assetId, bookingId: id },
           });
         }
 
@@ -10303,6 +10416,53 @@ export async function removeAssets({
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
       /**
+       * The zero-asset invariant, defended from the removal side.
+       *
+       * `reserveBooking` refuses to take a booking into RESERVED with nothing
+       * in it, but that only guards the transition — emptying the booking
+       * afterwards reached exactly the same state from the other direction,
+       * leaving a booking that reserves nothing and cannot be checked out.
+       * Enforced here, in the shared service, rather than at the six call
+       * sites (web overview bulk + single, manage-assets, manage-kits, the
+       * mobile endpoint), so no future caller can miss it.
+       *
+       * RESERVED only, deliberately. An empty DRAFT is normal
+       * work-in-progress; COMPLETE / ARCHIVED / CANCELLED hold nothing any
+       * more; and ONGOING / OVERDUE must stay emptiable, because pulling a
+       * checked-out asset off a live booking is a real correction flow that
+       * this service already reconciles asset status for (bug #99 coverage).
+       *
+       * Throwing inside the tx rolls the delete back, so the booking is never
+       * observably empty.
+       */
+      if (sourceBooking.status === BookingStatus.RESERVED) {
+        const remainingSlices = await tx.bookingAsset.count({
+          where: { bookingId: id },
+        });
+
+        if (remainingSlices === 0) {
+          // Model reservations survive asset removal (the rollback below only
+          // decrements `fulfilledQuantity`), so a booking held purely by
+          // outstanding model requests is still holding something.
+          const remainingModelRequests = await tx.bookingModelRequest.count({
+            where: { bookingId: id },
+          });
+
+          if (remainingModelRequests === 0) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              title: "Booking would be left empty",
+              message: BOOKING_EMPTY_RESERVED_MESSAGE,
+              status: 400,
+              shouldBeCaptured: false,
+              additionalData: { bookingId: id, organizationId },
+            });
+          }
+        }
+      }
+
+      /**
        * Re-open reservations that the removed rows had discharged.
        *
        * Counted from `bookingModelRequestId` — the row's own record of which
@@ -11327,9 +11487,16 @@ export async function getBookingFlags(
       id: { in: booking.assetIds },
       organizationId: booking.organizationId,
     },
-    include: {
-      category: true,
-      custody: true,
+    // why: `select`, not `include`. This function returns only booleans, so the
+    // row shape is private to it — and the previous `include` fetched every
+    // Asset scalar plus `category` and `custody` relations that no flag below
+    // reads (`hasAssetsInCustody` is derived from `status`, not the relation).
+    // On a large booking that payload is paid on every Reserve tap.
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      availableToBook: true,
       assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
@@ -11371,7 +11538,7 @@ export async function getBookingFlags(
               : { id: { not: booking.id } }),
           },
         },
-        include: {
+        select: {
           booking: {
             select: { id: true, status: true },
           },
@@ -11450,20 +11617,29 @@ export async function bulkDeleteBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -11616,6 +11792,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -11627,14 +11804,22 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const bookings = await db.booking.findMany({
       where,
@@ -11813,20 +11998,29 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
+  role,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** Caller's effective role — decides whether ownership scoping applies */
+  role: OrganizationRoles;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      role,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -12872,8 +13066,15 @@ export async function getExistingBookingDetails(
 /**
  * Resolves the subset of the given asset IDs that can be added to a booking.
  *
- * Assets that belong to a kit are rejected (kits are added as a unit, not as
- * loose assets).
+ * INDIVIDUAL assets that belong to a kit are rejected — they live entirely
+ * inside their kit, so kits are added as a unit rather than as loose assets.
+ *
+ * QUANTITY_TRACKED kit members are ACCEPTED: each `AssetKit` row claims only a
+ * slice of the pool (`AssetKit.quantity`) and a QT asset may sit in several
+ * kits at once while keeping free-pool units, which are legitimately bookable
+ * on their own. That's the same rule the booking page's asset picker already
+ * applies. Over-allocation is caught downstream by the windowed availability
+ * guard in `updateBookingAssets`. See `isDirectBookingBlockedByKit`.
  *
  * @param assetIds - Asset IDs sourced from request/form input
  * @param organizationId - The caller's validated organization ID. Scopes the
@@ -12881,8 +13082,8 @@ export async function getExistingBookingDetails(
  *   be returned), preventing a cross-org IDOR where an attacker in Org A could
  *   add Org B's assets to a booking.
  * @returns The IDs of the assets that exist in `organizationId` and are not
- *   part of a kit
- * @throws {ShelfError} If any selected asset belongs to a kit
+ *   blocked by kit membership
+ * @throws {ShelfError} If any selected INDIVIDUAL asset belongs to a kit
  */
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][],
@@ -12896,15 +13097,18 @@ export async function getAvailableAssetsIdsForBooking(
       select: {
         status: true,
         id: true,
+        // `type` decides whether kit membership actually blocks the add —
+        // only INDIVIDUAL members are exclusive to their kit.
+        type: true,
         assetKits: { select: { kitId: true } },
       },
     });
 
-    if (selectedAssets.some((asset) => asset.assetKits.length > 0)) {
-      // User-input validation, not a server fault: adding kit-member assets
-      // directly is disallowed (kits are added as a unit). A 400 keeps this out
-      // of the Sentry error pipeline (handled client error). The outer catch
-      // re-wraps but inherits status/shouldBeCaptured from this cause. See
+    if (selectedAssets.some(isDirectBookingBlockedByKit)) {
+      // User-input validation, not a server fault: adding INDIVIDUAL kit-member
+      // assets directly is disallowed (kits are added as a unit). A 400 keeps
+      // this out of the Sentry error pipeline (handled client error). The outer
+      // catch re-wraps but inherits status/shouldBeCaptured from this cause. See
       // SHELF-WEBAPP-21Y.
       throw new ShelfError({
         cause: null,

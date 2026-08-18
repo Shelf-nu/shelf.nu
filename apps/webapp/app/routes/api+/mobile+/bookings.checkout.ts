@@ -2,12 +2,17 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -56,7 +61,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // foreign-org id 404s.
     const existingBooking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      // creatorId/custodianUserId feed the ownership guard below.
+      select: {
+        from: true,
+        to: true,
+        creatorId: true,
+        custodianUserId: true,
+      },
     });
 
     if (!existingBooking) {
@@ -65,6 +76,20 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
+
+    // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
+    // permission map, so the role gate above passes for ANY booking id in the
+    // organization — they may only check out bookings they created or are
+    // custodian of. No-op for ADMIN/OWNER. `checkoutBooking` does not check
+    // ownership itself, so without this the route is more permissive than web.
+    // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role: resolveMostPrivilegedRole(roles),
+      action: "check out",
+    });
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
