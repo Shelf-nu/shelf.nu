@@ -1,4 +1,5 @@
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { DateTime } from "luxon";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -144,6 +145,28 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     /**
+     * Status first, eligibility second.
+     *
+     * `reserveBooking` refuses anything that is not DRAFT anyway, but it does
+     * so AFTER this route's eligibility block. Two devices on one booking is
+     * the ordinary case: A reserves it, B's stale detail screen still shows
+     * DRAFT and B taps Reserve. If that booking also holds an unavailable
+     * asset, checking eligibility first sends B hunting for an asset to fix
+     * when the real answer is "someone already reserved this". Answering with
+     * the status also skips the eligibility queries on a request that cannot
+     * succeed.
+     */
+    if (booking.status !== BookingStatus.DRAFT) {
+      throw new ShelfError({
+        cause: null,
+        message: `This booking is already ${booking.status.toLowerCase()}. Only DRAFT bookings can be reserved.`,
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
      * Reserve eligibility, matching the web form exactly.
      *
      * Web disables its Reserve button when a booking has neither assets nor
@@ -156,8 +179,12 @@ export async function action({ request }: ActionFunctionArgs) {
      * can skip it.
      *
      * Already-booked assets are NOT re-checked here: `reserveBooking` runs its
-     * own conflict validation inside the transaction, which is the race-safe
-     * place for it.
+     * own conflict validation inside the transaction, which is both the
+     * race-safe place for it and the one that can name the offending assets.
+     * The companion greys Reserve out for that case from the
+     * `hasAlreadyBookedAssets` flag on the booking detail payload, so this
+     * route refusing it a second time would only trade a precise message for
+     * a vague one.
      */
     const flags = await getBookingFlags({
       id: booking.id,
@@ -173,9 +200,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!flags.hasAssets && !flags.hasModelRequests) {
       throw new ShelfError({
         cause: null,
-        title: "Nothing to reserve",
-        message:
-          "Add assets or reserve at least one model on this booking before you reserve it.",
+        message: BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,
@@ -185,9 +210,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (flags.hasUnavailableAssets) {
       throw new ShelfError({
         cause: null,
-        title: "Unavailable assets",
-        message:
-          "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
+        message: BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS,
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,
@@ -272,6 +295,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
+    // why: message-only by contract. The companion's shared API client
+    // flattens every response to `json.error.message` (lib/api/client.ts) and
+    // supplies its own alert heading, so a `title` on the errors above would
+    // never reach a user. Keep refusal messages self-contained sentences
+    // rather than relying on a heading to complete them.
     return data(
       { error: { message: reason.message } },
       { status: reason.status }
