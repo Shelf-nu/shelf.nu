@@ -925,3 +925,53 @@ export function assertBookingIsCheckinable({
     });
   }
 }
+
+/**
+ * Takes a row-level lock on a booking, then returns its status.
+ *
+ * **Must be called inside a `db.$transaction()` interactive transaction**, and
+ * before any write that depends on the booking still being in a given status.
+ *
+ * A plain `SELECT` inside a transaction is NOT enough. Under PostgreSQL's
+ * default READ COMMITTED isolation it takes no lock, so a concurrent check-in,
+ * archive or cancellation can commit between the read and the write and this
+ * transaction still succeeds — mutating a booking that is closed by the time
+ * it commits. Reading inside the transaction narrows that window; only the
+ * lock closes it.
+ *
+ * The predicate is **org-scoped**, matching `lockAssetForQuantityUpdate`: a
+ * caller passing a foreign-org booking id matches zero rows, so it takes no
+ * lock and learns nothing about whether the id exists. Locking on `id` alone
+ * would hand an attacker a cross-tenant lock oracle and a contention vector.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param bookingId - Booking to lock
+ * @param organizationId - Caller's validated organization; scopes the lock
+ * @returns The locked booking's current status
+ * @throws {ShelfError} 404 when the booking is missing or cross-org
+ * @see {@link file://./../consumption-log/quantity-lock.server.ts} the asset equivalent
+ */
+export async function lockBookingForStatusCheck(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  bookingId: Booking["id"],
+  organizationId: Booking["organizationId"]
+): Promise<BookingStatus> {
+  // `Booking.status` carries no `@map`, so the Prisma field name IS the column
+  // name here — checked against the schema, per the raw-SQL rule.
+  const rows = await tx.$queryRaw<{ status: BookingStatus }[]>`
+    SELECT status FROM "Booking" WHERE id = ${bookingId} AND "organizationId" = ${organizationId} FOR UPDATE
+  `;
+
+  if (!rows || rows.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { bookingId, organizationId },
+      label,
+      status: 404,
+    });
+  }
+
+  return rows[0].status;
+}

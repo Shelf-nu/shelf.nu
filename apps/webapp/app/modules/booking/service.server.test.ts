@@ -102,6 +102,14 @@ vitest.mock("~/database/db.server", () => ({
           : Promise.all(callbackOrArray)
       ),
     $executeRaw: vitest.fn().mockResolvedValue(0),
+    // why: `lockBookingForStatusCheck` issues a raw `SELECT … FOR UPDATE`,
+    // which the model-shaped mock below cannot express. Defaults to an OPEN
+    // status so every pre-existing test is unaffected; the status-guard tests
+    // override it. ONGOING specifically: it is the only status that satisfies
+    // BOTH assertions (open for the asset-mutation paths, in-flight for
+    // check-in), so one default serves every caller. A string literal, not
+    // BookingStatus.ONGOING — this factory is hoisted above the imports.
+    $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -1762,12 +1770,13 @@ describe("updateBookingAssets", () => {
     // written to. The guard now reads the status inside the same transaction
     // as the write, which closes that window rather than narrowing it.
     // (detail.dev D055)
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValueOnce({
-      id: "booking-1",
-      name: "Test Booking",
-      status,
-    });
+    // why: the guard takes a row lock via raw SQL, so this is the read it
+    // asserts on. Once, not persistent: clearAllMocks clears call history but
+    // NOT implementations, and a persistent closed status would fail every
+    // later test in this describe for the wrong reason.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status },
+    ]);
 
     await expect(
       updateBookingAssets({
@@ -3936,13 +3945,14 @@ describe("fulfilModelRequestsAndCheckout", () => {
     });
     const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
 
-    // A three-deep queue, in the order the flow reads: the pre-tx load, the
-    // in-tx booking-status guard on the scanned-asset write path (RESERVED, so
-    // it passes), then the post-tx hydrate. Ordering matters — a missing entry
-    // does not fail loudly, it shifts every later read by one and the function
-    // returns whatever the exhausted mock yields.
+    // why: no database in unit tests, so every booking read this flow makes
+    // has to be queued here — the pre-tx load, then the post-tx hydrate. The
+    // in-tx status guard does NOT consume an entry: it reads through
+    // `$queryRaw` (row lock), which is stubbed separately in the db mock.
+    // Ordering matters — a missing or surplus entry does not fail loudly, it
+    // shifts every later read by one and the function returns whatever the
+    // exhausted mock yields.
     (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
-      .mockResolvedValueOnce(mockBooking)
       .mockResolvedValueOnce(mockBooking)
       .mockResolvedValueOnce(hydratedBooking);
     // why: scanned asset metadata lookup inside the tx — the service needs
@@ -4643,6 +4653,29 @@ describe("checkinBooking", () => {
       },
       data: { status: AssetStatus.AVAILABLE },
     });
+  });
+
+  it("refuses a checkin whose booking is completed between the read and the write", async () => {
+    // The race the row lock exists for. The pre-transaction read sees ONGOING
+    // and passes the early exit; by the time the write transaction opens, a
+    // concurrent check-in has committed COMPLETE. Modelled by letting the two
+    // reads disagree — which is precisely what a non-locking SELECT permits
+    // under READ COMMITTED.
+    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    // why: the unlocked pre-transaction read — still the old status.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the locked in-transaction read — the booking has moved on.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    await expect(checkinBooking(mockCheckinParams)).rejects.toThrow(
+      /ongoing or overdue/
+    );
+    // Without the locked check the early exit would have waved this through
+    // and the booking would have been written a second time.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("refuses checkin of a booking that was never checked out", async () => {
@@ -9979,13 +10012,13 @@ describe("addScannedAssetsToBooking", () => {
     //
     // Asserting through the public service function rather than the assertion
     // helper directly, so this fails if the guard is ever unwired from the path.
-    // mockResolvedValueOnce, not mockResolvedValue: `clearAllMocks` in the
-    // beforeEach clears call history but NOT implementations, so a persistent
-    // stub here would answer every later test in this describe with a closed
-    // booking and fail them for the wrong reason.
-    (
-      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
-    ).mockResolvedValueOnce({ status });
+    // why: the guard takes a row lock via raw SQL, so this is the read it
+    // asserts on. Once, not persistent: clearAllMocks clears call history but
+    // NOT implementations, so a persistent closed status would answer every
+    // later test in this describe and fail them for the wrong reason.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status },
+    ]);
 
     await expect(
       addScannedAssetsToBooking({

@@ -152,6 +152,7 @@ import {
   assertBookingIsCheckinable,
   assertBookingIsOpen,
   createBookingConflictConditions,
+  lockBookingForStatusCheck,
   getBulkBookingsWhereInput,
   isBookingExpired,
 } from "./utils.server";
@@ -2544,7 +2545,9 @@ export async function checkoutBooking({
       });
 
     // Not a reported finding — the twin of D084 on the check-out side, swept
-    // in because it is the same missing guard. Deliberately rejects only the
+    // in because it is the same missing guard. Unlocked early exit; the
+    // authoritative locked check runs inside the write transaction below.
+    // Deliberately rejects only the
     // CLOSED statuses: an existing pinned test checks out a DRAFT booking, so
     // narrowing this to RESERVED would be a behaviour change rather than a
     // fix. Re-running a FULL checkout on an ONGOING booking is a separate
@@ -2744,6 +2747,19 @@ export async function checkoutBooking({
 
     await db.$transaction(
       async (tx) => {
+        // Authoritative status check. The pre-transaction assert above is a
+        // cheap early exit; THIS one is the one that holds, because it locks
+        // the row and the lock is kept until this transaction commits.
+        //
+        // The race is not theoretical: cancelling a RESERVED booking from
+        // another tab while this checkout is in flight would otherwise leave a
+        // CANCELLED booking whose assets are all CHECKED_OUT.
+        assertBookingIsOpen({
+          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          operation: "check out",
+          bookingId: id,
+        });
+
         await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           // SECURITY (cross-org IDOR): the helper scopes the asset/kit
@@ -4302,6 +4318,10 @@ export async function checkinBooking({
     // checking in nothing: the asset filter keeps only CHECKED_OUT assets, and
     // on those statuses there are none. The booking then reads as finished
     // although it never happened. (detail.dev D084)
+    //
+    // This read is NOT locked — `bookingFound` is loaded outside the write
+    // transaction — so treat it as a cheap early exit only. The authoritative,
+    // locked check runs inside the transaction below.
     assertBookingIsCheckinable({ status: bookingFound.status, bookingId: id });
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
@@ -4515,6 +4535,15 @@ export async function checkinBooking({
 
     const updatedBooking = await db.$transaction(
       async (tx) => {
+        // Authoritative status check — the pre-transaction assert above is a
+        // cheap early exit, this is the one that holds. Locking matters here
+        // because two concurrent check-ins would otherwise both read ONGOING
+        // and both run the completion writes.
+        assertBookingIsCheckinable({
+          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          bookingId: id,
+        });
+
         /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
@@ -8248,12 +8277,21 @@ export async function updateBookingAssets({
       });
 
       // The four callers each validate the status before getting here, but
-      // every one of them does so in a read of its own — so a booking
-      // completed between their check and this write was still modified.
-      // Re-asserting on the row THIS transaction just read closes that window
-      // by construction. (detail.dev D055)
+      // every one of them does so in a read of its own, so a booking closed in
+      // between was still written to. (detail.dev D055)
+      //
+      // Re-reading inside this transaction is NOT sufficient on its own: under
+      // READ COMMITTED the `findUniqueOrThrow` above takes no lock, so a
+      // concurrent check-in or cancellation can still commit between it and
+      // the writes below. The row lock is what actually closes the window —
+      // it is held until this transaction commits.
+      const lockedStatus = await lockBookingForStatusCheck(
+        tx,
+        id,
+        organizationId
+      );
       assertBookingIsOpen({
-        status: b.status,
+        status: lockedStatus,
         operation: "change the items on",
         bookingId: id,
       });
@@ -12594,12 +12632,16 @@ async function addScannedAssetsToBookingWithinTx(
   // not here. The scan-assets loader computes `canUserManageBookingAssets`,
   // but that only decides what to render, so a direct POST could add assets to
   // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
-  const scanTargetBooking = await tx.booking.findUniqueOrThrow({
-    where: { id: bookingId, organizationId },
-    select: { status: true },
-  });
+  //
+  // Locked rather than merely re-read: this runs inside the caller's
+  // transaction, and a plain SELECT there takes no lock under READ COMMITTED.
+  const scanTargetStatus = await lockBookingForStatusCheck(
+    tx,
+    bookingId,
+    organizationId
+  );
   assertBookingIsOpen({
-    status: scanTargetBooking.status,
+    status: scanTargetStatus,
     operation: "add scanned items to",
     bookingId,
   });
