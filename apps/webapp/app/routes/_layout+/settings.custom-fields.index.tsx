@@ -112,23 +112,28 @@ export default function CustomFieldsIndexPage() {
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
         <h2 className=" text-lg text-gray-900">Custom Fields</h2>
-        <Button
-          to="new"
-          role="link"
-          aria-label="new custom field"
-          data-test-id="createNewCustomField"
-          variant="primary"
-          disabled={
-            !canCreateMoreCustomFields
-              ? {
-                  reason:
-                    "You are not able to create more active custom fields within your current plan.",
-                }
-              : false
-          }
-        >
-          New custom field
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button to="groups" role="link" variant="secondary">
+            Manage groups
+          </Button>
+          <Button
+            to="new"
+            role="link"
+            aria-label="new custom field"
+            data-test-id="createNewCustomField"
+            variant="primary"
+            disabled={
+              !canCreateMoreCustomFields
+                ? {
+                    reason:
+                      "You are not able to create more active custom fields within your current plan.",
+                  }
+                : false
+            }
+          >
+            New custom field
+          </Button>
+        </div>
       </div>
       <List
         bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
