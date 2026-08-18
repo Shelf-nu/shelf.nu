@@ -11,7 +11,15 @@
 # tapping it again restores the full feed.
 #
 # Fixture: SHELF_TEST_UNEXPECTED_SAM is an asset that is NOT among the audit's
-# expected assets. The scan persists, so the run resets it afterward.
+# expected assets.
+#
+# The scan PERSISTS and this flow does not tear it down: the companion has no
+# UI to remove a scan from an audit (the web scanner does; the app does not),
+# so a teardown step is not expressible here. The flow is written to tolerate
+# that — re-running against an audit that already holds the exception still
+# passes, because a duplicate scan leaves the existing row in place and every
+# assertion is about the row and the filter, not about the count. Reset the
+# fixture audit externally only when you want clean counts.
 #
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_AUDIT_NAME
 #      SHELF_TEST_UNEXPECTED_SAM (lowercase ok) / SHELF_TEST_UNEXPECTED_TITLE

@@ -1193,7 +1193,15 @@ function AuditScannerContent() {
             remainingCount={remainingCount}
             unexpectedCount={unexpectedCount}
             unexpectedFilterActive={showUnexpectedOnly}
-            onUnexpectedPress={() => setShowUnexpectedOnly((v) => !v)}
+            onUnexpectedPress={() => {
+              // why: the badge sits inside the Scanned tab button, and React
+              // Native gives the press to the inner touchable only — the parent
+              // tab never fires. Tapping it from the Not-scanned tab would
+              // otherwise flip the filter while leaving the other list on
+              // screen, so switch tabs here explicitly. (Codex, PR #2879.)
+              setActiveTab("scanned");
+              setShowUnexpectedOnly((v) => !v);
+            }}
           />
 
           {/* why: the evidence sheet lives behind a row tap, so name it once
