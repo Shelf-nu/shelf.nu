@@ -9,7 +9,10 @@ import type {
   PermissionEntity,
 } from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
-import { SSO_ASSIGNABLE_ROLE_PRECEDENCE } from "./role-precedence";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
@@ -70,11 +73,18 @@ export function resolveEffectiveRole({
   }>;
   organizationId: string;
 }): OrganizationRoles {
-  const roles = userOrganizations.find(
-    (o) => o.organization.id === organizationId
-  )?.roles;
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
 
-  return roles?.[0] ?? OrganizationRoles.BASE;
+  // Most privileged, not roles[0]. Both callers use this to decide how much a
+  // user may see — the custodian picker's scope and booking visibility — so a
+  // membership ordered [SELF_SERVICE, ADMIN] would otherwise hand an actual
+  // admin the restricted view. Shares its ordering with SSO group resolution.
+  return (
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    OrganizationRoles.BASE
+  );
 }
 
 /**
