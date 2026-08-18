@@ -7,7 +7,7 @@ import {
   isAddonProduct,
 } from "~/modules/billing/price-validation.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, rethrowIfClientError } from "~/utils/error";
 import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
 
 const label: ErrorLabel = "Stripe";
@@ -65,14 +65,7 @@ export async function createBarcodeAddonCheckoutSession({
     }
     return url;
   } catch (cause) {
-    // A CLIENT-error ShelfError (e.g. the price validation above) already
-    // carries a message the user can act on; rewriting it to "try again later"
-    // would hand back a 400 telling them to retry a request that can never
-    // succeed. Internal 5xx ShelfErrors keep the friendly wrapper -- "No url
-    // found in stripe checkout session" is not something a user can act on.
-    if (cause instanceof ShelfError && (cause.status ?? 500) < 500) {
-      throw cause;
-    }
+    rethrowIfClientError(cause);
 
     throw new ShelfError({
       cause,
@@ -140,14 +133,7 @@ export async function createBarcodeAddonTrialSubscription({
 
     return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
   } catch (cause) {
-    // A CLIENT-error ShelfError (e.g. the price validation above) already
-    // carries a message the user can act on; rewriting it to "try again later"
-    // would hand back a 400 telling them to retry a request that can never
-    // succeed. Internal 5xx ShelfErrors keep the friendly wrapper -- "No url
-    // found in stripe checkout session" is not something a user can act on.
-    if (cause instanceof ShelfError && (cause.status ?? 500) < 500) {
-      throw cause;
-    }
+    rethrowIfClientError(cause);
 
     throw new ShelfError({
       cause,

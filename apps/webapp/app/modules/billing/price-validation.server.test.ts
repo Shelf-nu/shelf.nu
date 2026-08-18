@@ -13,7 +13,9 @@
  */
 
 import Stripe from "stripe";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { addonMetadata, stripePriceFactory, tierMetadata } from "@factories";
 
 // why: Stripe SDK makes external API calls
 const { mockStripe } = vi.hoisted(() => ({
@@ -104,12 +106,7 @@ describe("assertPriceIsForAddon", () => {
   });
 
   it("returns the price when it belongs to the add-on", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_1",
-      active: true,
-      type: "recurring",
-      product: BARCODE_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(stripePriceFactory());
 
     const price = await assertPriceIsForAddon({
       priceId: "price_1",
@@ -124,12 +121,9 @@ describe("assertPriceIsForAddon", () => {
   });
 
   it("rejects a tier price — the entitlement bypass", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_tier",
-      active: true,
-      type: "recurring",
-      product: TIER_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_tier", metadata: tierMetadata() })
+    );
 
     await expect(
       assertPriceIsForAddon({ priceId: "price_tier", addonType: "barcodes" })
@@ -137,12 +131,12 @@ describe("assertPriceIsForAddon", () => {
   });
 
   it("rejects the other add-on's price", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_audits",
-      active: true,
-      type: "recurring",
-      product: AUDIT_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({
+        id: "price_audits",
+        metadata: addonMetadata("audits"),
+      })
+    );
 
     await expect(
       assertPriceIsForAddon({ priceId: "price_audits", addonType: "barcodes" })
@@ -150,12 +144,9 @@ describe("assertPriceIsForAddon", () => {
   });
 
   it("rejects an inactive price", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_old",
-      active: false,
-      type: "recurring",
-      product: BARCODE_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_old", active: false })
+    );
 
     await expect(
       assertPriceIsForAddon({ priceId: "price_old", addonType: "barcodes" })
@@ -203,12 +194,9 @@ describe("assertPriceMatchesTier", () => {
   });
 
   it("accepts the price whose product carries that tier", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_t2",
-      active: true,
-      type: "recurring",
-      product: TIER_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_t2", metadata: tierMetadata() })
+    );
 
     await expect(
       assertPriceMatchesTier({ priceId: "price_t2", shelfTier: "tier_2" })
@@ -216,12 +204,9 @@ describe("assertPriceMatchesTier", () => {
   });
 
   it("refuses a cheaper tier's price claimed as a higher tier", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_t1",
-      active: true,
-      type: "recurring",
-      product: product({ shelf_tier: "tier_1" }),
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_t1", metadata: tierMetadata("tier_1") })
+    );
 
     await expect(
       assertPriceMatchesTier({ priceId: "price_t1", shelfTier: "tier_2" })
@@ -232,12 +217,9 @@ describe("assertPriceMatchesTier", () => {
     // Worst because the resulting subscription is an add-on product, so
     // `isAddonSubscription` early-returns and the webhook never corrects the
     // tier the route already wrote.
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_barcodes",
-      active: true,
-      type: "recurring",
-      product: BARCODE_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_barcodes" })
+    );
 
     await expect(
       assertPriceMatchesTier({ priceId: "price_barcodes", shelfTier: "tier_2" })
@@ -301,12 +283,9 @@ describe("inactive products and non-recurring prices", () => {
 
   it("rejects a one-time add-on price", async () => {
     // Every caller creates a SUBSCRIPTION.
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_once",
-      active: true,
-      type: "one_time",
-      product: BARCODE_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({ id: "price_once", type: "one_time" })
+    );
 
     await expect(
       assertPriceIsForAddon({ priceId: "price_once", addonType: "barcodes" })
@@ -314,12 +293,13 @@ describe("inactive products and non-recurring prices", () => {
   });
 
   it("rejects a one-time tier price", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_once",
-      active: true,
-      type: "one_time",
-      product: TIER_PRODUCT,
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({
+        id: "price_once",
+        type: "one_time",
+        metadata: tierMetadata(),
+      })
+    );
 
     await expect(
       assertPriceMatchesTier({ priceId: "price_once", shelfTier: "tier_2" })
@@ -327,12 +307,13 @@ describe("inactive products and non-recurring prices", () => {
   });
 
   it("rejects an archived tier product", async () => {
-    mockStripe.prices.retrieve.mockResolvedValue({
-      id: "price_t2",
-      active: true,
-      type: "recurring",
-      product: product({ shelf_tier: "tier_2" }, false),
-    });
+    mockStripe.prices.retrieve.mockResolvedValue(
+      stripePriceFactory({
+        id: "price_t2",
+        metadata: tierMetadata(),
+        productActive: false,
+      })
+    );
 
     await expect(
       assertPriceMatchesTier({ priceId: "price_t2", shelfTier: "tier_2" })

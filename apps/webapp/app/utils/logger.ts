@@ -3,6 +3,7 @@ import pino from "pino";
 
 import { SENTRY_DSN, env } from "./env";
 import { ShelfError } from "./error";
+import { redactSensitive } from "./redact";
 
 /**
  * Fraction of handled 4xx errors to record in the Sentry log trail. Defaults
@@ -28,19 +29,32 @@ const HANDLED_4XX_SAMPLE_RATE = (() => {
   return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 1;
 })();
 
-function serializeError<E extends Error>(error: E): Error {
+/**
+ * Flattens an error (and its `cause` chain) into the plain object pino writes.
+ *
+ * The spread pulls in every enumerable own property, which for a `ShelfError`
+ * includes `additionalData` — so this function is the single point where
+ * caller-supplied debug context becomes a durable log line. Redacting here
+ * rather than at each call site means a hand-written `additionalData` carrying
+ * a secret is safe by default; `parseData` sanitizes its payload separately,
+ * before the value ever reaches an error.
+ *
+ * @param error - The error to serialize
+ * @returns A plain object safe to write to the log
+ */
+export function serializeError<E extends Error>(error: E): Error {
   if (!(error.cause instanceof Error)) {
-    return {
+    return redactSensitive({
       ...error,
       stack: error.stack,
-    };
+    });
   }
 
-  return {
+  return redactSensitive({
     ...error,
     cause: serializeError(error.cause),
     stack: error.stack,
-  };
+  });
 }
 
 const logger = pino({
