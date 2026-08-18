@@ -180,7 +180,22 @@ function validateFutureDate(
 }
 
 interface BookingFormSchemaParams {
-  hints?: ReturnType<typeof getHints>;
+  /**
+   * Timezone + locale for the acting user. REQUIRED, and deliberately not
+   * optional: `coerceLocalDate` falls back to UTC when it has no zone, so a
+   * caller that forgets this silently reads every typed wall-clock time as UTC.
+   * For a user west of UTC that makes near-future starts look like the past and
+   * "Start date must be in the future" blocks them for the length of their UTC
+   * offset (5 hours in US Central, 7 in US Pacific). That shipped for three
+   * months because `hints` was optional and one caller omitted it.
+   *
+   * Pass the RESOLVED preference zone, not the raw browser hint:
+   * `{ ...hints, timeZone: prefs.timeZone }` on the client (`useFormatPrefs`),
+   * or `resolveUserFormatPrefsById(userId, getClientHint(request)).timeZone` on
+   * the server. That is the same zone date DISPLAY uses, so the check the user
+   * sees agrees with the instant we store.
+   */
+  hints: ReturnType<typeof getHints>;
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
   workingHours: any; // Accept any type, normalize internally
@@ -249,13 +264,13 @@ function buildBookingDateSchemas({
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
   // Create enhanced date schemas with working hours and buffer validation
-  const startDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+  const startDateSchema = coerceLocalDate(hints.timeZone).superRefine(
     (data, ctx) => {
       // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
         effectiveBufferStartTime,
-        hints?.timeZone
+        hints.timeZone
       );
       if (!futureValidation.isValid) {
         ctx.addIssue({
@@ -266,7 +281,7 @@ function buildBookingDateSchemas({
       }
 
       // 2. Validate working hours if available
-      if (workingHours && hints?.timeZone) {
+      if (workingHours && hints.timeZone) {
         const workingHoursValidation = validateWorkingHours(
           data,
           workingHours,
@@ -282,10 +297,10 @@ function buildBookingDateSchemas({
     }
   );
 
-  const endDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+  const endDateSchema = coerceLocalDate(hints.timeZone).superRefine(
     (data, ctx) => {
       // Only validate working hours for end date (no future date requirement)
-      if (workingHours && hints?.timeZone) {
+      if (workingHours && hints.timeZone) {
         const validation = validateWorkingHours(
           data,
           workingHours,
@@ -420,8 +435,8 @@ export function BookingFormSchema({
           userId: z.string().optional().nullable(),
         })
       ),
-    startDate: coerceLocalDate(hints?.timeZone).optional(),
-    endDate: coerceLocalDate(hints?.timeZone).optional(),
+    startDate: coerceLocalDate(hints.timeZone).optional(),
+    endDate: coerceLocalDate(hints.timeZone).optional(),
     tags: tagsRequired
       ? z.string().min(1, "At least one tag is required")
       : z.string().optional(),

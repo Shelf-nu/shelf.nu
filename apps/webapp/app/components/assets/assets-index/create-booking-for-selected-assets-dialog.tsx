@@ -15,11 +15,13 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
@@ -36,10 +38,15 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const bookingSettings = useBookingSettings();
   const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
     useUserRoleHelper();
+  const hints = useHints();
+  // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+  // (matches display + the server parse), not the browser hint.
+  const prefs = useFormatPrefs();
 
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
+      hints: { ...hints, timeZone: prefs.timeZone },
       action: "new",
       workingHours,
       bookingSettings,

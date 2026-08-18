@@ -1,5 +1,5 @@
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import {
   BookingFormSchema,
@@ -13,6 +13,20 @@ import {
  *
  * See issue: Bug: Booking time restrictions affect OWNER and ADMIN users and they shouldn't
  */
+
+/**
+ * Zone + locale for the cases below that are not about timezones. These suites
+ * build their dates with `date-fns` relative to `new Date()`, i.e. in the
+ * RUNTIME zone, so they need the schema to read the wire string back in that
+ * same zone or every assertion shifts by the machine's offset.
+ *
+ * `hints` is required precisely so a caller can never fall through to an
+ * implicit UTC (see the docblock on `BookingFormSchemaParams`). Spelling it out
+ * here keeps that guarantee visible in the tests too.
+ */
+const RUNTIME_ZONE_HINTS = {
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+};
 
 describe("BookingFormSchema - time restrictions", () => {
   const baseBookingSettings = {
@@ -31,6 +45,7 @@ describe("BookingFormSchema - time restrictions", () => {
   describe("bufferStartTime restriction", () => {
     it("should enforce buffer time for BASE/SELF_SERVICE users", () => {
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -63,6 +78,7 @@ describe("BookingFormSchema - time restrictions", () => {
 
     it("should bypass buffer time for ADMIN/OWNER users", () => {
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -91,6 +107,7 @@ describe("BookingFormSchema - time restrictions", () => {
   describe("maxBookingLength restriction", () => {
     it("should enforce max booking length for BASE/SELF_SERVICE users", () => {
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -125,6 +142,7 @@ describe("BookingFormSchema - time restrictions", () => {
 
     it("should bypass max booking length for ADMIN/OWNER users", () => {
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -154,6 +172,7 @@ describe("BookingFormSchema - time restrictions", () => {
     it("should still enforce end date after start date for all users", () => {
       // This validation should apply to everyone
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -189,6 +208,7 @@ describe("BookingFormSchema - time restrictions", () => {
   describe("default isAdminOrOwner behavior", () => {
     it("should default to false (enforce restrictions) when isAdminOrOwner is not provided", () => {
       const schema = BookingFormSchema({
+        hints: RUNTIME_ZONE_HINTS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
@@ -761,6 +781,7 @@ describe("DuplicateBookingSchema - date validation", () => {
   describe("bufferStartTime restriction", () => {
     it("enforces buffer time for BASE/SELF_SERVICE users", () => {
       const schema = DuplicateBookingSchema({
+        hints: RUNTIME_ZONE_HINTS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
         isAdminOrOwner: false, // BASE/SELF_SERVICE user
@@ -783,6 +804,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
     it("bypasses buffer time for ADMIN/OWNER users", () => {
       const schema = DuplicateBookingSchema({
+        hints: RUNTIME_ZONE_HINTS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
         isAdminOrOwner: true, // ADMIN/OWNER user
@@ -879,6 +901,7 @@ describe("DuplicateBookingSchema - date validation", () => {
   describe("cross-field date validation", () => {
     it("rejects endDate <= startDate with the exact cross-field message on the endDate path", () => {
       const schema = DuplicateBookingSchema({
+        hints: RUNTIME_ZONE_HINTS,
         workingHours: disabledWorkingHours,
         bookingSettings: {
           ...baseBookingSettings,
@@ -908,6 +931,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
     it("rejects bookings exceeding max length for BASE users but bypasses for ADMIN/OWNER", () => {
       const baseSchema = DuplicateBookingSchema({
+        hints: RUNTIME_ZONE_HINTS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
         isAdminOrOwner: false,
@@ -931,6 +955,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
       // Same 72h window passes for an admin (buffer + max-length bypassed).
       const adminSchema = DuplicateBookingSchema({
+        hints: RUNTIME_ZONE_HINTS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
         isAdminOrOwner: true,
@@ -956,11 +981,13 @@ describe("DuplicateBookingSchema - date validation", () => {
   describe("parity with BookingFormSchema (action: new)", () => {
     const sharedSettings = baseBookingSettings;
     const dupSchema = DuplicateBookingSchema({
+      hints: RUNTIME_ZONE_HINTS,
       workingHours: disabledWorkingHours,
       bookingSettings: sharedSettings,
       isAdminOrOwner: true,
     });
     const formSchema = BookingFormSchema({
+      hints: RUNTIME_ZONE_HINTS,
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: sharedSettings,
@@ -1128,5 +1155,119 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
       // Round-trip is lossless: back to the exact stored instant.
       expect((result.data.startDate as Date).toISOString()).toBe(storedUtc);
     }
+  });
+});
+
+/**
+ * Regression: a booking that starts SOON, for a user WEST of UTC.
+ *
+ * A caller that omitted `hints` used to fall through to `coerceLocalDate`'s UTC
+ * default, so the typed wall-clock was read as UTC. For America/Chicago (UTC-5
+ * in summer) that shifts the instant 5 hours into the past, and the plain
+ * future-date check rejects it with "Start date must be in the future". The
+ * user therefore could not book anything less than their UTC offset ahead —
+ * reported from the field as "unable to create a booking unless the time is
+ * 5 hours in advance".
+ *
+ * `hints` is now required, so the omission is a compile error. These cases pin
+ * the runtime behaviour that made the omission harmful, so the guarantee
+ * survives any future refactor of the parse.
+ */
+describe("BookingFormSchema - near-future start, user west of UTC", () => {
+  const disabledWorkingHours = {
+    enabled: false,
+    weeklySchedule: {},
+    overrides: [],
+  };
+
+  /** No advance-notice requirement, so only the plain future check applies. */
+  const noBufferSettings = {
+    bufferStartTime: 0,
+    tagsRequired: false,
+    maxBookingLength: null,
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  const validCustodian = JSON.stringify({
+    id: "tm-1",
+    name: "Test User",
+    userId: "user-1",
+  });
+
+  /** 2026-08-18 13:00 in America/Chicago (CDT, UTC-5) is 18:00Z. */
+  const NOW = new Date("2026-08-18T18:00:00.000Z");
+  const CHICAGO = "America/Chicago";
+
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  /** Builds the form payload for a start/end typed as local wall-clock. */
+  function parseWith(timeZone: string, startDate: string, endDate: string) {
+    return BookingFormSchema({
+      hints: { timeZone },
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: noBufferSettings,
+      isAdminOrOwner: false,
+    }).safeParse({
+      name: "Book a printer this afternoon",
+      startDate,
+      endDate,
+      custodian: validCustodian,
+    });
+  }
+
+  /** Messages for a failed parse, or [] when it succeeded. */
+  function messages(result: ReturnType<typeof parseWith>) {
+    return result.success ? [] : result.error.errors.map((e) => e.message);
+  }
+
+  it("accepts a start 2 hours ahead when the user's own zone is used", () => {
+    // 13:00 Chicago now, booking 15:00-17:00 Chicago the same afternoon.
+    const result = parseWith(CHICAGO, "2026-08-18T15:00", "2026-08-18T17:00");
+    expect(messages(result)).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it("reads that start as the correct absolute instant", () => {
+    const result = parseWith(CHICAGO, "2026-08-18T15:00", "2026-08-18T17:00");
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // 15:00 CDT is 20:00Z, not 15:00Z.
+      expect((result.data.startDate as Date).toISOString()).toBe(
+        "2026-08-18T20:00:00.000Z"
+      );
+    }
+  });
+
+  it("rejects that same start when the zone is lost to UTC", () => {
+    // This is the shipped bug, reproduced by passing the fallback zone that an
+    // omitted `hints` used to produce. 15:00 read as UTC is 10:00 Chicago,
+    // three hours BEFORE the current 13:00, so it looks like the past.
+    const result = parseWith("UTC", "2026-08-18T15:00", "2026-08-18T17:00");
+    expect(result.success).toBe(false);
+    expect(messages(result)).toContain("Start date must be in the future");
+  });
+
+  it("shows the rejection window equals the user's UTC offset", () => {
+    // Under the bug the cliff sits exactly 5 hours out for UTC-5: everything
+    // earlier reads as past, 18:01 onwards reads as future.
+    const verdicts = ["14:00", "17:00", "18:00", "19:00"].map((time) => ({
+      time,
+      accepted: parseWith("UTC", `2026-08-18T${time}`, "2026-08-19T09:00")
+        .success,
+    }));
+
+    expect(verdicts).toEqual([
+      { time: "14:00", accepted: false }, // 1h ahead locally
+      { time: "17:00", accepted: false }, // 4h ahead locally
+      { time: "18:00", accepted: false }, // 5h ahead locally, still the cliff
+      { time: "19:00", accepted: true }, // 6h ahead locally, finally allowed
+    ]);
   });
 });
