@@ -121,8 +121,9 @@ describe("Color Contrast Utilities", () => {
      *
      * The per-badge tests below name the surfaces each colour serves and are
      * worth keeping as documentation, but they only ever asserted 5 of the 10
-     * tokens — and the five they skipped were exactly the ones that failed
-     * (orange 2.82:1, brown 3.84:1, amber 4.07:1). A palette-wide loop cannot
+     * tokens — and four of the five they skipped were failing (orange 2.82:1,
+     * brown 3.84:1, amber 4.07:1, pink 4.11:1). Indigo was the only one that
+     * came through the gap clean, at 6.46:1. A palette-wide loop cannot
      * develop that blind spot: adding a colour to BADGE_COLORS adds a case.
      */
     describe("Every BADGE_COLORS entry", () => {
