@@ -30,6 +30,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
+// why: React Router v7 single fetch — `data()` must return a real Response so
+// the action's error path has an assertable status.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };
@@ -59,6 +61,9 @@ vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
 }));
 
+// why: the emitter pushes to a live SSE stream keyed to a real session; there
+// is none in a route-level test, and the notification is a side effect of the
+// success path rather than anything these assertions inspect.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
