@@ -11,7 +11,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -47,7 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // scan / select the assets (the partial-checkin path). The mobile app must
     // NEVER be more permissive than the web / a workspace's settings, so we
     // enforce the same policy server-side here.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, roles } = await getMobileUserContext(user.id, organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const explicitCheckinRequired =
@@ -105,7 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role,
+      role: resolveMostPrivilegedRole(roles),
       action: "check in",
     });
 

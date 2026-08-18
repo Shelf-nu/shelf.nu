@@ -242,6 +242,14 @@ export async function getMobileUserContext(
   organizationId: string
 ): Promise<{
   role: OrganizationRoles;
+  /**
+   * Every role on this membership. `role` is `roles[0]`, which is wrong for
+   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
+   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
+   * Callers making a privilege decision should use this with
+   * `resolveMostPrivilegedRole`.
+   */
+  roles: OrganizationRoles[];
   canUseBarcodes: boolean;
   canUseAudits: boolean;
   canSeeAllCustody: boolean;
@@ -280,6 +288,7 @@ export async function getMobileUserContext(
 
   return {
     role,
+    roles: userOrg.roles,
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
     canSeeAllCustody: computeCanSeeAllCustody({

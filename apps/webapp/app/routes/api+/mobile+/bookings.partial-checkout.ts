@@ -9,7 +9,10 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -108,11 +111,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // custodian of. No-op for ADMIN/OWNER. `partialCheckoutBooking` does not check
     // ownership itself, so without this the route is more permissive than web.
     // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role,
+      role: resolveMostPrivilegedRole(roles),
       action: "check out",
     });
 
