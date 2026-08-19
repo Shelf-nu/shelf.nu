@@ -822,7 +822,10 @@ export default function AssetDetailScreen() {
                 {assetBookings.hasLoaded &&
                 assetBookings.totalCount > assetBookings.bookings.length ? (
                   <Text style={styles.bookingsEmpty}>
-                    {`Showing the ${assetBookings.bookings.length} most recent of ${assetBookings.totalCount}. Open this asset on the web app to see them all.`}
+                    {/* why: not "most recent". Rows come back newest-START-first,
+                        so on an asset with future reservations these are the
+                        furthest-ahead bookings, not the latest past ones. */}
+                    {`Showing ${assetBookings.bookings.length} of ${assetBookings.totalCount}. Open this asset on the web app to see them all.`}
                   </Text>
                 ) : null}
               </View>
@@ -1293,7 +1296,11 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   bookingCustodian: {
     fontSize: fontSize.xs,
-    color: colors.mutedLight,
+    // why: NOT `mutedLight` — that token is for icons and large text (4.35:1
+    // light, 3.77:1 dark) and misses 4.5:1 at this 12px size. `muted` still
+    // reads quieter than the dates line above it and clears the bar in both
+    // themes.
+    color: colors.muted,
   },
   bookingsMore: {
     paddingVertical: spacing.sm,

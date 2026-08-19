@@ -7,7 +7,11 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -24,10 +28,12 @@ import {
  * the app had no way to ask the question at all, because even the bookings
  * list endpoint cannot filter by asset.
  *
- * Scoping mirrors `bookings.ts` exactly, because the same rules apply to a
- * per-asset slice of the same data:
+ * Scoping mirrors `bookings.ts`, because the same rules apply to a per-asset
+ * slice of the same data:
  *   - organisation scoped
- *   - SELF_SERVICE / BASE see only bookings they are custodian of
+ *   - SELF_SERVICE / BASE see only bookings they are custodian of, matched
+ *     through `resolveCustodianScope` + `custodianScopeClause` — the user link
+ *     OR any of their team-member links, never the user link alone
  *   - DRAFT bookings stay private to their creator
  *
  * Statuses match the web tab's `BOOKING_STATUS_TO_SHOW`: everything except
@@ -92,6 +98,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
+    /**
+     * Custodian scope (web parity). Web matches a self-service or base user's
+     * bookings through their user link OR any of their team-member links.
+     * Matching only the user link hides a booking whose custodian was assigned
+     * by picking a TEAM MEMBER rather than a user — it shows on the website and
+     * vanishes on the phone, for the very user it belongs to. On this screen
+     * that misfires worse than on a list: the section states "This asset has
+     * never been booked", which is a claim, not an empty list.
+     *
+     * Same helpers the bookings list and the calendar use. When you touch one
+     * of the three, check the other two.
+     */
+    const custodianScope = isSelfServiceOrBase
+      ? await resolveCustodianScope({ userId: user.id, organizationId })
+      : null;
+
     const where = {
       organizationId,
       // Web's BOOKING_STATUS_TO_SHOW for this tab.
@@ -108,8 +130,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // both standalone rows and kit-driven slices, since both are BookingAsset
       // rows pointing at the asset.
       bookingAssets: { some: { assetId } },
-      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
-      AND: [bookingDraftVisibilityClause(user.id)],
+      AND: [
+        bookingDraftVisibilityClause(user.id),
+        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
+      ],
     };
 
     const [bookings, totalCount] = await Promise.all([
@@ -126,9 +150,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
           custodianTeamMember: { select: { name: true } },
         },
-        // Soonest-first among upcoming, most-recent-first among past: ordering
-        // by `from` descending puts the newest window at the top, which is what
-        // the web tab does and what "when was this out last?" wants.
+        /**
+         * Newest start date first, and deliberately NOT web's order.
+         *
+         * The previous comment here claimed two things that cannot both be
+         * true of one sort, and a web parity that does not exist: web's asset
+         * bookings tab defaults to `from` ASCENDING. Ascending is wrong for
+         * this surface though, because the phone previews only the first three
+         * rows — an asset with any history would show three old bookings and
+         * hide the one it is out on today. Descending puts today's booking in
+         * the visible three for every asset whose future is not already full
+         * of reservations.
+         *
+         * A true relevance order (out-now, then next-out, then history) needs
+         * a computed discriminator this query cannot express. If the preview
+         * ever grows past three rows, revisit.
+         */
         orderBy: [{ from: "desc" }],
         skip: (page - 1) * perPage,
         take: perPage,
