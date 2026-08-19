@@ -47,8 +47,26 @@ export function ScannedItemsList({
 
   const renderItem = useCallback(
     ({ item }: { item: ScannedItem }) => {
-      const evidenceCount = (item.notesCount ?? 0) + (item.imagesCount ?? 0);
-      const hasEvidence = evidenceCount > 0;
+      // why two numbers and not their sum: the sum is not comparable between
+      // rows. Photos uploaded WITH a caption store a comment beside them;
+      // the same photos with no caption store a system row instead, which is
+      // not evidence and is not counted. So one digit read 3 or 2 for the
+      // same two photos — it tracked how the upload happened to be stored,
+      // not what the auditor found. The sheet this opens has always shown
+      // "1 note, 1 photo" as two counts; the row now says the same thing.
+      const noteCount = item.notesCount ?? 0;
+      const photoCount = item.imagesCount ?? 0;
+      const hasEvidence = noteCount > 0 || photoCount > 0;
+      const evidenceLabel = [
+        noteCount > 0
+          ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}`
+          : null,
+        photoCount > 0
+          ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
       const syncFailed = item.syncFailed === true;
 
       return (
@@ -62,7 +80,7 @@ export function ScannedItemsList({
           accessibilityLabel={`${item.name?.trim() || "Untitled asset"}, ${
             item.isExpected ? "found" : "unexpected, not on this audit"
           }${item.locationName ? `, at ${item.locationName}` : ""}${
-            hasEvidence ? `, ${evidenceCount} evidence items` : ""
+            hasEvidence ? `, ${evidenceLabel}` : ""
           }${syncFailed ? ", not synced" : ""}. Tap to add notes or photos.`}
           accessibilityRole="button"
         >
@@ -123,8 +141,30 @@ export function ScannedItemsList({
               words until there is a count to show instead. */}
           {hasEvidence ? (
             <View style={styles.evidenceBadge}>
-              <Ionicons name="attach" size={12} color={colors.primaryText} />
-              <Text style={styles.evidenceCount}>{evidenceCount}</Text>
+              {/* why these glyphs: the web row and the audit detail panel use
+                  a speech bubble for a note and an image mark for a photo.
+                  A paperclip meant "images" on one surface and
+                  "notes and images" on another. */}
+              {noteCount > 0 ? (
+                <>
+                  <Ionicons
+                    name="chatbubble-outline"
+                    size={12}
+                    color={colors.primaryText}
+                  />
+                  <Text style={styles.evidenceCount}>{noteCount}</Text>
+                </>
+              ) : null}
+              {photoCount > 0 ? (
+                <>
+                  <Ionicons
+                    name="image-outline"
+                    size={12}
+                    color={colors.primaryText}
+                  />
+                  <Text style={styles.evidenceCount}>{photoCount}</Text>
+                </>
+              ) : null}
             </View>
           ) : (
             <View style={styles.addEvidenceChip}>
