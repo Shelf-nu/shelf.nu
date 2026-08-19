@@ -155,6 +155,66 @@ describe("removeAssetFromAudit", () => {
   });
 });
 
+describe("concurrent removal", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockDb.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
+      cb(mockDb)
+    );
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: AUDIT_ID,
+      name: "My Audit",
+      status: AuditStatus.PENDING,
+    });
+  });
+
+  it("does not decrement counts when the row was already deleted", async () => {
+    // Two simultaneous removals of the same asset. Both pass the read; the
+    // second deletes nothing. `deleteMany` reports that as `{ count: 0 }`
+    // rather than throwing the way `delete` did, so without an explicit check
+    // the second request would still decrement the counters and write a
+    // second note — double-counting a single removal.
+    mockDb.auditAsset.findFirst.mockResolvedValue({
+      assetId: "asset-1",
+      expected: true,
+    });
+    mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      removeAssetFromAudit({
+        auditId: AUDIT_ID,
+        auditAssetId: "auditasset-mine",
+        organizationId: ORG_ID,
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/not found in this audit/);
+
+    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+  });
+
+  it("aborts a bulk removal when fewer rows were deleted than proven", async () => {
+    // `expectedCount` is derived from the READ, so a concurrent removal would
+    // make the decrement overshoot — and the `expected` flag needed to choose
+    // the counter cannot be recovered from a row that is already gone.
+    mockDb.auditAsset.findMany.mockResolvedValue([
+      { id: "auditasset-1", assetId: "asset-1", expected: true },
+      { id: "auditasset-2", assetId: "asset-2", expected: true },
+    ]);
+    mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      removeAssetsFromAudit({
+        auditId: AUDIT_ID,
+        auditAssetIds: ["auditasset-1", "auditasset-2"],
+        organizationId: ORG_ID,
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/removed by someone else/);
+
+    expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("removeAssetsFromAudit (bulk)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -174,6 +234,8 @@ describe("removeAssetsFromAudit (bulk)", () => {
     mockDb.auditAsset.findMany.mockResolvedValue([
       { id: "auditasset-mine", assetId: "asset-1", expected: true },
     ]);
+    // why: the delete-count guard compares this against the proven-id count.
+    mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
 
     await removeAssetsFromAudit({
       auditId: AUDIT_ID,

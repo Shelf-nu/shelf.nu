@@ -2871,9 +2871,26 @@ export async function removeAssetFromAudit({
       // Delete the audit asset (cascade will delete related scans). Scoped
       // again rather than by id alone: defence in depth, so the write cannot
       // outlive a future refactor of the check above.
-      await tx.auditAsset.deleteMany({
+      const removed = await tx.auditAsset.deleteMany({
         where: { id: auditAssetId, auditSessionId: auditId },
       });
+
+      // `deleteMany` reports zero rows where `delete` would have thrown
+      // P2025, so the count has to be checked explicitly or the scoping change
+      // above would have quietly cost us a concurrency guard: two simultaneous
+      // removals of the same asset would both pass the read, the second would
+      // delete nothing, and it would still decrement the counters and write a
+      // second note. Throwing here rolls the whole transaction back.
+      if (removed.count !== 1) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit asset not found in this audit",
+          additionalData: { auditAssetId, auditId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
 
       // Update audit session counts
       // If it was an expected asset, decrement expectedAssetCount
@@ -2991,9 +3008,32 @@ export async function removeAssetsFromAudit({
       // the caller's original id list — a foreign id in the input must not
       // reach the delete even though it was filtered out of the counts above.
       const provenAuditAssetIds = auditAssets.map((aa) => aa.id);
-      await tx.auditAsset.deleteMany({
+      const removed = await tx.auditAsset.deleteMany({
         where: { id: { in: provenAuditAssetIds }, auditSessionId: auditId },
       });
+
+      // Same reasoning as the singular path. `expectedCount` was derived from
+      // the READ, so if a concurrent removal took some of these rows first,
+      // decrementing by it would overshoot — and the `expected` flag needed to
+      // pick the right counter cannot be recovered from a row that is already
+      // gone. Aborting and letting the caller retry keeps the counters honest;
+      // silently proceeding would corrupt audit totals, which is the thing
+      // this whole path exists to keep accurate.
+      if (removed.count !== provenAuditAssetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some of those assets were removed by someone else while this request was running. Nothing was changed — please reload the audit and try again.",
+          additionalData: {
+            auditId,
+            expected: provenAuditAssetIds.length,
+            removed: removed.count,
+          },
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
 
       // Update audit session counts
       if (expectedCount > 0) {
