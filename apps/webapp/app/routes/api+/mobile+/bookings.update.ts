@@ -1,5 +1,4 @@
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
-import { DateTime } from "luxon";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
@@ -16,7 +15,6 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isValidTimeZone } from "~/utils/date-format";
 import { prefsForDeclaredZone } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -170,8 +168,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
+    let parsedBooking;
     try {
-      BookingFormSchema({
+      parsedBooking = BookingFormSchema({
         prefs,
         action: "save",
         status: existing.status,
@@ -205,26 +204,20 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Dates + custodian only apply to DRAFT bookings (updateBasicBooking
-    // re-gates this internally); parse the dates only when they will be used.
+    // re-gates this internally), so only carry them through for a draft.
+    //
+    // Use the instants the schema already produced rather than re-parsing the
+    // raw body: `coerceLocalDate` accepts second precision via `fromISO`, while
+    // DATE_TIME_FORMAT is minute-only, so re-parsing could reject a payload the
+    // schema had just accepted. Reusing the result also guarantees the stored
+    // instant is the one that was validated, in the same declared zone.
     const isDraft = existing.status === BookingStatus.DRAFT;
-    // Same zone the schema validated in, so the stored instant matches the
-    // wall-clock that just passed validation.
-    const fromDt = isDraft
-      ? DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
-          zone: prefs.timeZone,
-        })
-      : undefined;
-    const toDt = isDraft
-      ? DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
-          zone: prefs.timeZone,
-        })
-      : undefined;
+    const from = isDraft ? parsedBooking.startDate : undefined;
+    const to = isDraft ? parsedBooking.endDate : undefined;
 
-    // BookingFormSchema validates the dates with the broader `coerceLocalDate`,
-    // so a value can pass validation yet not match DATE_TIME_FORMAT here and
-    // become an Invalid Date. Guard before handing dates to the service, as the
-    // create path does — otherwise `Invalid Date` flows into updateBasicBooking.
-    if ((fromDt && !fromDt.isValid) || (toDt && !toDt.isValid)) {
+    // A DRAFT validates through the full schema, so both dates are present;
+    // assert it rather than handing `undefined` to the service as "unchanged".
+    if (isDraft && (!from || !to)) {
       throw new ShelfError({
         cause: null,
         message: "Invalid booking start or end date.",
@@ -233,9 +226,6 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
-    const from = fromDt?.toJSDate();
-    const to = toDt?.toJSDate();
 
     const booking = await updateBasicBooking({
       id: body.bookingId,
