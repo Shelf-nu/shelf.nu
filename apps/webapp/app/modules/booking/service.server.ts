@@ -2424,7 +2424,6 @@ async function runCheckoutSideEffects({
   bookingFound,
   userId,
   effectiveStatus,
-  effectiveBooking,
   effectiveTo,
   hints,
   organizationId,
@@ -2433,7 +2432,6 @@ async function runCheckoutSideEffects({
   bookingFound: BookingForEmail;
   userId?: string;
   effectiveStatus: BookingStatus;
-  effectiveBooking: BookingForEmail;
   effectiveTo: Date | null | undefined;
   hints: ClientHint;
   organizationId: Booking["organizationId"];
@@ -2452,10 +2450,6 @@ async function runCheckoutSideEffects({
       custodianUserId: bookingFound.custodianUserId || undefined,
     });
   }
-
-  /** Calculate the time difference between the booking.to and the current time */
-  const { hours } = calcTimeDifference(effectiveTo!, new Date());
-  const lessThanOneHourToCheckin = hours < 1;
 
   /** We cancel just in case there is something pending */
   await cancelScheduler(bookingFound);
@@ -2806,22 +2800,13 @@ export async function checkoutBooking({
       { timeout: 15000 }
     );
 
-    /** Build effective post-checkout values by merging bookingFound with any
-     * fields modified by dataToUpdate (adjusted dates, status). This avoids
-     * re-reading from the DB and ensures downstream logic (notes, scheduling)
-     * uses the correct post-checkout values. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, taken from `dataToUpdate` where it changed
+     * them and from `bookingFound` otherwise. Avoids re-reading the row, and
+     * keeps downstream logic (notes, scheduling) on post-checkout truth. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     // Extracted to a shared helper so `fulfilModelRequestsAndCheckout`
     // can run the same post-commit work (status transition note,
@@ -2835,7 +2820,6 @@ export async function checkoutBooking({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
@@ -3193,27 +3177,18 @@ export async function fulfilModelRequestsAndCheckout({
       userId,
     });
 
-    /** Build an effective snapshot so the status-transition note + email
-     * scheduler see the post-checkout truth without re-reading the row. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, so the status-transition note and the email
+     * scheduler see post-checkout truth without re-reading the row. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     /** Post-commit checkout side-effects shared with `checkoutBooking` */
     return await runCheckoutSideEffects({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
