@@ -93,6 +93,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
       description={`Create a new booking with selected(${selectedAssets.length}) assets`}
       actionUrl="/bookings/new"
       className="lg:w-[600px]"
+      // No `allowBodyOverflow` despite the TagsAutocomplete below: this dialog
+      // scrolls its own content in the `max-h`/`overflow-auto` wrapper, which
+      // already clips the suggestion listbox before the dialog body ever could.
+      // Opting in would not un-clip it — it would only cost the body its scroll.
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => {
         /** This handles server side errors in case client side validation fails */

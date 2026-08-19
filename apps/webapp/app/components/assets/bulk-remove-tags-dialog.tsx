@@ -58,6 +58,10 @@ export default function BulkRemoveTagsDialog() {
       description="Remove tags to selected assets. Assets that don't have any of the selected tags, will be skipped."
       actionUrl="/api/assets/bulk-assign-tags?remove=true"
       arrayFieldId="assetIds"
+      // TagsAutocomplete's suggestion listbox is absolutely positioned inside
+      // its own field, so the dialog body must not clip it. Safe here because
+      // this dialog is short enough to never need the body to scroll.
+      allowBodyOverflow
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
