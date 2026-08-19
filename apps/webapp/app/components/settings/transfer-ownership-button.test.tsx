@@ -3,6 +3,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createLayoutLoaderData, OWNER_EMAIL } from "@factories";
 
 // ── Mocks ──────────────────────────────────────────────
 
@@ -41,35 +42,7 @@ const { default: TransferOwnershipButton } = await import(
 
 // ── Test data ──────────────────────────────────────────
 
-const OWNER_EMAIL = "owner@example.com";
-
-function createLayoutData({
-  roles = [OrganizationRoles.ADMIN],
-  isShelfAdmin = false,
-  owner = { id: "owner-1", email: OWNER_EMAIL } as {
-    id: string;
-    email: string;
-  } | null,
-}: {
-  roles?: OrganizationRoles[];
-  isShelfAdmin?: boolean;
-  /** `null` mirrors a loader payload that stopped selecting the owner. */
-  owner?: { id: string; email: string } | null;
-} = {}) {
-  return {
-    currentOrganizationUserRoles: roles,
-    currentOrganization: {
-      id: "org-1",
-      name: "Test Org",
-      owner,
-    },
-    // Shelf staff admin flag, as derived by the _layout loader
-    isAdmin: isShelfAdmin,
-    user: { id: "user-1" },
-  };
-}
-
-function renderButton(layoutData = createLayoutData()) {
+function renderButton(layoutData = createLayoutLoaderData()) {
   mockUseRouteLoaderData.mockReturnValue(layoutData);
   return render(<TransferOwnershipButton />);
 }
@@ -82,7 +55,7 @@ describe("TransferOwnershipButton", () => {
   });
 
   it("links the workspace owner to the transfer section on general settings", () => {
-    renderButton(createLayoutData({ roles: [OrganizationRoles.OWNER] }));
+    renderButton(createLayoutLoaderData({ roles: [OrganizationRoles.OWNER] }));
 
     expect(
       screen.getByRole("link", { name: /transfer ownership/i })
@@ -91,7 +64,7 @@ describe("TransferOwnershipButton", () => {
 
   it("links Shelf staff admins who are not the owner the same way", () => {
     renderButton(
-      createLayoutData({
+      createLayoutLoaderData({
         roles: [OrganizationRoles.ADMIN],
         isShelfAdmin: true,
       })
@@ -104,7 +77,7 @@ describe("TransferOwnershipButton", () => {
 
   it("shows non-owners an inert button whose hover reason names the owner", async () => {
     const user = userEvent.setup();
-    renderButton(createLayoutData({ roles: [OrganizationRoles.ADMIN] }));
+    renderButton(createLayoutLoaderData({ roles: [OrganizationRoles.ADMIN] }));
 
     // No link for non-owners — only an inert button
     expect(
@@ -130,7 +103,7 @@ describe("TransferOwnershipButton", () => {
 
   it("falls back to a generic reason when the loader ships no owner", () => {
     renderButton(
-      createLayoutData({ roles: [OrganizationRoles.ADMIN], owner: null })
+      createLayoutLoaderData({ roles: [OrganizationRoles.ADMIN], owner: null })
     );
 
     const button = screen.getByRole("button", { name: /transfer ownership/i });

@@ -7,6 +7,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createLayoutLoaderData, OWNER_EMAIL } from "@factories";
 import { TooltipProvider } from "../shared/tooltip";
 
 // ── Mocks ──────────────────────────────────────────────
@@ -56,28 +57,6 @@ const { default: TransferOwnershipCard } = await import(
 
 // ── Test data ──────────────────────────────────────────
 
-const OWNER_EMAIL = "owner@example.com";
-
-function createLayoutData({
-  roles = [OrganizationRoles.ADMIN],
-  isShelfAdmin = false,
-}: {
-  roles?: OrganizationRoles[];
-  isShelfAdmin?: boolean;
-} = {}) {
-  return {
-    currentOrganizationUserRoles: roles,
-    currentOrganization: {
-      id: "org-1",
-      name: "Test Org",
-      owner: { id: "owner-1", email: OWNER_EMAIL },
-    },
-    // Shelf staff admin flag, as derived by the _layout loader
-    isAdmin: isShelfAdmin,
-    user: { id: "user-1" },
-  };
-}
-
 const admin = {
   id: "admin-1",
   firstName: "Julia",
@@ -92,11 +71,11 @@ const noSubscription = {
 };
 
 function renderCard({
-  layoutData = createLayoutData(),
+  layoutData = createLayoutLoaderData(),
   admins = [admin],
   isPersonalWorkspace = false,
 }: {
-  layoutData?: ReturnType<typeof createLayoutData>;
+  layoutData?: ReturnType<typeof createLayoutLoaderData>;
   admins?: (typeof admin)[];
   isPersonalWorkspace?: boolean;
 } = {}) {
@@ -126,7 +105,7 @@ describe("TransferOwnershipCard", () => {
 
   it("shows the transfer flow to the workspace owner", () => {
     renderCard({
-      layoutData: createLayoutData({ roles: [OrganizationRoles.OWNER] }),
+      layoutData: createLayoutLoaderData({ roles: [OrganizationRoles.OWNER] }),
     });
 
     expect(
@@ -140,7 +119,7 @@ describe("TransferOwnershipCard", () => {
 
   it("tells non-owner members who can transfer instead of rendering nothing", () => {
     renderCard({
-      layoutData: createLayoutData({ roles: [OrganizationRoles.ADMIN] }),
+      layoutData: createLayoutLoaderData({ roles: [OrganizationRoles.ADMIN] }),
     });
 
     const explainer = screen.getByText(/only the workspace owner/i, {
@@ -155,7 +134,7 @@ describe("TransferOwnershipCard", () => {
 
   it("still shows the transfer flow to Shelf admins who are not the owner", () => {
     renderCard({
-      layoutData: createLayoutData({
+      layoutData: createLayoutLoaderData({
         roles: [OrganizationRoles.ADMIN],
         isShelfAdmin: true,
       }),
@@ -168,7 +147,7 @@ describe("TransferOwnershipCard", () => {
 
   it("explains the account-email alternative for personal workspaces", () => {
     renderCard({
-      layoutData: createLayoutData({ roles: [OrganizationRoles.OWNER] }),
+      layoutData: createLayoutLoaderData({ roles: [OrganizationRoles.OWNER] }),
       isPersonalWorkspace: true,
     });
 
@@ -188,7 +167,7 @@ describe("TransferOwnershipCard", () => {
   it("renders an inert transfer button when the workspace has no admins", async () => {
     const user = userEvent.setup();
     renderCard({
-      layoutData: createLayoutData({ roles: [OrganizationRoles.OWNER] }),
+      layoutData: createLayoutLoaderData({ roles: [OrganizationRoles.OWNER] }),
       admins: [],
     });
 

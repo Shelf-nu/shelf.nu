@@ -2,10 +2,9 @@ import { useState } from "react";
 import { Form, Link, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useCanTransferOwnership } from "~/hooks/use-can-transfer-ownership";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useIsShelfAdmin } from "~/hooks/use-is-shelf-admin";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
@@ -112,8 +111,7 @@ export default function TransferOwnershipCard({
   premiumIsEnabled,
   isPersonalWorkspace = false,
 }: TransferOwnershipCardProps) {
-  const { isOwner } = useUserRoleHelper();
-  const isShelfAdmin = useIsShelfAdmin();
+  const canTransferOwnership = useCanTransferOwnership();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<Admin | null>(null);
   const [transferSubscription, setTransferSubscription] = useState(false);
@@ -170,7 +168,7 @@ export default function TransferOwnershipCard({
   }
 
   /** Non-owners cannot transfer, but must still be able to discover who can */
-  if (!isOwner && !isShelfAdmin) {
+  if (!canTransferOwnership) {
     return (
       <Card className={tw(className)} id="transfer-ownership">
         <h4 className="mb-1 text-text-lg font-semibold">
