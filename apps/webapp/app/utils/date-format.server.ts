@@ -103,8 +103,20 @@ export async function resolveUserFormatPrefsById(
  * {@link ResolvedFormatPrefs} precisely to stop a non-preference zone being
  * passed by accident.
  *
+ * ACCEPTED RISK — the declared zone is fully client-controlled, and the booking
+ * schema evaluates working-hours / booking-window rules in it. A caller can
+ * therefore choose a zone whose 09:00 lands on an out-of-hours instant and still
+ * satisfy the org's rules. This is pre-existing behaviour on `main` (the mobile
+ * routes have always validated in `body.timeZone`), confined to the caller's own
+ * organization and their own permitted booking action — policy evasion, not an
+ * IDOR. The durable fix is to evaluate working-hours against the ORGANIZATION's
+ * zone and keep the declared zone strictly for decoding the offset-less wire
+ * string; that is a product decision affecting web equally, so it is deliberately
+ * deferred rather than solved here. Do not widen this helper's use without
+ * revisiting it.
+ *
  * @param timeZone - The IANA zone the client declared, already validated by the
- *   route's Zod schema (`isValidTimeZone`).
+ *   route's Zod schema (`isValidTimeZone`). Callers MUST validate before calling.
  * @returns Concrete prefs carrying the declared zone.
  */
 export function prefsForDeclaredZone(timeZone: string): ResolvedFormatPrefs {
