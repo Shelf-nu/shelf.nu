@@ -9,6 +9,8 @@ export * from "./asset";
 export * from "./organization";
 export * from "./assetModel";
 export * from "./activityEvent";
+/** Audit session + audit asset factories. `createAuditAsset` requires an
+ * `auditSessionId`: that link is the model's entire tenant boundary. */
 export * from "./audit";
 export * from "./layoutLoaderData";
 export * from "./stripePrice";
