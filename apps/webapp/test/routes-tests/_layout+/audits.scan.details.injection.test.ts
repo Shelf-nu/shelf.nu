@@ -47,9 +47,14 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-// why: shared audit-assignee guard; mocked since it performs DB lookups.
+// why: shared audit-assignee guards; mocked since they perform DB lookups.
+// Both are needed: the loader uses the sync BASE/SELF_SERVICE variant, the
+// action uses the async one. A module mock that omits either makes the missing
+// export `undefined`, so the route 500s and every assertion fails for the
+// wrong reason rather than reporting a missing guard.
 vi.mock("~/modules/audit/service.server", () => ({
   requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssignee: vi.fn(),
 }));
 
 // why: external database — don't hit the real DB. $transaction runs the

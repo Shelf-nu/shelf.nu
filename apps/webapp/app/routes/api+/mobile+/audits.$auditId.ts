@@ -8,6 +8,7 @@ import {
 import {
   getAuditSessionDetails,
   getAuditScans,
+  requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -46,6 +47,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ auditId: z.string().min(1) })
     );
 
+    // Gate the READ, not merely the CTA below. `isAssignee` was computed only
+    // to decide whether to show a "Complete Audit" button, so an unassigned
+    // BASE or SELF_SERVICE user could still fetch the full audit — its assets,
+    // scans, notes and progress — for any audit in the workspace. The web
+    // overview loader already gates this; mobile did not. (detail.dev D054)
+    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId: user.id,
+      isSelfServiceOrBase,
+    });
+
     // Fetch session details and scans in parallel
     const [{ session, expectedAssets }, scans] = await Promise.all([
       getAuditSessionDetails({ id: auditId, organizationId }),
@@ -57,7 +71,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // SELF_SERVICE only when assigned. Encode that eligibility in
     // `canComplete` so the client never shows a "Complete Audit" CTA that
     // 403s after confirmation. Mirrors the endpoint's own rule exactly.
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
     const isAssignee = session.assignments.some((a) => a.user.id === user.id);
     const canCompleteAudit =
       (session.status === "ACTIVE" || session.status === "PENDING") &&

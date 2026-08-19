@@ -36,7 +36,10 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import {
+  requireAuditAssignee,
+  requireAuditAssigneeForBaseSelfService,
+} from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -186,11 +189,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
+    });
+
+    // The loader gates the read with `requireAuditAssigneeForBaseSelfService`;
+    // this action did not gate the writes. Every intent below mutates the
+    // audit — notes, condition, evidence deletion — so the guard is hoisted
+    // here rather than repeated per intent, and a new intent inherits it.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
     });
 
     const formData = await request.clone().formData();
@@ -528,6 +542,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       await deleteAuditImage({
         imageId,
         organizationId,
+        auditSessionId: auditId,
+        auditAssetId,
       });
 
       return payload({ success: true });

@@ -185,16 +185,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.clone().formData();
     const intent = formData.get("intent");
 
-    if (intent === "complete-audit") {
-      // Assignee-gated: ADMIN/OWNER may complete any audit,
-      // BASE/SELF_SERVICE only when assigned.
-      await requireAuditAssignee({
-        auditSessionId: auditId,
-        organizationId,
-        userId,
-        isSelfServiceOrBase,
-      });
+    // Assignee-gated for EVERY intent: ADMIN/OWNER may act on any audit,
+    // BASE/SELF_SERVICE only on audits assigned to them.
+    //
+    // Hoisted rather than repeated per branch, because only `complete-audit`
+    // used to carry it — `remove-asset` and `bulk-remove-assets` had none, so
+    // an unassigned member could strip assets out of anyone's audit by direct
+    // POST. The loader's `canRemoveAssets` is display-only. Putting the guard
+    // ahead of the switch means a newly added intent inherits it instead of
+    // having to remember. (detail.dev D101)
+    //
+    // `cancel-audit` additionally enforces creator-or-admin inside
+    // `cancelAuditSession`; that is a narrower rule and stays where it is.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
 
+    if (intent === "complete-audit") {
       await completeAuditWithImages({
         request,
         auditSessionId: auditId,
