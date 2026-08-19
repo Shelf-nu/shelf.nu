@@ -995,6 +995,21 @@ export async function getAssetsForAuditSession({
         assetId: true,
         expected: true,
         status: true,
+        // why: so the overview row can SAY it holds evidence. The notes and
+        // photos were always reachable — via the Activity feed, or by opening
+        // a row on the off-chance — but nothing in the assets table indicated
+        // which rows were worth opening. On a 200-asset audit that makes the
+        // one damaged item indistinguishable from the 199 clean ones.
+        //
+        // COMMENT only, matching `getAuditScans`: system notes are audit
+        // trail, not something a person wrote about the asset's condition,
+        // and counting them would inflate every row to a uniform number.
+        _count: {
+          select: {
+            notes: { where: { type: "COMMENT" } },
+            images: true,
+          },
+        },
       },
     });
 
@@ -1008,6 +1023,8 @@ export async function getAssetsForAuditSession({
           auditAssetId: aa.id,
           expected: aa.expected,
           auditStatus: aa.status,
+          auditNotesCount: aa._count.notes,
+          auditImagesCount: aa._count.images,
         },
       ])
     );

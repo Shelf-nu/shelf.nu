@@ -21,10 +21,14 @@ import {
   type AuditExpectedAsset,
   type AuditScanData,
   type AuditAssetStatus,
+  type AuditEvidenceResponse,
+  type AuditEvidenceNote,
+  type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { EvidenceViewer } from "@/components/audit/evidence-viewer";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_STATUS_LABELS,
@@ -114,6 +118,14 @@ type DisplayAsset = {
   locationName: string | null;
   categoryName: string | null;
   custodianName: string | null;
+  /**
+   * The audit-asset row id, present only once the asset has been scanned.
+   * Keys this asset's evidence in the `byAuditAsset` payload.
+   */
+  auditAssetId: string | null;
+  /** Counts from the detail payload — what the row advertises before any fetch. */
+  notesCount: number;
+  imagesCount: number;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -132,6 +144,53 @@ function AuditDetailContent() {
   const { currentOrg } = useOrg();
   const { colors, auditStatusBadge, auditAssetStatusBadge } = useTheme();
   const { formatDateTime } = useDateFormatter();
+
+  // ── Evidence (notes + photos recorded on this audit) ──
+  //
+  // why a separate fetch: this is the heavy half (image URLs, note bodies,
+  // authors) and is only wanted once someone opens a row, so the detail
+  // payload stays cheap. Loaded lazily on first open and then kept, because
+  // a completed audit's evidence cannot change underneath us.
+  const [evidence, setEvidence] = useState<AuditEvidenceResponse | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [openEvidence, setOpenEvidence] = useState<{
+    auditAssetId: string | null;
+    name: string;
+  } | null>(null);
+
+  const loadEvidence = useCallback(async () => {
+    if (!currentOrg?.id || !id || evidence) return;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    const { data, error } = await api.auditEvidence(id, currentOrg.id);
+    if (error) setEvidenceError(error);
+    else if (data) setEvidence(data);
+    setEvidenceLoading(false);
+  }, [currentOrg?.id, id, evidence]);
+
+  /** Opens the viewer for one asset, or for the audit itself (`null`). */
+  const onEvidencePress = useCallback(
+    (target: { auditAssetId: string | null; name: string }) => {
+      setOpenEvidence(target);
+      void loadEvidence();
+    },
+    [loadEvidence]
+  );
+
+  const openEvidenceBucket: {
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  } = (() => {
+    if (!evidence || !openEvidence) return { notes: [], images: [] };
+    if (openEvidence.auditAssetId === null) return evidence.general;
+    return (
+      evidence.byAuditAsset[openEvidence.auditAssetId] ?? {
+        notes: [],
+        images: [],
+      }
+    );
+  })();
   const styles = useStyles();
 
   // ── State ──────────────────────────────────────────────
@@ -336,6 +395,9 @@ function AuditDetailContent() {
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
+        auditAssetId: scan?.auditAssetId ?? null,
+        notesCount: scan?.auditNotesCount ?? 0,
+        imagesCount: scan?.auditImagesCount ?? 0,
       });
     }
 
@@ -357,6 +419,9 @@ function AuditDetailContent() {
           locationName: scan.assetLocationName,
           categoryName: null,
           custodianName: null,
+          auditAssetId: scan.auditAssetId,
+          notesCount: scan.auditNotesCount,
+          imagesCount: scan.auditImagesCount,
         });
       }
     }
@@ -408,9 +473,27 @@ function AuditDetailContent() {
         });
       }
 
+      // why: evidence is the ONE thing on this card worth opening. Everything
+      // else (image, name, location, category, custodian, status) is already
+      // shown, which is why the card is otherwise inert — see the note below.
+      const evidenceCount = item.notesCount + item.imagesCount;
+      const hasEvidence = evidenceCount > 0 && item.auditAssetId !== null;
+      const Card = hasEvidence ? TouchableOpacity : View;
+
       return (
-        <View
+        <Card
           style={styles.assetCard}
+          {...(hasEvidence
+            ? {
+                onPress: () =>
+                  onEvidencePress({
+                    auditAssetId: item.auditAssetId as string,
+                    name: item.name,
+                  }),
+                activeOpacity: 0.7,
+                accessibilityRole: "button" as const,
+              }
+            : { accessibilityRole: "summary" as const })}
           // why: React Native 0.81 treats a plain View as a container,
           // so VoiceOver/TalkBack would announce each child Text node
           // separately. `accessible` collapses the subtree into one
@@ -421,8 +504,14 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-          ].join(", ")}
-          accessibilityRole="summary"
+            hasEvidence
+              ? `${evidenceCount} ${
+                  evidenceCount === 1 ? "attachment" : "attachments"
+                }, tap to view`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(", ")}
         >
           {/*
             why: the previous `router.push('/(tabs)/assets/...)' from
@@ -473,16 +562,32 @@ function AuditDetailContent() {
             )}
           </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
-            <Text style={[styles.statusText, { color: badge.text }]}>
-              {statusLabel}
-            </Text>
+          <View style={styles.assetRight}>
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <View
+                style={[styles.statusDot, { backgroundColor: badge.text }]}
+              />
+              <Text style={[styles.statusText, { color: badge.text }]}>
+                {statusLabel}
+              </Text>
+            </View>
+            {hasEvidence ? (
+              <View style={styles.evidenceChip}>
+                <Ionicons name="attach" size={12} color={colors.primaryText} />
+                <Text style={styles.evidenceChipText}>{evidenceCount}</Text>
+              </View>
+            ) : null}
           </View>
-        </View>
+        </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime]
+    [
+      colors,
+      auditAssetStatusBadge,
+      styles,
+      formatDateTime,
+      onEvidencePress,
+    ]
   );
 
   // ── Loading / Error states ────────────────────────────
@@ -731,6 +836,40 @@ function AuditDetailContent() {
                     </Text>
                   </View>
                 )}
+
+                {/*
+                  why: the completion note and any photos attached when the
+                  audit closed are about the audit as a whole, so they belong
+                  with its details rather than on any one asset row. Shown
+                  once completed — before that there is nothing to read.
+                */}
+                {isCompleted && (
+                  <TouchableOpacity
+                    style={styles.auditEvidenceRow}
+                    onPress={() =>
+                      onEvidencePress({
+                        auditAssetId: null,
+                        name: "Completion notes and photos",
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel="View the completion notes and photos for this audit"
+                  >
+                    <Ionicons
+                      name="document-attach-outline"
+                      size={15}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.auditEvidenceText}>
+                      Completion notes and photos
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={15}
+                      color={colors.muted}
+                    />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
@@ -916,6 +1055,16 @@ function AuditDetailContent() {
           </View>
         }
       />
+
+      <EvidenceViewer
+        visible={openEvidence !== null}
+        onClose={() => setOpenEvidence(null)}
+        title={openEvidence?.name ?? ""}
+        notes={openEvidenceBucket.notes}
+        images={openEvidenceBucket.images}
+        isLoading={evidenceLoading}
+        error={evidenceError}
+      />
     </View>
   );
 }
@@ -1013,6 +1162,25 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     fontWeight: "600",
   },
+  assetRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  auditEvidenceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    marginTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  auditEvidenceText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
+  },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1020,6 +1188,23 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: 2,
     borderRadius: borderRadius.pill,
     gap: 4,
+  },
+  evidenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+  },
+  evidenceChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    // why: `primaryText`, not `primary` — the brand orange is ~3.1:1 on
+    // white and fails the 4.5:1 text bar; `primaryText` is its accessible
+    // twin, the same pairing the rest of the app uses for orange labels.
+    color: colors.primaryText,
   },
   statusDot: {
     width: 6,

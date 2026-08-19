@@ -2,6 +2,7 @@ import { apiFetch, apiUpload } from "./client";
 import type {
   AuditsResponse,
   AuditDetailResponse,
+  AuditEvidenceResponse,
   RecordScanResponse,
   CompleteAuditResponse,
   CreateAuditNoteResponse,
@@ -61,6 +62,29 @@ export const auditsApi = {
   audit: (auditId: string, orgId: string) =>
     apiFetch<AuditDetailResponse>(
       `/api/mobile/audits/${auditId}?orgId=${orgId}`
+    ),
+
+  /**
+   * Get every note and photo recorded on an audit, for READING.
+   *
+   * The write halves (`addAuditNote`, `uploadAuditImage`) have always
+   * existed; this is the read half. Without it the app knew evidence
+   * existed — the detail payload carries counts — but could not show any of
+   * it, so a completed audit surfaced none of the work the field worker had
+   * just done.
+   *
+   * Fetched separately from the detail payload rather than folded into it:
+   * this is heavier (image URLs, note bodies, authors) and only needed when
+   * someone actually opens a row, so the audit list and detail stay cheap.
+   *
+   * @param auditId Audit session id.
+   * @param orgId Active organization id from `useOrg`.
+   * @param signal AbortSignal so navigating away mid-flight cancels.
+   */
+  auditEvidence: (auditId: string, orgId: string, signal?: AbortSignal) =>
+    apiFetch<AuditEvidenceResponse>(
+      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}`,
+      { signal }
     ),
 
   /** Record a scan during an audit (idempotent) */

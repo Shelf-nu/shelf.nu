@@ -1053,6 +1053,51 @@ export type AuditDetailResponse = {
   canComplete: boolean;
 };
 
+/**
+ * One note or photo recorded on an audit, as the evidence route serves it.
+ *
+ * `authorName` is null when the account has been removed — the evidence
+ * survives the person, so the UI says "Unknown" rather than hiding the row.
+ */
+export type AuditEvidenceNote = {
+  id: string;
+  content: string;
+  createdAt: string;
+  authorName: string | null;
+  authorImage: string | null;
+};
+
+export type AuditEvidenceImage = {
+  id: string;
+  imageUrl: string;
+  /** Always populated — the server falls back to `imageUrl`. */
+  thumbnailUrl: string;
+  description: string | null;
+  createdAt: string;
+  authorName: string | null;
+  authorImage: string | null;
+};
+
+/**
+ * Everything recorded ON an audit, split the way the schema splits it.
+ *
+ * `general` is the completion note and any photos attached when the audit was
+ * closed. `byAuditAsset` is keyed by the same `auditAssetId` the detail
+ * payload already carries, so a row looks up its own evidence directly.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
+export type AuditEvidenceResponse = {
+  general: {
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  };
+  byAuditAsset: Record<
+    string,
+    { notes: AuditEvidenceNote[]; images: AuditEvidenceImage[] }
+  >;
+};
+
 export type RecordScanResponse = {
   success: boolean;
   scanId: string;

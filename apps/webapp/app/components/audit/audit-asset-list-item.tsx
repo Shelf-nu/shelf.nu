@@ -13,6 +13,7 @@
  */
 
 import { isAuditCompleted } from "@shelf/labels";
+import { Paperclip } from "lucide-react";
 import { useLoaderData } from "react-router";
 
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
@@ -56,6 +57,14 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
  */
 export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   const { session, canRemoveAssets } = useLoaderData<typeof loader>();
+  /**
+   * Condition notes + photos recorded against this asset during the audit.
+   * One number, because the reader's question is "is there anything here?",
+   * not "how many of each?" — the panel answers that.
+   */
+  const evidenceCount =
+    (item.auditData?.auditNotesCount ?? 0) +
+    (item.auditData?.auditImagesCount ?? 0);
   const { category, location, custody: custodyArray } = item;
   // `custody` is an array on the quantities data model — surface the primary
   // custody row so the existing single-custodian badge keeps working.
@@ -129,9 +138,35 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode ? (
+              {displayCode || evidenceCount > 0 ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <AssetCodeBadge {...displayCode} />
+                  {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
+                  {/*
+                    why: the row is the only place someone looks when asking
+                    "which of these did we find something on?". The notes and
+                    photos were always reachable — through the Activity feed,
+                    or by opening a row on spec — but nothing here said which
+                    rows were worth opening, so on a large audit the one
+                    damaged item read exactly like the clean ones.
+
+                    Links into the existing notes-and-images panel rather than
+                    introducing a second place to read evidence. That panel has
+                    no status gate, so this works on a completed audit, which
+                    is when the record actually gets consulted.
+                  */}
+                  {evidenceCount > 0 && item.auditData?.auditAssetId ? (
+                    <Button
+                      to={`/audits/${session.id}/scan/${item.auditData.auditAssetId}/details`}
+                      variant="link"
+                      className="flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[12px] font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                      aria-label={`${evidenceCount} ${
+                        evidenceCount === 1 ? "attachment" : "attachments"
+                      } on ${item.title}`}
+                    >
+                      <Paperclip className="size-3" />
+                      <span className="tabular-nums">{evidenceCount}</span>
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
