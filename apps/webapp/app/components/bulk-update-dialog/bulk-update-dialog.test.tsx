@@ -85,6 +85,7 @@ type DialogTestProps = {
   keepSelectionOnSuccess?: boolean;
   skipCloseOnSuccess?: boolean;
   allowBodyOverflow?: boolean;
+  className?: string;
 };
 
 /**
@@ -237,9 +238,26 @@ describe("BulkUpdateDialogContent — body overflow opt-in", () => {
   });
 
   it("keeps the caller's own className alongside the opt-in", async () => {
+    // `test-caller-class` is a deliberate non-Tailwind sentinel: `tw()` is
+    // `twMerge`, which would collapse a second width utility into the first and
+    // hide a regression that dropped the caller's classes.
+    await open("tag-add", {
+      allowBodyOverflow: true,
+      className: "md:w-[600px] test-caller-class",
+    });
+
+    const el = dialogEl();
+    expect(el?.classList.contains("dialog-allows-overflow")).toBe(true);
+    expect(el?.classList.contains("test-caller-class")).toBe(true);
+    expect(el?.className).toContain("md:w-[600px]");
+    // The two width sources are `className || "lg:w-[400px]"` — mutually
+    // exclusive, so a caller class REPLACES the default rather than joining it.
+    expect(el?.className).not.toContain("lg:w-[400px]");
+  });
+
+  it("falls back to the default width when no className is passed", async () => {
     await open("tag-add", { allowBodyOverflow: true });
 
-    // The default `lg:w-[400px]` still applies when no className is passed.
     expect(dialogEl()?.className).toContain("lg:w-[400px]");
   });
 });
