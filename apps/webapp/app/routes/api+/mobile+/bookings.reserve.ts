@@ -12,6 +12,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   getBookingFlags,
   reserveBooking,
@@ -83,7 +84,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, timeZone } = BodySchema.parse(await request.json());
+    const { bookingId, timeZone } = parseMobileBody(
+      BodySchema,
+      await request.json()
+    );
 
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =

@@ -9,6 +9,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -99,7 +100,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // of the web route-layer gate).
     await assertMobileCanUseBookings(organizationId);
 
-    const body = BodySchema.parse(await request.json());
+    const body = parseMobileBody(BodySchema, await request.json());
 
     // Resolve the caller's role to branch self-service rules + admin bypass.
     const { role } = await getMobileUserContext(user.id, organizationId);
