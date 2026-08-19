@@ -1,4 +1,5 @@
 import { action as createAction } from "~/routes/api+/mobile+/bookings.create";
+import { action as reserveAction } from "~/routes/api+/mobile+/bookings.reserve";
 import { action as updateAction } from "~/routes/api+/mobile+/bookings.update";
 import { createActionArgs } from "@mocks/remix";
 
@@ -60,6 +61,10 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/booking/service.server", () => ({
   createBooking: vi.fn(),
   updateBasicBooking: vi.fn(),
+  // reserve's imports — unreachable in these cases (validation or the booking
+  // lookup answers first), but declared so the mock mirrors the real module.
+  reserveBooking: vi.fn(),
+  getBookingFlags: vi.fn(),
 }));
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn(),
@@ -114,6 +119,7 @@ describe("mobile booking routes - declared timezone validation", () => {
 
   const routes = [
     { name: "create", action: createAction },
+    { name: "reserve", action: reserveAction },
     { name: "update", action: updateAction },
   ];
 
