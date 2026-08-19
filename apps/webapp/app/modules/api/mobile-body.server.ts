@@ -17,22 +17,46 @@
  * @see {@link file://../../utils/http.server.ts} parseData — the FormData equivalent for web routes
  */
 import { z } from "zod";
+import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
 /**
- * Parse a mobile JSON body against a Zod schema, surfacing validation failures
- * as a 400 rather than an uncaptured 500.
+ * Read and validate a mobile JSON body, surfacing client-input failures as a
+ * 400 rather than an uncaptured 500.
+ *
+ * Takes the `Request` rather than an already-parsed body on purpose: a body that
+ * is not valid JSON makes `request.json()` throw a `SyntaxError`, which reaches
+ * the same generic 500 + Sentry branch this helper exists to avoid. Parsing here
+ * keeps both failure modes — unparseable JSON and schema-invalid JSON — on the
+ * 400 path.
  *
  * @param schema - The Zod schema describing the expected body.
- * @param body - The parsed JSON from `await request.json()`.
+ * @param request - The incoming request whose JSON body to read.
+ * @param label - `ShelfError` label for the thrown error. Defaults to "Booking"
+ *   since the booking actions are the current callers; pass the owning domain
+ *   when reusing this from another mobile route.
  * @returns The validated, typed body.
- * @throws {ShelfError} 400 (not captured) when validation fails; rethrows
- *   anything that is not a `ZodError` untouched.
+ * @throws {ShelfError} 400 (not captured) for unparseable JSON or schema
+ *   violations; rethrows anything else untouched.
  */
-export function parseMobileBody<Schema extends z.ZodTypeAny>(
+export async function parseMobileBody<Schema extends z.ZodTypeAny>(
   schema: Schema,
-  body: unknown
-): z.infer<Schema> {
+  request: Request,
+  label: ErrorLabel = "Booking"
+): Promise<z.infer<Schema>> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Request body must be valid JSON.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
   try {
     return schema.parse(body);
   } catch (cause) {
@@ -42,7 +66,7 @@ export function parseMobileBody<Schema extends z.ZodTypeAny>(
         // Name the offending field so "Time zone must be a valid IANA zone"
         // reaches the client instead of a generic failure.
         message: cause.errors[0]?.message ?? "Invalid request body.",
-        label: "Booking",
+        label,
         status: 400,
         shouldBeCaptured: false,
       });

@@ -147,6 +147,25 @@ describe("mobile booking routes - declared timezone validation", () => {
         expect(payload.error.message).toContain("Time zone");
       });
 
+      it("rejects an unparseable JSON body with 400", async () => {
+        // `request.json()` throws a SyntaxError, which reaches the same generic
+        // 500 branch as an unhandled ZodError unless the helper owns the parse.
+        const request = new Request("https://example.com/api/mobile/bookings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{not json",
+        });
+
+        const response = (await route.action(
+          createActionArgs({ request })
+        )) as unknown as Response;
+
+        expect(response.status).toBe(400);
+
+        const payload = await response.json();
+        expect(payload.error.message).not.toContain("something went wrong");
+      });
+
       it("accepts a real IANA zone past body validation", async () => {
         // Not asserting a 2xx — the request goes on to hit collaborators this
         // suite deliberately does not set up. What matters is that a valid zone

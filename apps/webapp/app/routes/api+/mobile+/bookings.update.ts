@@ -88,7 +88,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = parseMobileBody(BodySchema, await request.json());
+    const body = await parseMobileBody(BodySchema, request);
 
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =

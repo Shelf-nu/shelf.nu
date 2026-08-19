@@ -100,7 +100,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // of the web route-layer gate).
     await assertMobileCanUseBookings(organizationId);
 
-    const body = parseMobileBody(BodySchema, await request.json());
+    const body = await parseMobileBody(BodySchema, request);
 
     // Resolve the caller's role to branch self-service rules + admin bypass.
     const { role } = await getMobileUserContext(user.id, organizationId);

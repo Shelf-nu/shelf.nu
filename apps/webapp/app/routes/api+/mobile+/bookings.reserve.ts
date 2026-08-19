@@ -84,10 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, timeZone } = parseMobileBody(
-      BodySchema,
-      await request.json()
-    );
+    const { bookingId, timeZone } = await parseMobileBody(BodySchema, request);
 
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =
