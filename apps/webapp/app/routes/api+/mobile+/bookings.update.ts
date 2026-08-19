@@ -17,6 +17,7 @@ import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -151,6 +152,11 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
+    // TIMEZONE FIX: read the typed wall-clock in the acting user's RESOLVED
+    // preference zone, matching the web action. Falls back to the device zone
+    // above when the user has no stored preference. See `bookings.create.ts`.
+    const prefs = await resolveUserFormatPrefsById(userId, hints);
+
     // Business-rule validation via the shared web schema. The "save" action +
     // current status picks the right rule set (active bookings skip the date
     // rules; DRAFTs validate future/buffer/working-hours/max-length).
@@ -160,7 +166,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     try {
       BookingFormSchema({
-        hints,
+        prefs,
         action: "save",
         status: existing.status,
         workingHours,
@@ -195,14 +201,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // Dates + custodian only apply to DRAFT bookings (updateBasicBooking
     // re-gates this internally); parse the dates only when they will be used.
     const isDraft = existing.status === BookingStatus.DRAFT;
+    // Same zone the schema validated in, so the stored instant matches the
+    // wall-clock that just passed validation.
     const from = isDraft
       ? DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
-          zone: body.timeZone,
+          zone: prefs.timeZone,
         }).toJSDate()
       : undefined;
     const to = isDraft
       ? DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
-          zone: body.timeZone,
+          zone: prefs.timeZone,
         }).toJSDate()
       : undefined;
 

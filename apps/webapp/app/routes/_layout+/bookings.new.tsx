@@ -36,7 +36,7 @@ import {
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/bookings.new.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -170,16 +170,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
-    const hints = getHints(request);
     // TIMEZONE FIX: parse the submitted wall-clock date in the acting user's
     // RESOLVED timezone preference (the same one date DISPLAY uses), not the
     // browser hint. When the two differ (e.g. pref Europe/London, browser
     // UTC+3) the browser hint interprets the typed wall-clock in the wrong
-    // zone and stores the wrong UTC instant. Locale still comes from `hints`.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+    // zone and stores the wrong UTC instant.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
@@ -190,7 +189,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const payload = parseData(
       formData,
       BookingFormSchema({
-        hints: hintsWithPrefTz,
+        prefs,
         action: "new",
         workingHours,
         bookingSettings,
@@ -245,7 +244,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       formData.get("startDate")!.toString()!,
       DATE_TIME_FORMAT,
       {
-        zone: prefTimeZone,
+        zone: prefs.timeZone,
       }
     ).toJSDate();
 
@@ -253,7 +252,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       formData.get("endDate")!.toString()!,
       DATE_TIME_FORMAT,
       {
-        zone: prefTimeZone,
+        zone: prefs.timeZone,
       }
     ).toJSDate();
 

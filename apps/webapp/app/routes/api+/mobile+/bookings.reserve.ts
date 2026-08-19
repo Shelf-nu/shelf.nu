@@ -20,6 +20,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -222,6 +223,11 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone,
     };
 
+    // TIMEZONE FIX: evaluate the booking's wall-clock in the acting user's
+    // RESOLVED preference zone, matching the web reserve action. Falls back to
+    // the device zone above when no preference is stored. See `bookings.create.ts`.
+    const prefs = await resolveUserFormatPrefsById(userId, hints);
+
     // Full validation parity with the web reserve action. The stored dates are
     // round-tripped to the form's local-string shape so the shared schema's
     // working-hours / buffer / max-length rules apply.
@@ -229,16 +235,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
+    // Format and re-parse in the SAME zone the schema validates in, otherwise
+    // this round-trip would shift the instant it is meant to preserve.
     const startDate = DateTime.fromJSDate(booking.from)
-      .setZone(timeZone)
+      .setZone(prefs.timeZone)
       .toFormat(DATE_TIME_FORMAT);
     const endDate = DateTime.fromJSDate(booking.to)
-      .setZone(timeZone)
+      .setZone(prefs.timeZone)
       .toFormat(DATE_TIME_FORMAT);
 
     try {
       BookingFormSchema({
-        hints,
+        prefs,
         action: "reserve",
         status: booking.status,
         workingHours,

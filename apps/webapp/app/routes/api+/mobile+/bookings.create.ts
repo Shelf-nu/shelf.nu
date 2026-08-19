@@ -16,6 +16,7 @@ import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -139,6 +140,15 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
+    // TIMEZONE FIX: read the typed wall-clock in the acting user's RESOLVED
+    // preference zone, exactly as the web action does. A stored preference wins;
+    // when the user has none, this resolves to the device zone above, so the
+    // behaviour is unchanged for everyone who never set one. Without this, a
+    // user with an explicit preference got mobile validation and storage in the
+    // device zone while the companion DISPLAYED the same booking in the
+    // preference zone.
+    const prefs = await resolveUserFormatPrefsById(userId, hints);
+
     // Business-rule validation via the shared web schema. We shape the JSON body
     // into the form-data shape the schema expects (custodian as a JSON string,
     // tags as a comma-separated string) so the rules stay byte-identical to web.
@@ -148,7 +158,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     try {
       BookingFormSchema({
-        hints,
+        prefs,
         action: "new",
         workingHours,
         bookingSettings,
@@ -185,11 +195,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // so a value can pass validation yet not match DATE_TIME_FORMAT here and
     // become an Invalid Date. Guard explicitly before handing dates to the
     // service (otherwise `Invalid Date` would silently flow into createBooking).
+    // Same zone the schema validated in, so the stored instant matches the
+    // wall-clock that just passed validation.
     const fromDt = DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
-      zone: body.timeZone,
+      zone: prefs.timeZone,
     });
     const toDt = DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
-      zone: body.timeZone,
+      zone: prefs.timeZone,
     });
     if (!fromDt.isValid || !toDt.isValid) {
       throw new ShelfError({
