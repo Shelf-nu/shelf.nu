@@ -20,6 +20,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isValidTimeZone } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -55,7 +56,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 const BodySchema = z.object({
   bookingId: z.string().min(1),
-  timeZone: z.string().min(1, "Time zone is required"),
+  // See `bookings.create.ts` — an unrecognised zone silently resolves to UTC.
+  timeZone: z
+    .string()
+    .min(1, "Time zone is required")
+    .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
 });
 
 export async function action({ request }: ActionFunctionArgs) {

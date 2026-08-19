@@ -17,6 +17,7 @@ import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isValidTimeZone } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -61,7 +62,11 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  timeZone: z.string().min(1, "Time zone is required"),
+  // See `bookings.create.ts` — an unrecognised zone silently resolves to UTC.
+  timeZone: z
+    .string()
+    .min(1, "Time zone is required")
+    .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
   tags: z.array(z.string()).optional().default([]),
 });
 
@@ -203,16 +208,33 @@ export async function action({ request }: ActionFunctionArgs) {
     const isDraft = existing.status === BookingStatus.DRAFT;
     // Same zone the schema validated in, so the stored instant matches the
     // wall-clock that just passed validation.
-    const from = isDraft
+    const fromDt = isDraft
       ? DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
           zone: prefs.timeZone,
-        }).toJSDate()
+        })
       : undefined;
-    const to = isDraft
+    const toDt = isDraft
       ? DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
           zone: prefs.timeZone,
-        }).toJSDate()
+        })
       : undefined;
+
+    // BookingFormSchema validates the dates with the broader `coerceLocalDate`,
+    // so a value can pass validation yet not match DATE_TIME_FORMAT here and
+    // become an Invalid Date. Guard before handing dates to the service, as the
+    // create path does — otherwise `Invalid Date` flows into updateBasicBooking.
+    if ((fromDt && !fromDt.isValid) || (toDt && !toDt.isValid)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid booking start or end date.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const from = fromDt?.toJSDate();
+    const to = toDt?.toJSDate();
 
     const booking = await updateBasicBooking({
       id: body.bookingId,

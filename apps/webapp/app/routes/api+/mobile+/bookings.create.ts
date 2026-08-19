@@ -16,6 +16,7 @@ import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isValidTimeZone } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -67,7 +68,14 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  timeZone: z.string().min(1, "Time zone is required"),
+  // Must be a real IANA zone: an unrecognised string is discarded by
+  // `resolveFormatPrefs`, which then falls back to UTC for any user without a
+  // stored timezone preference — silently reintroducing the wrong-zone bug this
+  // route was fixed for. Reject it at the boundary instead.
+  timeZone: z
+    .string()
+    .min(1, "Time zone is required")
+    .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
   tags: z.array(z.string()).optional().default([]),
   assetIds: z.array(z.string()).optional().default([]),
 });
