@@ -405,13 +405,29 @@ export default function KitsIndexPage() {
                       to={`/kits/${resource.id}/assets`}
                       title={resource.title}
                     />
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
                         availableToBook={
                           resource.extendedProps?.availableToBook
                         }
                       />
+                      {/* why: the list view of this same page shows the code
+                          chip, so switching to the calendar used to lose it.
+                          Same resolver, same primitive — see
+                          `.claude/rules/code-bearing-entity-list-consistency.md`. */}
+                      {(() => {
+                        if (!organization) return null;
+                        const code = resolveDisplayCode({
+                          entity: {
+                            qrCodes: resource.extendedProps?.qrCodes,
+                            barcodes: resource.extendedProps?.barcodes,
+                            entityKind: "kit",
+                          },
+                          organization,
+                        });
+                        return code ? <AssetCodeBadge {...code} /> : null;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -498,7 +514,10 @@ function ListContent({
   // back to QR when the workspace prefers SAM.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: { ...item, entityKind: "kit" },
+        organization: currentOrganization,
+      })
     : null;
 
   return (

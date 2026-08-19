@@ -276,6 +276,14 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
                   id: true,
                   name: true,
                   image: true,
+                  // Kit-code resolution, mirroring the asset select above.
+                  // Kits carry Qr and Barcode rows too, and the sidebar's kit
+                  // group header is a kit-listing surface — without these it
+                  // is the only row in that sidebar with no code chip.
+                  // Kit has no sequentialId / preferredBarcodeId; the resolver
+                  // tolerates their absence and falls back to QR.
+                  qrCodes: { take: 1, select: { id: true } },
+                  barcodes: { select: { id: true, type: true, value: true } },
                   location: {
                     select: { id: true, name: true },
                   },

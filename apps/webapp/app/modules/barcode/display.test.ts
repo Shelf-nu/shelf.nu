@@ -50,6 +50,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
       type: "QR_ID",
       isFallback: false,
       workspacePreference: "QR_ID",
+      entityKind: "asset",
     });
   });
 
@@ -78,6 +79,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
       type: "SAM_ID",
       isFallback: false,
       workspacePreference: "SAM_ID",
+      entityKind: "asset",
     });
   });
 
@@ -96,6 +98,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "SAM_ID",
+      entityKind: "asset",
     });
   });
 });
@@ -114,6 +117,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
       type: "Code128",
       isFallback: false,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -164,6 +168,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -206,6 +211,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
       type: "Code39",
       isFallback: false,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -265,6 +271,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: false,
       workspacePreference: "QR_ID",
+      entityKind: "asset",
     });
   });
 
@@ -301,6 +308,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -332,6 +340,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -359,6 +368,35 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
+  });
+
+  it("carries entityKind through so callers can word help text honestly", () => {
+    // why: the resolver picks the same code for a kit as for an asset — this
+    // field never changes WHICH code wins. It exists so the badge can avoid
+    // telling a kit to add a SAM ID, which kits cannot have.
+    const result = resolveDisplayCode({
+      entity: { qrCodes: [{ id: "kit-qr" }], entityKind: "kit" },
+      organization: {
+        qrIdDisplayPreference: "SAM_ID",
+        barcodesEnabled: false,
+      },
+    });
+
+    expect(result.entityKind).toBe("kit");
+    expect(result.value).toBe("kit-qr");
+    expect(result.isFallback).toBe(true);
+  });
+
+  it("treats an unmarked entity as an asset", () => {
+    // why: every existing call site omits entityKind; none of them may change
+    // meaning because this field was added.
+    const result = resolveDisplayCode({
+      entity: { qrCodes: [{ id: "qr" }] },
+      organization: { qrIdDisplayPreference: "QR_ID", barcodesEnabled: false },
+    });
+
+    expect(result.entityKind).toBe("asset");
   });
 });

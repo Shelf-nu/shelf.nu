@@ -76,6 +76,20 @@ export type EntityForCodeResolution = {
   qrCodes?: Pick<Qr, "id">[];
   barcodes?: Pick<Barcode, "id" | "type" | "value">[];
   preferredBarcodeId?: string | null;
+  /**
+   * What kind of thing this is. Only affects the fallback HELP TEXT, never
+   * which code is chosen.
+   *
+   * why it exists: the fallback tooltip tells the reader how to fix the
+   * fallback — "this item has no SAM ID, add one". For a KIT that sentence is
+   * an instruction nobody can follow: `Kit` has no `sequentialId` column and
+   * no UI to set one, so the reader is told to do something impossible and
+   * then blames themselves. Kits still resolve normally on the other six
+   * preference values, so this is help text, not behaviour.
+   *
+   * Defaults to "asset" so no existing call site changes meaning.
+   */
+  entityKind?: "asset" | "kit";
 };
 
 /**
@@ -123,6 +137,15 @@ export type ResolvedDisplayCode = {
   /** True when the workspace-preferred type was unavailable and we fell back to QR. */
   isFallback: boolean;
   /**
+   * Carried through so the badge can word the fallback honestly. A kit
+   * cannot be given a SAM ID, so it must not be told to add one.
+   *
+   * Optional, and the badge treats absence as "asset": several call sites
+   * hand-build this object for an explicit column where the entity kind is
+   * already obvious from the surface.
+   */
+  entityKind?: "asset" | "kit";
+  /**
    * What the workspace ASKED FOR — included so callers can craft good
    * help/tooltip copy when `isFallback` is true (so the badge can say
    * "workspace prefers Code 128 but this asset has none" instead of just
@@ -150,6 +173,8 @@ export function resolveDisplayCode({
   // value rather than a runtime crash.
   const qrCodes = entity.qrCodes ?? [];
   const barcodes = entity.barcodes ?? [];
+  // Only ever affects help text — see EntityForCodeResolution.entityKind.
+  const entityKind = entity.entityKind ?? "asset";
 
   // Universal fallback: every code-bearing entity has at least one active
   // QR. If the QR relation isn't included in the query, value is "" —
@@ -159,6 +184,7 @@ export function resolveDisplayCode({
     type: "QR_ID",
     isFallback,
     workspacePreference: organization.qrIdDisplayPreference,
+    entityKind,
   });
 
   // 1. Per-entity override wins when present and resolvable — but ONLY if
@@ -175,6 +201,7 @@ export function resolveDisplayCode({
         type: preferred.type,
         isFallback: false,
         workspacePreference: organization.qrIdDisplayPreference,
+        entityKind,
       };
     }
     // Stale FK — fall through to workspace preference.
@@ -198,6 +225,7 @@ export function resolveDisplayCode({
             type: "SAM_ID",
             isFallback: false,
             workspacePreference: organization.qrIdDisplayPreference,
+            entityKind,
           }
         : qrFallback(true);
 
@@ -226,6 +254,7 @@ export function resolveDisplayCode({
             type: matching[0].type,
             isFallback: false,
             workspacePreference: organization.qrIdDisplayPreference,
+            entityKind,
           }
         : qrFallback(true);
     }
