@@ -80,7 +80,25 @@ export interface AuditPdfDbResult {
       };
     } | null;
   })[];
-  // Recent activity notes (limited to 15)
+  /**
+   * What people OBSERVED — every COMMENT note, uncapped.
+   *
+   * Kept separate from `activityNotes` because they answer different
+   * questions and only one of them is safe to truncate. A condition note is
+   * the reason the audit was worth doing ("scuff on the left arm, still
+   * usable"); dropping one silently removes evidence from the record this
+   * PDF exists to be. Carries its asset so the receipt can group a note with
+   * the photos of the same asset.
+   */
+  conditionNotes: (AuditNote & {
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    } | null;
+    auditAsset: { asset: { id: string; title: string } | null } | null;
+  })[];
+  // Recent system activity (UPDATE rows only, limited to 15)
   activityNotes: (AuditNote & {
     user: {
       firstName: string | null;
@@ -217,22 +235,51 @@ export async function fetchAllAuditPdfRelatedData(
     const generalImages = images.filter((img) => img.auditAssetId === null);
     const assetImages = images.filter((img) => img.auditAssetId !== null);
 
-    // Fetch recent activity notes (limit to 15 most recent)
-    const activityNotes = await db.auditNote.findMany({
-      where: { auditSessionId },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            email: true,
+    // `AuditNote` holds two unrelated things and they must not share a query.
+    //
+    // COMMENT rows are what a person typed about the condition of an asset.
+    // UPDATE rows are the system trail ("X started this audit"), written as
+    // Markdoc source. Reading both with one `take: 15` meant the trail — which
+    // grows with every scan — crowded the observations out of the receipt, and
+    // anything past the fifteenth was dropped without a word. On any audit
+    // larger than a handful of assets the condition notes lost that race.
+    const [conditionNotes, activityNotes] = await Promise.all([
+      // Uncapped, and oldest first: this reads as a report, not a feed.
+      db.auditNote.findMany({
+        where: { auditSessionId, type: "COMMENT" },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              email: true,
+            },
+          },
+          // why: lets the receipt put a note and the photos of the same asset
+          // in one place, instead of two sections the reader has to join up.
+          auditAsset: {
+            select: { asset: { select: { id: true, title: true } } },
           },
         },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    });
+        orderBy: { createdAt: "asc" },
+      }),
+      db.auditNote.findMany({
+        where: { auditSessionId, type: "UPDATE" },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 15,
+      }),
+    ]);
 
     // Fetch assets and organization details in parallel for efficiency
     const [assets, organization] = await Promise.all([
@@ -311,6 +358,7 @@ export async function fetchAllAuditPdfRelatedData(
       assetIdToQrCodeMap,
       generalImages,
       assetImages,
+      conditionNotes,
       activityNotes,
     };
   } catch (cause) {

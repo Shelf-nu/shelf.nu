@@ -110,12 +110,14 @@ describe("AuditAssetListItem — evidence chip", () => {
     // that it distinguishes.
     renderRow(item());
 
-    expect(screen.queryByLabelText(/attachment/i)).toBeNull();
+    expect(screen.queryByLabelText(/note|photo/i)).toBeNull();
   });
 
-  it("sums notes and photos into one count", () => {
-    // why: the reader's question is "is there anything here?", not "how many
-    // of each?" — the panel answers the breakdown.
+  it("keeps notes and photos as two separate counts", () => {
+    // why NOT one summed number: it would not be comparable between rows.
+    // Photos uploaded with a caption store a COMMENT alongside them; the same
+    // photos with no caption store an UPDATE, which is not evidence and is not
+    // counted. A single digit would read differently for identical evidence.
     renderRow(
       item({
         auditData: {
@@ -129,12 +131,16 @@ describe("AuditAssetListItem — evidence chip", () => {
     );
 
     expect(
-      screen.getByLabelText("3 attachments on Arri Fresnel 650 Plus")
+      screen.getByLabelText("2 notes, 1 photo on Arri Fresnel 650 Plus")
     ).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
+    // both numbers on screen, never their sum
+    expect(screen.getByText("2")).toBeTruthy();
+    expect(screen.getByText("1")).toBeTruthy();
+    expect(screen.queryByText("3")).toBeNull();
   });
 
-  it("uses the singular for one attachment", () => {
+  it("names only the kind that is actually there", () => {
+    // why: "1 note" on a row with no photo, not "1 note, 0 photos".
     renderRow(
       item({
         auditData: {
@@ -148,7 +154,28 @@ describe("AuditAssetListItem — evidence chip", () => {
     );
 
     expect(
-      screen.getByLabelText("1 attachment on Arri Fresnel 650 Plus")
+      screen.getByLabelText("1 note on Arri Fresnel 650 Plus")
+    ).toBeTruthy();
+  });
+
+  it("shows the photo count on a row with photos but no note", () => {
+    // why: uploading photos without a caption writes no COMMENT at all, so
+    // this is the shape of the common field case. A notes-only indicator
+    // would have rendered nothing here.
+    renderRow(
+      item({
+        auditData: {
+          auditAssetId: "aa-1",
+          expected: true,
+          auditStatus: "FOUND",
+          auditNotesCount: 0,
+          auditImagesCount: 2,
+        },
+      })
+    );
+
+    expect(
+      screen.getByLabelText("2 photos on Arri Fresnel 650 Plus")
     ).toBeTruthy();
   });
 
@@ -168,10 +195,10 @@ describe("AuditAssetListItem — evidence chip", () => {
       })
     );
 
-    const chip = screen.getByLabelText("2 attachments on Arri Fresnel 650 Plus");
-    expect(chip.getAttribute("href")).toBe(
-      "/audits/audit-1/scan/aa-1/details"
+    const chip = screen.getByLabelText(
+      "1 note, 1 photo on Arri Fresnel 650 Plus"
     );
+    expect(chip.getAttribute("href")).toBe("/audits/audit-1/scan/aa-1/details");
   });
 
   it("stays silent when the audit-asset link is missing", () => {
@@ -189,6 +216,6 @@ describe("AuditAssetListItem — evidence chip", () => {
       })
     );
 
-    expect(screen.queryByLabelText(/attachment/i)).toBeNull();
+    expect(screen.queryByLabelText(/note|photo/i)).toBeNull();
   });
 });

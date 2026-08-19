@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
-import { MessageSquare, Paperclip } from "lucide-react";
+import { MessageSquare, ImageIcon } from "lucide-react";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
@@ -113,11 +113,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditId,
     });
 
-    // Fetch notes for this audit asset
+    // Fetch the notes a PERSON wrote about this audit asset.
+    //
+    // why the type filter: uploading photos without typing a caption writes an
+    // UPDATE note against this same asset (helpers.server.ts,
+    // createAuditAssetImagesAddedNote), whose body is the Markdoc
+    // `{% audit_images %}` tag. Without the filter this panel counted that row
+    // in its Notes badge and rendered the photos twice — once inside the note,
+    // once in the Images grid below — and it disagreed with the count on the
+    // row that opened it, which asks for COMMENT only.
     const notes = await db.auditNote.findMany({
       where: {
         auditSessionId: auditId,
         auditAssetId: auditAssetId,
+        type: "COMMENT",
       },
       select: {
         id: true,
@@ -895,7 +904,7 @@ export default function AuditAssetDetails() {
       {/* Images section - fixed height at bottom */}
       <div className="h-68 shrink-0 overflow-y-auto  border-gray-200 px-6 py-4">
         <div className="mb-3 flex items-center gap-2">
-          <Paperclip className="size-5 text-gray-600" />
+          <ImageIcon className="size-5 text-gray-600" />
           <h3 className="text-base font-semibold text-gray-900">Images</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
             {localImages.length}
