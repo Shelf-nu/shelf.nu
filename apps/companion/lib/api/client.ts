@@ -232,8 +232,6 @@ export async function apiFetch<T>(
       return { data: null, error: null };
     }
 
-    if (__DEV__) console.error("[API] Fetch error:", err);
-
     // Auto-retry on timeout or network errors (not on auth/permission
     // errors). Requests sent with `retry: false` are exempt: a timed-out
     // POST may have landed server-side, and re-sending a non-idempotent
@@ -241,7 +239,21 @@ export async function apiFetch<T>(
     const isRetryable =
       (err instanceof Error && err.name === "AbortError" && timedOut) ||
       err instanceof TypeError; // TypeError = network failure
-    if (isRetryable && options.retry !== false && _retryCount < MAX_RETRIES) {
+    const willRetry =
+      isRetryable && options.retry !== false && _retryCount < MAX_RETRIES;
+
+    // why warn, not error, when a retry follows: in development React
+    // Native's LogBox promotes every console.error into a full-screen red
+    // overlay. A timeout we are about to retry — and usually recover from —
+    // is not worth stopping the app for, and on a slow or flaky connection
+    // it made the app unusable for testing while nothing was actually
+    // broken. Reserve the red box for the request that has given up.
+    if (__DEV__) {
+      const log = willRetry ? console.warn : console.error;
+      log("[API] Fetch failed:", path, err);
+    }
+
+    if (willRetry) {
       if (__DEV__) console.log("[API] Retrying…", path);
       return apiFetch<T>(path, options, _retryCount + 1);
     }
