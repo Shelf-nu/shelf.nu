@@ -2521,7 +2521,11 @@ describe("audit service", () => {
       expect(result.auditAssetId).toBe("audit-asset-winner");
       expect(mockDb.auditScan.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { auditAssetId: "audit-asset-winner" },
+          // why the exact object: the scan snapshots expectedness alongside the
+          // link, and it must take that from the row it actually attached to.
+          // The winner here is unexpected, so a scan that later outlives the
+          // deleted asset can still say so.
+          data: { auditAssetId: "audit-asset-winner", wasExpected: false },
         })
       );
       // ...and contributes NO count movement: the winner already counted it.
@@ -2551,6 +2555,14 @@ describe("audit service", () => {
       expect(mockDb.auditAsset.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: "FOUND" }),
+        })
+      );
+      // why: the sibling case above snapshots wasExpected: false. Pinning the
+      // true case here is what stops the snapshot being a constant — it has to
+      // follow the expectedness resolved from the row the scan attached to.
+      expect(mockDb.auditScan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { auditAssetId: "audit-asset-expected", wasExpected: true },
         })
       );
       expect(countUpdateData()).toEqual({
