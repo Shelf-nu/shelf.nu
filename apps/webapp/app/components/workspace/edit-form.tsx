@@ -119,25 +119,12 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  /**
-   * Captured once on mount: when the page is opened via a section anchor
-   * (e.g. /settings/general#transfer-ownership) the browser's scroll to that
-   * section must win — autofocusing the Name input would scroll right back to
-   * the top. Deliberately NOT a live hash subscription: same-route redirects
-   * (e.g. after deleting a SCIM token) clear the hash, and a live value would
-   * flip `when` to true and steal focus mid-session. Read from window (SSR
-   * guard: the hash never reaches the server) instead of useLocation so the
-   * form keeps working when rendered outside a router (tests, previews).
-   */
-  const [arrivedAtSectionAnchor] = useState(
-    () => typeof window !== "undefined" && Boolean(window.location.hash)
-  );
-
-  // Focus the Name input on mount, but skip when the field is disabled
-  // (personal workspaces don't allow renaming) or when the visitor came for a
-  // specific section further down the page.
+  // Focus the Name input on mount, but skip it when the field is disabled
+  // (personal workspaces don't allow renaming). Arriving via a section anchor
+  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
+  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
   const nameInputRef = useAutoFocus<HTMLInputElement>({
-    when: !isPersonalWorkspace && !arrivedAtSectionAnchor,
+    when: !isPersonalWorkspace,
   });
 
   const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);

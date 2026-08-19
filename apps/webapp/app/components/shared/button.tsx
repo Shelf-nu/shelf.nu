@@ -8,7 +8,7 @@ import type {
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import { Link, type LinkProps } from "react-router";
 import { tw } from "~/utils/tw";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
+import { DisabledReasonHoverCard } from "./disabled-reason-hover-card";
 import type { IconType } from "./icons-map";
 import {
   Tooltip,
@@ -210,11 +210,11 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     const Component = isLinkProps(props) ? Link : as;
 
     /**
-     * Disabled-with-reason popup state. Controlled so a tap can open it too:
-     * touch devices never fire hover, so a hover-only reason leaves the
-     * button looking dead on mobile.
+     * Id linking a disabled button to the hidden copy of its reason, so
+     * `aria-describedby` can announce it. Always generated (hooks cannot be
+     * conditional); only referenced on the disabled-with-reason path.
      */
-    const [disabledReasonOpen, setDisabledReasonOpen] = React.useState(false);
+    const disabledReasonId = React.useId();
 
     // Default to type="button" for native button elements to prevent
     // implicit form submission (HTML spec defaults to type="submit").
@@ -323,46 +323,32 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     // Render disabled button with hover card
     if (isDisabled && disabledReason) {
       return (
-        <HoverCard
-          openDelay={50}
-          closeDelay={50}
-          open={disabledReasonOpen}
-          onOpenChange={setDisabledReasonOpen}
+        <DisabledReasonHoverCard
+          title={disabledTitle}
+          reason={disabledReason}
+          descriptionId={disabledReasonId}
+          triggerClassName="disabled cursor-not-allowed select-none"
+          asChild
         >
-          <HoverCardTrigger
-            className="disabled cursor-not-allowed select-none"
-            asChild
+          <Component
+            {...props}
+            {...newTabRel}
+            className={finalStyles}
+            aria-label={ariaLabel}
+            // why: no native `disabled` here — it would swallow the pointer
+            // events the reason popup needs — so expose the state to
+            // assistive tech explicitly, and point at the reason so AT users
+            // get the same explanation the hover card gives everyone else.
+            aria-disabled={true}
+            aria-describedby={disabledReasonId}
+            prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
+            ref={ref}
+            onMouseDown={(e: MouseEvent) => e.preventDefault()}
+            onClick={(e: MouseEvent) => e.preventDefault()}
           >
-            <Component
-              {...props}
-              {...newTabRel}
-              className={finalStyles}
-              aria-label={ariaLabel}
-              // why: no native `disabled` here — it would swallow the pointer
-              // events the reason popup needs — so expose the state to
-              // assistive tech explicitly.
-              aria-disabled={true}
-              onMouseDown={(e: MouseEvent) => e.preventDefault()}
-              onClick={(e: MouseEvent) => {
-                // why: tap must reveal the reason — touch has no hover.
-                // Outside taps and Escape dismiss via Radix.
-                e.preventDefault();
-                setDisabledReasonOpen((prev) => !prev);
-              }}
-            >
-              {buttonContent}
-            </Component>
-          </HoverCardTrigger>
-          {/* why: bottom placement stays on-screen for wide buttons on
-          narrow viewports — a left-side popup has no room there and rendered
-          half off-screen. collisionPadding keeps it inside the viewport. */}
-          <HoverCardContent side="bottom" collisionPadding={8}>
-            <h5 className="text-left text-[14px]">
-              {disabledTitle || "Action disabled"}
-            </h5>
-            <p className="text-left text-[14px]">{disabledReason}</p>
-          </HoverCardContent>
-        </HoverCard>
+            {buttonContent}
+          </Component>
+        </DisabledReasonHoverCard>
       );
     }
 

@@ -46,21 +46,26 @@ const OWNER_EMAIL = "owner@example.com";
 function createLayoutData({
   roles = [OrganizationRoles.ADMIN],
   isShelfAdmin = false,
+  owner = { id: "owner-1", email: OWNER_EMAIL } as {
+    id: string;
+    email: string;
+  } | null,
 }: {
   roles?: OrganizationRoles[];
   isShelfAdmin?: boolean;
+  /** `null` mirrors a loader payload that stopped selecting the owner. */
+  owner?: { id: string; email: string } | null;
 } = {}) {
   return {
     currentOrganizationUserRoles: roles,
     currentOrganization: {
       id: "org-1",
       name: "Test Org",
-      owner: { id: "owner-1", email: OWNER_EMAIL },
+      owner,
     },
-    user: {
-      id: "user-1",
-      roles: isShelfAdmin ? [{ name: "ADMIN" }] : [],
-    },
+    // Shelf staff admin flag, as derived by the _layout loader
+    isAdmin: isShelfAdmin,
+    user: { id: "user-1" },
   };
 }
 
@@ -109,12 +114,32 @@ describe("TransferOwnershipButton", () => {
 
     // why: disabled-with-reason buttons render without the `disabled`
     // attribute (a HoverCard wrapper prevents the click instead), so we
-    // assert the behavior — the hover reason must name the owner.
+    // assert the behavior — the reason must name the owner, both on hover
+    // and to assistive tech.
     await user.hover(button);
     expect(
-      await screen.findByText(
+      await screen.findAllByText(
         new RegExp(`only the workspace owner \\(${OWNER_EMAIL}\\)`, "i")
       )
-    ).toBeInTheDocument();
+    ).not.toHaveLength(0);
+
+    expect(
+      document.getElementById(button.getAttribute("aria-describedby") as string)
+    ).toHaveTextContent(new RegExp(OWNER_EMAIL, "i"));
+  });
+
+  it("falls back to a generic reason when the loader ships no owner", () => {
+    renderButton(
+      createLayoutData({ roles: [OrganizationRoles.ADMIN], owner: null })
+    );
+
+    const button = screen.getByRole("button", { name: /transfer ownership/i });
+
+    // No stray "()" where the email would have gone
+    expect(
+      document.getElementById(button.getAttribute("aria-describedby") as string)
+    ).toHaveTextContent(
+      /^only the workspace owner can transfer ownership of this workspace\.$/i
+    );
   });
 });

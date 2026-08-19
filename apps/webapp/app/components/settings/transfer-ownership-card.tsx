@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { Roles } from "@prisma/client";
 import { Form, Link, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserData } from "~/hooks/use-user-data";
+import { useIsShelfAdmin } from "~/hooks/use-is-shelf-admin";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -114,7 +113,7 @@ export default function TransferOwnershipCard({
   isPersonalWorkspace = false,
 }: TransferOwnershipCardProps) {
   const { isOwner } = useUserRoleHelper();
-  const user = useUserData();
+  const isShelfAdmin = useIsShelfAdmin();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<Admin | null>(null);
   const [transferSubscription, setTransferSubscription] = useState(false);
@@ -138,8 +137,6 @@ export default function TransferOwnershipCard({
   const validationErrors = getValidationErrors<typeof TransferOwnershipSchema>(
     actionData?.error
   );
-
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
   // Check if current owner has subscriptions that could be transferred
   const ownerHasSubscription =

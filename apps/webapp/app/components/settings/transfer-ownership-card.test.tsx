@@ -72,10 +72,9 @@ function createLayoutData({
       name: "Test Org",
       owner: { id: "owner-1", email: OWNER_EMAIL },
     },
-    user: {
-      id: "user-1",
-      roles: isShelfAdmin ? [{ name: "ADMIN" }] : [],
-    },
+    // Shelf staff admin flag, as derived by the _layout loader
+    isAdmin: isShelfAdmin,
+    user: { id: "user-1" },
   };
 }
 

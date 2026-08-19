@@ -167,17 +167,15 @@ export default function UserTeamSetting() {
         three action buttons get the actual free space. */}
         <Filters innerWrapperClassName="md:w-auto">
           {/* Three buttons don't always fit one row: stack them full-width on
-          mobile, and let the row wrap on tighter md screens */}
-          <div className="flex w-full flex-col gap-1 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
+          mobile, and let the row wrap on tighter md screens. The container owns
+          the spacing and the stretch — children must NOT add their own `mt-*`
+          or `w-full`, or the gaps stop being uniform. */}
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
             <TransferOwnershipButton />
             <ImportUsersDialog />
             <InviteUserDialog
               trigger={
-                <Button
-                  type="button"
-                  className="mt-2 w-full md:mt-0 md:w-max"
-                  variant="primary"
-                >
+                <Button type="button" variant="primary">
                   <span className="whitespace-nowrap">Invite a user</span>
                 </Button>
               }
