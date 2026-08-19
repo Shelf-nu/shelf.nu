@@ -73,12 +73,9 @@ export default function ImportUsersDialog({
       {trigger ? (
         cloneElement(trigger, { onClick: openDialog })
       ) : (
-        <Button
-          type="button"
-          variant="secondary"
-          className="mt-2 w-full md:mt-0 md:w-max"
-          onClick={openDialog}
-        >
+        // No width/margin classes here on purpose: the actions row that
+        // renders this owns the layout (see settings.team.users).
+        <Button type="button" variant="secondary" onClick={openDialog}>
           <span className="whitespace-nowrap">Import Users</span>
         </Button>
       )}

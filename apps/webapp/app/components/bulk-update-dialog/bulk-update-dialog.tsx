@@ -19,11 +19,7 @@ import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
+import type { DisabledProp } from "../shared/button";
 
 /**
  * Type of the dialog
@@ -62,16 +58,13 @@ type CommonBulkDialogProps = {
 type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
   label?: string;
   onClick?: () => void;
-  /** Disabled can be a boolean  */
-  disabled?:
-    | boolean
-    | {
-        reason: string;
-      };
+  /** Boolean, or `{ reason }` to explain WHY the action is unavailable. */
+  disabled?: DisabledProp;
 };
 
 type BulkUpdateTriggerButtonProps = {
-  disabled?: boolean;
+  /** Boolean, or `{ reason }` to explain WHY the action is unavailable. */
+  disabled?: DisabledProp;
   type: BulkDialogType;
   label: string;
   onClick?: () => void;
@@ -119,46 +112,21 @@ function BulkUpdateDialogTrigger({
   label = `Update ${type}`,
   disabled,
 }: BulkUpdateDialogTriggerProps) {
-  const isDisabled =
-    disabled === undefined // If it is undefined, then it is not disabled
-      ? false
-      : typeof disabled === "boolean"
-      ? disabled
-      : true; // If it is an object, then it is disabled
-  const reason = typeof disabled === "object" ? disabled.reason : "";
-
   const openBulkDialog = useSetAtom(openBulkDialogAtom);
 
   function handleOpenDialog() {
     openBulkDialog(type);
   }
 
-  if (disabled) {
-    return (
-      <HoverCard openDelay={50} closeDelay={50}>
-        <HoverCardTrigger
-          className={tw("disabled inline-flex w-full cursor-not-allowed ")}
-        >
-          <BulkUpdateTriggerButton
-            disabled={isDisabled}
-            type={type}
-            label={label}
-            onClick={onClick}
-            onOpen={handleOpenDialog}
-          />
-        </HoverCardTrigger>
-        {reason && (
-          <HoverCardContent side="left">
-            <h5 className="text-left text-[14px]">Action disabled</h5>
-            <p className="text-left text-[14px]">{reason}</p>
-          </HoverCardContent>
-        )}
-      </HoverCard>
-    );
-  }
-
+  /**
+   * `disabled` is handed straight to `Button`, which owns the
+   * disabled-with-reason presentation (hover, tap and `aria-describedby`).
+   * This used to re-implement the HoverCard here, which left every bulk action
+   * hover-only — dead grey controls on touch. Don't reintroduce that copy.
+   */
   return (
     <BulkUpdateTriggerButton
+      disabled={disabled}
       type={type}
       label={label}
       onClick={onClick}
