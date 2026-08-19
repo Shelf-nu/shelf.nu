@@ -2839,25 +2839,40 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Fetch the audit asset to get the actual asset ID
-      const auditAsset = await tx.auditAsset.findUnique({
-        where: { id: auditAssetId },
+      // SECURITY (cross-tenant IDOR): scope the lookup to THIS audit.
+      //
+      // `auditAssetId` arrives from the request body. `AuditAsset` carries no
+      // `organizationId` of its own — it inherits the tenant purely through
+      // `auditSession` — so `auditSessionId` is the only thing that can scope
+      // it, and an id-only `findUnique` matched any row in the table. Proving
+      // the AUDIT is org-owned above does not help: nothing tied the audit
+      // asset to that audit. A caller could delete another organization's
+      // audit rows (cascading to their scans), and the count decrement below
+      // would then corrupt their OWN audit's totals as well.
+      const auditAsset = await tx.auditAsset.findFirst({
+        where: { id: auditAssetId, auditSessionId: auditId },
         select: { assetId: true, expected: true },
       });
 
       if (!auditAsset) {
         throw new ShelfError({
           cause: null,
-          message: "Audit asset not found",
-          additionalData: { auditAssetId },
+          // Deliberately does not distinguish "no such row" from "belongs to
+          // another audit" — the id is caller-supplied and the difference is
+          // an existence oracle.
+          message: "Audit asset not found in this audit",
+          additionalData: { auditAssetId, auditId },
           label,
           status: 404,
+          shouldBeCaptured: false,
         });
       }
 
-      // Delete the audit asset (cascade will delete related scans)
-      await tx.auditAsset.delete({
-        where: { id: auditAssetId },
+      // Delete the audit asset (cascade will delete related scans). Scoped
+      // again rather than by id alone: defence in depth, so the write cannot
+      // outlive a future refactor of the check above.
+      await tx.auditAsset.deleteMany({
+        where: { id: auditAssetId, auditSessionId: auditId },
       });
 
       // Update audit session counts
@@ -2955,9 +2970,13 @@ export async function removeAssetsFromAudit({
         });
       }
 
-      // Fetch the audit assets to get the actual asset IDs
+      // SECURITY (cross-tenant IDOR): same unscoped lookup as the singular
+      // path — see the comment there. The current web caller happens to
+      // resolve these ids itself from `auditSessionId`, so it is safe by
+      // construction, but that is the CALLER's property and not this
+      // function's. Scoping here is what makes it true for every caller.
       const auditAssets = await tx.auditAsset.findMany({
-        where: { id: { in: auditAssetIds } },
+        where: { id: { in: auditAssetIds }, auditSessionId: auditId },
         select: { id: true, assetId: true, expected: true },
       });
 
@@ -2968,9 +2987,12 @@ export async function removeAssetsFromAudit({
       const assetIds = auditAssets.map((aa) => aa.assetId);
       const expectedCount = auditAssets.filter((aa) => aa.expected).length;
 
-      // Delete the audit assets (cascade will delete related scans)
+      // Delete only the rows just PROVEN to belong to this audit, rather than
+      // the caller's original id list — a foreign id in the input must not
+      // reach the delete even though it was filtered out of the counts above.
+      const provenAuditAssetIds = auditAssets.map((aa) => aa.id);
       await tx.auditAsset.deleteMany({
-        where: { id: { in: auditAssetIds } },
+        where: { id: { in: provenAuditAssetIds }, auditSessionId: auditId },
       });
 
       // Update audit session counts
