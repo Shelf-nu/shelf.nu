@@ -458,8 +458,15 @@ export async function createAuditAssetImagesAddedNote({
         displayName: true,
       },
     }),
-    tx.auditAsset.findUnique({
-      where: { id: auditAssetId },
+    // SECURITY (cross-audit IDOR): scoped to the session the note is being
+    // written for. `auditSessionId` was already a parameter here and simply
+    // went unused, so an id-only lookup matched any `AuditAsset` in the table
+    // — including another organization's, since `AuditAsset` inherits its
+    // tenant through `auditSession` and carries no `organizationId` of its
+    // own. The result was a note in one audit naming an asset from another,
+    // which then flows into the PDF report. (detail.dev D050)
+    tx.auditAsset.findFirst({
+      where: { id: auditAssetId, auditSessionId },
       include: {
         asset: {
           select: { id: true, title: true },
