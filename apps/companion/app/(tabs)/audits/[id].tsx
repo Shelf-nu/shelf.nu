@@ -476,8 +476,23 @@ function AuditDetailContent() {
       // why: evidence is the ONE thing on this card worth opening. Everything
       // else (image, name, location, category, custodian, status) is already
       // shown, which is why the card is otherwise inert — see the note below.
-      const evidenceCount = item.notesCount + item.imagesCount;
-      const hasEvidence = evidenceCount > 0 && item.auditAssetId !== null;
+      // why two numbers and not their sum: see scanned-items-list.tsx. The
+      // sum changes for identical evidence depending on whether the auditor
+      // typed a caption, so it cannot be compared between rows.
+      const noteCount = item.notesCount;
+      const photoCount = item.imagesCount;
+      const hasEvidence =
+        (noteCount > 0 || photoCount > 0) && item.auditAssetId !== null;
+      const evidenceLabel = [
+        noteCount > 0
+          ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}`
+          : null,
+        photoCount > 0
+          ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
       const Card = hasEvidence ? TouchableOpacity : View;
 
       return (
@@ -504,11 +519,7 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-            hasEvidence
-              ? `${evidenceCount} ${
-                  evidenceCount === 1 ? "attachment" : "attachments"
-                }, tap to view`
-              : null,
+            hasEvidence ? `${evidenceLabel}, tap to view` : null,
           ]
             .filter(Boolean)
             .join(", ")}
@@ -573,21 +584,33 @@ function AuditDetailContent() {
             </View>
             {hasEvidence ? (
               <View style={styles.evidenceChip}>
-                <Ionicons name="attach" size={12} color={colors.primaryText} />
-                <Text style={styles.evidenceChipText}>{evidenceCount}</Text>
+                {noteCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{noteCount}</Text>
+                  </>
+                ) : null}
+                {photoCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="image-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{photoCount}</Text>
+                  </>
+                ) : null}
               </View>
             ) : null}
           </View>
         </Card>
       );
     },
-    [
-      colors,
-      auditAssetStatusBadge,
-      styles,
-      formatDateTime,
-      onEvidencePress,
-    ]
+    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
   );
 
   // ── Loading / Error states ────────────────────────────
