@@ -107,6 +107,12 @@ type DisplayAsset = {
   isExpected: boolean;
   scannedAt: string | null;
   /**
+   * The code that was scanned. Kept for rows whose asset has been deleted:
+   * with the asset gone this and the snapshotted title are all that survive,
+   * and the code is what matches a physical label. Null for ordinary rows.
+   */
+  scannedCode: string | null;
+  /**
    * Context the field worker needs DURING the audit. All nullable —
    * server may omit when unknown (e.g. asset has no location set, asset
    * isn't in custody, older mobile client without these fields).
@@ -333,6 +339,7 @@ function AuditDetailContent() {
         status: scan ? "FOUND" : notFoundStatus,
         isExpected: true,
         scannedAt: scan?.scannedAt || null,
+        scannedCode: null,
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
@@ -343,13 +350,35 @@ function AuditDetailContent() {
     const expectedIds = new Set(expectedAssets.map((a) => a.id));
     for (const scan of existingScans) {
       if (!expectedIds.has(scan.assetId)) {
+        /**
+         * A scan whose asset has since been DELETED, not an unexpected one.
+         *
+         * Deleting an asset cascades away its AuditAsset row and SetNulls the
+         * scan's asset, so the row survives pointing at nothing. It used to
+         * render blank and badged "Unexpected" — doubly wrong, because the
+         * scan was of an expected asset. The server now flags it outright and
+         * snapshots the title at scan time, so the row can still name what it
+         * was; the scanned code covers rows written before that existed.
+         */
+        const isDeletedAsset = scan.assetDeleted || !scan.assetId;
+        const snapshotTitle = scan.assetTitle?.trim();
         items.push({
-          id: scan.assetId,
-          name: scan.assetTitle,
+          // why: every deleted-asset scan would otherwise share the id "",
+          // colliding in the list's keyExtractor. The scanned code is the
+          // stable identity that survives the asset.
+          id: isDeletedAsset
+            ? `deleted:${scan.code || scan.scannedAt}`
+            : scan.assetId,
+          name: isDeletedAsset
+            ? snapshotTitle
+              ? `${snapshotTitle} (deleted)`
+              : "Deleted asset"
+            : snapshotTitle || "Untitled asset",
           mainImage: null,
           status: "UNEXPECTED",
           isExpected: false,
           scannedAt: scan.scannedAt,
+          scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location
           // (getAuditScans selects asset.location.name). Category and
           // custody are not fetched for scan records, so they stay null —
@@ -406,6 +435,12 @@ function AuditDetailContent() {
           icon: "person-outline",
           text: `with ${item.custodianName}`,
         });
+      }
+      // why: a deleted asset has no location, category or custodian left. The
+      // scanned code is what matches a physical label or finds the row in the
+      // activity feed, so it takes the meta line those would have used.
+      if (item.scannedCode) {
+        metaParts.push({ icon: "qr-code-outline", text: item.scannedCode });
       }
 
       return (

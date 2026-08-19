@@ -1018,6 +1018,11 @@ export type AuditScanData = {
   auditNotesCount: number;
   /** Number of condition photos uploaded for this scanned asset. */
   auditImagesCount: number;
+  /**
+   * The scanned asset has since been DELETED. Distinct from an empty title,
+   * which a scan recorded before the snapshot columns existed also has.
+   */
+  assetDeleted: boolean;
 };
 
 export type AuditDetailResponse = {
