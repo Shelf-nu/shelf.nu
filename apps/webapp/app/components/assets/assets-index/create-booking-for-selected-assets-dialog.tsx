@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -36,10 +37,14 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const bookingSettings = useBookingSettings();
   const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
     useUserRoleHelper();
+  // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+  // (matches display + the server parse), not the browser hint.
+  const prefs = useFormatPrefs();
 
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
+      prefs,
       action: "new",
       workingHours,
       bookingSettings,
