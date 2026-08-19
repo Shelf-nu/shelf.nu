@@ -18,7 +18,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isValidTimeZone } from "~/utils/date-format";
-import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { prefsForDeclaredZone } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -62,7 +62,7 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  // See `bookings.create.ts` — an unrecognised zone silently resolves to UTC.
+  // Must be a real IANA zone — see `bookings.create.ts`.
   timeZone: z
     .string()
     .min(1, "Time zone is required")
@@ -157,10 +157,11 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
-    // TIMEZONE FIX: read the typed wall-clock in the acting user's RESOLVED
-    // preference zone, matching the web action. Falls back to the device zone
-    // above when the user has no stored preference. See `bookings.create.ts`.
-    const prefs = await resolveUserFormatPrefsById(userId, hints);
+    // Decode the wall-clock in the zone the client DECLARED it in, not the
+    // user's preference zone. See `bookings.create.ts` — and note the edit
+    // screen re-submits the value it rendered device-local, so a preference-zone
+    // decode here would shift the booking again on every save.
+    const prefs = prefsForDeclaredZone(body.timeZone);
 
     // Business-rule validation via the shared web schema. The "save" action +
     // current status picks the right rule set (active bookings skip the date

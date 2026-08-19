@@ -56,7 +56,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 const BodySchema = z.object({
   bookingId: z.string().min(1),
-  // See `bookings.create.ts` — an unrecognised zone silently resolves to UTC.
+  // Must be a real IANA zone — see `bookings.create.ts`.
   timeZone: z
     .string()
     .min(1, "Time zone is required")

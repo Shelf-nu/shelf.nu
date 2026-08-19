@@ -5,7 +5,6 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -92,7 +91,6 @@ import {
 } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -1598,20 +1596,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
-
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefs.timeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefs.timeZone,
-            }).toJSDate()
-          : undefined;
+        // Use the schema-coerced instants rather than re-parsing the raw form
+        // fields: `coerceLocalDate` accepts second precision via `fromISO`,
+        // while DATE_TIME_FORMAT is minute-only, so a value the schema accepted
+        // could re-parse to an Invalid Date and reach the service. Same
+        // reasoning as the duplicate dialog and the extend branch below.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const tags = buildTagsSet(parsedData.tags).set;
 
@@ -1664,21 +1655,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
         const tags = buildTagsSet(parsedData.tags).set;
 
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefs.timeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefs.timeZone,
-            }).toJSDate()
-          : undefined;
+        // Schema-coerced instants, not a re-parse of the raw form fields — see
+        // the "save" branch above for why the minute-only DATE_TIME_FORMAT
+        // cannot be used on a value `coerceLocalDate` already accepted.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const booking = await reserveBooking({
           id,

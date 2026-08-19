@@ -1,5 +1,4 @@
 import { useAtomValue } from "jotai";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -37,7 +36,6 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import styles from "~/styles/layout/bookings.new.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -210,6 +208,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       description,
       tags: commaSeparatedTags,
+      // Use the schema-coerced instants rather than re-parsing the raw form
+      // field: `coerceLocalDate` accepts second precision via `fromISO`, while
+      // DATE_TIME_FORMAT is minute-only, so a value the schema accepted could
+      // re-parse to an Invalid Date and reach the service. Same reasoning as
+      // the duplicate dialog and the extend branch.
+      startDate: from,
+      endDate: to,
     } = payload;
 
     // Validate that the custodian belongs to the same organization
@@ -240,21 +245,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    const from = DateTime.fromFormat(
-      formData.get("startDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefs.timeZone,
-      }
-    ).toJSDate();
-
-    const to = DateTime.fromFormat(
-      formData.get("endDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefs.timeZone,
-      }
-    ).toJSDate();
+    // `BookingFormSchema` returns a union across its action branches, so the
+    // coerced dates widen to `Date | undefined` even though the "new" branch
+    // makes both required. Assert that at runtime rather than with `!`: a
+    // missing date is a 400, never an Invalid Date handed to `createBooking`.
+    if (!from || !to) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking start and end dates are required.",
+        additionalData: { userId, organizationId },
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const tags = buildTagsSet(commaSeparatedTags).set;
 

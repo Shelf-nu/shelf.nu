@@ -1211,6 +1211,10 @@ describe("BookingFormSchema - near-future start, user west of UTC", () => {
   const NOW = new Date("2026-08-18T18:00:00.000Z");
   const CHICAGO = "America/Chicago";
 
+  // why: `validateFutureDate` compares the parsed start against the real clock.
+  // Pinning "now" to a known instant is what makes the offset-sized rejection
+  // cliff below assertable at all — against a live clock the boundary cases
+  // would drift and flake.
   beforeAll(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

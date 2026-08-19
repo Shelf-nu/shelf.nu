@@ -14,7 +14,10 @@
 import { db } from "~/database/db.server";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs, ResolvedFormatPrefs } from "~/utils/date-format";
-import { resolveFormatPrefs } from "~/utils/date-format";
+import {
+  HARDCODED_DEFAULT_PREFS,
+  resolveFormatPrefs,
+} from "~/utils/date-format";
 
 /**
  * Minimal Prisma surface `resolveUserFormatPrefsById` needs. Both the extended
@@ -70,4 +73,40 @@ export async function resolveUserFormatPrefsById(
   });
 
   return resolveFormatPrefs(userPrefs, hints);
+}
+
+/**
+ * Prefs whose zone is the one a client DECLARED it encoded its wall-clock in.
+ *
+ * A `datetime-local`-style wire string (`"2026-08-20T09:00"`) carries no offset,
+ * so it only means something paired with the zone it was written in. Decoding it
+ * in any other zone yields a different instant — an encoding error, not a
+ * preference disagreement.
+ *
+ * The companion serialises picked dates from DEVICE-local components
+ * (`toLocalWire` in `apps/companion/app/(tabs)/bookings/new.tsx`) and declares
+ * that zone in the request body, deliberately rendering its picker device-local
+ * to match. So the mobile booking routes must decode in the declared zone, NOT
+ * in the user's stored preference zone. Doing otherwise shifts the stored
+ * instant, and — because the edit screen re-submits what it rendered — shifts it
+ * again on every save.
+ *
+ * Web needs no equivalent: its forms seed the input from the preference zone
+ * (`toIsoDateTimeToUserTimezone(booking.from, prefs.timeZone)`), so there the
+ * declared zone and the preference zone are the same thing, and
+ * {@link resolveUserFormatPrefsById} is the right source.
+ *
+ * Only `timeZone` is read by the booking schemas; the remaining fields come from
+ * {@link HARDCODED_DEFAULT_PREFS} and are never used for parsing. This exists as
+ * a named helper rather than an inline object so the exception is greppable and
+ * explained once — `BookingFormSchemaParams.prefs` is typed
+ * {@link ResolvedFormatPrefs} precisely to stop a non-preference zone being
+ * passed by accident.
+ *
+ * @param timeZone - The IANA zone the client declared, already validated by the
+ *   route's Zod schema (`isValidTimeZone`).
+ * @returns Concrete prefs carrying the declared zone.
+ */
+export function prefsForDeclaredZone(timeZone: string): ResolvedFormatPrefs {
+  return { ...HARDCODED_DEFAULT_PREFS, timeZone };
 }

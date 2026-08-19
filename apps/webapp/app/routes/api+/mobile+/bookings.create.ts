@@ -17,7 +17,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isValidTimeZone } from "~/utils/date-format";
-import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { prefsForDeclaredZone } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -68,10 +68,10 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  // Must be a real IANA zone: an unrecognised string is discarded by
-  // `resolveFormatPrefs`, which then falls back to UTC for any user without a
-  // stored timezone preference — silently reintroducing the wrong-zone bug this
-  // route was fixed for. Reject it at the boundary instead.
+  // Must be a real IANA zone. The declared zone is what every date on this
+  // request is decoded in, so an unrecognised one makes Luxon yield an invalid
+  // DateTime and surfaces as a vague "Invalid date format" against the date
+  // fields. Reject it here instead, naming the field that is actually wrong.
   timeZone: z
     .string()
     .min(1, "Time zone is required")
@@ -148,14 +148,11 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
-    // TIMEZONE FIX: read the typed wall-clock in the acting user's RESOLVED
-    // preference zone, exactly as the web action does. A stored preference wins;
-    // when the user has none, this resolves to the device zone above, so the
-    // behaviour is unchanged for everyone who never set one. Without this, a
-    // user with an explicit preference got mobile validation and storage in the
-    // device zone while the companion DISPLAYED the same booking in the
-    // preference zone.
-    const prefs = await resolveUserFormatPrefsById(userId, hints);
+    // Decode the wall-clock in the zone the client DECLARED it in, not the
+    // user's preference zone: the companion builds `startDate`/`endDate` from
+    // device-local components and sends the matching zone, so any other zone
+    // yields a different instant than the picker showed.
+    const prefs = prefsForDeclaredZone(body.timeZone);
 
     // Business-rule validation via the shared web schema. We shape the JSON body
     // into the form-data shape the schema expects (custodian as a JSON string,
