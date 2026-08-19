@@ -232,6 +232,41 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
     expect(txNoteOps.findUnique).not.toHaveBeenCalled();
   });
 
+  it("refuses a note in the SAME audit but a different asset", async () => {
+    // Assignment is per-audit, so this is not a privilege boundary — but the
+    // route lists and creates notes filtered by `auditAssetId`, so a note on a
+    // sibling asset is one this page never offered. Appending images to it
+    // would corrupt a note the caller never saw.
+    dbNoteOps.findFirst.mockResolvedValue(null);
+
+    const form = new FormData();
+    form.set("intent", "add-images-to-note");
+    form.set("noteId", "note-on-a-sibling-asset");
+    form.set("content", "body");
+    form.append("images", new File(["d"], "p.jpg", { type: "image/jpeg" }));
+
+    await action({
+      request: new Request(
+        "http://localhost/audits/session-1/scan/audit-asset-1/details",
+        { method: "POST", body: form }
+      ),
+      params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as unknown as Parameters<typeof action>[0]);
+
+    expect(dbNoteOps.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "note-on-a-sibling-asset",
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+        }),
+      })
+    );
+    expect(uploadAuditImage).not.toHaveBeenCalled();
+    expect(txNoteOps.updateMany).not.toHaveBeenCalled();
+  });
+
   it("uploads NOTHING when the note is not in this audit", async () => {
     // The refusal was always correct; the ordering was not. The scoped lookup
     // used to run after the upload loop, so a rejected request still wrote

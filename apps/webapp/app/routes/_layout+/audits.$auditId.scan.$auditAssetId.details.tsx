@@ -312,6 +312,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // let an assignee of one audit delete notes belonging to another
           // audit in the same workspace.
           auditSessionId: auditId,
+          auditAssetId,
           auditSession: { organizationId },
         },
         select: { type: true },
@@ -341,6 +342,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: {
           id: noteId,
           auditSessionId: auditId,
+          auditAssetId,
           auditSession: { organizationId },
         },
       });
@@ -502,6 +504,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: {
           id: noteId,
           auditSessionId: auditId,
+          auditAssetId,
           auditSession: { organizationId },
         },
         select: { id: true },
@@ -563,6 +566,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             where: {
               id: noteId,
               auditSessionId: auditId,
+              auditAssetId,
               auditSession: { organizationId },
             },
           });
@@ -610,6 +614,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             where: {
               id: noteId,
               auditSessionId: auditId,
+              // …and to the ASSET the URL names. This route creates notes with
+              // `auditAssetId` set and lists them filtered by it, so a note on a
+              // different asset is one this page never offered. Not a privilege
+              // boundary — assignment is per-audit, so an assignee reaches every
+              // asset in it — but appending images to, or deleting, another
+              // asset's note corrupts data the caller never saw.
+              auditAssetId,
               auditSession: { organizationId },
             },
             data: {
