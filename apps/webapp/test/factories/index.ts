@@ -10,3 +10,4 @@ export * from "./organization";
 export * from "./assetModel";
 export * from "./activityEvent";
 export * from "./layoutLoaderData";
+export * from "./stripePrice";

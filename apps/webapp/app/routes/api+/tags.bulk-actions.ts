@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkDeleteTagsSchema } from "~/components/tag/bulk-delete-dialog";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { bulkDeleteTags } from "~/modules/tag/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -39,13 +40,25 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { tagIds } = parseData(formData, BulkDeleteTagsSchema);
+        // `currentSearchParams` carries the filters the user was looking at.
+        // Without it a "select all" over a filtered list deletes every tag in
+        // the workspace while the UI reports the filtered count.
+        const { tagIds, currentSearchParams } = parseData(
+          formData,
+          BulkDeleteTagsSchema.and(CurrentSearchParamsSchema)
+        );
 
-        await bulkDeleteTags({ tagIds, organizationId });
+        const { count } = await bulkDeleteTags({
+          tagIds,
+          organizationId,
+          currentSearchParams,
+        });
 
         sendNotification({
-          title: "Tags deleted",
-          message: "Your tags has been deleted successfully",
+          title: count === 1 ? "Tag deleted" : "Tags deleted",
+          message: `${count} ${
+            count === 1 ? "tag has" : "tags have"
+          } been deleted successfully`,
           icon: { name: "trash", variant: "error" },
           senderId: userId,
         });

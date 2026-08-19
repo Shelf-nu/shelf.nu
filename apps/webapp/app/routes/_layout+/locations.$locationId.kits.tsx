@@ -29,6 +29,7 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
 import {
   getLocationKits,
@@ -179,18 +180,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "bulk-remove-kits": {
-        const { kitIds } = parseData(
+        // `currentSearchParams` comes from the submitted form, not `request.url`
+        // — the dialog posts to a bare action URL, so the request carries no
+        // query string and "select all" would match every kit here.
+        const { kitIds, currentSearchParams } = parseData(
           formData,
-          z.object({
-            kitIds: z.array(z.string()).min(1),
-          })
+          z
+            .object({
+              kitIds: z.array(z.string()).min(1),
+            })
+            .and(CurrentSearchParamsSchema)
         );
 
         const resolvedKitIds = await resolveLocationKitIds({
           ids: kitIds,
           organizationId,
           locationId,
-          request,
+          currentSearchParams,
         });
 
         if (resolvedKitIds.length === 0) {
