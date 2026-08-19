@@ -14,8 +14,8 @@
  * @see {@link file://./service.server.ts} `removeAssetFromAudit`, `removeAssetsFromAudit`
  */
 
-import { AuditStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
+import { createAuditAsset, createAuditSession } from "@factories";
 import type * as noteService from "~/modules/note/service.server";
 
 // why: no database in unit tests. The callback form of $transaction hands the
@@ -75,19 +75,24 @@ const ORG_ID = "org-mine";
 /** The victim's row: a real AuditAsset, belonging to a DIFFERENT audit. */
 const FOREIGN_AUDIT_ASSET_ID = "auditasset-belonging-to-another-org";
 
+/**
+ * The caller's own audit — genuinely theirs, genuinely PENDING. That is what
+ * made the bug reachable: every check that DID exist passed.
+ */
+const myAudit = () =>
+  createAuditSession({
+    id: AUDIT_ID,
+    name: "My Audit",
+    organizationId: ORG_ID,
+  });
+
 describe("removeAssetFromAudit", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     mockDb.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
       cb(mockDb)
     );
-    // The caller's own audit — genuinely theirs, genuinely PENDING. This is
-    // what made the bug reachable: every check that DID exist passed.
-    mockDb.auditSession.findUnique.mockResolvedValue({
-      id: AUDIT_ID,
-      name: "My Audit",
-      status: AuditStatus.PENDING,
-    });
+    mockDb.auditSession.findUnique.mockResolvedValue(myAudit());
   });
 
   it("refuses an audit asset that belongs to a different audit", async () => {
@@ -161,11 +166,7 @@ describe("concurrent removal", () => {
     mockDb.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
       cb(mockDb)
     );
-    mockDb.auditSession.findUnique.mockResolvedValue({
-      id: AUDIT_ID,
-      name: "My Audit",
-      status: AuditStatus.PENDING,
-    });
+    mockDb.auditSession.findUnique.mockResolvedValue(myAudit());
   });
 
   it("does not decrement counts when the row was already deleted", async () => {
@@ -174,10 +175,9 @@ describe("concurrent removal", () => {
     // rather than throwing the way `delete` did, so without an explicit check
     // the second request would still decrement the counters and write a
     // second note — double-counting a single removal.
-    mockDb.auditAsset.findFirst.mockResolvedValue({
-      assetId: "asset-1",
-      expected: true,
-    });
+    mockDb.auditAsset.findFirst.mockResolvedValue(
+      createAuditAsset({ auditSessionId: AUDIT_ID })
+    );
     mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 0 });
 
     await expect(
@@ -197,8 +197,11 @@ describe("concurrent removal", () => {
     // make the decrement overshoot — and the `expected` flag needed to choose
     // the counter cannot be recovered from a row that is already gone.
     mockDb.auditAsset.findMany.mockResolvedValue([
-      { id: "auditasset-1", assetId: "asset-1", expected: true },
-      { id: "auditasset-2", assetId: "asset-2", expected: true },
+      createAuditAsset({ auditSessionId: AUDIT_ID }, { id: "auditasset-1" }),
+      createAuditAsset(
+        { auditSessionId: AUDIT_ID },
+        { id: "auditasset-2", assetId: "asset-2" }
+      ),
     ]);
     mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
 
@@ -221,18 +224,14 @@ describe("removeAssetsFromAudit (bulk)", () => {
     mockDb.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
       cb(mockDb)
     );
-    mockDb.auditSession.findUnique.mockResolvedValue({
-      id: AUDIT_ID,
-      name: "My Audit",
-      status: AuditStatus.PENDING,
-    });
+    mockDb.auditSession.findUnique.mockResolvedValue(myAudit());
   });
 
   it("deletes only the ids proven to be in this audit", async () => {
     // One id is genuinely in this audit; the other belongs elsewhere and so
     // does not come back from the scoped read.
     mockDb.auditAsset.findMany.mockResolvedValue([
-      { id: "auditasset-mine", assetId: "asset-1", expected: true },
+      createAuditAsset({ auditSessionId: AUDIT_ID }, { id: "auditasset-mine" }),
     ]);
     // why: the delete-count guard compares this against the proven-id count.
     mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
