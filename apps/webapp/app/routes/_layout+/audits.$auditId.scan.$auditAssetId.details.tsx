@@ -78,6 +78,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const auditAsset = await db.auditAsset.findFirst({
       where: {
         id: auditAssetId,
+        // Bound to the audit named in the URL, not merely to the org. Without
+        // `auditSessionId` a caller could pass an audit asset from a DIFFERENT
+        // audit and the page would render it under this audit's heading — and
+        // the action's assignment guard, which keys on `auditId`, would then be
+        // validating a different audit from the one being written to.
+        auditSessionId: auditId,
         auditSession: {
           organizationId,
         },
@@ -206,6 +212,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       isSelfServiceOrBase,
     });
+
+    // …and prove the audit asset actually belongs to that audit. Both ids come
+    // from the URL and were never tied together, so guarding on `auditId`
+    // alone would validate assignment against one audit while every intent
+    // below writes to an asset in another. `AuditAsset` has no
+    // `organizationId` of its own — the session link is its whole tenant
+    // boundary — so the org filter goes through the relation.
+    const auditAssetInSession = await db.auditAsset.findFirst({
+      where: {
+        id: auditAssetId,
+        auditSessionId: auditId,
+        auditSession: { organizationId },
+      },
+      select: { id: true },
+    });
+
+    if (!auditAssetInSession) {
+      throw new ShelfError({
+        cause: null,
+        // Uniform with a genuinely unknown id: both ids are caller-supplied,
+        // so a distinct message would confirm which ones exist.
+        message: "Audit asset not found in this audit",
+        additionalData: { auditId, auditAssetId },
+        label: "Audit",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
     const formData = await request.clone().formData();
     const intent = formData.get("intent") as string;

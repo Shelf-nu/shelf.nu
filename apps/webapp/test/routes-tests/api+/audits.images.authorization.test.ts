@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Audit image evidence — assignment and parent binding.
  *
@@ -69,8 +70,6 @@ import {
   action,
   loader,
 } from "~/routes/api+/audits.$auditId.assets.$assetId.images";
-
-// @vitest-environment node
 
 const AUDIT_ID = "audit-1";
 const ASSET_ID = "auditasset-1";

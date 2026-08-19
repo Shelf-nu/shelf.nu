@@ -185,24 +185,35 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.clone().formData();
     const intent = formData.get("intent");
 
-    // Assignee-gated for EVERY intent: ADMIN/OWNER may act on any audit,
+    /**
+     * Intents whose own authorization rule is BROADER than assignment, and so
+     * must not sit behind the assignment guard.
+     *
+     * `cancel-audit` is the only one today. `createAuditSession` does NOT
+     * auto-assign the creator, while `cancelAuditSession` guarantees the
+     * creator may always cancel — so gating it on assignment would lock a
+     * BASE creator out of an audit they made themselves. The narrower
+     * creator-or-admin rule inside the service is the correct gate there.
+     */
+    const INTENTS_WITH_THEIR_OWN_RULE = new Set(["cancel-audit"]);
+
+    // Assignee-gated by DEFAULT: ADMIN/OWNER may act on any audit,
     // BASE/SELF_SERVICE only on audits assigned to them.
     //
-    // Hoisted rather than repeated per branch, because only `complete-audit`
-    // used to carry it — `remove-asset` and `bulk-remove-assets` had none, so
-    // an unassigned member could strip assets out of anyone's audit by direct
-    // POST. The loader's `canRemoveAssets` is display-only. Putting the guard
-    // ahead of the switch means a newly added intent inherits it instead of
-    // having to remember. (detail.dev D101)
-    //
-    // `cancel-audit` additionally enforces creator-or-admin inside
-    // `cancelAuditSession`; that is a narrower rule and stays where it is.
-    await requireAuditAssignee({
-      auditSessionId: auditId,
-      organizationId,
-      userId,
-      isSelfServiceOrBase,
-    });
+    // Expressed as an exclusion rather than a list of guarded intents so the
+    // default is fail-closed — a newly added intent inherits the guard instead
+    // of silently escaping it. Only `complete-audit` used to carry a check, so
+    // `remove-asset` and `bulk-remove-assets` let an unassigned member strip
+    // assets out of anyone's audit by direct POST; the loader's
+    // `canRemoveAssets` is display-only. (detail.dev D101)
+    if (!INTENTS_WITH_THEIR_OWN_RULE.has(String(intent))) {
+      await requireAuditAssignee({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+        isSelfServiceOrBase,
+      });
+    }
 
     if (intent === "complete-audit") {
       await completeAuditWithImages({

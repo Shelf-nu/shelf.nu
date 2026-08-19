@@ -61,6 +61,11 @@ vi.mock("~/modules/audit/service.server", () => ({
 // callback with an opaque tx so we can assert on helpers called inside it.
 vi.mock("~/database/db.server", () => ({
   db: {
+    // why: the action proves the URL's `auditAssetId` belongs to the URL's
+    // `auditId` before dispatching any intent — both ids are caller-supplied
+    // and were never tied together. Returning a row means "it does belong",
+    // which is the precondition every test in this file assumes.
+    auditAsset: { findFirst: vi.fn().mockResolvedValue({ id: "aa-1" }) },
     // $transaction passes a tx exposing the auditNote ops that the
     // multi-file and add-images-to-note paths call directly. The single-file
     // path delegates to the mocked helper, which never touches tx.
