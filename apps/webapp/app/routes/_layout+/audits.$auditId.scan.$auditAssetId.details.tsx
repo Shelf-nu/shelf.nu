@@ -306,7 +306,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Prevent deletion of auto-generated notes (UPDATE type)
       const noteToDelete = await db.auditNote.findFirst({
-        where: { id: noteId, auditSession: { organizationId } },
+        where: {
+          id: noteId,
+          // Bound to the audit in the URL as well as the org. Org scope alone
+          // let an assignee of one audit delete notes belonging to another
+          // audit in the same workspace.
+          auditSessionId: auditId,
+          auditSession: { organizationId },
+        },
         select: { type: true },
       });
 
@@ -333,6 +340,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deleted = await db.auditNote.deleteMany({
         where: {
           id: noteId,
+          auditSessionId: auditId,
           auditSession: { organizationId },
         },
       });
@@ -509,8 +517,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Update the note to append the audit_images tag
       await db.$transaction(async (tx) => {
-        const existingNote = await tx.auditNote.findUnique({
-          where: { id: noteId },
+        // SECURITY (cross-organization IDOR): `AuditNote` has no
+        // `organizationId` column — it inherits its tenant through
+        // `auditSession` — so an id-only lookup addressed every note in the
+        // table, in every workspace. `noteId` comes from the request body, so
+        // this branch could READ and then OVERWRITE the content of any audit
+        // note in any organization.
+        //
+        // The sibling delete branch was hardened for exactly this and carries
+        // a comment saying so; this path was missed.
+        const existingNote = await tx.auditNote.findFirst({
+          where: {
+            id: noteId,
+            auditSessionId: auditId,
+            auditSession: { organizationId },
+          },
         });
 
         if (!existingNote) {
@@ -549,12 +570,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           allImageIds.length
         } ids="${allImageIds.join(",")}" /%}`;
 
-        await tx.auditNote.update({
-          where: { id: noteId },
+        // `updateMany`, not `update`: a unique-only `where` cannot carry the
+        // parent scope, and the write must be scoped in its own right rather
+        // than relying on the read above surviving a future refactor.
+        const updated = await tx.auditNote.updateMany({
+          where: {
+            id: noteId,
+            auditSessionId: auditId,
+            auditSession: { organizationId },
+          },
           data: {
             content: updatedContent,
           },
         });
+
+        if (updated.count === 0) {
+          throw new ShelfError({
+            cause: null,
+            message: "Note not found",
+            additionalData: { noteId, auditId },
+            label: "Audit",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
       });
 
       return payload({ images: uploadedImages });

@@ -59,6 +59,16 @@ vi.mock("~/modules/audit/service.server", () => ({
 
 // why: external database — don't hit the real DB. $transaction runs the
 // callback with an opaque tx so we can assert on helpers called inside it.
+const { txNoteOps } = vi.hoisted(() => ({
+  txNoteOps: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    findFirst: vi.fn().mockResolvedValue({ id: "note-1", content: "body" }),
+    update: vi.fn(),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  },
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     // why: the action proves the URL's `auditAssetId` belongs to the URL's
@@ -69,18 +79,18 @@ vi.mock("~/database/db.server", () => ({
     // $transaction passes a tx exposing the auditNote ops that the
     // multi-file and add-images-to-note paths call directly. The single-file
     // path delegates to the mocked helper, which never touches tx.
-    $transaction: vi.fn(async (fn: any) =>
-      fn({
-        auditNote: {
-          create: vi.fn(),
-          findUnique: vi.fn(),
-          update: vi.fn(),
-        },
-      })
-    ),
+    //
+    // The note ops are hoisted to module scope (`txNoteOps`) rather than
+    // created per call, so a test can assert on the WHERE clause they were
+    // given. `AuditNote` has no `organizationId` column, so that predicate is
+    // the entire tenant boundary for the model.
+    $transaction: vi.fn(async (fn: any) => fn({ auditNote: txNoteOps })),
     auditNote: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
     },
   },
 }));
@@ -159,6 +169,97 @@ function makeUploadImageRequest(opts: {
     { method: "POST", body: form }
   );
 }
+
+describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", () => {
+  /**
+   * `AuditNote` has NO `organizationId` column. It inherits its tenant purely
+   * through `auditSession`, so a lookup keyed on the note id alone addresses
+   * every note in the table, in every workspace — and `noteId` arrives in the
+   * request body.
+   *
+   * The delete branch was hardened for this and carries a comment saying so.
+   * The `add-images-to-note` branch was missed: it read the note with
+   * `findUnique({ where: { id } })` and then OVERWROTE its content with
+   * `update({ where: { id } })`, both unscoped.
+   *
+   * These assert the WHERE clauses, because that predicate IS the tenant
+   * boundary — if a refactor drops it the note becomes globally addressable
+   * again, and no behavioural assertion would notice.
+   */
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requirePermission).mockResolvedValue({
+      organizationId: "org-1",
+      isSelfServiceOrBase: false,
+    } as any);
+    txNoteOps.findFirst.mockResolvedValue({ id: "note-1", content: "body" });
+    txNoteOps.updateMany.mockResolvedValue({ count: 1 });
+    (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
+  });
+
+  it("scopes the add-images-to-note READ to the audit and the org", async () => {
+    const form = new FormData();
+    form.set("intent", "add-images-to-note");
+    form.set("noteId", "note-from-another-org");
+    form.set("content", "body");
+    // `images` (plural) is the field this branch reads; a File under any
+    // other name is filtered out and the route 400s before the note lookup.
+    form.append("images", new File(["d"], "p.jpg", { type: "image/jpeg" }));
+
+    await action({
+      request: new Request(
+        "http://localhost/audits/session-1/scan/audit-asset-1/details",
+        { method: "POST", body: form }
+      ),
+      params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as any);
+
+    expect(txNoteOps.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "note-from-another-org",
+          auditSessionId: "session-1",
+          auditSession: { organizationId: "org-1" },
+        }),
+      })
+    );
+    // `findUnique` is the unscoped shape this replaced — it must not come back.
+    expect(txNoteOps.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("scopes the add-images-to-note WRITE, not just the read", async () => {
+    const form = new FormData();
+    form.set("intent", "add-images-to-note");
+    form.set("noteId", "note-1");
+    form.set("content", "body");
+    // `images` (plural) is the field this branch reads; a File under any
+    // other name is filtered out and the route 400s before the note lookup.
+    form.append("images", new File(["d"], "p.jpg", { type: "image/jpeg" }));
+
+    await action({
+      request: new Request(
+        "http://localhost/audits/session-1/scan/audit-asset-1/details",
+        { method: "POST", body: form }
+      ),
+      params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as any);
+
+    // Scoped in its own right rather than trusting the read above to have
+    // filtered — the two must not drift apart in a later refactor.
+    expect(txNoteOps.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "note-1",
+          auditSessionId: "session-1",
+          auditSession: { organizationId: "org-1" },
+        }),
+      })
+    );
+    expect(txNoteOps.update).not.toHaveBeenCalled();
+  });
+});
 
 describe("audits.$auditId.scan.$auditAssetId.details action — upload-image injection", () => {
   beforeEach(() => {
