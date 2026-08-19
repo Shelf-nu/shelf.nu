@@ -491,6 +491,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
+      // Prove the note is ours BEFORE uploading anything.
+      //
+      // The scoped lookup used to sit inside the transaction below, AFTER this
+      // loop — so a request naming a note in another audit (or another
+      // organization) was correctly refused, but only once the images had
+      // already been written to storage and to the database. The refusal was
+      // sound; the side effect was not.
+      const targetNote = await db.auditNote.findFirst({
+        where: {
+          id: noteId,
+          auditSessionId: auditId,
+          auditSession: { organizationId },
+        },
+        select: { id: true },
+      });
+
+      if (!targetNote) {
+        throw new ShelfError({
+          cause: null,
+          // Uniform with a genuinely unknown id — `noteId` is caller-supplied.
+          message: "Note not found",
+          additionalData: { noteId, auditId },
+          label: "Audit Image",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+
       // Upload each file sequentially
       const uploadedImages: Array<{ id: string }> = [];
       for (const file of files) {
@@ -516,85 +544,105 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       // Update the note to append the audit_images tag
-      await db.$transaction(async (tx) => {
-        // SECURITY (cross-organization IDOR): `AuditNote` has no
-        // `organizationId` column — it inherits its tenant through
-        // `auditSession` — so an id-only lookup addressed every note in the
-        // table, in every workspace. `noteId` comes from the request body, so
-        // this branch could READ and then OVERWRITE the content of any audit
-        // note in any organization.
-        //
-        // The sibling delete branch was hardened for exactly this and carries
-        // a comment saying so; this path was missed.
-        const existingNote = await tx.auditNote.findFirst({
-          where: {
-            id: noteId,
-            auditSessionId: auditId,
-            auditSession: { organizationId },
-          },
-        });
-
-        if (!existingNote) {
-          throw new ShelfError({
-            cause: null,
-            message: "Note not found",
-            additionalData: { noteId },
-            label: "Audit Image",
-            status: 404,
+      // The pre-check above closes the ordinary case. This still re-checks
+      // under the write, because the note can be deleted between the two —
+      // and if that happens the uploads are rolled back rather than left
+      // orphaned in storage with nothing pointing at them.
+      try {
+        await db.$transaction(async (tx) => {
+          // SECURITY (cross-organization IDOR): `AuditNote` has no
+          // `organizationId` column — it inherits its tenant through
+          // `auditSession` — so an id-only lookup addressed every note in the
+          // table, in every workspace. `noteId` comes from the request body, so
+          // this branch could READ and then OVERWRITE the content of any audit
+          // note in any organization.
+          //
+          // The sibling delete branch was hardened for exactly this and carries
+          // a comment saying so; this path was missed.
+          const existingNote = await tx.auditNote.findFirst({
+            where: {
+              id: noteId,
+              auditSessionId: auditId,
+              auditSession: { organizationId },
+            },
           });
-        }
 
-        // Extract existing image IDs from content if any
-        const existingImageIds: string[] = [];
-        const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
-        let match;
-        while ((match = regex.exec(existingNote.content)) !== null) {
-          existingImageIds.push(...match[1].split(","));
-        }
+          if (!existingNote) {
+            throw new ShelfError({
+              cause: null,
+              message: "Note not found",
+              additionalData: { noteId },
+              label: "Audit Image",
+              status: 404,
+            });
+          }
 
-        // Add new image IDs
-        const newImageIds = uploadedImages.map((img) => img.id);
-        const allImageIds = [...existingImageIds, ...newImageIds];
+          // Extract existing image IDs from content if any
+          const existingImageIds: string[] = [];
+          const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
+          let match;
+          while ((match = regex.exec(existingNote.content)) !== null) {
+            existingImageIds.push(...match[1].split(","));
+          }
 
-        // Remove existing audit_images tags, sanitize the surviving user-authored
-        // body so a previously-injected delimiter can't survive a re-tag, then
-        // append the fresh trusted tag.
-        const strippedTags = existingNote.content.replace(
-          /{%\s*audit_images[^%]*%}/g,
-          ""
+          // Add new image IDs
+          const newImageIds = uploadedImages.map((img) => img.id);
+          const allImageIds = [...existingImageIds, ...newImageIds];
+
+          // Remove existing audit_images tags, sanitize the surviving user-authored
+          // body so a previously-injected delimiter can't survive a re-tag, then
+          // append the fresh trusted tag.
+          const strippedTags = existingNote.content.replace(
+            /{%\s*audit_images[^%]*%}/g,
+            ""
+          );
+          // stripMarkdocDelimiters trims and removes `{%`/`%}` from user text only;
+          // the trusted tag is appended after, so it is never touched.
+          const sanitizedBody = stripMarkdocDelimiters(strippedTags);
+          const updatedContent = `${sanitizedBody}\n\n{% audit_images count=${
+            allImageIds.length
+          } ids="${allImageIds.join(",")}" /%}`;
+
+          // `updateMany`, not `update`: a unique-only `where` cannot carry the
+          // parent scope, and the write must be scoped in its own right rather
+          // than relying on the read above surviving a future refactor.
+          const updated = await tx.auditNote.updateMany({
+            where: {
+              id: noteId,
+              auditSessionId: auditId,
+              auditSession: { organizationId },
+            },
+            data: {
+              content: updatedContent,
+            },
+          });
+
+          if (updated.count === 0) {
+            throw new ShelfError({
+              cause: null,
+              message: "Note not found",
+              additionalData: { noteId, auditId },
+              label: "Audit",
+              status: 404,
+              shouldBeCaptured: false,
+            });
+          }
+        });
+      } catch (cause) {
+        // Best-effort cleanup. A failure here must not mask the original
+        // error, which is the one the caller needs to see.
+        await Promise.all(
+          uploadedImages.map((img) =>
+            deleteAuditImage({
+              imageId: img.id,
+              organizationId,
+              auditSessionId: auditId,
+              auditAssetId,
+            }).catch(() => undefined)
+          )
         );
-        // stripMarkdocDelimiters trims and removes `{%`/`%}` from user text only;
-        // the trusted tag is appended after, so it is never touched.
-        const sanitizedBody = stripMarkdocDelimiters(strippedTags);
-        const updatedContent = `${sanitizedBody}\n\n{% audit_images count=${
-          allImageIds.length
-        } ids="${allImageIds.join(",")}" /%}`;
-
-        // `updateMany`, not `update`: a unique-only `where` cannot carry the
-        // parent scope, and the write must be scoped in its own right rather
-        // than relying on the read above surviving a future refactor.
-        const updated = await tx.auditNote.updateMany({
-          where: {
-            id: noteId,
-            auditSessionId: auditId,
-            auditSession: { organizationId },
-          },
-          data: {
-            content: updatedContent,
-          },
-        });
-
-        if (updated.count === 0) {
-          throw new ShelfError({
-            cause: null,
-            message: "Note not found",
-            additionalData: { noteId, auditId },
-            label: "Audit",
-            status: 404,
-            shouldBeCaptured: false,
-          });
-        }
-      });
+        throw cause;
+      }
 
       return payload({ images: uploadedImages });
     }

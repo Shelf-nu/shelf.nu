@@ -59,7 +59,13 @@ vi.mock("~/modules/audit/service.server", () => ({
 
 // why: external database — don't hit the real DB. $transaction runs the
 // callback with an opaque tx so we can assert on helpers called inside it.
-const { txNoteOps } = vi.hoisted(() => ({
+const { txNoteOps, dbNoteOps } = vi.hoisted(() => ({
+  // The pre-check runs on `db` (outside the transaction); the update runs on
+  // `tx`. Separate spies so a test can tell which layer refused.
+  dbNoteOps: {
+    findFirst: vi.fn().mockResolvedValue({ id: "note-1" }),
+    deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+  },
   txNoteOps: {
     create: vi.fn(),
     findUnique: vi.fn(),
@@ -84,14 +90,11 @@ vi.mock("~/database/db.server", () => ({
     // created per call, so a test can assert on the WHERE clause they were
     // given. `AuditNote` has no `organizationId` column, so that predicate is
     // the entire tenant boundary for the model.
-    $transaction: vi.fn(async (fn: any) => fn({ auditNote: txNoteOps })),
-    auditNote: {
-      findUnique: vi.fn(),
-      findFirst: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn(),
-      deleteMany: vi.fn(),
-    },
+    $transaction: vi.fn(
+      async (fn: (tx: { auditNote: typeof txNoteOps }) => unknown) =>
+        fn({ auditNote: txNoteOps })
+    ),
+    auditNote: dbNoteOps,
   },
 }));
 
@@ -192,6 +195,7 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
       organizationId: "org-1",
       isSelfServiceOrBase: false,
     } as any);
+    dbNoteOps.findFirst.mockResolvedValue({ id: "note-1" });
     txNoteOps.findFirst.mockResolvedValue({ id: "note-1", content: "body" });
     txNoteOps.updateMany.mockResolvedValue({ count: 1 });
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
@@ -213,9 +217,9 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
       ),
       params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
       context: { getSession: () => ({ userId: "user-1" }) },
-    } as any);
+    } as unknown as Parameters<typeof action>[0]);
 
-    expect(txNoteOps.findFirst).toHaveBeenCalledWith(
+    expect(dbNoteOps.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           id: "note-from-another-org",
@@ -226,6 +230,30 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
     );
     // `findUnique` is the unscoped shape this replaced — it must not come back.
     expect(txNoteOps.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("uploads NOTHING when the note is not in this audit", async () => {
+    // The refusal was always correct; the ordering was not. The scoped lookup
+    // used to run after the upload loop, so a rejected request still wrote
+    // images to storage and to the database before returning 404.
+    dbNoteOps.findFirst.mockResolvedValue(null);
+
+    const form = new FormData();
+    form.set("intent", "add-images-to-note");
+    form.set("noteId", "note-from-another-org");
+    form.set("content", "body");
+    form.append("images", new File(["d"], "p.jpg", { type: "image/jpeg" }));
+
+    await action({
+      request: new Request(
+        "http://localhost/audits/session-1/scan/audit-asset-1/details",
+        { method: "POST", body: form }
+      ),
+      params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as unknown as Parameters<typeof action>[0]);
+
+    expect(uploadAuditImage).not.toHaveBeenCalled();
   });
 
   it("scopes the add-images-to-note WRITE, not just the read", async () => {
@@ -244,7 +272,7 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
       ),
       params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
       context: { getSession: () => ({ userId: "user-1" }) },
-    } as any);
+    } as unknown as Parameters<typeof action>[0]);
 
     // Scoped in its own right rather than trusting the read above to have
     // filtered — the two must not drift apart in a later refactor.
