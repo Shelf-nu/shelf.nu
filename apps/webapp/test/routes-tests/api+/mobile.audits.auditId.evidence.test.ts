@@ -141,11 +141,17 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         IMAGE_ASSET,
       ]);
 
-      const res = await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
       const json = await body(res);
 
-      expect(json.general.notes.map((n: any) => n.id)).toEqual(["note-general"]);
-      expect(json.general.images.map((i: any) => i.id)).toEqual(["img-general"]);
+      expect(json.general.notes.map((n: any) => n.id)).toEqual([
+        "note-general",
+      ]);
+      expect(json.general.images.map((i: any) => i.id)).toEqual([
+        "img-general",
+      ]);
       expect(json.byAuditAsset["aa-1"].notes.map((n: any) => n.id)).toEqual([
         "note-asset",
       ]);
@@ -162,7 +168,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         { ...NOTE_ASSET, id: "note-other", auditAssetId: "aa-2" },
       ]);
 
-      const res = await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
       const json = await body(res);
 
       expect(Object.keys(json.byAuditAsset).sort()).toEqual(["aa-1", "aa-2"]);
@@ -214,7 +222,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       // why: proves a guessed id from another org cannot be probed here.
       mockDb.auditSession.findFirst.mockResolvedValue(null);
 
-      const res = await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
 
       expect((res as unknown as Response).status).toBe(404);
       expect(mockDb.auditNote.findMany).not.toHaveBeenCalled();
@@ -227,7 +237,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         canUseAudits: false,
       });
 
-      const res = await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
 
       expect((res as unknown as Response).status).toBe(403);
       expect(mockDb.auditSession.findFirst).not.toHaveBeenCalled();
@@ -239,6 +251,21 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { auditSessionId: "audit-1", organizationId: "org-1" },
+        })
+      );
+    });
+
+    it("asks only for COMMENT notes, not the system activity trail", async () => {
+      // why: `AuditNote` mixes human comments with UPDATE rows written as
+      // MARKDOC SOURCE (`{% link to="/settings/team/users/..." /%}`). The web
+      // feed renders those through MarkdownViewer; the phone has no Markdoc
+      // renderer, so an unfiltered query paints raw tag source into the sheet.
+      // Found against a real workspace holding 9 UPDATE rows and 1 COMMENT.
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(mockDb.auditNote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { auditSessionId: "audit-1", type: "COMMENT" },
         })
       );
     });

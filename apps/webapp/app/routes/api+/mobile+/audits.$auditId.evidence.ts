@@ -44,7 +44,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canUseAudits } = await getMobileUserContext(user.id, organizationId);
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     if (!canUseAudits) {
       return data(
@@ -80,7 +83,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const [notes, images] = await Promise.all([
       db.auditNote.findMany({
-        where: { auditSessionId: auditId },
+        // why COMMENT only: `AuditNote` holds two unrelated things. `UPDATE`
+        // rows are the system activity trail ("X started this audit") and are
+        // written as MARKDOC SOURCE — `{% link to="/settings/team/users/..." /%}`.
+        // The web feed renders that through `MarkdownViewer`; the phone has no
+        // Markdoc renderer, so an unfiltered query puts raw tag source on
+        // screen. `COMMENT` rows are what a person actually typed, which is
+        // the only thing this route means by evidence. Verified against a real
+        // workspace: 9 UPDATE rows carrying tag source, 1 COMMENT.
+        //
+        // It also keeps this route agreeing with the COUNTS the client already
+        // has — `getAssetsForAuditSession` filters its `_count` the same way,
+        // so a row promising 1 attachment opens a sheet holding exactly 1.
+        where: { auditSessionId: auditId, type: "COMMENT" },
         select: {
           id: true,
           content: true,
