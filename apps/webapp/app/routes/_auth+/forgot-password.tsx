@@ -31,6 +31,7 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
+import { checkDomainSSOStatus } from "~/utils/sso.server";
 import { passwordSchema } from "~/utils/zod";
 
 const ForgotPasswordSchema = z.object({
@@ -99,8 +100,43 @@ export async function action({ request, context }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        /** We are going to get the user to make sure it exists and is confirmed
-         * this will not allow the user to use the forgot password before they have confirmed their email
+        /**
+         * SSO is checked by DOMAIN, before any user lookup, and this one is
+         * safe to answer honestly.
+         *
+         * `checkDomainSSOStatus` queries `auth.sso_domains` by the email's
+         * domain alone — it never touches the user table — so the answer
+         * depends only on whether the workspace configured SSO for that
+         * domain. Anyone can discover that by typing any address at that
+         * domain into the login page, so saying it here leaks nothing new,
+         * and it saves an SSO user from waiting for a reset email that will
+         * never arrive.
+         */
+        const domainStatus = await checkDomainSSOStatus(email);
+
+        if (domainStatus.isConfiguredForSSO) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This email's domain uses single sign-on, so its password cannot be reset here. Please sign in with SSO instead.",
+            additionalData: { email },
+            shouldBeCaptured: false,
+            label: "Auth",
+          });
+        }
+
+        /**
+         * Everything past this point responds IDENTICALLY whether or not the
+         * account exists.
+         *
+         * The previous version returned three distinguishable outcomes — an
+         * "unconfirmed user" error, an "SSO user" error, and a redirect — so
+         * anyone could enumerate which addresses were registered, and which
+         * were federated, one request at a time. `user.sso` is a per-user
+         * flag, so answering it at all confirmed the account existed.
+         *
+         * The reset link is still only sent to a real, non-SSO account; what
+         * changed is that the RESPONSE no longer distinguishes the cases.
          */
         const user = await db.user.findFirst({
           where: { email },
@@ -110,29 +146,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
           },
         });
 
-        if (!user) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
-          });
+        if (user && !user.sso) {
+          await sendResetPasswordLink(email);
         }
-
-        if (user.sso) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "This user is an SSO user and cannot reset password using email.",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
-          });
-        }
-
-        await sendResetPasswordLink(email);
 
         return redirect("/forgot-password?email=" + email);
       }
