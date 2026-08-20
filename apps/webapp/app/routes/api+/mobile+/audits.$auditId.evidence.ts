@@ -6,6 +6,8 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 
@@ -44,7 +46,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canUseAudits } = await getMobileUserContext(
+    const { roles, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -66,6 +68,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ auditId: z.string().min(1) })
     );
 
+    // Gate the READ on assignment, exactly as the audit detail route does.
+    // This route returns the notes and photos people recorded, which is the
+    // same class of data that gate was added to protect: without it an
+    // unassigned BASE or SELF_SERVICE user could read the evidence of any
+    // audit in the workspace by id. The write halves (`audits.note`,
+    // `audits.image`) already require it through
+    // `requireAuditAssetInSession`; reading must not be the loose end.
+    //
+    // Resolved from ALL roles, never from `roles[0]`: `getMobileUserContext`
+    // sets `role = roles[0]`, so a membership ordered [SELF_SERVICE, ADMIN]
+    // would refuse a real admin who is not assigned.
+    const effectiveRole = resolveMostPrivilegedRole(roles);
+    const isSelfServiceOrBase =
+      effectiveRole === "SELF_SERVICE" || effectiveRole === "BASE";
+
     // Prove the audit is in this workspace before reporting anything about
     // it, so a guessed id from another org cannot be probed through this
     // route. Mirrors the guard on the asset-bookings route.
@@ -80,6 +97,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { status: 404 }
       );
     }
+
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId: user.id,
+      isSelfServiceOrBase,
+    });
 
     const [notes, images] = await Promise.all([
       db.auditNote.findMany({

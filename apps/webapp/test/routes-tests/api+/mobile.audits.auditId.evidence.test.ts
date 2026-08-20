@@ -23,6 +23,17 @@ vi.mock("react-router", async () => {
 });
 
 // why: external auth — no Supabase in tests
+// why: the assignee gate is a shared guard with its own suite; here it only
+// needs to be callable so the route's own behaviour is what is under test.
+vi.mock("~/modules/audit/service.server", () => ({
+  requireAuditAssignee: vi.fn(),
+}));
+// why: pure role-precedence helper, but importing it pulls in server-only
+// booking authorization; the tests drive the role through getMobileUserContext.
+vi.mock("~/utils/booking-authorization.server", () => ({
+  resolveMostPrivilegedRole: (roles: string[]) =>
+    roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
+}));
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -57,6 +68,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 
 const mockDb = db as unknown as {
   auditSession: { findFirst: ReturnType<typeof vi.fn> };
@@ -122,6 +134,7 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (getMobileUserContext as any).mockResolvedValue({
+      roles: ["ADMIN"],
       role: "ADMIN",
       canUseAudits: true,
     });
@@ -250,6 +263,43 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         expect.objectContaining({
           where: { auditSessionId: "audit-1", organizationId: "org-1" },
         })
+      );
+    });
+
+    it("gates the read on assignment, like the audit detail route", async () => {
+      // why: this route returns the notes and photos people recorded, the same
+      // class of data #2900 gated on the detail route. Without this an
+      // unassigned BASE or SELF_SERVICE user could read any audit's evidence
+      // in the workspace by id, reopening the hole that PR closed.
+      (getMobileUserContext as any).mockResolvedValue({
+        roles: ["SELF_SERVICE"],
+        canUseAudits: true,
+      });
+
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(requireAuditAssignee).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auditSessionId: "audit-1",
+          organizationId: "org-1",
+          isSelfServiceOrBase: true,
+        })
+      );
+    });
+
+    it("does not treat a privileged member as self-service", async () => {
+      // why: getMobileUserContext sets role = roles[0], so a membership
+      // ordered [SELF_SERVICE, ADMIN] would refuse a real admin. The role must
+      // be resolved from ALL roles.
+      (getMobileUserContext as any).mockResolvedValue({
+        roles: ["SELF_SERVICE", "ADMIN"],
+        canUseAudits: true,
+      });
+
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(requireAuditAssignee).toHaveBeenCalledWith(
+        expect.objectContaining({ isSelfServiceOrBase: false })
       );
     });
 
