@@ -656,47 +656,68 @@ describe("getBookingDefaultStartEndTimes", () => {
       expect.assertions(2);
 
       // 2025-07-25T23:30Z is still FRIDAY in UTC but already SATURDAY in Tokyo
-      // (UTC+9, 08:30 on the 26th). Saturday is closed in this schedule, so the
-      // two zones must resolve to different next-working-day answers.
+      // (UTC+9, 08:30 on the 26th).
+      //
+      // Saturday is opened on DIFFERENT hours from the weekday schedule so the
+      // two zones cannot produce the same answer. With Saturday closed (as the
+      // shared fixture has it) both zones funnel to Monday 09:00 and the case
+      // proves nothing — a build reading the calendar day off UTC while still
+      // formatting in the preference zone would pass it.
       vitest.setSystemTime(new Date("2025-07-25T23:30:00Z"));
 
+      const saturdayOpen: WorkingHoursData = {
+        ...mockWorkingHours,
+        weeklySchedule: {
+          ...mockWorkingHours.weeklySchedule,
+          "6": { isOpen: true, openTime: "10:00", closeTime: "14:00" },
+        } as WeeklyScheduleJson,
+      };
+
       const utc = getBookingDefaultStartEndTimes(
-        mockWorkingHours,
+        saturdayOpen,
         0,
         false,
         prefsFor("UTC")
       );
       const tokyo = getBookingDefaultStartEndTimes(
-        mockWorkingHours,
+        saturdayOpen,
         0,
         false,
         prefsFor("Asia/Tokyo")
       );
 
-      // UTC: Friday 23:30 is past Friday's 17:00 close → next working day is Monday.
-      expect(utc.startDate).toBe("2025-07-28T09:00:00");
-      // Tokyo: already Saturday 08:30 → Saturday is closed, so also Monday, but
-      // Monday 09:00 TOKYO — a different absolute instant and a different string.
+      // UTC: Friday 23:30, past Friday's 17:00 close → next open day is
+      // Saturday, which now opens at 10:00.
+      expect(utc.startDate).toBe("2025-07-26T10:00:00");
+      // Tokyo: already Saturday 08:30, and the search only ever starts from
+      // TOMORROW → Sunday (closed), then Monday 09:00 Tokyo. Different calendar
+      // day and different wall clock from UTC.
       expect(tokyo.startDate).toBe("2025-07-28T09:00:00");
     });
 
     it("resolves a date override against the preference zone's calendar day", () => {
       expect.assertions(2);
 
-      // Friday the 25th is overridden closed. At 23:30Z it is still the 25th in
-      // UTC (override applies) but already the 26th in Tokyo (it does not).
+      // Friday the 25th carries an override. At 23:30Z it is still the 25th in
+      // UTC, so the override applies there; in Tokyo it is already the 26th, so
+      // it does not.
+      //
+      // The override OPENS Friday late rather than closing it. A closed-Friday
+      // override is inert at this instant — 23:30 is past the normal 17:00 close
+      // either way — so it could be deleted without changing either assertion.
+      // Opening late makes the override the only thing that separates the zones.
       vitest.setSystemTime(new Date("2025-07-25T23:30:00Z"));
 
       const workingHoursWithOverride: WorkingHoursData = {
         ...mockWorkingHours,
         overrides: [
           {
-            id: "friday-closed",
+            id: "friday-late",
             date: new Date("2025-07-25"),
-            isOpen: false,
-            openTime: null,
-            closeTime: null,
-            reason: "Company event",
+            isOpen: true,
+            openTime: "20:00",
+            closeTime: "23:59",
+            reason: "Late event",
             createdAt: new Date("2025-01-01T00:00:00.000Z"),
             updatedAt: new Date("2025-01-01T00:00:00.000Z"),
             workingHoursId: "working-hours-1",
@@ -717,9 +738,11 @@ describe("getBookingDefaultStartEndTimes", () => {
         prefsFor("Asia/Tokyo")
       );
 
-      // Both land on Monday here; what matters is that each resolved the
-      // override against its OWN calendar day without throwing or skipping a week.
-      expect(utc.startDate).toBe("2025-07-28T09:00:00");
+      // UTC: still the 25th → override applies, and 23:30 sits inside
+      // 20:00-23:59 → the in-hours branch, i.e. now + 10 minutes.
+      expect(utc.startDate).toBe("2025-07-25T23:40:00");
+      // Tokyo: already the 26th → the override does not apply. Saturday and
+      // Sunday are closed, so the next open day is Monday.
       expect(tokyo.startDate).toBe("2025-07-28T09:00:00");
     });
   });

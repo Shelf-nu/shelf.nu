@@ -115,7 +115,7 @@ describe("mobile booking routes - declared timezone validation", () => {
     vi.mocked(requireMobileAuth).mockResolvedValue({
       user: { id: "user-1" },
     } as any);
-    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1" as any);
+    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
     vi.mocked(getMobileUserContext).mockResolvedValue({
       role: "ADMIN",
     } as any);
@@ -210,7 +210,7 @@ describe("mobile routes - malformed body returns 400", () => {
     vi.mocked(requireMobileAuth).mockResolvedValue({
       user: { id: "user-1" },
     } as any);
-    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1" as any);
+    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
     // `canUseAudits` gates the audit routes with a 403 BEFORE they parse the
     // body, so it has to be satisfied for these cases to reach the parse.
     vi.mocked(getMobileUserContext).mockResolvedValue({
