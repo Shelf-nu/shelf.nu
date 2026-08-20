@@ -70,7 +70,9 @@ describe("triggerEmail", () => {
       to: "support@shelf.nu, deleted+abc123@deleted.shelf.nu",
     });
 
-    // The live inbox must still get the email
+    // The live inbox must still get the email, and the soft-deleted one must
+    // not: a second call would mean the guard only rewrote the first header
+    expect(transporter.sendMail).toHaveBeenCalledOnce();
     expect(transporter.sendMail).toHaveBeenCalledWith(
       expect.objectContaining({ to: "support@shelf.nu" })
     );
@@ -84,6 +86,7 @@ describe("triggerEmail", () => {
       to: "support@shelf.nu, deleted+abc123@DELETED.SHELF.NU",
     });
 
+    expect(transporter.sendMail).toHaveBeenCalledOnce();
     expect(transporter.sendMail).toHaveBeenCalledWith(
       expect.objectContaining({ to: "support@shelf.nu" })
     );
