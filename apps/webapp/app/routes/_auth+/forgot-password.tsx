@@ -31,7 +31,6 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-import { checkDomainSSOStatus } from "~/utils/sso.server";
 import { passwordSchema } from "~/utils/zod";
 
 const ForgotPasswordSchema = z.object({
@@ -101,42 +100,27 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         /**
-         * SSO is checked by DOMAIN, before any user lookup, and this one is
-         * safe to answer honestly.
-         *
-         * `checkDomainSSOStatus` queries `auth.sso_domains` by the email's
-         * domain alone — it never touches the user table — so the answer
-         * depends only on whether the workspace configured SSO for that
-         * domain. Anyone can discover that by typing any address at that
-         * domain into the login page, so saying it here leaks nothing new,
-         * and it saves an SSO user from waiting for a reset email that will
-         * never arrive.
-         */
-        const domainStatus = await checkDomainSSOStatus(email);
-
-        if (domainStatus.isConfiguredForSSO) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "This email's domain uses single sign-on, so its password cannot be reset here. Please sign in with SSO instead.",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
-          });
-        }
-
-        /**
-         * Everything past this point responds IDENTICALLY whether or not the
-         * account exists.
+         * Every outcome below responds IDENTICALLY, and the decision to send
+         * is made on the PER-USER `sso` flag.
          *
          * The previous version returned three distinguishable outcomes — an
          * "unconfirmed user" error, an "SSO user" error, and a redirect — so
          * anyone could enumerate which addresses were registered, and which
-         * were federated, one request at a time. `user.sso` is a per-user
-         * flag, so answering it at all confirmed the account existed.
+         * were federated, one request at a time.
          *
-         * The reset link is still only sent to a real, non-SSO account; what
-         * changed is that the RESPONSE no longer distinguishes the cases.
+         * An earlier revision of this fix short-circuited on the DOMAIN's SSO
+         * configuration instead, to keep a helpful "use SSO" message. That was
+         * wrong: `sso: true` is only ever set when a user actually arrives
+         * through SSO, so a domain configured for SSO can still hold legacy
+         * password accounts with `sso: false`. Gating on the domain locked
+         * those users out of password recovery entirely — a worse outcome than
+         * the silence it was trying to avoid, and inconsistent with
+         * `validateNonSSOUser`, which gates on the per-user flag for exactly
+         * this reason.
+         *
+         * If the SSO hint is wanted back, it belongs in the page as static
+         * copy shown to everyone ("if your organization uses SSO, sign in that
+         * way") — that helps without answering a question about any address.
          */
         const user = await db.user.findFirst({
           where: { email },
