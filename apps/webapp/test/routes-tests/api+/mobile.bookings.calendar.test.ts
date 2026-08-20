@@ -27,7 +27,6 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
-  assertMobileCanUseBookings: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
 
@@ -90,7 +89,6 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
-  assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 
@@ -121,8 +119,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
     mockDb.booking.findMany.mockResolvedValue([]);
     mockDb.booking.count.mockResolvedValue(0);
     mockDb.booking.findFirst.mockResolvedValue(null);
@@ -240,7 +237,9 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
   describe("who can see what", () => {
     it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-      (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
+      (getMobileUserContext as any).mockResolvedValue({
+        roles: ["SELF_SERVICE"],
+      });
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
@@ -261,7 +260,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
     });
 
     it("scopes a BASE user the same way", async () => {
-      (getMobileUserContext as any).mockResolvedValue({ role: "BASE" });
+      (getMobileUserContext as any).mockResolvedValue({ roles: ["BASE"] });
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
@@ -290,17 +289,32 @@ describe("GET /api/mobile/bookings/calendar", () => {
       expect(lastWhere().organizationId).toBe("org-1");
     });
 
-    it("refuses when the workspace has no bookings entitlement", async () => {
-      (assertMobileCanUseBookings as any).mockRejectedValue(
-        Object.assign(new Error("Bookings not enabled"), { status: 403 })
-      );
+    it("reads the most privileged role, not whichever one is stored first", async () => {
+      // The regression this guards: the context's `role` is `roles[0]`, so a
+      // membership stored `[SELF_SERVICE, ADMIN]` narrowed a genuine admin to
+      // bookings they are custodian of - their colleagues' bookings vanished
+      // from the grid while the list lens still showed them.
+      (getMobileUserContext as any).mockResolvedValue({
+        roles: ["SELF_SERVICE", "ADMIN"],
+      });
 
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      expect(resolveCustodianScope).not.toHaveBeenCalled();
+      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
+    });
+
+    it("answers for a personal workspace, exactly as the list lens does", async () => {
+      // why: the two lenses share one screen and one query. Gating this one on
+      // workspace type and not the other meant tapping the calendar replaced
+      // the day panel with a raw server string and left no way back. The gate
+      // belongs on the write paths, which keep it.
       const res = await loader(
         createLoaderArgs({ request: calendarRequest(RANGE) })
       );
 
-      expect((res as unknown as Response).status).toBe(403);
-      expect(mockDb.booking.findMany).not.toHaveBeenCalled();
+      expect((res as unknown as Response).status).toBe(200);
+      expect(mockDb.booking.findMany).toHaveBeenCalled();
     });
   });
 
@@ -345,13 +359,95 @@ describe("GET /api/mobile/bookings/calendar", () => {
       expect(body.outsideWindow.count).toBe(0);
       expect(body.outsideWindow.jumpTo).toBeNull();
     });
+
+    it("does not run the backward lookup when something lies ahead", async () => {
+      // why: that query orders by `to`, which carries no index, and its answer
+      // is thrown away whenever there is anything forward - the ordinary case
+      // for a calendar. It used to run on every month swipe regardless.
+      mockDb.booking.findFirst.mockResolvedValue({
+        from: new Date("2026-09-13T09:00:00.000Z"),
+      });
+
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      expect(mockDb.booking.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockDb.booking.findFirst.mock.calls[0]?.[0]?.orderBy).toEqual({
+        from: "asc",
+      });
+    });
+
+    it("falls back to the nearest booking behind when nothing lies ahead", async () => {
+      mockDb.booking.count.mockResolvedValue(3);
+      mockDb.booking.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ to: new Date("2026-07-04T17:00:00.000Z") });
+
+      const res = await loader(
+        createLoaderArgs({ request: calendarRequest(RANGE) })
+      );
+      const body = await (res as unknown as Response).json();
+
+      expect(mockDb.booking.findFirst).toHaveBeenCalledTimes(2);
+      expect(body.outsideWindow.jumpTo).toContain("2026-07-04");
+    });
   });
 
   describe("the payload", () => {
-    it("caps how many rows one month can pull down", async () => {
+    it("asks for one row past the cap, so it can tell whether there is more", async () => {
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
-      expect(mockDb.booking.findMany.mock.calls.at(-1)?.[0]?.take).toBe(500);
+      expect(mockDb.booking.findMany.mock.calls.at(-1)?.[0]?.take).toBe(501);
+    });
+
+    it("says so when it had to truncate, rather than drawing empty days", async () => {
+      // The regression this guards: rows are ordered by start date, so dropping
+      // the overflow removes the END of the window. The last week of the month
+      // rendered with no bands and the day panel answered "Nothing booked on
+      // this day" for days that were fully booked.
+      mockDb.booking.findMany.mockResolvedValue(
+        Array.from({ length: 501 }, (_, i) => ({
+          id: `b${i}`,
+          name: `Job ${i}`,
+          status: "RESERVED",
+          from: new Date("2026-08-10T09:00:00.000Z"),
+          to: new Date("2026-08-12T17:00:00.000Z"),
+          custodianUser: null,
+          custodianTeamMember: null,
+        }))
+      );
+
+      const res = await loader(
+        createLoaderArgs({ request: calendarRequest(RANGE) })
+      );
+      const body = await (res as unknown as Response).json();
+
+      expect(body.truncated).toBe(true);
+      // The probe row is dropped rather than shipped.
+      expect(body.bookings).toHaveLength(500);
+    });
+
+    it("reports no truncation for a window it could answer in full", async () => {
+      mockDb.booking.findMany.mockResolvedValue([]);
+
+      const res = await loader(
+        createLoaderArgs({ request: calendarRequest(RANGE) })
+      );
+      const body = await (res as unknown as Response).json();
+
+      expect(body.truncated).toBe(false);
+    });
+
+    it("clamps an oversized search term, as the list route does", async () => {
+      // why: unbounded, this term reaches four separate `contains` predicates
+      // per request.
+      await loader(
+        createLoaderArgs({
+          request: calendarRequest(`${RANGE}&search=${"a".repeat(500)}`),
+        })
+      );
+
+      const or = lastWhere().OR;
+      expect(or[0].name.contains).toHaveLength(100);
     });
 
     it("orders soonest first, because a calendar is read forwards", async () => {
@@ -370,13 +466,8 @@ describe("GET /api/mobile/bookings/calendar", () => {
           status: "RESERVED",
           from: new Date("2026-08-10T09:00:00.000Z"),
           to: new Date("2026-08-12T17:00:00.000Z"),
-          custodianUser: {
-            firstName: "Amanda",
-            lastName: "Cole",
-            profilePicture: null,
-          },
+          custodianUser: { firstName: "Amanda", lastName: "Cole" },
           custodianTeamMember: null,
-          _count: { bookingAssets: 4 },
         },
       ]);
 
@@ -386,7 +477,17 @@ describe("GET /api/mobile/bookings/calendar", () => {
       const body = await (res as unknown as Response).json();
 
       expect(body.bookings[0].custodianName).toBe("Amanda Cole");
-      expect(body.bookings[0].assetCount).toBe(4);
+    });
+
+    it("selects only what a band and a row actually draw", async () => {
+      // why: an asset count and a custodian avatar were selected, mapped and
+      // shipped without ever being rendered. The count cost a correlated
+      // subquery on every row of every month page.
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      const select = mockDb.booking.findMany.mock.calls.at(-1)?.[0]?.select;
+      expect(select._count).toBeUndefined();
+      expect(select.custodianUser.select.profilePicture).toBeUndefined();
     });
 
     it("prefers a team member's name over the user's", async () => {
@@ -397,13 +498,8 @@ describe("GET /api/mobile/bookings/calendar", () => {
           status: "ONGOING",
           from: new Date("2026-08-10T09:00:00.000Z"),
           to: new Date("2026-08-10T17:00:00.000Z"),
-          custodianUser: {
-            firstName: "Amanda",
-            lastName: "Cole",
-            profilePicture: null,
-          },
+          custodianUser: { firstName: "Amanda", lastName: "Cole" },
           custodianTeamMember: { name: "Lighting crew" },
-          _count: { bookingAssets: 0 },
         },
       ]);
 

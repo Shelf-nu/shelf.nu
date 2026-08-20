@@ -2,7 +2,6 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
-  assertMobileCanUseBookings,
   getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
@@ -13,6 +12,7 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -21,6 +21,16 @@ import {
 
 /** Hard ceiling on the window a single call may ask for. */
 const MAX_RANGE_DAYS = 366;
+
+/**
+ * Most bookings one window will answer with.
+ *
+ * A month for a busy workspace is unbounded otherwise, and this may be pulled
+ * over site data. Hitting it is REPORTED rather than silent: rows are ordered
+ * by start date, so a quiet truncation drops the END of the window and the last
+ * week of the month renders empty while looking perfectly healthy.
+ */
+const MAX_BOOKINGS_PER_WINDOW = 500;
 
 /**
  * GET /api/mobile/bookings/calendar
@@ -54,8 +64,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    await assertMobileCanUseBookings(organizationId);
 
+    /**
+     * why no `assertMobileCanUseBookings` here: it is a workspace-TYPE gate that
+     * 403s a personal workspace, and the bookings LIST this view shares a screen
+     * with does not apply it. Gating one lens and not the other meant tapping
+     * the calendar replaced the day panel with a raw server string and left no
+     * way back except switching lens. Web draws the same line - reads are open
+     * and the gate sits on the WRITE paths (`bookings.create`, calendar
+     * subscription, CSV export), which keep it.
+     */
     await requireMobilePermission({
       userId: user.id,
       organizationId,
@@ -158,9 +176,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
     const statuses = requested.length > 0 ? requested : DEFAULT_STATUSES;
 
-    const search = url.searchParams.get("search")?.trim() || undefined;
+    /**
+     * Clamped to the same 100 characters the list route applies. Unbounded, this
+     * term reaches four separate `contains` predicates per request, so a large
+     * value costs several unbounded pattern matches over the booking table.
+     */
+    const search =
+      url.searchParams.get("search")?.trim().slice(0, 100) || undefined;
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    /**
+     * `roles`, resolved to the most privileged one - NOT the context's `role`,
+     * which is `roles[0]`. A membership stored `[SELF_SERVICE, ADMIN]` resolves
+     * to SELF_SERVICE there, so a genuine admin was narrowed to bookings they
+     * are custodian of and every colleague's booking vanished from the grid
+     * while the list lens still showed them. The sibling mobile booking routes
+     * all resolve it this way.
+     */
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
@@ -216,51 +249,72 @@ export async function loader({ request }: LoaderFunctionArgs) {
       NOT: { AND: [{ from: { lte: end } }, { to: { gte: start } }] },
     };
 
-    const bookings = await db.booking.findMany({
+    const rows = await db.booking.findMany({
       where: { ...baseWhere, ...overlapsWindow },
+      /**
+       * Exactly what a band and a day-panel row render, and nothing else. An
+       * asset count and a custodian avatar were selected and shipped but never
+       * drawn; the count in particular cost a correlated subquery on every one
+       * of these rows, on a phone that may be on site data.
+       */
       select: {
         id: true,
         name: true,
         status: true,
         from: true,
         to: true,
-        custodianUser: {
-          select: { firstName: true, lastName: true, profilePicture: true },
-        },
+        custodianUser: { select: { firstName: true, lastName: true } },
         custodianTeamMember: { select: { name: true } },
-        _count: { select: { bookingAssets: true } },
       },
       // Soonest first: a calendar is read forwards.
       orderBy: [{ from: "asc" }],
-      // why: a month for a busy workspace is unbounded otherwise. The grid can
-      // only show a few bands per day anyway, so a ceiling costs nothing that
-      // is visible and stops one request pulling an enormous payload onto a
-      // phone that may be on site data.
-      take: 500,
+      // One past the ceiling, purely to learn whether there IS more. The extra
+      // row is dropped below and never reaches the client.
+      take: MAX_BOOKINGS_PER_WINDOW + 1,
     });
 
     /**
-     * How much this filter matches beyond the visible month, and where to look.
-     * Two cheap indexed lookups, and only they can answer "where did my
-     * bookings go" when the month on screen is empty.
+     * why this is reported and not swallowed: the rows are ordered by start
+     * date, so truncation removes the END of the window. The last week of the
+     * month would render with no bands at all and the day panel would answer
+     * "Nothing booked on this day" for days that are fully booked. The counts
+     * below cannot cover it either - these rows DO overlap the window, so they
+     * are not "outside" it.
      */
-    const [outsideCount, nextUp, previous] = await Promise.all([
+    const truncated = rows.length > MAX_BOOKINGS_PER_WINDOW;
+    const bookings = truncated ? rows.slice(0, MAX_BOOKINGS_PER_WINDOW) : rows;
+
+    /**
+     * How much this filter matches beyond the visible month, and where to look.
+     * Only these can answer "where did my bookings go" when the month on screen
+     * is empty.
+     *
+     * The forward lookup rides the `(organizationId, from, id)` index. The
+     * backward one orders by `to`, which has NO index, so it is deliberately not
+     * run alongside: its result is discarded whenever anything lies ahead, which
+     * is the ordinary case for a calendar. Paying for it only when the answer is
+     * actually needed costs one extra round trip on the rare empty-ahead path
+     * instead of a full sort of the org's history on every month swipe.
+     */
+    const [outsideCount, nextUp] = await Promise.all([
       db.booking.count({ where: outsideWindow }),
       db.booking.findFirst({
         where: { ...baseWhere, from: { gt: end } },
         orderBy: { from: "asc" },
         select: { from: true },
       }),
-      // `to`, not `from`: this is ordered by the nearest END behind the window,
-      // so returning its start sent the calendar to whenever that booking began
-      // - which for a long booking can be years before the month it was chosen
-      // for.
-      db.booking.findFirst({
-        where: { ...baseWhere, to: { lt: start } },
-        orderBy: { to: "desc" },
-        select: { to: true },
-      }),
     ]);
+
+    // `to`, not `from`: this is ordered by the nearest END behind the window, so
+    // returning its start sent the calendar to whenever that booking began -
+    // which for a long booking can be years before the month it was chosen for.
+    const previous = nextUp
+      ? null
+      : await db.booking.findFirst({
+          where: { ...baseWhere, to: { lt: start } },
+          orderBy: { to: "desc" },
+          select: { to: true },
+        });
 
     return data({
       bookings: bookings.map((b) => ({
@@ -269,15 +323,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: b.status,
         from: b.from,
         to: b.to,
-        assetCount: b._count.bookingAssets,
         custodianName:
           b.custodianTeamMember?.name ||
           [b.custodianUser?.firstName, b.custodianUser?.lastName]
             .filter(Boolean)
             .join(" ") ||
           null,
-        custodianImage: b.custodianUser?.profilePicture || null,
       })),
+      /**
+       * True when this window holds more than one response may carry, so the
+       * view can say the later part of the month is incomplete rather than
+       * drawing it as empty.
+       */
+      truncated,
       /**
        * Bookings matching the same filter that this month does not show.
        * `jumpTo` prefers the next one forward, since a calendar is read

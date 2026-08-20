@@ -859,26 +859,48 @@ export function calendarDayKeyToDate(key: string): Date {
 }
 
 /**
- * The range a one-month calendar view loads: the month itself plus a week
- * either side, so a booking that began in the previous month still paints its
- * band into this one.
+ * The range a one-month calendar view loads: EXACTLY the weeks a month grid
+ * draws, so a booking that began in the previous month still paints its band
+ * into this one.
+ *
+ * why week-aligned and not a flat week either side: a month grid renders whole
+ * weeks, so it shows at most six days of each neighbouring month. A flat
+ * seven-day pad fetched a fringe the grid has no square for, and a booking
+ * landing in it was drawn nowhere while still counting as INSIDE the window -
+ * so the "N more outside this month" line stayed hidden too. It was invisible
+ * with nothing to explain it. Fetching precisely what is rendered makes
+ * "overlaps the window" and "is drawn" the same statement.
  *
  * The end is the LAST INSTANT of its day, not midnight. Consumers document an
  * inclusive window and filter on `from <= end`, so a midnight bound silently
  * dropped every booking starting later on the window's final day.
  *
  * @param monthKey - any `YYYY-MM-DD` day inside the month to show
+ * @param weekStartsOn - first column of the grid, 0 = Sunday. Must match the
+ *   `firstDay` the grid is rendered with, or the window and the squares drift.
  * @returns the inclusive window to request
  */
-export function calendarMonthWindow(monthKey: string): {
+export function calendarMonthWindow(
+  monthKey: string,
+  weekStartsOn: number = 0
+): {
   start: Date;
   end: Date;
 } {
   const base = calendarDayKeyToDate(monthKey);
-  const start = new Date(base.getFullYear(), base.getMonth(), 1);
-  start.setDate(start.getDate() - 7);
-  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0);
-  end.setDate(end.getDate() + 7);
+  const firstOfMonth = new Date(base.getFullYear(), base.getMonth(), 1);
+  // Day 0 of the NEXT month is the last day of this one, leap years included.
+  const lastOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+
+  // Tolerate any integer, including the negatives a bad preference could carry.
+  const weekStart = ((Math.trunc(weekStartsOn) % 7) + 7) % 7;
+  const weekEnd = (weekStart + 6) % 7;
+
+  const start = new Date(firstOfMonth);
+  start.setDate(start.getDate() - ((start.getDay() - weekStart + 7) % 7));
+
+  const end = new Date(lastOfMonth);
+  end.setDate(end.getDate() + ((weekEnd - end.getDay() + 7) % 7));
   end.setHours(23, 59, 59, 999);
   return { start, end };
 }

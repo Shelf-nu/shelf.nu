@@ -202,7 +202,7 @@ function BookingsListContent() {
           {(["list", "calendar"] as const).map((v) => (
             <TouchableOpacity
               key={v}
-              style={[styles.lensItem, view === v && styles.lensItemActive]}
+              style={styles.lensItem}
               onPress={() => setView(v)}
               accessibilityRole="tab"
               accessibilityState={{ selected: view === v }}
@@ -288,14 +288,23 @@ function BookingsListContent() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Re-fetch immediately when the filter, search, or sort changes
+  /**
+   * Re-fetch immediately when the filter, search, or sort changes.
+   *
+   * Skipped entirely while the calendar is the visible lens: it runs its own
+   * query against the same filters, so every pill tap and every debounced
+   * keystroke was firing BOTH - a findMany and a count for a list that is not
+   * on screen, alongside the calendar's own. `view` is a dependency so
+   * switching back to the list refetches it with whatever the filters became
+   * in the meantime.
+   */
   useEffect(() => {
-    if (!currentOrg || !hasFetchedBookings.current) return;
+    if (!currentOrg || !hasFetchedBookings.current || view !== "list") return;
     nextPage.current = 1;
     fetchBookings(1, true).finally(() => {
       lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter, debouncedSearch, sortIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, debouncedSearch, sortIndex, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(
     useCallback(() => {
@@ -670,77 +679,75 @@ function BookingsListContent() {
           canCreate={currentOrg?.type === "TEAM"}
         />
       ) : (
-        <>
-          {/* Swipeable content area — swipe left/right to cycle filter pills */}
-          <View style={styles.flexFill} {...swipePanHandlers}>
-            <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
-              {error ? (
-                <View style={styles.centered}>
-                  <Ionicons
-                    name="alert-circle-outline"
-                    size={48}
-                    color={colors.error}
-                  />
-                  <Text style={styles.emptyText}>{error}</Text>
-                  <TouchableOpacity
-                    style={styles.retryButton}
-                    onPress={onRefresh}
-                    accessibilityLabel="Retry loading bookings"
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.retryText}>Retry</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : isLoading && bookings.length === 0 ? (
-                <BookingListSkeleton />
-              ) : bookings.length === 0 ? (
-                <View style={styles.centered}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={48}
-                    color={colors.border}
-                  />
-                  <Text style={styles.emptyTitle}>
-                    {STATUS_FILTERS[activeFilter].emptyTitle}
-                  </Text>
-                  <Text style={styles.emptyText}>
-                    {STATUS_FILTERS[activeFilter].emptyHint}
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  ref={listRef}
-                  data={bookings}
-                  renderItem={renderBooking}
-                  keyExtractor={bookingKeyExtractor}
-                  contentContainerStyle={styles.list}
-                  removeClippedSubviews
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
-                  initialNumToRender={10}
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={isRefreshing}
-                      onRefresh={onRefresh}
-                      tintColor={colors.muted}
-                      accessibilityLabel="Pull to refresh"
-                    />
-                  }
-                  onEndReached={onEndReached}
-                  onEndReachedThreshold={0.5}
-                  ListFooterComponent={
-                    isLoadingMore ? (
-                      <ActivityIndicator
-                        style={styles.footer}
-                        color={colors.muted}
-                      />
-                    ) : null
-                  }
+        /* Swipeable content area — swipe left/right to cycle filter pills */
+        <View style={styles.flexFill} {...swipePanHandlers}>
+          <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
+            {error ? (
+              <View style={styles.centered}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={48}
+                  color={colors.error}
                 />
-              )}
-            </Animated.View>
-          </View>
-        </>
+                <Text style={styles.emptyText}>{error}</Text>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={onRefresh}
+                  accessibilityLabel="Retry loading bookings"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : isLoading && bookings.length === 0 ? (
+              <BookingListSkeleton />
+            ) : bookings.length === 0 ? (
+              <View style={styles.centered}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={48}
+                  color={colors.border}
+                />
+                <Text style={styles.emptyTitle}>
+                  {STATUS_FILTERS[activeFilter].emptyTitle}
+                </Text>
+                <Text style={styles.emptyText}>
+                  {STATUS_FILTERS[activeFilter].emptyHint}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={listRef}
+                data={bookings}
+                renderItem={renderBooking}
+                keyExtractor={bookingKeyExtractor}
+                contentContainerStyle={styles.list}
+                removeClippedSubviews
+                maxToRenderPerBatch={10}
+                windowSize={5}
+                initialNumToRender={10}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={isRefreshing}
+                    onRefresh={onRefresh}
+                    tintColor={colors.muted}
+                    accessibilityLabel="Pull to refresh"
+                  />
+                }
+                onEndReached={onEndReached}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                  isLoadingMore ? (
+                    <ActivityIndicator
+                      style={styles.footer}
+                      color={colors.muted}
+                    />
+                  ) : null
+                }
+              />
+            )}
+          </Animated.View>
+        </View>
       )}
 
       {/* Create booking — only TEAM workspaces can use bookings (matches the
@@ -795,6 +802,8 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     gap: spacing.xs,
   },
+  // No active-state style: the selected lens is carried by the icon colour
+  // alone, matching the tab bar directly below (see the note above).
   lensItem: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
@@ -802,7 +811,6 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     justifyContent: "center",
   },
-  lensItemActive: {},
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -19,7 +19,15 @@
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/bookings.calendar.ts}
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   View,
   Text,
@@ -30,7 +38,11 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Calendar, type DateData } from "react-native-calendars";
+import {
+  Calendar,
+  type CalendarProps,
+  type DateData,
+} from "react-native-calendars";
 import { useRouter } from "expo-router";
 import {
   calendarDayKey as toKey,
@@ -68,9 +80,36 @@ const STATUS_PRIORITY: Record<string, number> = {
   COMPLETE: 4,
 };
 
-/** What our `markedDates` payload carries into the custom cell. */
+/**
+ * Exactly the props react-native-calendars hands a custom day component.
+ *
+ * why derived rather than hand-written: `dayComponent` used to take `any`, and
+ * with no contract nothing checked that our `onPress` was shadowing the
+ * library's own handler, nor that the marking we passed matched what a cell can
+ * receive. Both were live defects a real type would have caught at compile time.
+ */
+type CalendarDayProps = ComponentProps<
+  NonNullable<CalendarProps["dayComponent"]>
+>;
+
+/**
+ * One band, in the shape the library's `periods` marking uses. The flags are
+ * optional here for the same reason they are optional there: a band running in
+ * from outside the window has neither cap.
+ */
+type BookingBand = {
+  color: string;
+  startingDay?: boolean;
+  endingDay?: boolean;
+};
+
+/**
+ * What our `markedDates` payload carries into the custom cell: the library's
+ * band list, plus the TOTAL touching that day. The library has no field for
+ * that total and the cell needs it to print an honest "+N".
+ */
 type DayMarking = {
-  periods?: { startingDay: boolean; endingDay: boolean; color: string }[];
+  periods?: BookingBand[];
   total?: number;
   selected?: boolean;
 };
@@ -95,14 +134,9 @@ const DayCell = memo(function DayCell({
   marking,
   onPress,
   colors,
-  maxBands,
-}: {
-  date?: { dateString: string; day: number };
-  state?: string;
+}: Omit<CalendarDayProps, "marking"> & {
   marking?: DayMarking;
-  onPress: (dateString: string) => void;
   colors: ReturnType<typeof useTheme>["colors"];
-  maxBands: number;
 }) {
   const periods = marking?.periods ?? [];
   const hidden = Math.max(0, (marking?.total ?? 0) - periods.length);
@@ -112,7 +146,17 @@ const DayCell = memo(function DayCell({
   return (
     <TouchableOpacity
       style={dayStyles.cell}
-      onPress={() => date && onPress(date.dateString)}
+      /**
+       * The LIBRARY's press handler, not our own.
+       *
+       * why: overriding it meant a tap on one of the greyed adjacent-month days
+       * the grid still renders set the selected day to a date in another month,
+       * and the month-sync effect below immediately overwrote it - so an
+       * obviously tappable square either did nothing or jumped to the 1st. The
+       * library's handler navigates to that day's month first and then calls
+       * `onDayPress`, which is what a tapper is asking for.
+       */
+      onPress={() => onPress?.(date)}
       accessibilityRole="button"
       accessibilityLabel={
         date
@@ -151,7 +195,9 @@ const DayCell = memo(function DayCell({
       </View>
 
       <View style={dayStyles.bands}>
-        {periods.slice(0, maxBands).map((p, i) => (
+        {/* Already sorted and capped where `total` is counted, so the "+N"
+            below and what is drawn here can never disagree. */}
+        {periods.map((p, i) => (
           <View
             key={i}
             style={[
@@ -217,6 +263,8 @@ type Props = {
 type CachedMonth = {
   bookings: CalendarBooking[];
   outside: { count: number; jumpTo: string | null };
+  /** The server had more for this window than it would send. */
+  truncated: boolean;
 };
 
 export function BookingCalendar({
@@ -247,6 +295,24 @@ export function BookingCalendar({
   }>({ count: 0, jumpTo: null });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The window held more bookings than one response carries. Rows arrive
+   * soonest first, so what is missing is the END of the month - it would render
+   * as empty days, which on this screen reads as "nothing booked" rather than
+   * "not shown".
+   */
+  const [truncated, setTruncated] = useState(false);
+
+  /**
+   * The month being shown, as its first day.
+   *
+   * why anchor it: the library preserves the day-of-month across swipes and
+   * clamps it at month ends, and the "jump to the next booking" row sets a
+   * specific date. Both produce different day keys for the SAME month, which
+   * request the same window - so keying work off the raw value refetched a
+   * month already in hand and re-ran the whole marking pass for nothing.
+   */
+  const monthAnchor = `${visibleMonth.slice(0, 7)}-01`;
 
   /**
    * Months already fetched, so paging back and forth does not refetch what we
@@ -273,8 +339,12 @@ export function BookingCalendar({
    * the user has left.
    */
   const cacheKey = useCallback(
+    // Sliced to the MONTH: two day keys inside one month describe the same
+    // window, so keying on the full key made them miss each other in the cache.
     (monthKey: string) =>
-      `${orgId ?? ""}|${monthKey}|${statuses ?? ""}|${search ?? ""}`,
+      `${orgId ?? ""}|${monthKey.slice(0, 7)}|${statuses ?? ""}|${
+        search ?? ""
+      }`,
     [orgId, statuses, search]
   );
 
@@ -295,6 +365,7 @@ export function BookingCalendar({
   useEffect(() => {
     setBookings([]);
     setOutside({ count: 0, jumpTo: null });
+    setTruncated(false);
   }, [orgId]);
 
   /**
@@ -314,12 +385,14 @@ export function BookingCalendar({
         // correct in the common case, so the grid does not blink.
         setBookings(cached.bookings);
         setOutside(cached.outside);
-        setError(null);
+        setTruncated(cached.truncated);
       } else {
         setIsLoading(true);
       }
 
-      const { start, end } = monthWindow(monthKey);
+      // The account's week start, so the window is exactly the weeks the grid
+      // draws. Anything wider fetches days that have no square to paint on.
+      const { start, end } = monthWindow(monthKey, prefs.weekStartsOn);
 
       setError(null);
       const res = await api.bookingsCalendar(
@@ -341,19 +414,23 @@ export function BookingCalendar({
         const next = {
           bookings: res.data.bookings,
           outside: res.data.outsideWindow ?? { count: 0, jumpTo: null },
+          truncated: res.data.truncated === true,
         };
         monthCache.current.set(key, next);
         setBookings(next.bookings);
         setOutside(next.outside);
+        setTruncated(next.truncated);
       }
       setIsLoading(false);
     },
-    [orgId, statuses, search, cacheKey]
+    [orgId, statuses, search, cacheKey, prefs.weekStartsOn]
   );
 
+  // Anchored to the month, so selecting a different day inside the month on
+  // screen does not re-request a window we already have.
   useEffect(() => {
-    void load(visibleMonth);
-  }, [load, visibleMonth]);
+    void load(monthAnchor);
+  }, [load, monthAnchor]);
 
   /**
    * Keep the selected day inside the month on screen.
@@ -387,8 +464,8 @@ export function BookingCalendar({
     if (lastRefreshToken.current === refreshToken) return;
     lastRefreshToken.current = refreshToken;
     monthCache.current.clear();
-    void load(visibleMonth, { force: true });
-  }, [refreshToken, load, visibleMonth]);
+    void load(monthAnchor, { force: true });
+  }, [refreshToken, load, monthAnchor]);
 
   /**
    * Single pass over the bookings, producing both the day marks and a
@@ -398,32 +475,53 @@ export function BookingCalendar({
    * on every tap. On a busy month that is the same work repeated for each poke
    * at the grid, and this screen is poked at constantly.
    */
-  const { marks, byDay } = useMemo(() => {
-    const marks: Record<
+  const { marks, byDay, undrawn } = useMemo(() => {
+    /** Bands while they are still sortable; `priority` is dropped on the way out. */
+    const ranked: Record<
       string,
       {
-        periods: {
-          startingDay: boolean;
-          endingDay: boolean;
-          color: string;
-          priority: number;
-        }[];
+        periods: (BookingBand & { priority: number })[];
         /** EVERY booking touching the day, not just the bands we draw. */
         total: number;
       }
     > = {};
     const byDay: Record<string, CalendarBooking[]> = {};
+    /**
+     * Fetched, but covering no square this grid draws.
+     *
+     * The window is built from the DEVICE's midnight while days are keyed in the
+     * account's saved zone, so when those differ the two disagree by up to a
+     * day at each edge. That is a far narrower fringe than the flat week this
+     * replaced, but a booking landing in it would still be drawn nowhere while
+     * counting as inside the window - invisible, with nothing to explain it.
+     * Folding them into the "outside this month" line closes it exactly,
+     * whatever the two zones are.
+     */
+    const undrawn: CalendarBooking[] = [];
 
-    const window = monthWindow(visibleMonth);
+    const window = monthWindow(monthAnchor, prefs.weekStartsOn);
 
     for (const b of bookings) {
-      // Clipped to the window: a booking can be longer than the enumeration
-      // cap, and counting from its own start then produced no keys for the
-      // month on screen at all.
-      const keys = daysCovered(b.from, b.to, {
-        from: window.start,
-        to: window.end,
-      });
+      /**
+       * Clipped to the window: a booking can be longer than the enumeration
+       * cap, and counting from its own start then produced no keys for the
+       * month on screen at all.
+       *
+       * In the account's SAVED zone, which is not always the device's. Keying
+       * by device time filed a booking under one square while `trueStart` /
+       * `trueEnd` and the row beneath printed another date - so the band lost
+       * its caps, and the day the row named answered "Nothing booked".
+       */
+      const keys = daysCovered(
+        b.from,
+        b.to,
+        { from: window.start, to: window.end },
+        prefs.timeZone
+      );
+      if (keys.length === 0) {
+        undrawn.push(b);
+        continue;
+      }
       // The caps still come from the booking's real dates, so a band running
       // in from before the window is drawn open rather than looking like it
       // starts at the edge of the screen.
@@ -432,7 +530,7 @@ export function BookingCalendar({
       const color = bookingStatusBadge[b.status]?.text ?? colors.primary;
       keys.forEach((key) => {
         (byDay[key] ??= []).push(b);
-        const mark = (marks[key] ??= { periods: [], total: 0 });
+        const mark = (ranked[key] ??= { periods: [], total: 0 });
         mark.total += 1;
         // Collect every band; the cap is applied after sorting, below.
         mark.periods.push({
@@ -443,11 +541,26 @@ export function BookingCalendar({
         });
       });
     }
-    // Most urgent first, then cap. `total` still counts everything, so the
-    // cell's "+N" stays truthful about what it is not showing.
-    for (const mark of Object.values(marks)) {
-      mark.periods.sort((a, b) => a.priority - b.priority);
-      mark.periods = mark.periods.slice(0, MAX_BANDS_PER_DAY);
+    /**
+     * Most urgent first, then cap - the ONLY place the cap is applied, so the
+     * cell can draw what it is given and its "+N" can never disagree with it.
+     * `total` still counts everything, so that "+N" stays truthful.
+     */
+    const marks: Record<string, DayMarking> = {};
+    for (const [key, mark] of Object.entries(ranked)) {
+      marks[key] = {
+        total: mark.total,
+        periods: mark.periods
+          .sort((a, b) => a.priority - b.priority)
+          .slice(0, MAX_BANDS_PER_DAY)
+          // `priority` is ours, for ordering only; the library's marking has no
+          // such field and the cell has no use for it.
+          .map(({ color, startingDay, endingDay }) => ({
+            color,
+            startingDay,
+            endingDay,
+          })),
+      };
     }
     // The day panel reads the same way: what needs attention at the top.
     for (const list of Object.values(byDay)) {
@@ -457,13 +570,14 @@ export function BookingCalendar({
       );
     }
 
-    return { marks, byDay };
+    return { marks, byDay, undrawn };
   }, [
     bookings,
     bookingStatusBadge,
     colors.primary,
-    visibleMonth,
+    monthAnchor,
     prefs.timeZone,
+    prefs.weekStartsOn,
   ]);
 
   /**
@@ -487,6 +601,29 @@ export function BookingCalendar({
 
   const dayBookings = byDay[selectedDay] ?? [];
 
+  /**
+   * What this grid does not show, from both directions: the server's count of
+   * everything outside the window it was asked for, plus anything it did send
+   * that landed on no square. `jumpTo` prefers the server's answer and falls
+   * back to the earliest undrawn booking, which arrives soonest-first.
+   */
+  const outsideCount = outside.count + undrawn.length;
+  const outsideJumpTo = outside.jumpTo ?? undrawn[0]?.from ?? null;
+
+  /**
+   * Stable identity, and it has to be.
+   *
+   * react-native-calendars does `const Component = dayComponent` and then
+   * renders `<Component/>`, so a new arrow on every render is a new component
+   * TYPE - React unmounts and remounts all ~42 cells, defeating both the
+   * library's `React.memo` on the day and our own on the cell. Every tap, every
+   * loading flip and every search keystroke rebuilt the whole grid.
+   */
+  const renderDay = useCallback(
+    (dayProps: CalendarDayProps) => <DayCell {...dayProps} colors={colors} />,
+    [colors]
+  );
+
   return (
     <View style={styles.container}>
       <Calendar
@@ -498,14 +635,7 @@ export function BookingCalendar({
         onMonthChange={(m: DateData) => setVisibleMonth(m.dateString)}
         onDayPress={(d: DateData) => setSelectedDay(d.dateString)}
         markedDates={markedDates}
-        dayComponent={(dayProps: any) => (
-          <DayCell
-            {...dayProps}
-            colors={colors}
-            maxBands={MAX_BANDS_PER_DAY}
-            onPress={setSelectedDay}
-          />
-        )}
+        dayComponent={renderDay}
         /* The account's saved week start, which web's calendar also uses.
            Re-deriving it from the device locale showed the two surfaces
            different week columns for the same account, and ignored anyone who
@@ -536,26 +666,39 @@ export function BookingCalendar({
         style={styles.calendar}
       />
 
+      {/* why: rows come back soonest first, so a window we could not answer in
+          full is missing its END. Those days would draw as empty, which on a
+          calendar reads as "free" — the one thing this view must never say
+          about a day that is booked. */}
+      {truncated ? (
+        <View style={styles.truncatedRow}>
+          <Ionicons
+            name="alert-circle-outline"
+            size={16}
+            color={colors.warningText}
+          />
+          <Text style={styles.truncatedText}>
+            This month has more bookings than can be shown. Narrow the filters
+            to see the rest.
+          </Text>
+        </View>
+      ) : null}
+
       {/* why: the bookings list is date-blind — "Active" shows every open
           booking whenever it falls — while this grid shows one month. Without
           this line you switch lens and four bookings simply vanish, with
           nothing saying they are in March. */}
-      {outside.count > 0 && outside.jumpTo ? (
+      {outsideCount > 0 && outsideJumpTo ? (
         <TouchableOpacity
           style={styles.outsideRow}
           onPress={() => {
-            const target = toKey(
-              new Date(outside.jumpTo as string),
-              prefs.timeZone
-            );
+            const target = toKey(new Date(outsideJumpTo), prefs.timeZone);
             setVisibleMonth(target);
             setSelectedDay(target);
           }}
           accessibilityRole="button"
-          accessibilityLabel={`${
-            outside.count
-          } more bookings outside this month. Jump to ${formatDate(
-            outside.jumpTo
+          accessibilityLabel={`${outsideCount} more bookings outside this month. Jump to ${formatDate(
+            outsideJumpTo
           )}`}
         >
           <Ionicons
@@ -564,9 +707,9 @@ export function BookingCalendar({
             color={colors.primaryText}
           />
           <Text style={styles.outsideText}>
-            {outside.count} more outside this month
+            {outsideCount} more outside this month
           </Text>
-          <Text style={styles.outsideJump}>{formatDate(outside.jumpTo)}</Text>
+          <Text style={styles.outsideJump}>{formatDate(outsideJumpTo)}</Text>
         </TouchableOpacity>
       ) : null}
 
@@ -668,6 +811,24 @@ const useStyles = createStyles((colors) => ({
   calendar: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  /** Same shape as the "outside this month" row, in the warning palette. */
+  truncatedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.warningBg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  truncatedText: {
+    flex: 1,
+    // warningText, not `warning`: this is small body copy, which needs the
+    // 4.5:1 shade rather than the badge fill.
+    color: colors.warningText,
+    fontSize: fontSize.xs,
   },
   outsideRow: {
     flexDirection: "row",

@@ -35,7 +35,7 @@ vi.mock("react-router", async () => ({
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
-  getMobileUserContext: vi.fn().mockResolvedValue({ role: "ADMIN" }),
+  getMobileUserContext: vi.fn().mockResolvedValue({ roles: ["ADMIN"] }),
 }));
 
 // why: the shared visibility helpers. Stubbed to sentinels so the assertions
@@ -90,7 +90,7 @@ describe("GET /api/mobile/bookings", () => {
     vi.clearAllMocks();
     (db.booking.findMany as any).mockResolvedValue([]);
     (db.booking.count as any).mockResolvedValue(0);
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
     (resolveCustodianScope as any).mockResolvedValue({
       userId: "user-1",
       teamMemberIds: ["tm-1", "tm-2"],
@@ -99,7 +99,9 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
+    (getMobileUserContext as any).mockResolvedValue({
+      roles: ["SELF_SERVICE"],
+    });
 
     await loader(createLoaderArgs({ request: request() }));
 
@@ -119,7 +121,7 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("scopes a BASE user the same way", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ role: "BASE" });
+    (getMobileUserContext as any).mockResolvedValue({ roles: ["BASE"] });
 
     await loader(createLoaderArgs({ request: request() }));
 
@@ -134,12 +136,27 @@ describe("GET /api/mobile/bookings", () => {
     expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
   });
 
+  it("reads the most privileged role, not whichever one is stored first", async () => {
+    // The regression this guards: the context's `role` is `roles[0]`, so a
+    // membership stored `[SELF_SERVICE, ADMIN]` resolved to SELF_SERVICE and a
+    // genuine admin was narrowed to bookings they are custodian of. The
+    // calendar lens shares this scoping and has to reach the same verdict.
+    (getMobileUserContext as any).mockResolvedValue({
+      roles: ["SELF_SERVICE", "ADMIN"],
+    });
+
+    await loader(createLoaderArgs({ request: request() }));
+
+    expect(resolveCustodianScope).not.toHaveBeenCalled();
+    expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
+  });
+
   it("always applies draft privacy, whatever the role", async () => {
     for (const role of ["ADMIN", "SELF_SERVICE", "BASE"]) {
       vi.clearAllMocks();
       (db.booking.findMany as any).mockResolvedValue([]);
       (db.booking.count as any).mockResolvedValue(0);
-      (getMobileUserContext as any).mockResolvedValue({ role });
+      (getMobileUserContext as any).mockResolvedValue({ roles: [role] });
 
       await loader(createLoaderArgs({ request: request() }));
 

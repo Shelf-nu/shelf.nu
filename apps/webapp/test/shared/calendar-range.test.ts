@@ -164,10 +164,33 @@ describe("calendarDaysCovered, clipped to a window", () => {
 });
 
 describe("calendarMonthWindow", () => {
-  it("covers the month plus a week either side", () => {
+  it("covers exactly the weeks a month grid draws", () => {
+    // 1 Aug 2026 is a Saturday and 31 Aug a Monday, so a Sunday-start grid runs
+    // Sun 26 Jul to Sat 5 Sep.
     const { start, end } = calendarMonthWindow("2026-08-14");
-    expect(calendarDayKey(start)).toBe("2026-07-25"); // 1 Aug minus 7
-    expect(calendarDayKey(end)).toBe("2026-09-07"); // 31 Aug plus 7
+    expect(calendarDayKey(start)).toBe("2026-07-26");
+    expect(calendarDayKey(end)).toBe("2026-09-05");
+    expect(start.getDay()).toBe(0);
+    expect(end.getDay()).toBe(6);
+  });
+
+  it("follows the account's week start rather than assuming Sunday", () => {
+    // why: the window has to match the `firstDay` the grid is rendered with. A
+    // Monday-start account draws a different first and last column, so a fixed
+    // Sunday window would fetch a day the grid never shows and miss one it does.
+    const { start, end } = calendarMonthWindow("2026-08-14", 1);
+    expect(calendarDayKey(start)).toBe("2026-07-27"); // Monday
+    expect(calendarDayKey(end)).toBe("2026-09-06"); // Sunday
+  });
+
+  it("adds no padding to a month that already fills whole weeks", () => {
+    // The regression this guards: a flat seven-day pad fetched a fringe the
+    // grid has no square for, so a booking landing in it was drawn nowhere
+    // while still counting as INSIDE the window - which kept the "N more
+    // outside this month" line hidden too.
+    const { start, end } = calendarMonthWindow("2026-02-10");
+    expect(calendarDayKey(start)).toBe("2026-02-01");
+    expect(calendarDayKey(end)).toBe("2026-02-28");
   });
 
   it("ends at the last instant of the final day, not its midnight", () => {
@@ -179,15 +202,8 @@ describe("calendarMonthWindow", () => {
     expect(end.getMinutes()).toBe(59);
     expect(end.getMilliseconds()).toBe(999);
 
-    const lateThatDay = new Date(2026, 8, 7, 10, 0);
+    const lateThatDay = new Date(2026, 8, 5, 10, 0);
     expect(lateThatDay <= end).toBe(true);
-  });
-
-  it("reads the month locally, so it does not slip west of UTC", () => {
-    // `new Date("2026-09-01")` is UTC midnight, which is 31 August in Los
-    // Angeles - the window would have been August's while September showed.
-    const { start } = calendarMonthWindow("2026-09-01");
-    expect(calendarDayKey(start)).toBe("2026-08-25"); // 1 Sep minus 7
   });
 });
 

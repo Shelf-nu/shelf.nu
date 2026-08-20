@@ -11,6 +11,7 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -79,7 +80,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // can only see the bookings they are the custodian of (web parity — see
     // getBookings' `isSelfServiceOrBase` branch). Owners/admins see all. This
     // matters especially now that DRAFT bookings appear in the default view.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    /**
+     * Resolved from `roles`, not from the context's `role`, which is `roles[0]`
+     * and wrong for any privilege decision: a membership stored
+     * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE there, so a genuine admin
+     * was narrowed to their own bookings. The calendar lens must reach the same
+     * verdict from the same membership, or the two lenses on this screen
+     * disagree about what exists.
+     */
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
