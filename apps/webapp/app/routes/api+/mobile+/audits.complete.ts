@@ -6,6 +6,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   completeAuditSession,
   requireAuditAssignee,
@@ -63,14 +64,15 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
 
-    const body = await request.json();
-    const { sessionId, completionNote, timeZone } = z
-      .object({
+    const { sessionId, completionNote, timeZone } = await parseMobileBody(
+      z.object({
         sessionId: z.string().min(1),
         completionNote: z.string().optional(),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Audit"
+    );
 
     // Assignee-gated (matches webapp behavior): ADMIN/OWNER may complete any
     // audit, BASE/SELF_SERVICE only when assigned.

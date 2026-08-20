@@ -119,8 +119,10 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip when the field is disabled
-  // (personal workspaces don't allow renaming).
+  // Focus the Name input on mount, but skip it when the field is disabled
+  // (personal workspaces don't allow renaming). Arriving via a section anchor
+  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
+  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
   const nameInputRef = useAutoFocus<HTMLInputElement>({
     when: !isPersonalWorkspace,
   });

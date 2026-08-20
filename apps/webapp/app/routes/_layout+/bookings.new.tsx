@@ -1,5 +1,4 @@
 import { useAtomValue } from "jotai";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -36,8 +35,7 @@ import {
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/bookings.new.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -170,16 +168,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
-    const hints = getHints(request);
     // TIMEZONE FIX: parse the submitted wall-clock date in the acting user's
     // RESOLVED timezone preference (the same one date DISPLAY uses), not the
     // browser hint. When the two differ (e.g. pref Europe/London, browser
     // UTC+3) the browser hint interprets the typed wall-clock in the wrong
-    // zone and stores the wrong UTC instant. Locale still comes from `hints`.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+    // zone and stores the wrong UTC instant.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
@@ -190,7 +187,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const payload = parseData(
       formData,
       BookingFormSchema({
-        hints: hintsWithPrefTz,
+        prefs,
         action: "new",
         workingHours,
         bookingSettings,
@@ -211,6 +208,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       description,
       tags: commaSeparatedTags,
+      // Use the schema-coerced instants rather than re-parsing the raw form
+      // field: `coerceLocalDate` accepts second precision via `fromISO`, while
+      // DATE_TIME_FORMAT is minute-only, so a value the schema accepted could
+      // re-parse to an Invalid Date and reach the service. Same reasoning as
+      // the duplicate dialog and the extend branch.
+      startDate: from,
+      endDate: to,
     } = payload;
 
     // Validate that the custodian belongs to the same organization
@@ -241,21 +245,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    const from = DateTime.fromFormat(
-      formData.get("startDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefTimeZone,
-      }
-    ).toJSDate();
-
-    const to = DateTime.fromFormat(
-      formData.get("endDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefTimeZone,
-      }
-    ).toJSDate();
+    // `BookingFormSchema` returns a union across its action branches, so the
+    // coerced dates widen to `Date | undefined` even though the "new" branch
+    // makes both required. Assert that at runtime rather than with `!`: a
+    // missing date is a 400, never an Invalid Date handed to `createBooking`.
+    if (!from || !to) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking start and end dates are required.",
+        additionalData: { userId, organizationId },
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const tags = buildTagsSet(commaSeparatedTags).set;
 

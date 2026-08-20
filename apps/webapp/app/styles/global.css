@@ -269,11 +269,29 @@ dialog {
   }
 }
 
-.bulk-tagging-dialog .react-tags__listbox {
+/*
+ * Opt-in escape hatch for dialogs holding an inline (non-portaled) autocomplete.
+ * `.react-tags__listbox` is absolutely positioned inside its own field, so a
+ * dialog body that clips or scrolls would cut the suggestions off.
+ *
+ * Apply it ONLY to those dialogs — never by default. `.dialog-body` is the sole
+ * scroll container a dialog has: `.dialog-backdrop` is `fixed`, and `<dialog>`
+ * is opened via the `open` attribute rather than `showModal()`, so it is not
+ * `:modal` and gets no UA `overflow: auto` either. Switching the body to
+ * `visible` therefore removes the LAST place a tall dialog can scroll: anything
+ * exceeding the panel's `md:max-h-[calc(100vh-4rem)]` cap spills past the
+ * viewport with no way to reach it. That is how the bulk "Create audit" dialog
+ * lost its submit button on short windows (#2894) — the class used to be
+ * applied unconditionally to every bulk dialog.
+ *
+ * @see {@link file://./../components/bulk-update-dialog/bulk-update-dialog.tsx} `allowBodyOverflow`
+ * @see {@link file://./../components/layout/dialog.tsx} the panel cap this defeats
+ */
+.dialog-allows-overflow .react-tags__listbox {
   z-index: 1000;
 }
 
-.bulk-tagging-dialog .dialog-body {
+.dialog-allows-overflow .dialog-body {
   @apply overflow-visible;
 }
 
