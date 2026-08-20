@@ -8,6 +8,7 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
 import {
   resolveMostPrivilegedRole,
@@ -68,15 +69,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, assetIds, kitIds, timeZone } = z
-      .object({
+    const { bookingId, assetIds, kitIds, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         assetIds: z.array(z.string()).default([]),
         kitIds: z.array(z.string()).optional().default([]),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Load the booking's reservation window so the service can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain

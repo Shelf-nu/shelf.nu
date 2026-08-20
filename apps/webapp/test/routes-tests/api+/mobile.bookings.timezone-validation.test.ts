@@ -1,6 +1,10 @@
+import { action as assetAddNoteAction } from "~/routes/api+/mobile+/asset.add-note";
+import { action as auditsRecordScanAction } from "~/routes/api+/mobile+/audits.record-scan";
+import { action as bookingsArchiveAction } from "~/routes/api+/mobile+/bookings.archive";
 import { action as createAction } from "~/routes/api+/mobile+/bookings.create";
 import { action as reserveAction } from "~/routes/api+/mobile+/bookings.reserve";
 import { action as updateAction } from "~/routes/api+/mobile+/bookings.update";
+import { action as custodyReleaseAction } from "~/routes/api+/mobile+/custody.release";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -185,6 +189,62 @@ describe("mobile booking routes - declared timezone validation", () => {
         const payload = await response.json();
         expect(payload?.error?.message ?? "").not.toContain("IANA zone");
       });
+    });
+  }
+});
+
+/**
+ * The malformed-body contract, one representative route per domain.
+ *
+ * `parseMobileBody` was applied across 19 mobile routes; asserting all of them
+ * would be ceremony. What these pin is that the helper is wired at each domain's
+ * boundary and that the shared behaviour holds — an unparseable body answers 400
+ * rather than the generic 500 + Sentry capture the bare `schema.parse()` produced.
+ *
+ * `~/utils/error` is not mocked, for the same reason as the suite above: the real
+ * status is the thing under test.
+ */
+describe("mobile routes - malformed body returns 400", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireMobileAuth).mockResolvedValue({
+      user: { id: "user-1" },
+    } as any);
+    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1" as any);
+    // `canUseAudits` gates the audit routes with a 403 BEFORE they parse the
+    // body, so it has to be satisfied for these cases to reach the parse.
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: true,
+    } as any);
+  });
+
+  /** A body that is not valid JSON at all. */
+  function malformedRequest() {
+    return new Request("https://example.com/api/mobile/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not json",
+    });
+  }
+
+  const representatives = [
+    { domain: "asset", action: assetAddNoteAction },
+    { domain: "audit", action: auditsRecordScanAction },
+    { domain: "booking", action: bookingsArchiveAction },
+    { domain: "custody", action: custodyReleaseAction },
+  ];
+
+  for (const { domain, action } of representatives) {
+    it(`${domain}: answers 400, not the generic 500`, async () => {
+      const response = (await action(
+        createActionArgs({ request: malformedRequest() })
+      )) as unknown as Response;
+
+      expect(response.status).toBe(400);
+
+      const payload = await response.json();
+      expect(payload.error.message).not.toContain("something went wrong");
     });
   }
 });
