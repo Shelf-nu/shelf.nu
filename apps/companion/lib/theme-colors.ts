@@ -191,8 +191,8 @@ function buildBookingStatusBadge(c: Colors) {
     DRAFT: { bg: c.borderLight, text: c.gray700 },
     RESERVED: { bg: c.inCustodyBg, text: c.inCustody },
     ONGOING: { bg: c.checkedOutBg, text: c.checkedOut },
-    OVERDUE: { bg: c.errorBg, text: c.error },
-    COMPLETE: { bg: c.successBg, text: c.success },
+    OVERDUE: { bg: c.errorBg, text: c.errorText },
+    COMPLETE: { bg: c.successBg, text: c.successText },
     ARCHIVED: { bg: c.borderLight, text: c.muted },
     CANCELLED: { bg: c.borderLight, text: c.muted },
   } as Record<string, { bg: string; text: string }>;
