@@ -159,7 +159,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
               new ShelfError({
                 cause,
                 message: "Failed to send the password reset link",
-                additionalData: { email },
+                // The USER ID, not the address. This endpoint is anonymous, so
+                // logging the email would put account addresses into the log
+                // stream and Sentry — a log-side version of the very leak this
+                // route was changed to close, since anyone with log access
+                // could then read off which addresses are registered. The id
+                // identifies the account for debugging without storing PII.
+                additionalData: { userId: user.id },
                 label: "Auth",
               })
             );
