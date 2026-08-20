@@ -131,6 +131,30 @@ export function redactUrlCredentials(value: string): string {
     }
   }
 
+  // The fragment is not covered by `searchParams`, and OAuth implicit flows put
+  // the token there: `https://host/#access_token=...`. This helper runs from
+  // `serializeError`, so it sees every logged URL and not only imported image
+  // ones — a callback URL logged on an auth failure is the realistic case.
+  if (url.hash.length > 1) {
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    let fragmentRedacted = false;
+
+    for (const param of Array.from(fragment.keys())) {
+      if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+        fragment.set(param, REDACTED_URL_PART);
+        fragmentRedacted = true;
+      }
+    }
+
+    // Only rewrite the fragment when a parameter actually matched: a plain
+    // `#section-2` is not query-shaped, and round-tripping it through
+    // URLSearchParams would turn it into `section-2=`.
+    if (fragmentRedacted) {
+      url.hash = fragment.toString();
+      redacted = true;
+    }
+  }
+
   // Return the ORIGINAL string when there was nothing to redact. `URL.toString()`
   // normalizes — `HTTPS://EXAMPLE.COM:443/a` comes back as
   // `https://example.com/a` — so returning it unconditionally would silently

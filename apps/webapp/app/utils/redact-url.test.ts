@@ -49,6 +49,26 @@ describe("redactUrlCredentials", () => {
     expect(out).toContain("w=200");
   });
 
+  it("redacts a token in the URL FRAGMENT", () => {
+    // `searchParams` does not see the fragment, and OAuth implicit flows put
+    // the token there. This helper runs from `serializeError`, so it sees every
+    // logged URL — an auth callback logged on failure is the realistic case,
+    // not an imported image.
+    const out = redactUrlCredentials(
+      "https://app.shelf.nu/callback#access_token=abc123&state=xyz"
+    );
+
+    expect(out).not.toContain("abc123");
+    expect(out).toContain("state=xyz");
+  });
+
+  it("leaves a plain (non query-shaped) fragment alone", () => {
+    // `#section-2` is not `key=value`; round-tripping it through
+    // URLSearchParams would rewrite it as `section-2=`.
+    const url = "https://example.com/docs#section-2";
+    expect(redactUrlCredentials(url)).toBe(url);
+  });
+
   it("leaves an ordinary URL alone", () => {
     const url = "https://example.com/img.jpg?w=200&h=100";
     expect(redactUrlCredentials(url)).toBe(url);
