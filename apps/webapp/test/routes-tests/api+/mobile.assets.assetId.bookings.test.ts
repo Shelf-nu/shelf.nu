@@ -1,7 +1,8 @@
+// @vitest-environment node
+
+import { OrganizationRoles } from "@prisma/client";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId.bookings";
 import { createLoaderArgs } from "@mocks/remix";
-
-// @vitest-environment node
 
 // why: mocking Remix's data() so the loader returns real Response objects
 const createDataMock = vi.hoisted(() => {
@@ -43,6 +44,8 @@ vi.mock("~/modules/booking/service.server", () => ({
   custodianScopeClause: vi.fn(() => ({ __custodianClause: true })),
 }));
 
+// why: no Postgres in unit tests, and the mock is also how the assertions read
+// the exact `where` the booking query was built with.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findFirst: vi.fn() },
@@ -50,16 +53,18 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: keeps ShelfError status codes observable in the response without the
+// real error pipeline logging through them.
 vi.mock("~/utils/error", () => ({
-  makeShelfError: vi.fn((cause: any) => ({
-    message: cause?.message ?? "error",
-    status: cause?.status ?? 500,
-  })),
+  makeShelfError: vi.fn((cause: unknown) => {
+    const err = cause as { message?: string; status?: number } | null;
+    return { message: err?.message ?? "error", status: err?.status ?? 500 };
+  }),
   ShelfError: class ShelfError extends Error {
     status: number;
-    constructor(opts: any) {
+    constructor(opts: { message: string; status?: number }) {
       super(opts.message);
-      this.status = opts.status || 500;
+      this.status = opts.status ?? 500;
     }
   },
 }));
@@ -89,9 +94,48 @@ function lastWhere() {
   return mockDb.booking.findMany.mock.calls.at(-1)?.[0]?.where;
 }
 
-function request(qs = "orgId=org-1") {
+/**
+ * Fixtures for the loader's inputs.
+ *
+ * Typed off the real return types rather than hand-rolled object literals, so
+ * a mock that no longer matches what the function actually resolves fails to
+ * compile instead of drifting quietly. Each takes overrides so a test states
+ * only the field it cares about.
+ */
+type MobileAuth = Awaited<ReturnType<typeof requireMobileAuth>>;
+type MobileContext = Awaited<ReturnType<typeof getMobileUserContext>>;
+
+function mobileUser(overrides: Partial<MobileAuth["user"]> = {}): MobileAuth {
+  return {
+    user: {
+      id: "user-1",
+      email: "user-1@example.com",
+      firstName: "Test",
+      lastName: "User",
+      profilePicture: null,
+      onboarded: true,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+      ...overrides,
+    },
+  } as MobileAuth;
+}
+
+function mobileContext(overrides: Partial<MobileContext> = {}): MobileContext {
+  return {
+    role: OrganizationRoles.ADMIN,
+    canUseBarcodes: true,
+    canUseAudits: true,
+    canSeeAllCustody: true,
+    ...overrides,
+  } as MobileContext;
+}
+
+function request(qs = "orgId=org-1", assetId = "asset-1") {
   return new Request(
-    `http://localhost/api/mobile/assets/asset-1/bookings?${qs}`,
+    `http://localhost/api/mobile/assets/${assetId}/bookings?${qs}`,
     {
       headers: { Authorization: "Bearer token" },
     }
@@ -103,10 +147,10 @@ const ARGS = { params: { assetId: "asset-1" } };
 describe("GET /api/mobile/assets/:assetId/bookings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (requireMobilePermission as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    vi.mocked(requireMobileAuth).mockResolvedValue(mobileUser());
+    vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
+    vi.mocked(requireMobilePermission).mockResolvedValue(undefined);
+    vi.mocked(getMobileUserContext).mockResolvedValue(mobileContext());
     mockDb.asset.findFirst.mockResolvedValue({ id: "asset-1" });
     mockDb.booking.findMany.mockResolvedValue([]);
     mockDb.booking.count.mockResolvedValue(0);
@@ -120,7 +164,9 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       // the very user it belongs to. On this screen it misfires worse than on
       // a list, because the section then states "This asset has never been
       // booked", which is a claim rather than an empty list.
-      (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileContext({ role: OrganizationRoles.SELF_SERVICE })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
@@ -140,7 +186,9 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
     });
 
     it("applies the same scope to BASE", async () => {
-      (getMobileUserContext as any).mockResolvedValue({ role: "BASE" });
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileContext({ role: OrganizationRoles.BASE })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
@@ -200,6 +248,71 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       expect(statuses).toContain("COMPLETE");
       expect(statuses).not.toContain("CANCELLED");
       expect(statuses).not.toContain("ARCHIVED");
+    });
+  });
+
+  describe("pagination survives a hostile query string", () => {
+    /** The `skip`/`take` the booking query actually ran with. */
+    function lastPaging() {
+      const call = mockDb.booking.findMany.mock.calls.at(-1)?.[0];
+      return { skip: call?.skip, take: call?.take };
+    }
+
+    it("floors a fractional page instead of handing Prisma 1.5", async () => {
+      // `Number("1.5")` is 1.5, which reached `skip` unchanged. Prisma rejects
+      // a fractional skip, so the endpoint answered 500 for a typo in a URL.
+      await loader(
+        createLoaderArgs({ request: request("orgId=org-1&page=1.5"), ...ARGS })
+      );
+
+      const { skip, take } = lastPaging();
+      expect(Number.isInteger(skip)).toBe(true);
+      expect(Number.isInteger(take)).toBe(true);
+    });
+
+    it("ignores a non-finite page rather than passing Infinity through", async () => {
+      await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&page=Infinity"),
+          ...ARGS,
+        })
+      );
+
+      const { skip } = lastPaging();
+      expect(Number.isFinite(skip)).toBe(true);
+      expect(skip).toBe(0);
+    });
+
+    it.each(["0", "-3", "abc", ""])(
+      "falls back to the first page for page=%s",
+      async (bad) => {
+        await loader(
+          createLoaderArgs({
+            request: request(`orgId=org-1&page=${bad}`),
+            ...ARGS,
+          })
+        );
+
+        expect(lastPaging().skip).toBe(0);
+      }
+    );
+
+    it("keeps perPage within its ceiling and integral", async () => {
+      await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&perPage=2.5"),
+          ...ARGS,
+        })
+      );
+      expect(Number.isInteger(lastPaging().take)).toBe(true);
+
+      await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&perPage=999"),
+          ...ARGS,
+        })
+      );
+      expect(lastPaging().take).toBe(50);
     });
   });
 });

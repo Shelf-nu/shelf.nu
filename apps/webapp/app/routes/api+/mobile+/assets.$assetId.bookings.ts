@@ -87,10 +87,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const url = new URL(request.url);
-    const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+
+    /**
+     * Pagination is caller-supplied, so it has to survive nonsense.
+     * `Number("1.5")` is 1.5 and `Number("Infinity")` is Infinity; both reach
+     * Prisma as a fractional or non-finite `skip`/`take`, which it rejects with
+     * a 500. Floor to a finite integer and fall back to the default rather than
+     * failing the request over a bad query string.
+     */
+    const positiveInt = (raw: string | null, fallback: number): number => {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return fallback;
+      const floored = Math.floor(parsed);
+      return floored >= 1 ? floored : fallback;
+    };
+
+    const page = positiveInt(url.searchParams.get("page"), 1);
     const perPage = Math.min(
       50,
-      Math.max(1, Number(url.searchParams.get("perPage")) || 20)
+      positiveInt(url.searchParams.get("perPage"), 20)
     );
 
     const { role } = await getMobileUserContext(user.id, organizationId);
