@@ -71,6 +71,12 @@ vitest.mock("~/database/db.server", () => {
               (callbackOrArray as (tx: unknown) => unknown)(db as any)
             : Promise.all(callbackOrArray as Promise<unknown>[])
         ),
+      // why: `lockBookingForStatusCheck` takes its row lock through a raw
+      // `SELECT … FOR UPDATE`, which the model-shaped mocks below cannot
+      // express. ONGOING is the one status that satisfies both the open and
+      // the in-flight assertion, so a single default serves every path this
+      // suite exercises. String literal — this factory is hoisted.
+      $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
         // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING

@@ -818,3 +818,178 @@ export function normalizeBookingAssets<
     bookingAssetId: ba.id,
   }));
 }
+
+/**
+ * Booking statuses in which the booking is a CLOSED record.
+ *
+ * A closed booking is history: its assets have been returned (COMPLETE), the
+ * reservation was called off (CANCELLED), or it has been filed away
+ * (ARCHIVED). Nothing about it may change afterwards, or the audit trail stops
+ * describing what actually happened.
+ *
+ * This is the same set `canUserRemoveBookingAssets` treats as closed and the
+ * inverse of `ADDABLE_BOOKING_STATUSES` — kept in one place so the server-side
+ * assertions below cannot drift from the client-side affordances.
+ *
+ * @see {@link file://./../../utils/bookings.ts} `canUserRemoveBookingAssets`
+ * @see {@link file://./constants.ts} `ADDABLE_BOOKING_STATUSES`
+ */
+export const CLOSED_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.COMPLETE,
+  BookingStatus.ARCHIVED,
+  BookingStatus.CANCELLED,
+];
+
+/**
+ * Statuses in which a booking is physically in flight — its assets are out
+ * with a custodian right now. Only these can be checked back in.
+ */
+export const IN_FLIGHT_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Refuses a mutation against a booking that is already closed.
+ *
+ * Call this from the SERVICE layer, inside the same transaction as the write,
+ * reading the status from a row loaded in that transaction. Routes checking
+ * the status themselves is not equivalent, for two reasons:
+ *
+ * 1. A route that forgets is simply unguarded. The scan-assets action had no
+ *    status check of any kind, so a direct POST could add assets to a
+ *    COMPLETE booking; its loader computed `canUserManageBookingAssets`, but
+ *    that only decided what to RENDER.
+ * 2. A route that checks before calling the service leaves a window open. The
+ *    four `updateBookingAssets` callers all validated the status, but each did
+ *    so in a read of its own — so a booking completed in between was still
+ *    written to. Reading inside the write's transaction closes that window by
+ *    construction rather than by narrowing it.
+ *
+ * @param status - The booking's current status, read inside the transaction
+ * @param operation - Verb phrase for the message, e.g. "add items to"
+ * @param bookingId - Included in `additionalData` for debugging
+ * @throws {ShelfError} 400 when the booking is COMPLETE, ARCHIVED or CANCELLED
+ */
+export function assertBookingIsOpen({
+  status,
+  operation,
+  bookingId,
+}: {
+  status: BookingStatus;
+  operation: string;
+  bookingId: Booking["id"];
+}): void {
+  if (CLOSED_BOOKING_STATUSES.includes(status)) {
+    throw new ShelfError({
+      cause: null,
+      message: `You cannot ${operation} a booking that is ${status.toLowerCase()}. Completed, archived and cancelled bookings are closed records and can no longer be changed.`,
+      additionalData: { bookingId, status },
+      label,
+      status: 400,
+      // User-input class, not a server fault: a stale tab whose booking was
+      // completed elsewhere lands here legitimately.
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Refuses a check-in against a booking that was never checked out.
+ *
+ * `checkinBooking` writes `status: COMPLETE` unconditionally, so without this
+ * a direct POST against a DRAFT or RESERVED booking marked it COMPLETE while
+ * checking in nothing — the asset filter drops every asset that is not
+ * CHECKED_OUT, which for those statuses is all of them. The result is a
+ * booking that reads as finished but never happened.
+ *
+ * @param status - The booking's current status, read inside the transaction
+ * @param bookingId - Included in `additionalData` for debugging
+ * @throws {ShelfError} 400 unless the booking is ONGOING or OVERDUE
+ */
+export function assertBookingIsCheckinable({
+  status,
+  bookingId,
+}: {
+  status: BookingStatus;
+  bookingId: Booking["id"];
+}): void {
+  if (!IN_FLIGHT_BOOKING_STATUSES.includes(status)) {
+    throw new ShelfError({
+      cause: null,
+      message: `You cannot check in a booking that is ${status.toLowerCase()}. Only ongoing or overdue bookings — the ones whose assets are actually out — can be checked in.`,
+      additionalData: { bookingId, status },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * The only capability {@link lockBookingForStatusCheck} needs from a client.
+ *
+ * Structural rather than `any`: the extended Prisma client has no exported
+ * interactive-transaction type, but the helper does not need one — it issues a
+ * single tagged-template raw query. Naming just that keeps the compiler able to
+ * reject anything that is not a query-capable client, which `any` cannot do.
+ *
+ * `unknown[]` for the interpolated values: they are bound as parameters, so
+ * their static types are irrelevant here, and `unknown` does not silently
+ * accept a value the caller meant to narrow.
+ */
+type RawQueryClient = {
+  $queryRaw<T = unknown>(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<T>;
+};
+
+/**
+ * Takes a row-level lock on a booking, then returns its status.
+ *
+ * **Must be called inside a `db.$transaction()` interactive transaction**, and
+ * before any write that depends on the booking still being in a given status.
+ *
+ * A plain `SELECT` inside a transaction is NOT enough. Under PostgreSQL's
+ * default READ COMMITTED isolation it takes no lock, so a concurrent check-in,
+ * archive or cancellation can commit between the read and the write and this
+ * transaction still succeeds — mutating a booking that is closed by the time
+ * it commits. Reading inside the transaction narrows that window; only the
+ * lock closes it.
+ *
+ * The predicate is **org-scoped**, matching `lockAssetForQuantityUpdate`: a
+ * caller passing a foreign-org booking id matches zero rows, so it takes no
+ * lock and learns nothing about whether the id exists. Locking on `id` alone
+ * would hand an attacker a cross-tenant lock oracle and a contention vector.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param bookingId - Booking to lock
+ * @param organizationId - Caller's validated organization; scopes the lock
+ * @returns The locked booking's current status
+ * @throws {ShelfError} 404 when the booking is missing or cross-org
+ * @see {@link file://./../consumption-log/quantity-lock.server.ts} the asset equivalent
+ */
+export async function lockBookingForStatusCheck(
+  tx: RawQueryClient,
+  bookingId: Booking["id"],
+  organizationId: Booking["organizationId"]
+): Promise<BookingStatus> {
+  // `Booking.status` carries no `@map`, so the Prisma field name IS the column
+  // name here — checked against the schema, per the raw-SQL rule.
+  const rows = await tx.$queryRaw<{ status: BookingStatus }[]>`
+    SELECT status FROM "Booking" WHERE id = ${bookingId} AND "organizationId" = ${organizationId} FOR UPDATE
+  `;
+
+  if (!rows || rows.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { bookingId, organizationId },
+      label,
+      status: 404,
+    });
+  }
+
+  return rows[0].status;
+}
