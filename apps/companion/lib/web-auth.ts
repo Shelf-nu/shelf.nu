@@ -25,8 +25,13 @@ import { getSupabase } from "./supabase";
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
 
 /** Result of an SSO sign-in attempt. `error` is null on success or on a plain
- *  user cancellation (nothing to surface). */
-export type SsoSignInResult = { error: string | null };
+ *  user cancellation (nothing to surface). `updateRequired` marks the one
+ *  failure a retry can never fix: this build is too old for the target server,
+ *  so the caller should offer a store link instead. */
+export type SsoSignInResult = {
+  error: string | null;
+  updateRequired?: boolean;
+};
 
 /** Shape of the `/api/mobile/exchange` JSON response. */
 type ExchangeResponse = {
@@ -106,7 +111,12 @@ export async function signInViaWeb(email: string): Promise<SsoSignInResult> {
   // Point the app at the right server BEFORE opening the browser: the SSO
   // hand-off and the code exchange must both happen against that server.
   const discovery = await resolveServerForEmail(email);
-  if (!discovery.ok) return { error: discovery.message };
+  if (!discovery.ok) {
+    return {
+      error: discovery.message,
+      updateRequired: discovery.updateRequired,
+    };
+  }
 
   // Captured once, deliberately: re-reading this after the browser round trip
   // would be correct today but silently wrong if anything switched servers

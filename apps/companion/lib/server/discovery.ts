@@ -14,6 +14,7 @@
  * @see apps/webapp/app/routes/api+/mobile+/config.ts
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAppVersion } from "../app-update";
 import {
   CLOUD_SERVER,
   getActiveServer,
@@ -21,6 +22,7 @@ import {
 } from "./active-server";
 import {
   extractEmailDomain,
+  isAppVersionSupported,
   isResolutionFresh,
   normalizeBaseUrl,
   parseServerConfigResponse,
@@ -29,8 +31,16 @@ import {
   type DomainResolution,
 } from "./contract";
 
-/** Result of a discovery attempt. `message` is ready-to-display copy. */
-export type DiscoveryOutcome = { ok: true } | { ok: false; message: string };
+/**
+ * Result of a discovery attempt. `message` is ready-to-display copy.
+ *
+ * `updateRequired` means the failure is this build being too old for the target
+ * server — the caller should offer a store link rather than a plain retry,
+ * because retrying can never succeed.
+ */
+export type DiscoveryOutcome =
+  | { ok: true }
+  | { ok: false; message: string; updateRequired?: boolean };
 
 /** Registry lookups sit on the login path — keep the wait short. */
 const RESOLVE_TIMEOUT_MS = 5_000;
@@ -249,6 +259,19 @@ export async function resolveServerForEmail(
         fetched.config.reason === "unsupported_version"
           ? "This Shelf server needs to be updated before the app can connect."
           : "This server isn't set up for the Shelf app. Contact your administrator.",
+    };
+  }
+
+  // Force-update gate. Checked BEFORE setActiveServer so a too-old app never
+  // half-switches: it keeps its current working server instead of landing on
+  // one it cannot talk to.
+  if (
+    !isAppVersionSupported(getAppVersion(), fetched.config.minCompanionVersion)
+  ) {
+    return {
+      ok: false,
+      updateRequired: true,
+      message: `${fetched.config.config.name} requires a newer version of Shelf. Update the app to continue.`,
     };
   }
 

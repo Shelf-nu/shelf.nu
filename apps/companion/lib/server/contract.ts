@@ -39,7 +39,17 @@ export type DomainResolution = { baseUrl: string | null; cachedAt: number };
  * instruction from "you're off the VPN".
  */
 export type ConfigParseResult =
-  | { ok: true; config: ServerConfig }
+  | {
+      ok: true;
+      config: ServerConfig;
+      /**
+       * Lowest app version this server accepts, or null for "any". Kept OUT of
+       * `ServerConfig` deliberately: it is a gate evaluated at connect time,
+       * not part of the server's persisted identity, and it can change under a
+       * persisted config without invalidating it.
+       */
+      minCompanionVersion: string | null;
+    }
   | { ok: false; reason: "malformed" | "insecure" | "unsupported_version" };
 
 /**
@@ -142,6 +152,63 @@ export function normalizeBaseUrl(url: string): string {
 }
 
 /**
+ * Parses a dotted version string into numeric segments.
+ *
+ * Tolerates a build/pre-release suffix (`1.3.0-beta.2` → `[1, 3, 0]`) because
+ * `Constants.expoConfig.version` can legitimately carry one.
+ *
+ * @param value - A version string.
+ * @returns The numeric segments, or `null` when the value has no leading digit
+ *   group (i.e. it is not a version at all).
+ */
+function parseVersionSegments(value: string): number[] | null {
+  const core = value.trim().split(/[-+]/)[0] ?? "";
+  if (!/^\d+(\.\d+)*$/.test(core)) return null;
+  return core.split(".").map(Number);
+}
+
+/**
+ * Whether this app build is new enough for a server.
+ *
+ * The server advertises `minCompanionVersion` on `/api/mobile/config`; an app
+ * below it is shown a blocking update prompt rather than being allowed to
+ * connect and fail with confusing 4xx errors. This is the counterpart to
+ * `MIN_SERVER_MOBILE_API_VERSION`, which guards the other direction — neither
+ * side can update the other, so both checks have to exist.
+ *
+ * Compares segment-by-segment as NUMBERS. A lexical string compare would make
+ * "1.10.0" sort below "1.9.0" and lock every user out one release after the
+ * tenth — the classic force-update bug.
+ *
+ * Fails OPEN on anything unparseable: a typo in the server's env var must never
+ * brick a working install.
+ *
+ * @param appVersion - This build's version, e.g. from `Constants.expoConfig`.
+ * @param minVersion - The server's required minimum, or null/empty for "any".
+ * @returns `true` when the app may connect.
+ */
+export function isAppVersionSupported(
+  appVersion: string,
+  minVersion: string | null | undefined
+): boolean {
+  if (!minVersion) return true;
+
+  const required = parseVersionSegments(minVersion);
+  const actual = parseVersionSegments(appVersion);
+  if (!required || !actual) return true;
+
+  const length = Math.max(required.length, actual.length);
+  for (let i = 0; i < length; i++) {
+    // A missing segment is zero: "1.3" and "1.3.0" are the same version.
+    const a = actual[i] ?? 0;
+    const r = required[i] ?? 0;
+    if (a > r) return true;
+    if (a < r) return false;
+  }
+  return true;
+}
+
+/**
  * Whether a string is usable as an https base URL — correct scheme AND a real
  * host.
  *
@@ -194,11 +261,18 @@ export function parseServerConfigResponse(
     return { ok: false, reason: "malformed" };
   }
 
-  const { name, supabaseUrl, supabaseAnonKey, mobileApiVersion } = json as {
+  const {
+    name,
+    supabaseUrl,
+    supabaseAnonKey,
+    mobileApiVersion,
+    minCompanionVersion,
+  } = json as {
     name?: unknown;
     supabaseUrl?: unknown;
     supabaseAnonKey?: unknown;
     mobileApiVersion?: unknown;
+    minCompanionVersion?: unknown;
   };
 
   if (
@@ -227,6 +301,12 @@ export function parseServerConfigResponse(
 
   return {
     ok: true,
+    // Absent or non-string is treated as "no minimum" — an older server that
+    // predates this field must keep working.
+    minCompanionVersion:
+      typeof minCompanionVersion === "string" && minCompanionVersion.trim()
+        ? minCompanionVersion.trim()
+        : null,
     config: {
       baseUrl: normalizeBaseUrl(baseUrl),
       supabaseUrl: normalizeBaseUrl(supabaseUrl),

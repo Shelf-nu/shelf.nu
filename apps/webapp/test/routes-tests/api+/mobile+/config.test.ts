@@ -38,6 +38,7 @@ vi.mock("~/utils/env", () => ({
   SUPABASE_URL: "https://xyz.supabase.co",
   SUPABASE_ANON_PUBLIC: "anon-key-123",
   INSTANCE_NAME: "Acme University",
+  MIN_COMPANION_VERSION: "1.4.0",
 }));
 
 // why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
@@ -72,6 +73,7 @@ describe("GET /api/mobile/config", () => {
       supabaseUrl: "https://xyz.supabase.co",
       supabaseAnonKey: "anon-key-123",
       mobileApiVersion: 1,
+      minCompanionVersion: "1.4.0",
       ssoEnabled: true,
       passwordLoginEnabled: true,
     });
@@ -81,6 +83,7 @@ describe("GET /api/mobile/config", () => {
     const response = await invoke();
     const body = (await response.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual([
+      "minCompanionVersion",
       "mobileApiVersion",
       "name",
       "passwordLoginEnabled",

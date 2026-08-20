@@ -216,6 +216,27 @@ shown in the app as "Connected to \<name\>". Optional — defaults to `"Shelf"`.
 INSTANCE_NAME="Acme University"
 ```
 
+### `MIN_COMPANION_VERSION`
+
+Lowest Companion app version this instance accepts, e.g. `"1.4.0"`. Optional —
+unset means any version.
+
+```bash
+MIN_COMPANION_VERSION="1.4.0"
+```
+
+An app older than this is shown a blocking **Update Shelf** prompt with a store
+link, instead of being allowed to connect and fail with confusing 4xx errors.
+Set it when a breaking `/api/mobile/*` change ships.
+
+This is the counterpart to `mobileApiVersion`, which guards the other direction
+(a server too old for the app). Both checks exist because neither side can
+update the other: the app cannot upgrade the server, and the server cannot
+upgrade an installed app.
+
+The comparison is numeric per segment, so `1.10.0` correctly outranks `1.9.0`,
+and it **fails open** — a typo here can never lock users out of a working app.
+
 ### `COMPANION_SERVERS`
 
 **Shelf Cloud only** — leave unset on self-hosted instances.

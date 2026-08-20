@@ -20,6 +20,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
 import { getApiBaseUrl } from "@/lib/api";
+import { openAppStore } from "@/lib/app-update";
 import {
   getActiveServer,
   resolveServerForEmail,
@@ -40,6 +41,8 @@ export default function LoginScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  /** Set when discovery refused because THIS build is too old for the server. */
+  const [updateRequired, setUpdateRequired] = useState(false);
   /** Immediate lock for the reset link — state cannot block a same-tick retap. */
   const resetPendingRef = useRef(false);
   const router = useRouter();
@@ -102,6 +105,7 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     Keyboard.dismiss();
     setError(null);
+    setUpdateRequired(false);
 
     // why: the disabled prop covers the button, but not the password field's
     // onSubmitEditing nor the Face ID auto-submit effect. A password sign-in
@@ -117,8 +121,10 @@ export default function LoginScreen() {
     }
 
     setIsSubmitting(true);
-    const { error: signInError } = await signIn(trimmedEmail, password);
+    const { error: signInError, updateRequired: loginUpdateRequired } =
+      await signIn(trimmedEmail, password);
     setIsSubmitting(false);
+    if (loginUpdateRequired) setUpdateRequired(true);
 
     if (signInError) {
       setError(signInError);
@@ -128,6 +134,7 @@ export default function LoginScreen() {
   const handleSsoLogin = async () => {
     Keyboard.dismiss();
     setError(null);
+    setUpdateRequired(false);
 
     const trimmedEmail = email.trim();
     // why: the server is resolved from the email domain, so with an empty field
@@ -147,8 +154,10 @@ export default function LoginScreen() {
     setIsSsoSubmitting(true);
     // Opens the web SSO flow in the system browser; resolves once the app
     // receives the callback and installs the session (or the user cancels).
-    const { error: ssoError } = await signInViaWeb(trimmedEmail);
+    const { error: ssoError, updateRequired: ssoUpdateRequired } =
+      await signInViaWeb(trimmedEmail);
     setIsSsoSubmitting(false);
+    if (ssoUpdateRequired) setUpdateRequired(true);
     if (ssoError) {
       // On Android the auth-callback route is mounted on top of this screen while
       // the exchange runs, so a plain setError would be hidden — the user would sit
@@ -318,6 +327,21 @@ export default function LoginScreen() {
               </Text>
             )}
 
+            {/* Retrying can never fix a too-old build, so offer the store
+                rather than leaving the user to guess. */}
+            {updateRequired && (
+              <TouchableOpacity
+                testID="update-app-button"
+                style={styles.updateButton}
+                onPress={openAppStore}
+                activeOpacity={0.8}
+                accessibilityLabel="Update Shelf in the app store"
+                accessibilityRole="button"
+              >
+                <Text style={styles.updateButtonText}>Update Shelf</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               testID="forgot-password-link"
               style={[
@@ -412,6 +436,19 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   // borderLight/gray700 is the pair the DRAFT status badge already uses, so it
   // is theme-aware and vetted for WCAG 2.1 AA contrast in light and dark.
+  updateButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.xl,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: spacing.md,
+  },
+  updateButtonText: {
+    color: colors.primary,
+    fontSize: fontSize.base,
+    fontWeight: "600",
+  },
   serverChip: {
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,

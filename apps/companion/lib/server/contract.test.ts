@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 import {
   extractEmailDomain,
+  isAppVersionSupported,
   isResolutionFresh,
   isSameOrigin,
   MAX_SERVER_MOBILE_API_VERSION,
@@ -317,4 +318,42 @@ test("device preference keys are not treated as server-scoped", () => {
       key
     );
   }
+});
+
+// ── isAppVersionSupported ────────────────────────────────
+
+test("isAppVersionSupported accepts any app version when no minimum is set", () => {
+  for (const min of [null, undefined, ""]) {
+    assert.equal(isAppVersionSupported("1.0.0", min as string | null), true);
+  }
+});
+
+test("isAppVersionSupported compares numerically, not lexically", () => {
+  // "1.10.0" < "1.9.0" as strings — the classic force-update bug that locks
+  // every user out one minor release after the tenth.
+  assert.equal(isAppVersionSupported("1.10.0", "1.9.0"), true);
+  assert.equal(isAppVersionSupported("1.9.0", "1.10.0"), false);
+  assert.equal(isAppVersionSupported("2.0.0", "10.0.0"), false);
+});
+
+test("isAppVersionSupported treats an equal version as supported", () => {
+  assert.equal(isAppVersionSupported("1.3.0", "1.3.0"), true);
+});
+
+test("isAppVersionSupported handles differing segment counts", () => {
+  assert.equal(isAppVersionSupported("1.3", "1.3.0"), true);
+  assert.equal(isAppVersionSupported("1.3.1", "1.3"), true);
+  assert.equal(isAppVersionSupported("1.2.9", "1.3"), false);
+});
+
+test("isAppVersionSupported fails OPEN on an unparseable version", () => {
+  // A malformed value must never brick a working install: a typo'd env var on
+  // the server would otherwise lock every user out of a fine app.
+  assert.equal(isAppVersionSupported("1.3.0", "not-a-version"), true);
+  assert.equal(isAppVersionSupported("", "1.3.0"), true);
+  assert.equal(isAppVersionSupported("garbage", "1.3.0"), true);
+});
+
+test("isAppVersionSupported ignores a build suffix", () => {
+  assert.equal(isAppVersionSupported("1.3.0-beta.2", "1.3.0"), true);
 });

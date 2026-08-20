@@ -79,6 +79,7 @@ declare global {
       POSTHOG_HOST: string;
       COMPANION_SERVERS: string;
       INSTANCE_NAME: string;
+      MIN_COMPANION_VERSION: string;
     }
   }
 }
@@ -262,6 +263,22 @@ export const COMPANION_SERVERS = getEnv("COMPANION_SERVERS", {
  * @see {@link file://./../routes/api+/mobile+/config.ts}
  */
 export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Lowest companion-app version this instance will accept, e.g. "1.4.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a blocking
+ * "update required" screen with a store link instead of connecting — the
+ * standard force-update pattern. Leave unset (the default) to accept any
+ * version; set it when a breaking `/api/mobile/*` change ships, so older
+ * installs fail with an actionable message rather than a pile of 4xx.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
   isSecret: false,
   isRequired: false,
 });

@@ -19,10 +19,16 @@ type AuthState = {
   session: Session | null;
   user: User | null;
   isLoading: boolean;
+  /**
+   * Signs in with a password, resolving the correct server first.
+   *
+   * `updateRequired` marks the one failure a retry cannot fix — this build is
+   * too old for the target server — so the caller can offer a store link.
+   */
   signIn: (
     email: string,
     password: string
-  ) => Promise<{ error: string | null }>;
+  ) => Promise<{ error: string | null; updateRequired?: boolean }>;
   signOut: () => Promise<void>;
 };
 
@@ -70,7 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Point the app at the right server BEFORE authenticating: the credentials
     // must go to that server's Supabase project, not whichever was last active.
     const discovery = await resolveServerForEmail(email);
-    if (!discovery.ok) return { error: discovery.message };
+    if (!discovery.ok) {
+      return {
+        error: discovery.message,
+        updateRequired: discovery.updateRequired,
+      };
+    }
 
     const { error } = await getSupabase().auth.signInWithPassword({
       email,

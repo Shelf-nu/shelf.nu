@@ -20,7 +20,12 @@
  */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { config } from "~/config/shelf.config";
-import { INSTANCE_NAME, SUPABASE_ANON_PUBLIC, SUPABASE_URL } from "~/utils/env";
+import {
+  INSTANCE_NAME,
+  MIN_COMPANION_VERSION,
+  SUPABASE_ANON_PUBLIC,
+  SUPABASE_URL,
+} from "~/utils/env";
 
 /**
  * Wire-contract version of the mobile API surface.
@@ -45,6 +50,11 @@ export function loader(_args: LoaderFunctionArgs) {
     supabaseUrl: SUPABASE_URL,
     supabaseAnonKey: SUPABASE_ANON_PUBLIC,
     mobileApiVersion: MOBILE_API_VERSION,
+    // Lowest app version this instance accepts, or null for "any". The app
+    // shows a blocking update prompt when it is older than this. `mobileApiVersion`
+    // guards the other direction (server too old for the app); the two are
+    // independent because neither side can update the other.
+    minCompanionVersion: MIN_COMPANION_VERSION || null,
     ssoEnabled: !config.disableSSO,
     // Password login is an organisation-level concern (SSO orgs disable it per
     // organisation), not an instance-level one, so this is always true today.
