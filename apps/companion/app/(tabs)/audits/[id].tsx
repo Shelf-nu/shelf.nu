@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -168,14 +168,42 @@ function AuditDetailContent() {
     name: string;
   } | null>(null);
 
+  /**
+   * Which audit, in which workspace, the loaded evidence belongs to.
+   *
+   * why this is not optional: evidence is workspace data. Without it, cached
+   * notes and photos survive a switch to another audit or another
+   * organization and are shown under the new one — and a request started
+   * before the switch can land after it and overwrite the new context with
+   * the old one's rows. Both are cross-workspace disclosure, not just a
+   * stale-cache annoyance.
+   */
+  const evidenceContext =
+    currentOrg?.id && id ? `${currentOrg.id}:${id}` : null;
+
   // Guards concurrent opens without freezing the data, which is what the old
-  // `evidence` guard did. A ref, not state, so it cannot itself trigger a
-  // render or go stale inside the callback.
-  const evidenceInFlight = useRef(false);
+  // `evidence` guard did. Holds the context it is fetching FOR, so a reply
+  // from a previous context can be recognised and dropped. A ref, not state,
+  // so it cannot itself trigger a render or go stale inside the callback.
+  const evidenceInFlight = useRef<string | null>(null);
+
+  // Drop everything the moment the context changes, before any render can
+  // show it. Clearing on arrival would be too late: the sheet would paint the
+  // previous workspace's rows for a frame first.
+  useEffect(() => {
+    setEvidence(null);
+    setEvidenceError(null);
+    setEvidenceLoading(false);
+    evidenceInFlight.current = null;
+  }, [evidenceContext]);
 
   const loadEvidence = useCallback(async () => {
-    if (!currentOrg?.id || !id || evidenceInFlight.current) return;
-    evidenceInFlight.current = true;
+    if (!currentOrg?.id || !id || !evidenceContext) return;
+    // Only one fetch per context at a time; a fetch for a DIFFERENT context is
+    // never blocked by an older one still in flight.
+    if (evidenceInFlight.current === evidenceContext) return;
+    const requestFor = evidenceContext;
+    evidenceInFlight.current = requestFor;
     // Only show the spinner when there is nothing to show yet — on a refetch
     // the previous evidence stays put underneath.
     setEvidence((current) => {
@@ -184,11 +212,15 @@ function AuditDetailContent() {
     });
     setEvidenceError(null);
     const { data, error } = await api.auditEvidence(id, currentOrg.id);
+    // The context may have changed while this was in the air. Anything from a
+    // superseded request is discarded, including its in-flight marker, so it
+    // cannot clear a newer fetch's claim.
+    if (evidenceInFlight.current !== requestFor) return;
     if (error) setEvidenceError(error);
     else if (data) setEvidence(data);
     setEvidenceLoading(false);
-    evidenceInFlight.current = false;
-  }, [currentOrg?.id, id]);
+    evidenceInFlight.current = null;
+  }, [currentOrg?.id, id, evidenceContext]);
 
   /** Opens the viewer for one asset, or for the audit itself (`null`). */
   const onEvidencePress = useCallback(
