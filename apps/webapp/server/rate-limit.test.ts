@@ -155,6 +155,33 @@ describe("appLoaderRateLimit middleware", () => {
       );
     });
 
+    it("emits at most once per bucket per window, however long the flood runs", async () => {
+      // why: hono-rate-limiter runs the 429 handler for EVERY request once a
+      // bucket is over its limit, so an unthrottled emit would let a runaway
+      // client (or, via the pre-auth mobile limiter, an attacker) flood the
+      // logs quota and bury the very trail this telemetry exists to keep.
+      const app = makeApp(1);
+
+      for (let i = 0; i < 50; i++) {
+        await request(app, "/assets.data", "10.2.0.1");
+      }
+
+      expect(mockHandledClientError).toHaveBeenCalledTimes(1);
+    });
+
+    it("still logs separately for distinct buckets", async () => {
+      // The throttle must not collapse unrelated incidents into one entry —
+      // two different users hitting the same surface are two incidents.
+      const app = makeApp(1);
+
+      for (const ip of ["10.3.0.1", "10.3.0.2", "10.3.0.3"]) {
+        await request(app, "/assets.data", ip);
+        await request(app, "/assets.data", ip);
+      }
+
+      expect(mockHandledClientError).toHaveBeenCalledTimes(3);
+    });
+
     it("does not log the client IP for anonymous requests", async () => {
       const app = makeApp(1);
 

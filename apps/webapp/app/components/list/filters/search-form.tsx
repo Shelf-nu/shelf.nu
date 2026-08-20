@@ -167,6 +167,13 @@ export const SearchForm = ({ className }: { className?: string }) => {
             icon={isBusy ? "spinner" : "x"}
             variant="tertiary"
             disabled={isBusy}
+            // `title` alone is only the last-resort fallback in the accessible
+            // -name computation, and the shared Button treats an icon-only
+            // control without aria-label/label/tooltip as unnamed (it warns in
+            // dev). Keep `title` for the visual tooltip, name it explicitly for
+            // assistive tech. Static on purpose — the control is still "clear
+            // search" while it spins.
+            aria-label="Clear search"
             title="Clear search"
             className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
             onClick={clearSearch}
