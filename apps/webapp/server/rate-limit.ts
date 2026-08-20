@@ -46,9 +46,8 @@ let saturationNoticeAt = 0;
  * Emit at most one notice per window that telemetry is being dropped because
  * the tracker is saturated.
  *
- * Without this, the fail-closed branch is indistinguishable from "no rate
- * limiting happened" — a silent empty result that looks perfectly healthy,
- * which is the failure mode this repo has been bitten by before.
+ * Without it the fail-closed branch is indistinguishable from "no rate
+ * limiting happened": a silent empty result that looks perfectly healthy.
  *
  * @param now - Current epoch ms
  */
@@ -142,17 +141,15 @@ export function shouldEmitTelemetry(bucket: string, now: number): boolean {
  * Emit a searchable, low-severity trail entry when a rate limiter rejects a
  * request.
  *
- * Rate limiters short-circuit inside Hono middleware: they return
- * `c.json(..., 429)` BEFORE `refreshSession()`, `protect()` and React Router
- * run (see the ordering comment in `server/index.ts`). No `ShelfError` is ever
- * constructed, so `error()` / `logException()` — the only callers of
- * `Logger.handledClientError` — never fire. That left 429s invisible in EVERY
- * Sentry dataset: the client error-boundary deliberately skips them
- * (`EXPECTED_ERROR_BOUNDARY_STATUSES`), and the handled-4xx log trail is only
- * reachable from a caught `ShelfError`. The sole record was Fly's request log,
- * which is live-tail only and carries no user id — so a customer report ("too
- * many requests when adding a kit to my booking") could not be confirmed after
- * the fact.
+ * This is the ONLY telemetry a 429 produces. Limiters short-circuit inside Hono
+ * middleware, returning `c.json(..., 429)` before `refreshSession()`,
+ * `protect()` and React Router run (see the ordering comment in
+ * `server/index.ts`), so no `ShelfError` is constructed and `error()` /
+ * `logException()` — the only other callers of `Logger.handledClientError` —
+ * never fire. The client error-boundary skips 429 by design
+ * (`EXPECTED_ERROR_BOUNDARY_STATUSES`), and Fly's request log is live-tail only
+ * and carries no user id. Drop this call and rate limiting becomes both
+ * unobservable and unattributable.
  *
  * Routing through `Logger.handledClientError` keeps ONE pipeline for handled
  * 4xx: the entry lands on the Sentry **logs** quota rather than the small

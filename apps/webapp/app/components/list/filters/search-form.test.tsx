@@ -1,12 +1,11 @@
 /**
  * Regression tests for the list search field's debounce.
  *
- * The behaviour under test is a production incident, not a nicety: every
- * change to `?s=` is a router navigation, and each navigation issues one
- * single-fetch `*.data` request. Undebounced, typing produced one server-side
- * loader run per CHARACTER, which tripped `appLoaderRateLimit` (60 `.data`
- * requests per 60s per `(userId, path)`) and dropped users on the "Too many
- * requests" error boundary mid-task.
+ * Every change to `?s=` is a router navigation, and each navigation issues one
+ * single-fetch `*.data` request. Undebounced, typing costs one server-side
+ * loader run per character, which exhausts `appLoaderRateLimit`'s budget (60
+ * `.data` requests per 60s per `(userId, path)`) and drops the user on the
+ * "Too many requests" error boundary mid-task.
  *
  * These tests assert the observable contract — how many navigations a burst of
  * typing causes — rather than the timer plumbing.
@@ -93,8 +92,8 @@ describe("SearchForm debounce", () => {
     render(<SearchForm />);
     const input = screen.getByLabelText("Search kits");
 
-    // Simulate a user typing "broadcast" — the exact shape that produced nine
-    // `.data` requests in production.
+    // A nine-character search: one `.data` request per character without the
+    // debounce.
     const term = "broadcast";
     for (let i = 1; i <= term.length; i++) {
       fireEvent.change(input, { target: { value: term.slice(0, i) } });
@@ -113,9 +112,8 @@ describe("SearchForm debounce", () => {
     render(<SearchForm />);
     const input = screen.getByLabelText("Search kits");
 
-    // Four separate searches, 16 characters each = 64 characters. Undebounced
-    // this was 64 requests to one bucket — past the limiter's 60 and straight
-    // into a 429.
+    // Four separate searches, ~16 characters each. Undebounced that is 64
+    // requests against one bucket, past the limiter's 60 and into a 429.
     for (const term of [
       "alpha equipment 1",
       "beta equipment 22",
@@ -174,8 +172,8 @@ describe("SearchForm debounce", () => {
   });
 
   it("shows the busy indicator from the FIRST keystroke, not after the debounce", () => {
-    // why: a 100ms debounce was removed in a1f6cd734 precisely because it left
-    // the field looking idle while the user typed. Pin the fix.
+    // why: a debounce that only shows the spinner once the navigation starts
+    // leaves the field looking idle while the user types.
     render(<SearchForm />);
     const input = screen.getByLabelText("Search kits");
 

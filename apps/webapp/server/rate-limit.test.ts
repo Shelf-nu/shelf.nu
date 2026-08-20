@@ -113,11 +113,9 @@ describe("appLoaderRateLimit middleware", () => {
 
   /**
    * The limiter short-circuits in Hono middleware, so no `ShelfError` is built
-   * and `error()`/`logException()` never run. Combined with the client
-   * boundary deliberately not capturing 429s, that made rate limiting
-   * invisible in every Sentry dataset — a customer report of "too many
-   * requests" could not be confirmed after the fact. These tests pin the
-   * replacement trail.
+   * and `error()`/`logException()` never run. With the client boundary also
+   * skipping 429 by design, this trail is the only thing that makes a rate
+   * limit visible in Sentry and attributable to a user. These tests pin it.
    */
   describe("observability", () => {
     beforeEach(() => {
@@ -238,10 +236,9 @@ describe("telemetry throttle saturation", () => {
   }
 
   it("keeps a bucket suppressed even after the tracker fills with other buckets", async () => {
-    // why: the first version evicted the least-recently-emitted entry to make
-    // room, so rotating past the cap could evict a live suppressor and let its
-    // bucket emit again inside its own window — degrading the throttle to
-    // roughly one entry per request, which is what it exists to prevent.
+    // why: evicting a live suppressor to make room lets its bucket emit again
+    // inside its own window, degrading the throttle to roughly one entry per
+    // request — exactly what it exists to prevent.
     const { shouldEmitTelemetry } = await freshModule();
     const now = 1_000_000;
 
@@ -304,7 +301,9 @@ describe("telemetry throttle saturation", () => {
     }
 
     const saturationLogs = mockHandledClientError.mock.calls.filter(
-      (call) => typeof call[0]?.message === "string" && call[0].message.includes("saturated")
+      (call) =>
+        typeof call[0]?.message === "string" &&
+        call[0].message.includes("saturated")
     );
     expect(saturationLogs).toHaveLength(1);
     expect(saturationLogs[0][0].label).toBe("Rate limit");

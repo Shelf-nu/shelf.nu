@@ -16,23 +16,22 @@ import { SearchFieldTooltip } from "./search-field-tooltip";
  * into the URL.
  *
  * Every change to `?s=` is a router navigation, and each navigation issues one
- * single-fetch `*.data` request. Without a delay that is literally one
- * server-side loader run PER CHARACTER — which both hammers the database and
- * trips `appLoaderRateLimit` (`server/rate-limit.ts`: 60 `.data` requests per
- * 60s per `(userId, path)`, with the query string deliberately excluded from
- * the bucket key, so every `?s=` variant shares one budget). Typing ~60
- * characters into a list search within a minute was enough to earn a 429 and
- * the "Too many requests" error boundary, which is what customers hit on the
- * booking manage-kits/manage-assets modals.
+ * single-fetch `*.data` request. Undebounced that is one server-side loader run
+ * per character, which both hammers the database and exhausts
+ * `appLoaderRateLimit`'s budget (`server/rate-limit.ts`: 60 `.data` requests
+ * per 60s per `(userId, path)`, with the query string deliberately excluded
+ * from the bucket key, so every `?s=` variant shares one budget). Roughly 60
+ * characters of typing inside one minute is enough to spend it and land the
+ * user on the "Too many requests" error boundary, losing whatever modal they
+ * were working in.
  *
  * 400ms is the usual search-as-you-type range: long enough to collapse a
  * word into a single request, short enough to still feel live.
  *
- * NOTE: a 100ms debounce previously existed here and was removed in
- * `a1f6cd734` because it broke the loading indicator. That regression is
- * avoided below by driving the spinner off `isBusy` (pending debounce OR
- * in-flight navigation) rather than off navigation state alone — do not
- * "simplify" it back to `isSearching(navigation)`.
+ * The busy indicator must stay driven by `isBusy` (pending debounce OR
+ * in-flight navigation). Deriving it from `isSearching(navigation)` alone
+ * leaves the field looking idle for the whole debounce window, so do not
+ * "simplify" it back.
  */
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -105,9 +104,9 @@ export const SearchForm = ({ className }: { className?: string }) => {
    * Handles search input changes, debounced so a burst of typing produces ONE
    * navigation instead of one per character.
    *
-   * `replace: true` keeps search-as-you-type out of the history stack — before
-   * this, every character pushed an entry, so Back walked the user backwards
-   * through their own query one letter at a time.
+   * `replace: true` keeps search-as-you-type out of the history stack; without
+   * it every burst pushes an entry and Back walks the user backwards through
+   * their own query.
    */
   const handleSearchChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
