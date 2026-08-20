@@ -25,6 +25,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
 import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
@@ -79,7 +80,6 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const body = await request.json();
     const {
       title,
       description,
@@ -89,8 +89,8 @@ export async function action({ request }: ActionFunctionArgs) {
       valuation,
       customFields,
       qrId,
-    } = z
-      .object({
+    } = await parseMobileBody(
+      z.object({
         title: z.string().min(2, "Title must be at least 2 characters"),
         description: z.string().optional(),
         categoryId: z.string().optional(),
@@ -108,8 +108,10 @@ export async function action({ request }: ActionFunctionArgs) {
           )
           .optional(),
         qrId: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: a categoryId from the request body is attacker-controlled. Without
     // verifying it belongs to the caller's organization we'd happily use it to

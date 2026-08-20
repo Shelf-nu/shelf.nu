@@ -1,10 +1,64 @@
-import { addHours, addDays, format, differenceInHours } from "date-fns";
+import { addDays, format, differenceInHours } from "date-fns";
+import { DateTime } from "luxon";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import type {
   DaySchedule,
   WeeklyScheduleJson,
   WorkingHoursData,
 } from "./types";
+
+/**
+ * The day schedule that applies on a given zoned calendar date.
+ *
+ * A date-specific override wins over the weekly schedule, matching how
+ * `validateWorkingHours` resolves the same data
+ * (`~/components/booking/forms/forms-schema.ts`). Both the override key and the
+ * weekday are read from `zoned`, so the caller's zone decides which day this is
+ * — reading them from a device-local `Date` is what let a user whose preference
+ * zone differs from their device get another day's hours.
+ *
+ * @param zoned - The instant, already converted to the zone that defines "day".
+ * @param workingHours - The org's weekly schedule plus date overrides.
+ * @returns The applicable schedule, or null when the day has none.
+ */
+function resolveDaySchedule(
+  zoned: DateTime,
+  workingHours: WorkingHoursData
+): DaySchedule | null {
+  const dateString = zoned.toFormat("yyyy-MM-dd");
+  const override = workingHours.overrides.find(
+    (o) => getOverrideDateKey(o.date) === dateString
+  );
+
+  if (override) {
+    return {
+      isOpen: override.isOpen,
+      openTime: override.openTime || undefined,
+      closeTime: override.closeTime || undefined,
+    };
+  }
+
+  // Luxon weekday is 1=Mon..7=Sun; the schedule is keyed 0=Sun..6=Sat.
+  const dayOfWeek = (zoned.weekday % 7).toString();
+  return workingHours.weeklySchedule[dayOfWeek] || null;
+}
+
+/**
+ * The same calendar day as `zoned`, at an `"HH:mm"` wall-clock time in its zone.
+ *
+ * Used to materialise the org's open/close times on a specific day. Doing this
+ * with Luxon's `set` keeps the result in the target zone; the previous
+ * `Date.setHours` equivalent placed it on the DEVICE clock instead.
+ *
+ * @param zoned - The day to place the time on, in the target zone.
+ * @param time - Wall-clock time as `"HH:mm"`.
+ * @returns A DateTime on the same calendar day at that wall-clock time.
+ */
+function atWallClock(zoned: DateTime, time: string): DateTime {
+  const [hour, minute] = time.split(":").map(Number);
+  return zoned.set({ hour, minute, second: 0, millisecond: 0 });
+}
 
 /**
  * Returns the YYYY-MM-DD key that identifies an override's calendar date.
@@ -124,132 +178,86 @@ interface NextWorkingDayResult {
  * Finds the next working day based on the current date and provided working hours.
  * It checks for date-specific overrides first, then falls back to the weekly schedule.
  * If no working day is found within 14 days, it defaults to tomorrow's 9 AM - 6 PM.
+ * All calendar-day and wall-clock reasoning happens in `timeZone`, so "tomorrow"
+ * and "9 AM" mean what the user means. Reading them off a device-local `Date`
+ * put the search on the wrong day whenever the device and preference zones
+ * straddled midnight.
+ *
  * @param currentDate - The date from which to start searching for the next working day.
  * @param workingHours - The working hours data containing weekly schedules and overrides.
  * @param bufferStartTime - Buffer time in hours from current time.
+ * @param timeZone - IANA zone that defines calendar days and wall-clock times.
  * @returns An object containing the start and end times of the next working day.
  */
 function findNextWorkingDay(
   currentDate: Date,
   workingHours: WorkingHoursData,
-  bufferStartTime: number
+  bufferStartTime: number,
+  timeZone: string
 ): NextWorkingDayResult {
-  // Calculate buffer expiry time (current time + buffer hours)
-  const bufferExpiryTime =
-    bufferStartTime > 0 ? addHours(currentDate, bufferStartTime) : currentDate;
-  // Remove seconds and milliseconds
-  bufferExpiryTime.setSeconds(0, 0);
+  const now = DateTime.fromJSDate(currentDate).setZone(timeZone);
 
-  // Start checking from tomorrow
-  const searchDate = new Date(currentDate);
-  searchDate.setDate(searchDate.getDate() + 1);
+  // Buffer expiry (current time + buffer hours), seconds stripped. Luxon values
+  // are immutable, so unlike the previous `setSeconds` this cannot mutate the
+  // caller's Date when the buffer is 0.
+  const bufferExpiry = (
+    bufferStartTime > 0 ? now.plus({ hours: bufferStartTime }) : now
+  ).set({ second: 0, millisecond: 0 });
 
-  // Check up to 14 days to find next working day
-  for (let i = 0; i < 14; i++) {
-    const checkDate = new Date(searchDate);
-    checkDate.setDate(searchDate.getDate() + i);
+  // Check up to 14 days ahead, starting tomorrow. `plus({ days })` steps by
+  // calendar day in `timeZone`, so it stays correct across a DST boundary.
+  for (let dayOffset = 1; dayOffset <= 14; dayOffset++) {
+    const checkDay = now.plus({ days: dayOffset });
+    const daySchedule = resolveDaySchedule(checkDay, workingHours);
 
-    const dateString = format(checkDate, "yyyy-MM-dd"); // local calendar date
-    const dayOfWeek = checkDate.getDay().toString();
-
-    // Check for date-specific override first
-    const override = workingHours.overrides.find(
-      (override) => getOverrideDateKey(override.date) === dateString
-    );
-
-    let daySchedule: DaySchedule | null = null;
-
-    if (override) {
-      // Use override schedule
-      daySchedule = {
-        isOpen: override.isOpen,
-        openTime: override.openTime || undefined,
-        closeTime: override.closeTime || undefined,
-      };
-    } else {
-      // Use regular weekly schedule
-      daySchedule = workingHours.weeklySchedule[dayOfWeek] || null;
+    if (
+      !daySchedule?.isOpen ||
+      !daySchedule.openTime ||
+      !daySchedule.closeTime
+    ) {
+      continue;
     }
 
-    if (daySchedule?.isOpen && daySchedule.openTime && daySchedule.closeTime) {
-      const [openHours, openMinutes] = daySchedule.openTime
-        .split(":")
-        .map(Number);
-      const [closeHours, closeMinutes] = daySchedule.closeTime
-        .split(":")
-        .map(Number);
+    const workingDayStart = atWallClock(checkDay, daySchedule.openTime);
+    const workingDayEnd = atWallClock(checkDay, daySchedule.closeTime);
 
-      const workingDayStart = new Date(checkDate);
-      workingDayStart.setHours(openHours, openMinutes, 0, 0);
+    // Use whichever is later: buffer expiry time or working day start
+    const startTime =
+      bufferExpiry > workingDayStart ? bufferExpiry : workingDayStart;
 
-      const workingDayEnd = new Date(checkDate);
-      workingDayEnd.setHours(closeHours, closeMinutes, 0, 0);
-
-      // Use whichever is later: buffer expiry time or working day start
-      const startTime =
-        bufferExpiryTime > workingDayStart ? bufferExpiryTime : workingDayStart;
-
-      // If start time is beyond this working day's end, find next working day for end time
-      let endTime = workingDayEnd;
-      if (startTime >= workingDayEnd) {
-        // Find working hours for the start time's date
-        const startDateString = format(startTime, "yyyy-MM-dd");
-        const startDayOfWeek = startTime.getDay().toString();
-
-        // Check for override on start date
-        const startDayOverride = workingHours.overrides.find(
-          (override) => getOverrideDateKey(override.date) === startDateString
-        );
-
-        let startDaySchedule: DaySchedule | null = null;
-        if (startDayOverride) {
-          startDaySchedule = {
-            isOpen: startDayOverride.isOpen,
-            openTime: startDayOverride.openTime || undefined,
-            closeTime: startDayOverride.closeTime || undefined,
-          };
-        } else {
-          startDaySchedule =
-            workingHours.weeklySchedule[startDayOfWeek] || null;
-        }
-
-        if (startDaySchedule?.isOpen && startDaySchedule.closeTime) {
-          const [startDayCloseHours, startDayCloseMinutes] =
-            startDaySchedule.closeTime.split(":").map(Number);
-          endTime = new Date(startTime);
-          endTime.setHours(startDayCloseHours, startDayCloseMinutes, 0, 0);
-        } else {
-          // Fallback to 6 PM on start date
-          endTime = new Date(startTime);
-          endTime.setHours(18, 0, 0, 0);
-        }
-      }
-
-      return { startTime, endTime };
+    // If start time is beyond this working day's end, close on the start day
+    let endTime = workingDayEnd;
+    if (startTime >= workingDayEnd) {
+      const startDaySchedule = resolveDaySchedule(startTime, workingHours);
+      endTime =
+        startDaySchedule?.isOpen && startDaySchedule.closeTime
+          ? atWallClock(startTime, startDaySchedule.closeTime)
+          : // Fallback to 6 PM on start date
+            atWallClock(startTime, "18:00");
     }
+
+    return { startTime: startTime.toJSDate(), endTime: endTime.toJSDate() };
   }
 
   // Fallback: if no working day found, just use tomorrow 9 AM - 6 PM
-  const fallbackStart = new Date(currentDate);
-  fallbackStart.setDate(fallbackStart.getDate() + 1);
-  fallbackStart.setHours(9, 0, 0, 0);
-
-  const fallbackEnd = new Date(currentDate);
-  fallbackEnd.setDate(fallbackEnd.getDate() + 1);
-  fallbackEnd.setHours(18, 0, 0, 0);
+  const tomorrow = now.plus({ days: 1 });
+  const fallbackStart = atWallClock(tomorrow, "09:00");
+  const fallbackEnd = atWallClock(tomorrow, "18:00");
 
   // Use whichever is later: buffer expiry time or fallback start
   const finalStartTime =
-    bufferExpiryTime > fallbackStart ? bufferExpiryTime : fallbackStart;
+    bufferExpiry > fallbackStart ? bufferExpiry : fallbackStart;
 
   // If start time is beyond fallback end, set end to start day's 6 PM
-  let finalEndTime = fallbackEnd;
-  if (finalStartTime >= fallbackEnd) {
-    finalEndTime = new Date(finalStartTime);
-    finalEndTime.setHours(18, 0, 0, 0);
-  }
+  const finalEndTime =
+    finalStartTime >= fallbackEnd
+      ? atWallClock(finalStartTime, "18:00")
+      : fallbackEnd;
 
-  return { startTime: finalStartTime, endTime: finalEndTime };
+  return {
+    startTime: finalStartTime.toJSDate(),
+    endTime: finalEndTime.toJSDate(),
+  };
 }
 
 interface DefaultTimesResult {
@@ -265,55 +273,48 @@ interface DefaultTimesResult {
  *
  * For ADMIN/OWNER users, buffer time restrictions are automatically bypassed (effective buffer = 0).
  *
+ * Every calendar-day and wall-clock decision here is made in the acting user's
+ * PREFERENCE zone, which is the zone the form field displays and the server
+ * parses in. Computing them on the device clock made the default wrong by the
+ * offset between the two — and, when they straddled midnight, selected another
+ * day's working hours entirely.
+ *
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
  * @param bufferStartTime - Buffer time in hours from current time. Bypassed for admin/owner users.
  * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses buffer time restrictions).
+ * @param prefs - The acting user's resolved format prefs. Typed as
+ *   {@link ResolvedFormatPrefs} rather than a bare zone string so a browser-hint
+ *   object (`{ locale, timeZone }`) cannot satisfy it — the device zone is
+ *   exactly the wrong answer here, and that mistake is what this fixes.
  * @returns An object containing the start and end dates formatted for date input values.
  */
 export function getBookingDefaultStartEndTimes(
   workingHoursData: WorkingHoursData | null | undefined,
   bufferStartTime: number,
-  isAdminOrOwner: boolean
+  isAdminOrOwner: boolean,
+  prefs: ResolvedFormatPrefs
 ): DefaultTimesResult {
-  const now = new Date();
+  const { timeZone } = prefs;
+  const nowInstant = new Date();
+  const now = DateTime.fromJSDate(nowInstant).setZone(timeZone);
 
   // Admin/Owner users bypass buffer time restrictions
   const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
 
   // If no working hours data or working hours are disabled, use the original logic
   if (!workingHoursData || !workingHoursData.enabled) {
-    return getOriginalDefaultTimes(now, effectiveBufferStartTime);
+    return getOriginalDefaultTimes(
+      nowInstant,
+      effectiveBufferStartTime,
+      timeZone
+    );
   }
 
-  // Get today's date and schedule using the runtime's local calendar day so
-  // the match aligns with how the user picks times in the booking form.
-  const todayDateString = format(now, "yyyy-MM-dd");
-  const todayDayOfWeek = now.getDay().toString();
+  const todaySchedule = resolveDaySchedule(now, workingHoursData);
 
-  // Check for date-specific override first
-  const todayOverride = workingHoursData.overrides.find(
-    (override) => getOverrideDateKey(override.date) === todayDateString
-  );
-
-  let todaySchedule: DaySchedule | null = null;
-
-  if (todayOverride) {
-    // Use override schedule
-    todaySchedule = {
-      isOpen: todayOverride.isOpen,
-      openTime: todayOverride.openTime || undefined,
-      closeTime: todayOverride.closeTime || undefined,
-    };
-  } else {
-    // Use regular weekly schedule
-    todaySchedule = workingHoursData.weeklySchedule[todayDayOfWeek] || null;
-  }
-
-  // Current time as HH:MM string for comparison
-  const currentTimeString = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  // Current time as HH:MM in the preference zone, for comparison against the
+  // org's window (which is itself expressed as a wall clock).
+  const currentTimeString = now.toFormat("HH:mm");
 
   // Check if we're currently in working hours
   const isCurrentlyInWorkingHours =
@@ -325,101 +326,100 @@ export function getBookingDefaultStartEndTimes(
 
   if (isCurrentlyInWorkingHours && todaySchedule.closeTime) {
     // We're in working hours - use whichever is later: buffer expiry or 10 minutes from now
-    let earliestStartTime: Date;
+    const earliestStartTime = (
+      effectiveBufferStartTime > 0
+        ? now.plus({ hours: effectiveBufferStartTime })
+        : now.plus({ minutes: 10 })
+    ).set({ second: 0, millisecond: 0 });
 
-    if (effectiveBufferStartTime > 0) {
-      // Use buffer time from current time
-      earliestStartTime = addHours(now, effectiveBufferStartTime);
-    } else {
-      // Use original 10-minute logic when buffer is 0
-      earliestStartTime = new Date(now);
-      earliestStartTime.setMinutes(now.getMinutes() + 10, 0);
-    }
-
-    // Remove seconds and milliseconds
-    earliestStartTime.setSeconds(0, 0);
-
-    const [closeHours, closeMinutes] = todaySchedule.closeTime
-      .split(":")
-      .map(Number);
-    const endDateTime = new Date(now);
-    endDateTime.setHours(closeHours, closeMinutes, 0, 0);
+    const endDateTime = atWallClock(now, todaySchedule.closeTime);
 
     // If start time is beyond today's close time, find next working day
     if (earliestStartTime >= endDateTime) {
       const nextWorkingDay = findNextWorkingDay(
-        earliestStartTime,
+        earliestStartTime.toJSDate(),
         workingHoursData,
-        0
+        0,
+        timeZone
       );
       return {
-        startDate: dateForDateTimeInputValue(nextWorkingDay.startTime),
-        endDate: dateForDateTimeInputValue(nextWorkingDay.endTime),
+        startDate: dateForDateTimeInputValue(
+          nextWorkingDay.startTime,
+          timeZone
+        ),
+        endDate: dateForDateTimeInputValue(nextWorkingDay.endTime, timeZone),
       };
     }
 
     return {
-      startDate: dateForDateTimeInputValue(earliestStartTime),
-      endDate: dateForDateTimeInputValue(endDateTime),
+      startDate: dateForDateTimeInputValue(
+        earliestStartTime.toJSDate(),
+        timeZone
+      ),
+      endDate: dateForDateTimeInputValue(endDateTime.toJSDate(), timeZone),
     };
   } else {
     // We're outside working hours - find the next working day
     const nextWorkingDay = findNextWorkingDay(
-      now,
+      nowInstant,
       workingHoursData,
-      effectiveBufferStartTime
+      effectiveBufferStartTime,
+      timeZone
     );
 
     return {
-      startDate: dateForDateTimeInputValue(nextWorkingDay.startTime),
-      endDate: dateForDateTimeInputValue(nextWorkingDay.endTime),
+      startDate: dateForDateTimeInputValue(nextWorkingDay.startTime, timeZone),
+      endDate: dateForDateTimeInputValue(nextWorkingDay.endTime, timeZone),
     };
   }
 }
 
+/**
+ * Defaults for orgs with working hours disabled: start shortly from now, end at
+ * 6 PM. Like its working-hours sibling, "6 PM" and "next day" are read in
+ * `timeZone`, not on the device clock.
+ *
+ * @param nowInstant - Current instant.
+ * @param bufferStartTime - Buffer in hours; 0 uses the 10-minute rule.
+ * @param timeZone - IANA zone that defines the wall clock and calendar day.
+ * @returns Start/end formatted for a datetime-local input.
+ */
 function getOriginalDefaultTimes(
-  now: Date,
-  bufferStartTime: number
+  nowInstant: Date,
+  bufferStartTime: number,
+  timeZone: string
 ): DefaultTimesResult {
+  const now = DateTime.fromJSDate(nowInstant).setZone(timeZone);
+
   // Original logic for backward compatibility with buffer support
-  let startDateTime: Date;
+  const startDateTime = (
+    bufferStartTime > 0
+      ? now.plus({ hours: bufferStartTime })
+      : // Use original 10-minute logic when buffer is 0
+        now.plus({ minutes: 10 })
+  ).set({ second: 0, millisecond: 0 });
 
-  if (bufferStartTime > 0) {
-    // Use buffer time from current time
-    startDateTime = addHours(now, bufferStartTime);
-  } else {
-    // Use original 10-minute logic when buffer is 0
-    startDateTime = new Date(now);
-    startDateTime.setMinutes(now.getMinutes() + 10, 0);
-  }
-
-  // Remove seconds and milliseconds
-  startDateTime.setSeconds(0, 0);
-
-  const startDate = dateForDateTimeInputValue(startDateTime);
-
-  let endDate: string;
+  const startDate = dateForDateTimeInputValue(
+    startDateTime.toJSDate(),
+    timeZone
+  );
 
   // Use the start time for end date logic, not the original current time
-  const referenceTime = startDateTime;
+  const isAtOrNearSixPm =
+    startDateTime.hour >= 18 ||
+    (startDateTime.hour === 17 && startDateTime.minute > 49);
 
-  if (
-    referenceTime.getHours() >= 18 ||
-    (referenceTime.getHours() === 17 && referenceTime.getMinutes() > 49)
-  ) {
-    // If start time is after 6 PM (or close to it), set end to 6 PM next day
-    const endDateTime = new Date(referenceTime);
-    endDateTime.setDate(endDateTime.getDate() + 1);
-    endDateTime.setHours(18, 0, 0, 0);
-    endDate = dateForDateTimeInputValue(endDateTime);
-  } else {
-    // If start time is before 6 PM, set end to 6 PM same day
-    const endDateTime = new Date(referenceTime);
-    endDateTime.setHours(18, 0, 0, 0);
-    endDate = dateForDateTimeInputValue(endDateTime);
-  }
+  // After 6 PM (or close to it) the booking runs to 6 PM the NEXT day;
+  // otherwise it ends at 6 PM the same day.
+  const endDateTime = atWallClock(
+    isAtOrNearSixPm ? startDateTime.plus({ days: 1 }) : startDateTime,
+    "18:00"
+  );
 
-  return { startDate, endDate };
+  return {
+    startDate,
+    endDate: dateForDateTimeInputValue(endDateTime.toJSDate(), timeZone),
+  };
 }
 
 /**
