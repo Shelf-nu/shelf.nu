@@ -76,6 +76,19 @@ describe("triggerEmail", () => {
     );
   });
 
+  it("skips soft-deleted addresses whatever the domain casing", async () => {
+    vi.mocked(transporter.sendMail).mockClear();
+
+    await triggerEmail({
+      ...basePayload,
+      to: "support@shelf.nu, deleted+abc123@DELETED.SHELF.NU",
+    });
+
+    expect(transporter.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@shelf.nu" })
+    );
+  });
+
   it("skips sending when every address in a list is soft-deleted", async () => {
     vi.mocked(transporter.sendMail).mockClear();
 

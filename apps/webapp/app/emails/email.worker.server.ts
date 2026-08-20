@@ -88,7 +88,9 @@ export const triggerEmail = async ({
     .map((address) => address.trim())
     .filter(Boolean);
   const deliverableRecipients = recipients.filter(
-    (address) => !address.endsWith(SOFT_DELETED_EMAIL_DOMAIN)
+    // Lower-cased first: domains are case-insensitive, so an address stored
+    // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed
+    (address) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
   );
 
   if (recipients.length > 0 && deliverableRecipients.length === 0) {
