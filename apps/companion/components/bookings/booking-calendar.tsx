@@ -267,6 +267,13 @@ type CachedMonth = {
   truncated: boolean;
 };
 
+/** No month loaded: what an org switch resets to, and the initial value. */
+const EMPTY_MONTH: CachedMonth = {
+  bookings: [],
+  outside: { count: 0, jumpTo: null },
+  truncated: false,
+};
+
 export function BookingCalendar({
   orgId,
   statuses,
@@ -288,20 +295,22 @@ export function BookingCalendar({
   const [selectedDay, setSelectedDay] = useState(() =>
     toKey(new Date(), prefs.timeZone)
   );
-  const [bookings, setBookings] = useState<CalendarBooking[]>([]);
-  const [outside, setOutside] = useState<{
-    count: number;
-    jumpTo: string | null;
-  }>({ count: 0, jumpTo: null });
+  /**
+   * One month's answer, held as ONE piece of state.
+   *
+   * why not three: these always move together - the cache stores them as a unit
+   * (`CachedMonth`), `load` sets them as a unit, and an org switch clears them
+   * as a unit. Split across three `useState`s, every one of those was a cascade
+   * of three sets where one will do, and nothing in the types said they belong
+   * together. `truncated` is here for the same reason the other two are: rows
+   * arrive soonest first, so a window we could not answer in full is missing
+   * its END, which would draw as empty days and read as "nothing booked"
+   * rather than "not shown".
+   */
+  const [month, setMonth] = useState<CachedMonth>(EMPTY_MONTH);
+  const { bookings, outside, truncated } = month;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /**
-   * The window held more bookings than one response carries. Rows arrive
-   * soonest first, so what is missing is the END of the month - it would render
-   * as empty days, which on this screen reads as "nothing booked" rather than
-   * "not shown".
-   */
-  const [truncated, setTruncated] = useState(false);
 
   /**
    * The month being shown, as its first day.
@@ -363,9 +372,7 @@ export function BookingCalendar({
    * response landed, which is the one thing a workspace boundary must never do.
    */
   useEffect(() => {
-    setBookings([]);
-    setOutside({ count: 0, jumpTo: null });
-    setTruncated(false);
+    setMonth(EMPTY_MONTH);
   }, [orgId]);
 
   /**
@@ -383,9 +390,7 @@ export function BookingCalendar({
       if (cached) {
         // Paint what we have, then confirm it below. The month is already
         // correct in the common case, so the grid does not blink.
-        setBookings(cached.bookings);
-        setOutside(cached.outside);
-        setTruncated(cached.truncated);
+        setMonth(cached);
       } else {
         setIsLoading(true);
       }
@@ -411,15 +416,13 @@ export function BookingCalendar({
         // error for data we already have.
         if (!cached) setError(res.error);
       } else if (res.data) {
-        const next = {
+        const next: CachedMonth = {
           bookings: res.data.bookings,
           outside: res.data.outsideWindow ?? { count: 0, jumpTo: null },
           truncated: res.data.truncated === true,
         };
         monthCache.current.set(key, next);
-        setBookings(next.bookings);
-        setOutside(next.outside);
-        setTruncated(next.truncated);
+        setMonth(next);
       }
       setIsLoading(false);
     },
