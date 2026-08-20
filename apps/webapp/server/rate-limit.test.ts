@@ -1,9 +1,22 @@
 import { Hono } from "hono";
 import { session } from "remix-hono/session";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { appLoaderRateLimit } from "./rate-limit";
+import { appLoaderRateLimit, calendarFeedRateLimit } from "./rate-limit";
 import { createSessionStorage } from "./session";
+
+const mockHandledClientError = vi.hoisted(() => vi.fn());
+
+// why: the limiters emit their 429 trail through Logger.handledClientError,
+// which talks to Sentry's structured-log API — capture the call instead.
+vi.mock("~/utils/logger", () => ({
+  Logger: {
+    handledClientError: mockHandledClientError,
+    error: vi.fn(),
+    warn: vi.fn(),
+    log: vi.fn(),
+  },
+}));
 
 describe("appLoaderRateLimit middleware", () => {
   /**
@@ -96,5 +109,84 @@ describe("appLoaderRateLimit middleware", () => {
       const res = await request(app, "/api/sse/notification", "10.0.0.4");
       expect(res.status).toBe(200);
     }
+  });
+
+  /**
+   * The limiter short-circuits in Hono middleware, so no `ShelfError` is built
+   * and `error()`/`logException()` never run. Combined with the client
+   * boundary deliberately not capturing 429s, that made rate limiting
+   * invisible in every Sentry dataset — a customer report of "too many
+   * requests" could not be confirmed after the fact. These tests pin the
+   * replacement trail.
+   */
+  describe("observability", () => {
+    beforeEach(() => {
+      mockHandledClientError.mockReset();
+    });
+
+    it("records a rate-limited request on the handled-4xx log trail", async () => {
+      const app = makeApp(1);
+
+      await request(
+        app,
+        "/bookings/abc123/overview/manage-kits.data",
+        "10.1.0.1"
+      );
+      expect(mockHandledClientError).not.toHaveBeenCalled();
+
+      const overLimit = await request(
+        app,
+        "/bookings/abc123/overview/manage-kits.data",
+        "10.1.0.1"
+      );
+      expect(overLimit.status).toBe(429);
+
+      expect(mockHandledClientError).toHaveBeenCalledTimes(1);
+      const logged = mockHandledClientError.mock.calls[0][0];
+      expect(logged.status).toBe(429);
+      expect(logged.label).toBe("Rate limit");
+      // Never an error event — this is an expected, transient condition.
+      expect(logged.shouldBeCaptured).toBe(false);
+      // The path names the surface the user was on, which is what makes a
+      // customer report actionable.
+      expect(logged.message).toContain("app-loader");
+      expect(logged.message).toContain(
+        "/bookings/abc123/overview/manage-kits.data"
+      );
+    });
+
+    it("does not log the client IP for anonymous requests", async () => {
+      const app = makeApp(1);
+
+      await request(app, "/assets.data", "203.0.113.77");
+      await request(app, "/assets.data", "203.0.113.77");
+
+      const logged = mockHandledClientError.mock.calls[0][0];
+      expect(JSON.stringify(logged.additionalData ?? {})).not.toContain(
+        "203.0.113.77"
+      );
+      expect(logged.message).not.toContain("203.0.113.77");
+    });
+
+    it("never puts the calendar feed's secret token in the log trail", async () => {
+      // why: calendarFeedRateLimit keys on the request PATH, which embeds the
+      // feed's secret token. Logging that path verbatim would leak the secret
+      // into Sentry.
+      const secret = "s3cr3t-feed-token-do-not-log";
+      const app = new Hono();
+      const limiter = calendarFeedRateLimit();
+      app.use("*", limiter);
+      app.all("*", (c) => c.text("ok"));
+
+      // The limiter's default budget is 60/min; exhaust it, then trip it.
+      for (let i = 0; i <= 60; i++) {
+        await app.request(`https://app.shelf.nu/api/calendar/feed/${secret}`);
+      }
+
+      expect(mockHandledClientError).toHaveBeenCalled();
+      const logged = mockHandledClientError.mock.calls[0][0];
+      expect(logged.message).not.toContain(secret);
+      expect(logged.message).toContain("redacted");
+    });
   });
 });

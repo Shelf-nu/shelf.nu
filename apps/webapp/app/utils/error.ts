@@ -95,6 +95,7 @@ export type FailureReason = {
     | "DB"
     | "Request validation"
     | "Request aborted"
+    | "Rate limit" // A server-side rate limiter rejected the request (429)
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment" // Related to the environment setup

@@ -1,9 +1,88 @@
 import type { Context } from "hono";
 import { rateLimiter } from "hono-rate-limiter";
 import { getSession } from "remix-hono/session";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { getClientIp } from "./client-ip";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
+
+/**
+ * Emit a searchable, low-severity trail entry when a rate limiter rejects a
+ * request.
+ *
+ * Rate limiters short-circuit inside Hono middleware: they return
+ * `c.json(..., 429)` BEFORE `refreshSession()`, `protect()` and React Router
+ * run (see the ordering comment in `server/index.ts`). No `ShelfError` is ever
+ * constructed, so `error()` / `logException()` — the only callers of
+ * `Logger.handledClientError` — never fire. That left 429s invisible in EVERY
+ * Sentry dataset: the client error-boundary deliberately skips them
+ * (`EXPECTED_ERROR_BOUNDARY_STATUSES`), and the handled-4xx log trail is only
+ * reachable from a caught `ShelfError`. The sole record was Fly's request log,
+ * which is live-tail only and carries no user id — so a customer report ("too
+ * many requests when adding a kit to my booking") could not be confirmed after
+ * the fact.
+ *
+ * Routing through `Logger.handledClientError` keeps ONE pipeline for handled
+ * 4xx: the entry lands on the Sentry **logs** quota rather than the small
+ * error-event quota, honours `SENTRY_HANDLED_4XX_SAMPLE_RATE`, and is
+ * filterable by `label:"Rate limit"`.
+ *
+ * @param scope - Which limiter fired (e.g. `app-loader`), so the three
+ *   limiters stay distinguishable in one query
+ * @param detail - Caller-supplied description of WHAT was limited, appended to
+ *   the log message. **Must not contain secrets** — `calendarFeedRateLimit`
+ *   keys on a path that embeds the feed's secret token, so it passes a
+ *   redacted string rather than the raw path.
+ * @param userId - The authenticated user, when known. `handledClientError`
+ *   promotes this to a log attribute, which is what makes an incident
+ *   attributable to a reporting customer. The client IP is deliberately NOT
+ *   logged: it is PII and useless for attribution.
+ */
+function logRateLimitHit({
+  scope,
+  detail,
+  userId,
+}: {
+  scope: string;
+  detail: string;
+  userId?: string;
+}) {
+  Logger.handledClientError(
+    new ShelfError({
+      cause: null,
+      label: "Rate limit",
+      message: `Rate limit exceeded (${scope}): ${detail}`,
+      status: 429,
+      // Expected, transient, user-facing — never an error event.
+      shouldBeCaptured: false,
+      additionalData: userId ? { userId } : {},
+    })
+  );
+}
+
+/**
+ * Resolve the identity half of {@link appLoaderRateLimit}'s bucket key.
+ *
+ * Shared by the limiter's `keyGenerator` and its 429 `handler` so the value
+ * logged is provably the value that was counted — recomputing the lookup
+ * inline in both places would let them drift.
+ *
+ * @param c - The Hono request context
+ * @returns The signed-session `userId` when authenticated, plus the bucket
+ *   identity actually used (falling back to the client IP for anonymous and
+ *   edge cases).
+ */
+function resolveAppLoaderIdentity(c: Context) {
+  // `hono-rate-limiter` types the handler context with hono's default `Env`,
+  // which is structurally narrower than the `Context<Env>` that remix-hono's
+  // `getSession` expects; cast to bridge the two (the value is a genuine hono
+  // Context, only the generic differs).
+  const auth = getSession<SessionData, FlashData>(c).get(authSessionKey);
+  const userId = auth?.userId;
+
+  return { userId, identity: userId ?? getClientIp(c) };
+}
 
 /**
  * Coarse IP-based rate limit for `/api/mobile/*`.
@@ -24,15 +103,20 @@ export const mobileIpRateLimit = () =>
     limit: 30,
     standardHeaders: "draft-7",
     keyGenerator: (c) => `mobile:ip:${getClientIp(c)}`,
-    handler: (c) =>
-      c.json(
+    handler: (c) => {
+      // Pre-auth surface, so there is no user id to attribute this to; the
+      // path is all we can safely record.
+      logRateLimitHit({ scope: "mobile-ip", detail: c.req.path });
+
+      return c.json(
         {
           error: {
             message: "Too many requests. Please try again later.",
           },
         },
         429
-      ),
+      );
+    },
   });
 
 /**
@@ -68,26 +152,26 @@ export const appLoaderRateLimit = (limit = 60) =>
     windowMs: 60_000,
     limit,
     standardHeaders: "draft-7",
-    keyGenerator: (c) => {
-      // `hono-rate-limiter` types the handler context with hono's default
-      // `Env`, which is structurally narrower than the `Context<Env>` that
-      // remix-hono's `getSession` expects; cast to bridge the two (the value
-      // is a genuine hono Context, only the generic differs).
-      const auth = getSession<SessionData, FlashData>(c as Context).get(
-        authSessionKey
-      );
-      const identity = auth?.userId ?? getClientIp(c);
-      return `app:${identity}:${c.req.path}`;
-    },
-    handler: (c) =>
-      c.json(
+    keyGenerator: (c) =>
+      `app:${resolveAppLoaderIdentity(c as Context).identity}:${c.req.path}`,
+    handler: (c) => {
+      const { userId } = resolveAppLoaderIdentity(c as Context);
+
+      // The path is the other half of the bucket key, and is what makes a
+      // report actionable: it names the surface the user was on (e.g.
+      // `/bookings/<id>/overview/manage-kits.data`). Loader paths carry no
+      // secrets — the query string is excluded from `c.req.path` anyway.
+      logRateLimitHit({ scope: "app-loader", detail: c.req.path, userId });
+
+      return c.json(
         {
           error: {
             message: "Too many requests. Please try again later.",
           },
         },
         429
-      ),
+      );
+    },
   });
 
 /**
@@ -110,5 +194,16 @@ export const calendarFeedRateLimit = () =>
     limit: 60,
     standardHeaders: "draft-7",
     keyGenerator: (c) => `calendar:${c.req.path}`,
-    handler: (c) => c.text("Too many requests. Please try again later.", 429),
+    handler: (c) => {
+      // why: this limiter keys on the request PATH, which embeds the feed's
+      // SECRET TOKEN (see the doc comment above). Logging the raw path would
+      // leak that secret into the Sentry log trail, so record only that a feed
+      // was limited — the token is never recoverable from this entry.
+      logRateLimitHit({
+        scope: "calendar-feed",
+        detail: "/api/calendar/feed/<redacted>",
+      });
+
+      return c.text("Too many requests. Please try again later.", 429);
+    },
   });
