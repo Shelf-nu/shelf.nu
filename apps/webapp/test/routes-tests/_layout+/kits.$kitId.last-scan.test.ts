@@ -24,6 +24,15 @@
 
 import { OrganizationRoles } from "@prisma/client";
 
+// why: importing the route pulls in `db.server`, whose non-production
+// initialization calls `db.$connect()`. Without this the test attempts a real
+// PostgreSQL connection and emits an unhandled PrismaClientInitializationError
+// — which vitest reports separately from the assertions, so the suite can go
+// green while still being broken.
+vi.mock("~/database/db.server", () => ({
+  db: { $connect: vi.fn(), $transaction: vi.fn() },
+}));
+
 const { mockRequirePermission } = vi.hoisted(() => ({
   mockRequirePermission: vi.fn(),
 }));
@@ -56,6 +65,11 @@ vi.mock("~/modules/kit/service.server", () => ({
   }),
   deleteKit: vi.fn(),
   deleteKitImage: vi.fn(),
+  // why: called immediately after the scan lookup. Omitting it made the loader
+  // throw a missing-export error right past the assertions, which the removed
+  // `.catch()` then swallowed — so the tests passed without the loader ever
+  // returning a payload.
+  getKitCurrentBooking: vi.fn().mockReturnValue(null),
 }));
 // why: `generateQrObj` lives in qr/utils.server (not service.server) and runs
 // inside the same Promise.all as the kit fetch, so it reaches the DB and
@@ -96,11 +110,16 @@ describe("kit detail loader — last scan", () => {
   it("resolves the last scan through the gated helper", async () => {
     callerHolds([OrganizationRoles.BASE]);
 
-    await loader(loaderArgs()).catch(() => undefined);
+    // Awaited without a catch: if the loader throws, the test fails. A
+    // suppressed rejection here would let these assertions pass while the
+    // loader never actually completed.
+    const result = await loader(loaderArgs());
 
     // The defect was that this route called `parseScanData` directly, skipping
     // the `scan:read` gate the helper applies.
     expect(mockGetLastScanForViewer).toHaveBeenCalledTimes(1);
+    // …and the loader really did produce a payload carrying the gated value.
+    expect(result).toHaveProperty("lastScan", null);
   });
 
   it("forwards the viewer's FULL role list, not a single resolved role", async () => {
@@ -109,7 +128,7 @@ describe("kit detail loader — last scan", () => {
     // `role`, hands `hasPermission` a narrower membership than the caller has.
     callerHolds([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
 
-    await loader(loaderArgs()).catch(() => undefined);
+    await loader(loaderArgs());
 
     expect(mockGetLastScanForViewer).toHaveBeenCalledWith(
       expect.objectContaining({
