@@ -566,6 +566,11 @@ describe("audit service", () => {
   describe("removeAssetFromAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      // why: the removal paths now check the affected-row count, because
+      // `deleteMany` reports a vanished row as `{ count: 0 }` where the old
+      // unique `delete` threw. `clearAllMocks` wipes implementations set in an
+      // earlier describe, so this has to be re-established per test.
+      mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
     });
 
     it("removes expected asset from pending audit", async () => {
@@ -574,7 +579,7 @@ describe("audit service", () => {
         name: "Test Audit",
         status: "PENDING",
       });
-      mockDb.auditAsset.findUnique.mockResolvedValue({
+      mockDb.auditAsset.findFirst.mockResolvedValue({
         assetId: "asset-1",
         expected: true,
       });
@@ -591,8 +596,11 @@ describe("audit service", () => {
         select: { id: true, name: true, status: true },
       });
 
-      expect(mockDb.auditAsset.delete).toHaveBeenCalledWith({
-        where: { id: "audit-asset-1" },
+      // Scoped delete: `auditSessionId` is the tenant boundary, since
+      // AuditAsset has no organizationId of its own. `deleteMany` rather than
+      // `delete` because Prisma's unique-where cannot carry the extra filter.
+      expect(mockDb.auditAsset.deleteMany).toHaveBeenCalledWith({
+        where: { id: "audit-asset-1", auditSessionId: "audit-1" },
       });
 
       expect(mockDb.auditSession.update).toHaveBeenCalledWith({
@@ -610,7 +618,7 @@ describe("audit service", () => {
         name: "Test Audit",
         status: "PENDING",
       });
-      mockDb.auditAsset.findUnique.mockResolvedValue({
+      mockDb.auditAsset.findFirst.mockResolvedValue({
         assetId: "asset-1",
         expected: false,
       });
@@ -622,7 +630,7 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditAsset.delete).toHaveBeenCalled();
+      expect(mockDb.auditAsset.deleteMany).toHaveBeenCalled();
       expect(mockDb.auditSession.update).not.toHaveBeenCalled();
     });
 
@@ -658,7 +666,7 @@ describe("audit service", () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
         status: "PENDING",
       });
-      mockDb.auditAsset.findUnique.mockResolvedValue(null);
+      mockDb.auditAsset.findFirst.mockResolvedValue(null);
 
       await expect(
         removeAssetFromAudit({
@@ -674,6 +682,9 @@ describe("audit service", () => {
   describe("removeAssetsFromAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      // why: see the singular describe — the bulk path aborts unless the
+      // delete count matches the ids it just proved were in this audit.
+      mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 3 });
     });
 
     it("removes multiple assets from pending audit", async () => {
@@ -695,9 +706,12 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
+      // `auditSessionId` is the tenant boundary: AuditAsset has no
+      // organizationId column, so an id-only delete reaches every workspace.
       expect(mockDb.auditAsset.deleteMany).toHaveBeenCalledWith({
         where: {
           id: { in: ["audit-asset-1", "audit-asset-2", "audit-asset-3"] },
+          auditSessionId: "audit-1",
         },
       });
 
