@@ -130,6 +130,13 @@ async function cleanupChunks(key: string): Promise<void> {
 let client: SupabaseClient | null = null;
 
 /**
+ * URL the live client was built with. Tracked because `SupabaseClient` does not
+ * expose it, and `apiFetch` asserts against it that the session it is about to
+ * send belongs to the active server.
+ */
+let clientUrl: string | null = null;
+
+/**
  * Creates a client for one server, with the shared secure-storage adapter.
  *
  * @param supabaseUrl - The server's Supabase project URL.
@@ -140,6 +147,7 @@ function createForServer(
   supabaseUrl: string,
   supabaseAnonKey: string
 ): SupabaseClient {
+  clientUrl = supabaseUrl;
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       storage: secureStoreAdapter,
@@ -172,6 +180,16 @@ export function getSupabase(): SupabaseClient {
     );
   }
   return client;
+}
+
+/**
+ * The URL the live Supabase client was built with.
+ *
+ * @returns The URL, or `null` when no client has been created yet.
+ * @see ./server/contract.ts — `isSessionServerMismatched`, which consumes this
+ */
+export function getSupabaseClientUrl(): string | null {
+  return clientUrl;
 }
 
 /**

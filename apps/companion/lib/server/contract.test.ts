@@ -15,6 +15,7 @@ import {
   isAppVersionSupported,
   isResolutionFresh,
   isSameOrigin,
+  isSessionServerMismatched,
   MAX_SERVER_MOBILE_API_VERSION,
   normalizeBaseUrl,
   parseServerConfigResponse,
@@ -356,4 +357,47 @@ test("isAppVersionSupported fails OPEN on an unparseable version", () => {
 
 test("isAppVersionSupported ignores a build suffix", () => {
   assert.equal(isAppVersionSupported("1.3.0-beta.2", "1.3.0"), true);
+});
+
+// ── isSessionServerMismatched ────────────────────────────
+
+test("isSessionServerMismatched is false when the client matches the active server", () => {
+  assert.equal(
+    isSessionServerMismatched(
+      "https://xyz.supabase.co",
+      "https://xyz.supabase.co"
+    ),
+    false
+  );
+});
+
+test("isSessionServerMismatched ignores trailing-slash differences", () => {
+  // CLOUD_SERVER takes its URL straight from env while a switched/hydrated
+  // config is normalized, so the two can differ by a trailing slash while
+  // pointing at the same project. That is NOT a mismatch.
+  assert.equal(
+    isSessionServerMismatched(
+      "https://xyz.supabase.co/",
+      "https://xyz.supabase.co"
+    ),
+    false
+  );
+});
+
+test("isSessionServerMismatched is true for a different project", () => {
+  assert.equal(
+    isSessionServerMismatched(
+      "https://aaa.supabase.co",
+      "https://bbb.supabase.co"
+    ),
+    true
+  );
+});
+
+test("isSessionServerMismatched is false before a client exists", () => {
+  // Nothing has been built yet, so there is no session to be wrong about.
+  assert.equal(
+    isSessionServerMismatched(null, "https://xyz.supabase.co"),
+    false
+  );
 });

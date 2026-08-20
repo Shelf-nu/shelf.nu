@@ -48,6 +48,52 @@ export function initSentry() {
 }
 
 /**
+ * Reports that the live Supabase client and the active server disagree.
+ *
+ * This is a bug, never a user condition, and it is invisible from the outside —
+ * the user just sees an unexplained sign-out — so it must reach Sentry rather
+ * than only a dev console.
+ *
+ * Only hosts are sent, never keys or tokens.
+ *
+ * @param clientUrl - URL the live Supabase client was built with.
+ * @param activeSupabaseUrl - Supabase URL of the active server.
+ */
+export function reportServerMismatch(
+  clientUrl: string | null,
+  activeSupabaseUrl: string
+): void {
+  const host = (value: string | null) => {
+    if (!value) return "none";
+    try {
+      return new URL(value).host;
+    } catch {
+      return "unparseable";
+    }
+  };
+  try {
+    Sentry.captureMessage("Supabase client does not match the active server", {
+      level: "error",
+      tags: { area: "multi-server" },
+      extra: {
+        clientHost: host(clientUrl),
+        activeHost: host(activeSupabaseUrl),
+      },
+    });
+  } catch {
+    // Telemetry must never throw into the request path.
+  }
+  if (__DEV__) {
+    console.error(
+      "[Server] Supabase client/active-server mismatch:",
+      host(clientUrl),
+      "vs",
+      host(activeSupabaseUrl)
+    );
+  }
+}
+
+/**
  * Tags subsequent Sentry events with the Shelf server the app is connected to,
  * and keeps the tag current across server switches.
  *

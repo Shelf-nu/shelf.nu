@@ -2,7 +2,9 @@ import {
   getActiveServer,
   subscribeToServerChange,
 } from "../server/active-server";
-import { getSupabase } from "../supabase";
+import { getSupabase, getSupabaseClientUrl } from "../supabase";
+import { isSessionServerMismatched } from "../server/contract";
+import { reportServerMismatch } from "../sentry";
 
 /**
  * Base URL of the Shelf server the app is currently connected to.
@@ -88,6 +90,40 @@ subscribeToServerChange(() => {
   resetAccessTokenCache();
   attachAuthListener();
 });
+
+/**
+ * Refuses the request when the live Supabase client belongs to a different
+ * project than the active server.
+ *
+ * `apiFetch` / `apiUpload` are the single chokepoint every authenticated
+ * request passes through, which makes this the one place the core invariant of
+ * multi-server support can actually be enforced: the token we are about to send
+ * was minted by the server we are about to send it to.
+ *
+ * It should never fire — `setActiveServer` signs out and rebuilds before
+ * notifying anyone, and sessions are namespaced per Supabase project. It exists
+ * because "cannot happen by construction" is exactly what was believed about
+ * several guards on this feature that turned out to be reachable. Failing
+ * closed converts a silent cross-server credential leak into a clean re-auth.
+ *
+ * @returns An error result when the request must not proceed, otherwise null.
+ */
+function guardSessionServerMatch(): { data: null; error: string } | null {
+  const active = getActiveServer();
+  if (!isSessionServerMismatched(getSupabaseClientUrl(), active.supabaseUrl)) {
+    return null;
+  }
+
+  // Loud on purpose: this is a bug, not a user condition, and it is invisible
+  // from the outside — the user would just see an unexplained sign-out.
+  reportServerMismatch(getSupabaseClientUrl(), active.supabaseUrl);
+  resetAccessTokenCache();
+  notifyAuthError();
+  return {
+    data: null,
+    error: "Session expired. Please sign in again.",
+  };
+}
 
 /** Returns a valid access token, using cache when possible. */
 export async function getAccessToken(): Promise<string | null> {
@@ -183,6 +219,9 @@ export async function apiFetch<T>(
   let timedOut = false;
 
   try {
+    const mismatch = guardSessionServerMatch();
+    if (mismatch) return mismatch;
+
     const accessToken = await getAccessToken();
 
     if (!accessToken) {
@@ -302,6 +341,9 @@ export async function apiUpload<T>(
   formData: FormData
 ): Promise<{ data: T | null; error: string | null }> {
   try {
+    const mismatch = guardSessionServerMatch();
+    if (mismatch) return mismatch;
+
     const accessToken = await getAccessToken();
 
     if (!accessToken) {

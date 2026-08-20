@@ -318,6 +318,35 @@ export function parseServerConfigResponse(
 }
 
 /**
+ * Whether the live Supabase client belongs to a different project than the
+ * active server.
+ *
+ * The single invariant every API request depends on: the token we are about to
+ * send was minted by the server we are about to send it to. It holds by
+ * construction today — sessions are namespaced per Supabase project, and
+ * `setActiveServer` signs out and rebuilds before notifying anyone — but this
+ * makes it checkable rather than merely believed. If a future teardown or
+ * rebuild bug breaks it, the failure becomes a clean re-auth instead of one
+ * server silently receiving another server's credentials.
+ *
+ * Compares normalized origins: `CLOUD_SERVER` takes its URL straight from the
+ * env var while a switched or hydrated config has been normalized, so the two
+ * can differ by a trailing slash while naming the same project.
+ *
+ * @param clientUrl - URL the live Supabase client was built with, or null when
+ *   no client has been created yet.
+ * @param activeSupabaseUrl - The active server's Supabase URL.
+ * @returns `true` only when both exist and genuinely differ.
+ */
+export function isSessionServerMismatched(
+  clientUrl: string | null | undefined,
+  activeSupabaseUrl: string
+): boolean {
+  if (!clientUrl) return false;
+  return normalizeBaseUrl(clientUrl) !== normalizeBaseUrl(activeSupabaseUrl);
+}
+
+/**
  * Whether a cached resolution is still usable.
  *
  * @param entry - The cached resolution.
