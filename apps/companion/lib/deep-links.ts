@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
-import { api } from "./api";
+import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import { getScanCoordinates } from "./scan-location";
 
@@ -22,6 +22,11 @@ import { getScanCoordinates } from "./scan-location";
  *   https://app.shelf.nu/assets/{id}
  *   https://app.shelf.nu/bookings/{id}
  *   https://app.shelf.nu/audits/{id}
+ *
+ * The host above is illustrative, not exhaustive: the app can be connected to a
+ * self-hosted Shelf instance, and the parsing here is host-agnostic (it matches
+ * on path segments). Which hosts the OS actually delivers is decided by the
+ * native association, not by this file.
  *
  * The claimed paths are kept in sync with the iOS AASA `components` list and
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
@@ -131,7 +136,7 @@ async function resolveQrAndNavigate(qrId: string) {
   // hand off to the web resolver. Loop-safe in-app browser via openShelfWebUrl,
   // NOT Linking.openURL, because /qr/* is a verified App Link and openURL would
   // re-enter the app and loop back here.
-  void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+  void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
 }
 
 /**
