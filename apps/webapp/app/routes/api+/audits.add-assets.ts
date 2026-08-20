@@ -5,7 +5,10 @@ import { z } from "zod";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { addAssetsToAudit } from "~/modules/audit/service.server";
+import {
+  addAssetsToAudit,
+  requireAuditAssignee,
+} from "~/modules/audit/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -29,13 +32,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.audit,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      canSeeAllCustody,
+      isSelfServiceOrBase,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.update,
+    });
 
     const formData = await request.formData();
 
@@ -50,6 +58,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         additionalData: { organizationId, userId },
       }
     );
+
+    // `audit: update` authorizes updating audits in general, never THIS audit.
+    // Without this a BASE or SELF_SERVICE member could widen the scope of any
+    // pending audit in the workspace — adding assets to one they were never
+    // assigned to. ADMIN/OWNER are unrestricted. (detail.dev D043)
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
 
     // Determine if we're selecting all items across multiple pages
     const isSelectingAll =

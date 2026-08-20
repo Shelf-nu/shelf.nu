@@ -523,7 +523,7 @@ export default function BulkPartialCheckoutDialog({
       <Dialog
         open={open}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog lg:w-[400px]")}
+        className="lg:w-[400px]"
         title={
           <div className="w-full">
             <div className={tw("mb-2")}>

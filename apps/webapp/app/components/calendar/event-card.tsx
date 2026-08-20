@@ -1,5 +1,4 @@
 import type { EventContentArg } from "@fullcalendar/core";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import { ArrowRightIcon, Boxes } from "lucide-react";
 
@@ -243,16 +242,14 @@ export default function renderEventCard({ event }: EventCardProps) {
           </div>
         </div>
       </HoverCardTrigger>
-      <HoverCardPortal>
-        <HoverCardContent
-          className="pointer-events-none z-[99999] md:w-auto md:max-w-[450px]"
-          side="top"
-          sideOffset={8}
-          collisionPadding={16}
-        >
-          <EventCardContent booking={booking} />
-        </HoverCardContent>
-      </HoverCardPortal>
+      <HoverCardContent
+        className="pointer-events-none z-[99999] md:w-auto md:max-w-[450px]"
+        side="top"
+        sideOffset={8}
+        collisionPadding={16}
+      >
+        <EventCardContent booking={booking} />
+      </HoverCardContent>
     </HoverCard>
   );
 }

@@ -50,7 +50,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getHints, useHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -143,13 +143,12 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const hints = getHints(request);
     // TIMEZONE FIX: parse the submitted wall-clock dates in the acting user's
     // RESOLVED pref timezone (matches display), not the browser hint.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
@@ -166,7 +165,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     const { startDate: from, endDate: to } = parseData(
       formData,
       DuplicateBookingSchema({
-        hints: hintsWithPrefTz,
+        prefs,
         workingHours,
         bookingSettings,
         isAdminOrOwner,
@@ -234,10 +233,9 @@ export default function DuplicateBooking() {
   const actionData = useActionData<DataOrErrorResponse>();
 
   const disabled = useDisabled();
-  const hints = useHints();
   // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
   // timezone preference (the same one display uses), not the browser hint, so
-  // it agrees with the server parse. Locale still comes from `hints`.
+  // it agrees with the server parse.
   const prefs = useFormatPrefs();
 
   // Working hours + booking settings drive the date defaults and validation,
@@ -272,7 +270,7 @@ export default function DuplicateBooking() {
   const zo = useZorm(
     "DuplicateBooking",
     DuplicateBookingSchema({
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       workingHours,
       bookingSettings,
       isAdminOrOwner: isAdministratorOrOwner,
