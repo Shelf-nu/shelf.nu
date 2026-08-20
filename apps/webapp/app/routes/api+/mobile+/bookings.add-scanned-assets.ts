@@ -9,6 +9,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -67,8 +68,10 @@ export async function action({ request }: ActionFunctionArgs) {
     // bypassing the entitlement the web enforces.
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = BodySchema.parse(
-      await request.json()
+    const { bookingId, assetIds, kitIds } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
     );
 
     // Org-scoped booking lookup — a foreign-org booking id 404s here.
