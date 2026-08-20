@@ -35,26 +35,12 @@ import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { wallClockDateInZone, wallClockWireString } from "@shelf/datetime";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
-
-function getTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
-function toLocalWire(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
-}
 
 export default function EditBookingScreen() {
   const router = useRouter();
@@ -62,11 +48,12 @@ export default function EditBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
-  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
-  // are device-local, so formatting them in the preferred timezone would show a
-  // different time than the one being edited and submitted (CodeRabbit, #2798).
-  const { formatDateTime } = useDateFormatter();
+  // `from`/`to` below are wall-clock CARRIERS in the user's preference zone, not
+  // instants — their local fields are what the picker edits and what gets
+  // submitted. So the labels must read those local fields verbatim
+  // (`localeOnly`) and apply the user's FORMAT only: converting a carrier
+  // through a zone would shift it away from the value being edited.
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -126,8 +113,13 @@ export default function EditBookingScreen() {
           ? { id: b.custodianTeamMember.id, name: b.custodianTeamMember.name }
           : null
       );
-      setFrom(new Date(b.from));
-      setTo(new Date(b.to));
+      // The booking's stored instants become carriers of their wall clock in the
+      // preference zone, so the picker shows the same time the booking detail
+      // screen does — and re-submitting an untouched form is a no-op.
+      const fromCarrier = wallClockDateInZone(b.from, prefs.timeZone);
+      const toCarrier = wallClockDateInZone(b.to, prefs.timeZone);
+      setFrom(fromCarrier);
+      setTo(toCarrier);
       setSelectedTagIds(new Set(b.tags.map((t) => t.id)));
       setIsDraft(b.status === "DRAFT");
       // Snapshot the loaded values so the discard guard only fires on a REAL
@@ -136,8 +128,11 @@ export default function EditBookingScreen() {
         name: b.name,
         description: b.description ?? "",
         custodianId: b.custodianTeamMember?.id ?? null,
-        from: new Date(b.from).getTime(),
-        to: new Date(b.to).getTime(),
+        // Snapshot the CARRIERS, not the instants: the guard below compares
+        // these against the picker state, which is carriers. Mixing the two
+        // makes an untouched form look edited by the zone's offset.
+        from: fromCarrier.getTime(),
+        to: toCarrier.getTime(),
         tagIds: [...b.tags.map((t) => t.id)].sort().join(","),
       };
       if (tagsRes.data?.tags) setTags(tagsRes.data.tags);
@@ -146,7 +141,11 @@ export default function EditBookingScreen() {
     return () => {
       active = false;
     };
-  }, [id, currentOrg]);
+    // `prefs.timeZone` is inert here in practice: this effect returns early
+    // until `currentOrg` exists, and the org and the user profile are set from
+    // the same `/me` response — so the zone is already resolved by the time a
+    // load runs. Listed because the seeding above genuinely depends on it.
+  }, [id, currentOrg, prefs.timeZone]);
 
   // ── Unsaved-changes guard (only after a REAL edit) ─────
   const navigation = useNavigation();
@@ -245,9 +244,11 @@ export default function EditBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: toLocalWire(from),
-      endDate: toLocalWire(to),
-      timeZone: getTimeZone(),
+      startDate: wallClockWireString(from),
+      endDate: wallClockWireString(to),
+      // The wire strings carry no offset, so the zone they were written in has
+      // to travel with them — that is the preference zone the pickers edit in.
+      timeZone: prefs.timeZone,
       tags: Array.from(selectedTagIds),
     });
     setIsSubmitting(false);

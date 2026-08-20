@@ -66,10 +66,10 @@ function atWallClock(zoned: DateTime, time: string): DateTime {
  * Working hours overrides represent an absolute calendar date with no time
  * component — the DB column is `@db.Date`, which Prisma hydrates as a Date at
  * UTC midnight. That Date is only a transport artifact: formatting it in the
- * runtime's local timezone shifts it one day back for users west of UTC, which
- * used to make an override for day D match bookings on day D-1. Reading the
- * date from UTC (or treating an already-YYYY-MM-DD string as-is) preserves the
- * absolute-date meaning.
+ * runtime's local timezone shifts it one day back for users west of UTC, making
+ * an override for day D match bookings on day D-1. Reading the date from UTC
+ * (or treating an already-YYYY-MM-DD string as-is) preserves the absolute-date
+ * meaning.
  *
  * Contract: string inputs must be either date-only ("YYYY-MM-DD") or a UTC ISO
  * timestamp ("YYYY-MM-DD…Z"). Offset-style strings like
@@ -180,8 +180,8 @@ interface NextWorkingDayResult {
  * If no working day is found within 14 days, it defaults to tomorrow's 9 AM - 6 PM.
  * All calendar-day and wall-clock reasoning happens in `timeZone`, so "tomorrow"
  * and "9 AM" mean what the user means. Reading them off a device-local `Date`
- * put the search on the wrong day whenever the device and preference zones
- * straddled midnight.
+ * instead puts the search on the wrong day whenever the device and preference
+ * zones straddle midnight.
  *
  * @param currentDate - The date from which to start searching for the next working day.
  * @param workingHours - The working hours data containing weekly schedules and overrides.
@@ -420,56 +420,6 @@ function getOriginalDefaultTimes(
     startDate,
     endDate: dateForDateTimeInputValue(endDateTime.toJSDate(), timeZone),
   };
-}
-
-/**
- * Calculates the effective end date for a booking by extending the duration
- * to skip closed days when maxBookingLengthSkipClosedDays is enabled.
- *
- * @param startDate - The start date of the booking
- * @param endDate - The end date of the booking
- * @param workingHoursData - Working hours configuration with schedules and overrides
- * @param skipClosedDays - Whether to skip closed days in the calculation
- * @param timeZone - IANA zone that decides which calendar day the walk is on.
- *   Same contract as {@link calculateBusinessHoursDuration}.
- * @returns Effective end date for validation (or original endDate if not skipping)
- */
-export function calculateEffectiveEndDate(
-  startDate: Date,
-  endDate: Date,
-  workingHoursData: WorkingHoursData | null | undefined,
-  skipClosedDays: boolean,
-  timeZone: string
-): Date {
-  // If not skipping closed days or no working hours data, use original endDate
-  if (!skipClosedDays || !workingHoursData?.enabled) {
-    return endDate;
-  }
-
-  let closedDaysCount = 0;
-  let cursor = DateTime.fromJSDate(startDate).setZone(timeZone);
-  const end = DateTime.fromJSDate(endDate).setZone(timeZone);
-
-  // Count closed days between start and original end date
-  while (cursor < end) {
-    // Which day this is, and whether it is open, are decided in `timeZone` —
-    // see the shared resolver. Reading them off a device-local Date put the
-    // count on the wrong days whenever the device and preference zones
-    // straddled midnight.
-    const isOpen =
-      resolveDaySchedule(cursor, workingHoursData)?.isOpen ?? false;
-
-    if (!isOpen) {
-      closedDaysCount++;
-    }
-
-    // Move to next day. `plus({ days })` steps by calendar day in `timeZone`,
-    // so the walk stays correct across a DST boundary.
-    cursor = cursor.plus({ days: 1 });
-  }
-
-  // Extend the end date by the number of closed days
-  return end.plus({ days: closedDaysCount }).toJSDate();
 }
 
 /**

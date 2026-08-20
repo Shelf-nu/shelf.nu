@@ -180,6 +180,116 @@ export function calendarDayIndex(
   );
 }
 
+/** An instant's wall-clock reading in some zone, as plain calendar numbers. */
+export type WallClockParts = {
+  /** Full year, e.g. 2026. */
+  year: number;
+  /** 1-12, NOT the 0-11 a `Date` constructor wants. */
+  month: number;
+  /** 1-31. */
+  day: number;
+  /** 0-23. */
+  hour: number;
+  /** 0-59. */
+  minute: number;
+};
+
+/**
+ * What a clock on the wall in `timeZone` reads at the given instant.
+ *
+ * The returned numbers carry no zone of their own — they are what a person
+ * standing in `timeZone` would see, which is exactly what a naive wall-clock
+ * wire string (`"2026-08-20T09:00"`) and a native date picker both deal in.
+ * Pair them with the zone they were read in, or they mean nothing.
+ *
+ * `month` is 1-12 so the parts read like the wire format. Remember to subtract
+ * one when feeding a `Date` constructor.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone to read the clock in
+ * @returns the calendar/clock fields as seen in that zone
+ */
+export function wallClockPartsInZone(
+  value: string | Date,
+  timeZone: string
+): WallClockParts {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+/**
+ * A `Date` whose LOCAL fields carry an instant's wall clock in `timeZone`.
+ *
+ * The result is deliberately NOT the instant you passed in, and comparing it to
+ * one is meaningless. It is a carrier: `getFullYear()` … `getMinutes()` on it
+ * return what a clock in `timeZone` reads, which is what a UI that can only
+ * speak `Date` in the runtime's own zone needs in order to display and edit
+ * another zone's wall clock. React Native's date picker is exactly that UI.
+ *
+ * Round-trip it with {@link wallClockWireString} to get the naive wire string,
+ * and send the zone alongside — the pair is what carries the meaning. Never
+ * hand one of these to anything expecting a real instant (an API that wants an
+ * ISO timestamp, a duration subtraction, a sort against real instants).
+ *
+ * Day arithmetic on the result works in wall-clock terms, which is usually what
+ * a form default wants: `d.setDate(d.getDate() + 1)` moves to the next calendar
+ * day IN `timeZone`. The one caveat is the runtime's own DST — a wall clock the
+ * runtime zone skips cannot be represented by a `Date`, so it lands an hour
+ * off. That is inherent to picking dates through `Date` and affects the native
+ * picker identically.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone whose wall clock should be carried
+ * @returns a `Date` whose local fields spell that wall clock
+ */
+export function wallClockDateInZone(
+  value: string | Date,
+  timeZone: string
+): Date {
+  const { year, month, day, hour, minute } = wallClockPartsInZone(
+    value,
+    timeZone
+  );
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+/**
+ * Serialise a wall-clock carrier to the naive wire format, `yyyy-MM-ddTHH:mm`.
+ *
+ * Reads the LOCAL fields, so it is the inverse of {@link wallClockDateInZone}
+ * and inherits the same contract: the string alone is ambiguous, and the
+ * receiver must be told which zone it was written in. Shelf's booking APIs take
+ * that as a sibling `timeZone` field.
+ *
+ * @param wallClock - a carrier from {@link wallClockDateInZone}, or a `Date`
+ *   whose local fields are already the wall clock you mean
+ * @returns the naive `yyyy-MM-ddTHH:mm` string, no offset, no seconds
+ */
+export function wallClockWireString(wallClock: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${wallClock.getFullYear()}-${pad(wallClock.getMonth() + 1)}-` +
+    `${pad(wallClock.getDate())}T${pad(wallClock.getHours())}:` +
+    `${pad(wallClock.getMinutes())}`
+  );
+}
+
 /** Superset of the option shapes DateS callers pass today (facts-02 §C). */
 export type DateFormatOptions = {
   weekday?: "long" | "short" | "narrow";

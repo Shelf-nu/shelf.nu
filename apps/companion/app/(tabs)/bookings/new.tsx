@@ -38,28 +38,32 @@ import DateTimePicker, {
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { wallClockDateInZone, wallClockWireString } from "@shelf/datetime";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 
-/** Device IANA time zone (falls back to UTC) — sent so the server resolves the
- * local wire dates correctly without a client-hint cookie. */
-function getTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
+/**
+ * The default booking window — tomorrow 09:00-17:00 as `timeZone` reads it.
+ *
+ * Returns wall-clock carriers, not instants: their LOCAL fields spell the
+ * preference-zone wall clock, which is what the native picker edits and what
+ * `wallClockWireString` submits. See {@link wallClockDateInZone}.
+ *
+ * @param timeZone - the acting user's preference zone
+ * @returns carriers for the start and end of the default window
+ */
+function defaultBookingWindow(timeZone: string): { from: Date; to: Date } {
+  const tomorrow = wallClockDateInZone(new Date(), timeZone);
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
-/** Format a Date as the server's local wire string: `yyyy-MM-dd'T'HH:mm`. */
-function toLocalWire(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
+  const from = new Date(tomorrow);
+  from.setHours(9, 0, 0, 0);
+  const to = new Date(tomorrow);
+  to.setHours(17, 0, 0, 0);
+  return { from, to };
 }
 
 export default function CreateBookingScreen() {
@@ -67,11 +71,12 @@ export default function CreateBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
-  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
-  // are device-local, so formatting them in the preferred timezone would show a
-  // different time than the one being edited and submitted (CodeRabbit, #2798).
-  const { formatDateTime } = useDateFormatter();
+  // `from`/`to` below are wall-clock CARRIERS in the user's preference zone, not
+  // instants — their local fields are what the picker edits and what gets
+  // submitted. So the labels must read those local fields verbatim
+  // (`localeOnly`) and apply the user's FORMAT only: converting a carrier
+  // through a zone would shift it away from the value being edited.
+  const { formatDateTime, prefs } = useDateFormatter();
 
   // ── Form state ──────────────────────────────────
   const [name, setName] = useState("");
@@ -79,22 +84,15 @@ export default function CreateBookingScreen() {
   const [custodian, setCustodian] = useState<TeamMember | null>(null);
   // Default to a sensible near-future window (tomorrow 9:00–17:00) so the form
   // is one-tap usable; the user can still adjust either picker.
-  const [from, setFrom] = useState<Date | null>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d;
-  });
-  const [to, setTo] = useState<Date | null>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(17, 0, 0, 0);
-    return d;
-  });
-  // Capture the initial default window (refs init once) so a date-only change
-  // still counts as an unsaved edit in the discard guard below.
+  const [initialWindow] = useState(() => defaultBookingWindow(prefs.timeZone));
+  const [from, setFrom] = useState<Date | null>(initialWindow.from);
+  const [to, setTo] = useState<Date | null>(initialWindow.to);
+  // Capture the default window so a date-only change still counts as an unsaved
+  // edit in the discard guard below. Re-seeding keeps these in step.
   const initialFromRef = useRef(from?.getTime() ?? null);
   const initialToRef = useRef(to?.getTime() ?? null);
+  // Whether the user has picked a date themselves; gates the re-seed below.
+  const datesTouchedRef = useRef(false);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -155,13 +153,17 @@ export default function CreateBookingScreen() {
       if (Platform.OS === "android") setShowFromPicker(false);
       if (event.type === "dismissed") return;
       if (selected) {
+        datesTouchedRef.current = true;
         setFrom(selected);
-        // Keep `to` after `from`: if it's now invalid, push it to +1 day.
-        setTo((prev) =>
-          prev && prev <= selected
-            ? new Date(selected.getTime() + 24 * 60 * 60 * 1000)
-            : prev
-        );
+        // Keep `to` after `from`: if it's now invalid, push it to +1 day. Step
+        // the calendar field rather than adding 24h — these are wall-clock
+        // carriers, and a fixed 24h shifts the clock across a device DST edge.
+        setTo((prev) => {
+          if (!prev || prev > selected) return prev;
+          const next = new Date(selected);
+          next.setDate(next.getDate() + 1);
+          return next;
+        });
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
@@ -173,12 +175,27 @@ export default function CreateBookingScreen() {
       if (Platform.OS === "android") setShowToPicker(false);
       if (event.type === "dismissed") return;
       if (selected) {
+        datesTouchedRef.current = true;
         setTo(selected);
         if (Platform.OS === "ios") setShowToPicker(false);
       }
     },
     []
   );
+
+  // The preference zone arrives with the user profile, so on a cold start this
+  // screen can mount while `/me` is still in flight — at which point
+  // `formatPrefs` still holds the device-zone fallback and the seeded window
+  // means the wrong wall clock. Re-seed once the real zone lands, but never over
+  // a date the user has already picked.
+  useEffect(() => {
+    if (datesTouchedRef.current) return;
+    const seeded = defaultBookingWindow(prefs.timeZone);
+    setFrom(seeded.from);
+    setTo(seeded.to);
+    initialFromRef.current = seeded.from.getTime();
+    initialToRef.current = seeded.to.getTime();
+  }, [prefs.timeZone]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) => {
@@ -214,9 +231,11 @@ export default function CreateBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: toLocalWire(from),
-      endDate: toLocalWire(to),
-      timeZone: getTimeZone(),
+      startDate: wallClockWireString(from),
+      endDate: wallClockWireString(to),
+      // The wire strings carry no offset, so the zone they were written in has
+      // to travel with them — that is the preference zone the pickers edit in.
+      timeZone: prefs.timeZone,
       tags: selectedTagIds.size > 0 ? Array.from(selectedTagIds) : undefined,
     });
     setIsSubmitting(false);
