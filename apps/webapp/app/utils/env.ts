@@ -67,6 +67,7 @@ declare global {
       /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
       FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
+      FEEDBACK_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
@@ -207,6 +208,20 @@ export const SENTRY_RELEASE =
   "";
 
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
+  isRequired: false,
+});
+
+/**
+ * Internal inbox(es) that receive in-app feedback: issues, ideas and error
+ * reports. Accepts a comma separated list so more than one person gets
+ * notified (e.g. the support inbox plus whoever triages product feedback).
+ * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone,
+ * which is what every deployment did before this variable existed.
+ *
+ * Server side only, and deliberately absent from `getBrowserEnv()`: unlike
+ * SUPPORT_EMAIL it is never shown to users, it only routes internal mail.
+ */
+export const FEEDBACK_EMAIL = getEnv("FEEDBACK_EMAIL", {
   isRequired: false,
 });
 
