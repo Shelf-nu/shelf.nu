@@ -36,7 +36,10 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import {
+  requireAuditAssignee,
+  requireAuditAssigneeForBaseSelfService,
+} from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -75,6 +78,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const auditAsset = await db.auditAsset.findFirst({
       where: {
         id: auditAssetId,
+        // Bound to the audit named in the URL, not merely to the org. Without
+        // `auditSessionId` a caller could pass an audit asset from a DIFFERENT
+        // audit and the page would render it under this audit's heading — and
+        // the action's assignment guard, which keys on `auditId`, would then be
+        // validating a different audit from the one being written to.
+        auditSessionId: auditId,
         auditSession: {
           organizationId,
         },
@@ -195,12 +204,51 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
+
+    // The loader gates the read with `requireAuditAssigneeForBaseSelfService`;
+    // this action did not gate the writes. Every intent below mutates the
+    // audit — notes, condition, evidence deletion — so the guard is hoisted
+    // here rather than repeated per intent, and a new intent inherits it.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
+
+    // …and prove the audit asset actually belongs to that audit. Both ids come
+    // from the URL and were never tied together, so guarding on `auditId`
+    // alone would validate assignment against one audit while every intent
+    // below writes to an asset in another. `AuditAsset` has no
+    // `organizationId` of its own — the session link is its whole tenant
+    // boundary — so the org filter goes through the relation.
+    const auditAssetInSession = await db.auditAsset.findFirst({
+      where: {
+        id: auditAssetId,
+        auditSessionId: auditId,
+        auditSession: { organizationId },
+      },
+      select: { id: true },
+    });
+
+    if (!auditAssetInSession) {
+      throw new ShelfError({
+        cause: null,
+        // Uniform with a genuinely unknown id: both ids are caller-supplied,
+        // so a distinct message would confirm which ones exist.
+        message: "Audit asset not found in this audit",
+        additionalData: { auditId, auditAssetId },
+        label: "Audit",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
     const formData = await request.clone().formData();
     const intent = formData.get("intent") as string;
@@ -267,7 +315,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Prevent deletion of auto-generated notes (UPDATE type)
       const noteToDelete = await db.auditNote.findFirst({
-        where: { id: noteId, auditSession: { organizationId } },
+        where: {
+          id: noteId,
+          // Bound to the audit in the URL as well as the org. Org scope alone
+          // let an assignee of one audit delete notes belonging to another
+          // audit in the same workspace.
+          auditSessionId: auditId,
+          auditAssetId,
+          auditSession: { organizationId },
+        },
         select: { type: true },
       });
 
@@ -294,6 +350,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deleted = await db.auditNote.deleteMany({
         where: {
           id: noteId,
+          auditSessionId: auditId,
+          auditAssetId,
           auditSession: { organizationId },
         },
       });
@@ -444,6 +502,35 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
+      // Prove the note is ours BEFORE uploading anything.
+      //
+      // The scoped lookup used to sit inside the transaction below, AFTER this
+      // loop — so a request naming a note in another audit (or another
+      // organization) was correctly refused, but only once the images had
+      // already been written to storage and to the database. The refusal was
+      // sound; the side effect was not.
+      const targetNote = await db.auditNote.findFirst({
+        where: {
+          id: noteId,
+          auditSessionId: auditId,
+          auditAssetId,
+          auditSession: { organizationId },
+        },
+        select: { id: true },
+      });
+
+      if (!targetNote) {
+        throw new ShelfError({
+          cause: null,
+          // Uniform with a genuinely unknown id — `noteId` is caller-supplied.
+          message: "Note not found",
+          additionalData: { noteId, auditId },
+          label: "Audit Image",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+
       // Upload each file sequentially
       const uploadedImages: Array<{ id: string }> = [];
       for (const file of files) {
@@ -469,54 +556,113 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       // Update the note to append the audit_images tag
-      await db.$transaction(async (tx) => {
-        const existingNote = await tx.auditNote.findUnique({
-          where: { id: noteId },
-        });
-
-        if (!existingNote) {
-          throw new ShelfError({
-            cause: null,
-            message: "Note not found",
-            additionalData: { noteId },
-            label: "Audit Image",
-            status: 404,
+      // The pre-check above closes the ordinary case. This still re-checks
+      // under the write, because the note can be deleted between the two —
+      // and if that happens the uploads are rolled back rather than left
+      // orphaned in storage with nothing pointing at them.
+      try {
+        await db.$transaction(async (tx) => {
+          // SECURITY (cross-organization IDOR): `AuditNote` has no
+          // `organizationId` column — it inherits its tenant through
+          // `auditSession` — so an id-only lookup addressed every note in the
+          // table, in every workspace. `noteId` comes from the request body, so
+          // this branch could READ and then OVERWRITE the content of any audit
+          // note in any organization.
+          //
+          // The sibling delete branch was hardened for exactly this and carries
+          // a comment saying so; this path was missed.
+          const existingNote = await tx.auditNote.findFirst({
+            where: {
+              id: noteId,
+              auditSessionId: auditId,
+              auditAssetId,
+              auditSession: { organizationId },
+            },
           });
-        }
 
-        // Extract existing image IDs from content if any
-        const existingImageIds: string[] = [];
-        const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
-        let match;
-        while ((match = regex.exec(existingNote.content)) !== null) {
-          existingImageIds.push(...match[1].split(","));
-        }
+          if (!existingNote) {
+            throw new ShelfError({
+              cause: null,
+              message: "Note not found",
+              additionalData: { noteId },
+              label: "Audit Image",
+              status: 404,
+            });
+          }
 
-        // Add new image IDs
-        const newImageIds = uploadedImages.map((img) => img.id);
-        const allImageIds = [...existingImageIds, ...newImageIds];
+          // Extract existing image IDs from content if any
+          const existingImageIds: string[] = [];
+          const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
+          let match;
+          while ((match = regex.exec(existingNote.content)) !== null) {
+            existingImageIds.push(...match[1].split(","));
+          }
 
-        // Remove existing audit_images tags, sanitize the surviving user-authored
-        // body so a previously-injected delimiter can't survive a re-tag, then
-        // append the fresh trusted tag.
-        const strippedTags = existingNote.content.replace(
-          /{%\s*audit_images[^%]*%}/g,
-          ""
-        );
-        // stripMarkdocDelimiters trims and removes `{%`/`%}` from user text only;
-        // the trusted tag is appended after, so it is never touched.
-        const sanitizedBody = stripMarkdocDelimiters(strippedTags);
-        const updatedContent = `${sanitizedBody}\n\n{% audit_images count=${
-          allImageIds.length
-        } ids="${allImageIds.join(",")}" /%}`;
+          // Add new image IDs
+          const newImageIds = uploadedImages.map((img) => img.id);
+          const allImageIds = [...existingImageIds, ...newImageIds];
 
-        await tx.auditNote.update({
-          where: { id: noteId },
-          data: {
-            content: updatedContent,
-          },
+          // Remove existing audit_images tags, sanitize the surviving user-authored
+          // body so a previously-injected delimiter can't survive a re-tag, then
+          // append the fresh trusted tag.
+          const strippedTags = existingNote.content.replace(
+            /{%\s*audit_images[^%]*%}/g,
+            ""
+          );
+          // stripMarkdocDelimiters trims and removes `{%`/`%}` from user text only;
+          // the trusted tag is appended after, so it is never touched.
+          const sanitizedBody = stripMarkdocDelimiters(strippedTags);
+          const updatedContent = `${sanitizedBody}\n\n{% audit_images count=${
+            allImageIds.length
+          } ids="${allImageIds.join(",")}" /%}`;
+
+          // `updateMany`, not `update`: a unique-only `where` cannot carry the
+          // parent scope, and the write must be scoped in its own right rather
+          // than relying on the read above surviving a future refactor.
+          const updated = await tx.auditNote.updateMany({
+            where: {
+              id: noteId,
+              auditSessionId: auditId,
+              // …and to the ASSET the URL names. This route creates notes with
+              // `auditAssetId` set and lists them filtered by it, so a note on a
+              // different asset is one this page never offered. Not a privilege
+              // boundary — assignment is per-audit, so an assignee reaches every
+              // asset in it — but appending images to, or deleting, another
+              // asset's note corrupts data the caller never saw.
+              auditAssetId,
+              auditSession: { organizationId },
+            },
+            data: {
+              content: updatedContent,
+            },
+          });
+
+          if (updated.count === 0) {
+            throw new ShelfError({
+              cause: null,
+              message: "Note not found",
+              additionalData: { noteId, auditId },
+              label: "Audit",
+              status: 404,
+              shouldBeCaptured: false,
+            });
+          }
         });
-      });
+      } catch (cause) {
+        // Best-effort cleanup. A failure here must not mask the original
+        // error, which is the one the caller needs to see.
+        await Promise.all(
+          uploadedImages.map((img) =>
+            deleteAuditImage({
+              imageId: img.id,
+              organizationId,
+              auditSessionId: auditId,
+              auditAssetId,
+            }).catch(() => undefined)
+          )
+        );
+        throw cause;
+      }
 
       return payload({ images: uploadedImages });
     }
@@ -537,6 +683,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       await deleteAuditImage({
         imageId,
         organizationId,
+        auditSessionId: auditId,
+        auditAssetId,
       });
 
       return payload({ success: true });
