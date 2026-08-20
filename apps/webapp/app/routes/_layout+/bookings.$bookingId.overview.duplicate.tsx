@@ -252,7 +252,8 @@ export default function DuplicateBooking() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner
+      isAdministratorOrOwner,
+      prefs
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
