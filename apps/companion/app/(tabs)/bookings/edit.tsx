@@ -186,11 +186,15 @@ export default function EditBookingScreen() {
       if (event.type === "dismissed") return;
       if (selected) {
         setFrom(selected);
-        setTo((prev) =>
-          prev && prev <= selected
-            ? new Date(selected.getTime() + 24 * 60 * 60 * 1000)
-            : prev
-        );
+        // Keep `to` after `from`: if it's now invalid, push it to +1 day. Step
+        // the calendar field rather than adding 24h — these are wall-clock
+        // carriers, and a fixed 24h shifts the clock across a device DST edge.
+        setTo((prev) => {
+          if (!prev || prev > selected) return prev;
+          const next = new Date(selected);
+          next.setDate(next.getDate() + 1);
+          return next;
+        });
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },

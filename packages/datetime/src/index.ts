@@ -249,10 +249,20 @@ export function wallClockPartsInZone(
  *
  * Day arithmetic on the result works in wall-clock terms, which is usually what
  * a form default wants: `d.setDate(d.getDate() + 1)` moves to the next calendar
- * day IN `timeZone`. The one caveat is the runtime's own DST — a wall clock the
- * runtime zone skips cannot be represented by a `Date`, so it lands an hour
- * off. That is inherent to picking dates through `Date` and affects the native
- * picker identically.
+ * day IN `timeZone`. Step the calendar field to do it — adding a fixed 24h is
+ * absolute-timeline arithmetic and lands on a different clock across a runtime
+ * DST edge.
+ *
+ * KNOWN LIMITATION — a wall clock that the RUNTIME zone skips has no `Date` to
+ * carry it, so it normalises forward an hour: `2026-03-08T02:30` carried on a
+ * device in America/Los_Angeles round-trips as `03:30`. It bites only when the
+ * runtime zone differs from `timeZone` (when they match, the clock does not
+ * exist in `timeZone` either and moving forward is the defensible answer), and
+ * costs one hour of clocks per zone per year. The escape hatch is to stop
+ * routing through device-local fields at all: React Native's date picker takes
+ * a `timeZoneName` prop on iOS and Android, so it can be driven in `timeZone`
+ * directly and hand back a real instant — a different contract from this one,
+ * not a patch to it.
  *
  * @param value - a Date or parseable date string (a UTC instant)
  * @param timeZone - the IANA zone whose wall clock should be carried
