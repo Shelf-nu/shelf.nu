@@ -195,6 +195,25 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    * Additional className to form
    */
   formClassName?: string;
+
+  /**
+   * Opt in to a non-clipping, non-scrolling dialog body (`overflow: visible`).
+   *
+   * Set this ONLY when the dialog renders an inline, non-portaled floating
+   * element that must escape the body box — today that means `TagsAutocomplete`,
+   * whose `.react-tags__listbox` is absolutely positioned inside its own field.
+   * Radix popovers/selects wrapped in `PopoverPortal` render outside the dialog
+   * entirely and need nothing here.
+   *
+   * The cost is real: `.dialog-body` is the only scroll container a dialog has,
+   * so opting in means a dialog taller than `md:max-h-[calc(100vh-4rem)]` pushes
+   * its footer past the viewport with no way to reach it. This used to be on for
+   * every bulk dialog, which is what hid the "Create audit" submit button on
+   * short windows (#2894). A dialog that opts in must stay short.
+   *
+   * @default false
+   */
+  allowBodyOverflow?: boolean;
 };
 
 /** This component is basically the body of the Dialog */
@@ -214,6 +233,7 @@ const BulkUpdateDialogContent = forwardRef<
     skipCloseOnSuccess = false,
     keepSelectionOnSuccess = false,
     formClassName = "",
+    allowBodyOverflow = false,
   },
   ref
 ) {
@@ -284,7 +304,10 @@ const BulkUpdateDialogContent = forwardRef<
       <Dialog
         open={isDialogOpen}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog", className || "lg:w-[400px]")}
+        className={tw(
+          allowBodyOverflow && "dialog-allows-overflow",
+          className || "lg:w-[400px]"
+        )}
         title={
           <div className="w-full">
             {type !== "cancel" ? (

@@ -659,7 +659,7 @@ export async function getAssets(params: {
         // Setting where.OR here — BEFORE the category/tag/location/team-member
         // filters below — preserves the historical OR-entanglement: those
         // filters append to where.OR, so search OR-combines with them exactly
-        // as the previous buildFullAssetSearchOr clause did. The UNION always
+        // as the previous Prisma OR clause did. The UNION always
         // searches all 10 sources (the old id-shaped fast path searched a
         // subset and fell back on zero rows); id-shaped searches therefore now
         // return the full result set — a superset of before, the more-correct

@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -36,10 +37,14 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const bookingSettings = useBookingSettings();
   const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
     useUserRoleHelper();
+  // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+  // (matches display + the server parse), not the browser hint.
+  const prefs = useFormatPrefs();
 
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
+      prefs,
       action: "new",
       workingHours,
       bookingSettings,
@@ -88,6 +93,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
       description={`Create a new booking with selected(${selectedAssets.length}) assets`}
       actionUrl="/bookings/new"
       className="lg:w-[600px]"
+      // No `allowBodyOverflow` despite the TagsAutocomplete below: this dialog
+      // scrolls its own content in the `max-h`/`overflow-auto` wrapper, which
+      // already clips the suggestion listbox before the dialog body ever could.
+      // Opting in would not un-clip it — it would only cost the body its scroll.
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => {
         /** This handles server side errors in case client side validation fails */
