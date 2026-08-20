@@ -143,9 +143,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
               mainImage: isPlaceholder ? null : image.fullUrl,
               thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
               imageSource: image.source,
+              // Expiration describes the asset's OWN signed URL only — a
+              // model cover is a public URL that never expires, and the
+              // row's date can be stale residue from a removed own image.
+              // Send it only for the tier it describes, or a client-side
+              // expiry check discards a valid image.
+              mainImageExpiration:
+                image.source === "asset" ? asset.mainImageExpiration : null,
             };
           })(),
-          mainImageExpiration: asset.mainImageExpiration,
           // Kit linkage moved to the AssetKit pivot (quantities restructure);
           // the pivot row's `kitId` FK is the legacy single-kit id the companion
           // contract expects.

@@ -388,10 +388,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               return {
                 mainImage: isPlaceholder ? null : image.fullUrl,
                 thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+                // Expiration describes the asset's OWN signed URL only — a
+                // model cover is a public URL that never expires, and the
+                // row's date can be stale residue from a removed own image.
+                // Send it only for the tier it describes, or the palette's
+                // expiry check discards a valid image.
+                mainImageExpiration:
+                  image.source === "asset"
+                    ? asset.mainImageExpiration?.toISOString() ?? null
+                    : null,
               };
             })(),
-            mainImageExpiration:
-              asset.mainImageExpiration?.toISOString() ?? null,
             // `getAssets` widens its `extraInclude` arg to
             // `Prisma.AssetInclude`, so the return type can't narrow back
             // to the `assetLocations` shape we requested above. Cast at

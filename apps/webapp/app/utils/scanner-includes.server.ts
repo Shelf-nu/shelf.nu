@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+
 export const CUSTODY_INCLUDE = {
   custody: {
     select: {
@@ -32,6 +34,11 @@ export const CUSTODY_INCLUDE = {
  * without re-adding `status` and `type` explicitly.
  */
 export const ASSET_INCLUDE = {
+  // Model cover image — the scanned-item endpoints collapse the cascade
+  // into flat `mainImage`/`thumbnailImage` via `serializeAssetImage`, so
+  // assets with no image of their own render their model's cover in every
+  // scanner drawer.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // Asset placement lives on the `AssetLocation` pivot. Consumers read
   // the primary placement via `getPrimaryLocation`.
   assetLocations: {

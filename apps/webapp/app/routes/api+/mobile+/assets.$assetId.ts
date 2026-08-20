@@ -331,6 +331,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImage: flattened.mainImage,
         thumbnailImage: flattened.thumbnailImage,
         imageSource: flattened.imageSource,
+        // Expiration describes the asset's OWN signed URL only — a model
+        // cover is a public URL that never expires, and the row's date can
+        // be stale residue from a removed own image. Send it only for the
+        // tier it describes, or a client-side expiry check discards a
+        // valid image.
+        mainImageExpiration:
+          flattened.imageSource === "asset"
+            ? assetData.mainImageExpiration
+            : null,
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,

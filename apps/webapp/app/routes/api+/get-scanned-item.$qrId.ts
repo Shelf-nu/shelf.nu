@@ -3,6 +3,7 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getQr } from "~/modules/qr/service.server";
 import {
   getScannerPickerMeta,
@@ -210,7 +211,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           qr: {
             type: "asset" as const,
             asset: {
-              ...asset,
+              // Collapse the model-image cascade into the flat image fields
+              // the scanner drawers read; the nested relation is dropped so
+              // the row carries one source of truth for the image.
+              ...serializeAssetImage(asset),
               auditAssetId,
               auditNotesCount,
               auditImagesCount,
@@ -305,7 +309,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
           asset: qr.asset
             ? {
-                ...qr.asset,
+                // Collapse the model-image cascade into the flat image
+                // fields the scanner drawers read; the nested relation is
+                // dropped so the row carries one source of truth.
+                ...serializeAssetImage(qr.asset),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

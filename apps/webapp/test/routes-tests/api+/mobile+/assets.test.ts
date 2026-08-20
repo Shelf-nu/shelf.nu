@@ -207,6 +207,80 @@ describe("GET /api/mobile/assets", () => {
       custody: null,
     });
   });
+
+  it("sends mainImageExpiration only when the asset's own image won the cascade", async () => {
+    // why: expiration describes the asset's OWN signed URL only. A model
+    // cover is a public URL that never expires, and the row's date can be
+    // stale residue from a removed own image — a client-side expiry check
+    // fed that pairing discards a valid image. This pins the source gate.
+    findManyMock.mockResolvedValueOnce([
+      // Own image: the signed URL and its expiration travel together.
+      {
+        id: "asset-own",
+        title: "Own image",
+        status: "AVAILABLE",
+        mainImage: "https://supabase.test/sign/assets/own.png",
+        thumbnailImage: "https://supabase.test/sign/assets/own-thumbnail.png",
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+      // Inherited image: stale per-asset expiration residue must NOT ship
+      // next to the model's never-expiring public URL.
+      {
+        id: "asset-inherited",
+        title: "Inherited image",
+        status: "AVAILABLE",
+        mainImage: null,
+        thumbnailImage: null,
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: {
+          image: "https://supabase.test/public/files/model.png",
+          thumbnailImage:
+            "https://supabase.test/public/files/model-thumbnail.png",
+        },
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        mainImage: string | null;
+        imageSource: string;
+        mainImageExpiration: string | null;
+      }>;
+    };
+
+    expect(body.assets[0]).toMatchObject({
+      id: "asset-own",
+      mainImage: "https://supabase.test/sign/assets/own.png",
+      imageSource: "asset",
+      mainImageExpiration: "2026-08-01T00:00:00.000Z",
+    });
+    expect(body.assets[1]).toMatchObject({
+      id: "asset-inherited",
+      mainImage: "https://supabase.test/public/files/model.png",
+      imageSource: "model",
+      mainImageExpiration: null,
+    });
+  });
 });
 
 describe("GET /api/mobile/assets — status filter", () => {

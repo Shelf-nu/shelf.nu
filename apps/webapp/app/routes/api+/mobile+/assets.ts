@@ -29,10 +29,13 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  * modules/api/mobile-asset-search.server.ts), the same index-driven path the
  * web indexes use, in a single query.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect an expired URL — keeps this loader read-only and avoids fanning
- * out N writes per paginated read.
+ * Image URLs are returned with the model-image cascade already resolved
+ * (`shapeMobileAssetResponse`), not re-signed. `mainImageExpiration` is only
+ * sent when the asset's OWN signed URL won the cascade — model cover images
+ * are public and never expire. Mobile clients should call
+ * `/api/mobile/asset/refresh-image/:assetId` lazily when they detect an
+ * expired URL — keeps this loader read-only and avoids fanning out N writes
+ * per paginated read.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -251,7 +254,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         custody: visibleCustody,
         custodyList,
         custodyListOthersCount,
-        mainImageExpiration,
+        // Expiration describes the asset's OWN signed URL only — a model
+        // cover is a public URL that never expires, and the row's date can
+        // be stale residue from a removed own image. Send it only for the
+        // tier it describes, or the client's lazy refresh check discards a
+        // valid image.
+        mainImageExpiration:
+          shaped.imageSource === "asset" ? mainImageExpiration : null,
       };
     });
 
