@@ -104,16 +104,20 @@ export async function resolveUserFormatPrefsById(
  * passed by accident.
  *
  * ACCEPTED RISK — the declared zone is fully client-controlled, and the booking
- * schema evaluates working-hours / booking-window rules in it. A caller can
- * therefore choose a zone whose 09:00 lands on an out-of-hours instant and still
- * satisfy the org's rules. This is pre-existing behaviour on `main` (the mobile
- * routes have always validated in `body.timeZone`), confined to the caller's own
- * organization and their own permitted booking action — policy evasion, not an
- * IDOR. The durable fix is to evaluate working-hours against the ORGANIZATION's
- * zone and keep the declared zone strictly for decoding the offset-less wire
- * string; that is a product decision affecting web equally, so it is deliberately
- * deferred rather than solved here. Do not widen this helper's use without
- * revisiting it.
+ * schema evaluates working-hours rules in it. A caller can therefore choose a
+ * zone whose 09:00 lands on an out-of-hours instant and still satisfy the org's
+ * rules. Pre-existing on `main` (the mobile routes have always validated in
+ * `body.timeZone`), confined to the caller's own organization and their own
+ * permitted booking action — policy evasion, not an IDOR.
+ *
+ * Note this is the SAME gap as the one described in
+ * `.claude/rules/working-hours-are-location-local.md`, reached from the client
+ * side: working hours are the physical location's local wall clock and should
+ * not be judged against ANY user-supplied zone. The durable fix is a stored
+ * location zone, not a different user-side one. Deliberately accepted on
+ * 2026-08-20 — the people constrained by an org's hours are at that location in
+ * practice, and there is no `Organization.timeZone` to evaluate against. Read
+ * that rule before widening this helper's use.
  *
  * @param timeZone - The IANA zone the client declared, already validated by the
  *   route's Zod schema (`isValidTimeZone`). Callers MUST validate before calling.

@@ -276,6 +276,9 @@ export function WorkingHoursInfo({
               Special dates and holidays are also considered
             </p>
           )}
+          <p className="mt-1 text-xs text-gray-500">
+            Local hours of the physical location
+          </p>
           <div className="shrink-0">
             <WorkingHoursPreviewDialog workingHoursData={workingHoursData} />
           </div>
