@@ -792,7 +792,7 @@ describe("audit helpers", () => {
           findUnique: vi.fn(),
         },
         auditAsset: {
-          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
         auditNote: {
           create: vi.fn(),
@@ -807,7 +807,7 @@ describe("audit helpers", () => {
         lastName: "Doe",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-1",
         asset: {
           id: "asset-1",
@@ -833,8 +833,10 @@ describe("audit helpers", () => {
         },
       });
 
-      expect(mockTx.auditAsset.findUnique).toHaveBeenCalledWith({
-        where: { id: "audit-asset-1" },
+      // `auditSessionId` is the whole tenant boundary here: AuditAsset has no
+      // organizationId column, so an id-only lookup reaches every workspace.
+      expect(mockTx.auditAsset.findFirst).toHaveBeenCalledWith({
+        where: { id: "audit-asset-1", auditSessionId: "audit-1" },
         include: {
           asset: {
             select: { id: true, title: true },
@@ -866,7 +868,7 @@ describe("audit helpers", () => {
         lastName: "Smith",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-2",
         asset: {
           id: "asset-2",
@@ -906,7 +908,7 @@ describe("audit helpers", () => {
         lastName: "Johnson",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-3",
         asset: {
           id: "asset-3",
@@ -929,7 +931,7 @@ describe("audit helpers", () => {
 
     it("skips note creation when user not found", async () => {
       mockTx.user.findUnique.mockResolvedValue(null);
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-4",
         asset: { id: "asset-4", title: "Test Asset" },
       });
@@ -951,7 +953,7 @@ describe("audit helpers", () => {
         firstName: "Bob",
         lastName: "Williams",
       });
-      mockTx.auditAsset.findUnique.mockResolvedValue(null);
+      mockTx.auditAsset.findFirst.mockResolvedValue(null);
 
       await createAuditAssetImagesAddedNote({
         auditSessionId: "audit-5",
@@ -1499,7 +1501,7 @@ describe("audit helpers", () => {
           }),
         },
         auditAsset: {
-          findUnique: vi.fn().mockResolvedValue({
+          findFirst: vi.fn().mockResolvedValue({
             id: "audit-asset-1",
             asset: { id: "asset-1", title: "Drill" },
           }),

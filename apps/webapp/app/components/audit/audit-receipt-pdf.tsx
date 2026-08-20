@@ -1,6 +1,11 @@
 import type React from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  auditAssetStatusLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
@@ -165,6 +170,14 @@ const AuditPDFContent = ({
     assetImages,
     activityNotes,
   } = pdfMeta;
+
+  // why: the receipt can be downloaded at ANY point in an audit's life — the
+  // Actions dropdown offers it with no status gate — so it must apply the same
+  // completion rule as the screen it was printed from. `missingAssetCount` is
+  // seeded with the full expected count at creation, so a receipt for a
+  // never-started audit used to assert that every one of its assets was lost.
+  const auditIsCompleted = isAuditCompleted(session);
+  const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
 
   // Format creator name from user data or fallback to email
   const creatorName =
@@ -339,19 +352,23 @@ const AuditPDFContent = ({
             <div className="text-2xl font-bold">
               {session.foundAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Found</div>
+            <div className="text-sm text-gray-600">
+              {AUDIT_ASSET_STATUS_LABELS.FOUND}
+            </div>
           </div>
           <div className="border border-gray-300 p-3 text-center">
             <div className="text-2xl font-bold">
               {session.missingAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Missing</div>
+            <div className="text-sm text-gray-600">{unscannedLabel}</div>
           </div>
           <div className="border border-gray-300 p-3 text-center">
             <div className="text-2xl font-bold">
               {session.unexpectedAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Unexpected</div>
+            <div className="text-sm text-gray-600">
+              {AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
+            </div>
           </div>
         </div>
       </section>
@@ -490,7 +507,11 @@ const AuditPDFContent = ({
                       )}
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top text-xs">
-                      {/* Convert AuditAssetStatus to AuditStatusLabel for badge display */}
+                      {/* Convert AuditAssetStatus to AuditStatusLabel for badge
+                          display. Pass the audit's completion state so these
+                          rows agree with the Statistics tile above them — the
+                          two used to read "Not scanned" and "Missing" for the
+                          same assets in the same PDF. */}
                       <AuditAssetStatusBadge
                         status={getAuditStatusLabel(
                           asset.auditData.auditStatus
@@ -498,7 +519,8 @@ const AuditPDFContent = ({
                                 expected: boolean;
                                 auditStatus: AuditAssetStatus;
                               })
-                            : null
+                            : null,
+                          auditIsCompleted
                         )}
                       />
                     </td>

@@ -1,12 +1,19 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -48,9 +55,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, assetIds, checkouts, timeZone } = z
-      .object({
+    const { bookingId, assetIds, checkouts, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         // Optional: a QT-only check-out sends its quantities in `checkouts` with
         // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
@@ -74,8 +80,10 @@ export async function action({ request }: ActionFunctionArgs) {
           )
           .optional(),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
@@ -85,6 +93,33 @@ export async function action({ request }: ActionFunctionArgs) {
       ...getClientHint(request),
       ...(timeZone ? { timeZone } : {}),
     };
+
+    // Org-scoped, so a foreign-org id 404s before the ownership check runs.
+    const existingBooking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { creatorId: true, custodianUserId: true },
+    });
+
+    if (!existingBooking) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+
+    // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
+    // permission map, so the role gate above passes for ANY booking id in the
+    // organization — they may only check out bookings they created or are
+    // custodian of. No-op for ADMIN/OWNER. `partialCheckoutBooking` does not check
+    // ownership itself, so without this the route is more permissive than web.
+    // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role: resolveMostPrivilegedRole(roles),
+      action: "check out",
+    });
 
     const result = await partialCheckoutBooking({
       id: bookingId,

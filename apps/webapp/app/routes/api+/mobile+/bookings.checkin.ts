@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -8,8 +9,13 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -45,7 +51,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // scan / select the assets (the partial-checkin path). The mobile app must
     // NEVER be more permissive than the web / a workspace's settings, so we
     // enforce the same policy server-side here.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, roles } = await getMobileUserContext(user.id, organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const explicitCheckinRequired =
@@ -65,13 +71,14 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const body = await request.json();
-    const { bookingId, timeZone } = z
-      .object({
+    const { bookingId, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
@@ -81,6 +88,31 @@ export async function action({ request }: ActionFunctionArgs) {
       ...getClientHint(request),
       ...(timeZone ? { timeZone } : {}),
     };
+
+    // Org-scoped, so a foreign-org id 404s before ownership is evaluated.
+    const existingBooking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { creatorId: true, custodianUserId: true },
+    });
+
+    if (!existingBooking) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+
+    // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
+    // `booking:checkin`, so the role gate above passes for ANY booking id in
+    // the organization, and `checkinBooking` does not check ownership itself.
+    // No-op for ADMIN/OWNER. `role` is already resolved above for the
+    // explicit-checkin policy.
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role: resolveMostPrivilegedRole(roles),
+      action: "check in",
+    });
 
     const booking = await checkinBooking({
       id: bookingId,

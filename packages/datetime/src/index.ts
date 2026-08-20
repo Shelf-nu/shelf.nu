@@ -796,3 +796,173 @@ export function formatDate(
 
   return out.join(", ");
 }
+
+/* ────────────────────────── Calendar range helpers ─────────────────────────
+ * Day-level range maths for calendar surfaces. Formatting lives above; this is
+ * about WHICH DAYS a booking touches, which is a different question and one
+ * both apps will ask if web ever redraws its calendar from our own primitives.
+ * Kept here rather than in the companion so the answer can never differ
+ * between surfaces, and so it is testable without a React Native runtime.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `YYYY-MM-DD` for a date, in the LOCAL timezone.
+ *
+ * Deliberately not `toISOString().slice(0, 10)`: that converts to UTC first, so
+ * a booking at 22:00 on the 7th in UTC+3 would be keyed to the 8th and its band
+ * would be drawn on the wrong day.
+ *
+ * @param date - the instant to key
+ * @param timeZone - IANA zone to measure the calendar day in. Pass the user's
+ *   preferred zone whenever the key will be shown next to a date rendered in
+ *   that zone: with the device on a different zone, a booking near midnight
+ *   otherwise gets marked on one day and displays as another.
+ * @returns the calendar day in `timeZone` (or the device zone), zero padded
+ */
+export function calendarDayKey(date: Date, timeZone?: string): string {
+  if (timeZone) {
+    // Same mechanism as calendarDayIndex: the only way to ask what calendar
+    // date an instant falls on in a zone that is not the device's.
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const get = (type: string) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * The inverse of {@link calendarDayKey}: a `YYYY-MM-DD` key back to a local Date
+ * at midnight.
+ *
+ * Deliberately not `new Date(key)`. A bare `YYYY-MM-DD` is parsed as UTC
+ * midnight by the ECMAScript date-only form, so anywhere west of UTC the Date
+ * lands on the PREVIOUS day: `2026-09-01` in Los Angeles becomes 31 August.
+ * Anything that then reads `getMonth()` gets the wrong month, and a calendar
+ * built on that asks the server for the month before the one on screen. The
+ * bug is invisible east of UTC, which is exactly why it needs its own function.
+ *
+ * @param key - a `YYYY-MM-DD` day key
+ * @returns local midnight on that day, or an Invalid Date when unparseable
+ */
+export function calendarDayKeyToDate(key: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return new Date(NaN);
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * The range a one-month calendar view loads: EXACTLY the weeks a month grid
+ * draws, so a booking that began in the previous month still paints its band
+ * into this one.
+ *
+ * why week-aligned and not a flat week either side: a month grid renders whole
+ * weeks, so it shows at most six days of each neighbouring month. A flat
+ * seven-day pad fetched a fringe the grid has no square for, and a booking
+ * landing in it was drawn nowhere while still counting as INSIDE the window -
+ * so the "N more outside this month" line stayed hidden too. It was invisible
+ * with nothing to explain it. Fetching precisely what is rendered makes
+ * "overlaps the window" and "is drawn" the same statement.
+ *
+ * The end is the LAST INSTANT of its day, not midnight. Consumers document an
+ * inclusive window and filter on `from <= end`, so a midnight bound silently
+ * dropped every booking starting later on the window's final day.
+ *
+ * @param monthKey - any `YYYY-MM-DD` day inside the month to show
+ * @param weekStartsOn - first column of the grid, 0 = Sunday. Must match the
+ *   `firstDay` the grid is rendered with, or the window and the squares drift.
+ * @returns the inclusive window to request
+ */
+export function calendarMonthWindow(
+  monthKey: string,
+  weekStartsOn: number = 0
+): {
+  start: Date;
+  end: Date;
+} {
+  const base = calendarDayKeyToDate(monthKey);
+  const firstOfMonth = new Date(base.getFullYear(), base.getMonth(), 1);
+  // Day 0 of the NEXT month is the last day of this one, leap years included.
+  const lastOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+
+  // Tolerate any integer, including the negatives a bad preference could carry.
+  const weekStart = ((Math.trunc(weekStartsOn) % 7) + 7) % 7;
+  const weekEnd = (weekStart + 6) % 7;
+
+  const start = new Date(firstOfMonth);
+  start.setDate(start.getDate() - ((start.getDay() - weekStart + 7) % 7));
+
+  const end = new Date(lastOfMonth);
+  end.setDate(end.getDate() + ((weekEnd - end.getDay() + 7) % 7));
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/**
+ * A `YYYY-MM-DD` key as an instant at UTC midnight, purely so day ranges can be
+ * walked without the device's zone or its DST jumps entering into it. This is
+ * NOT the same as {@link calendarDayKeyToDate}, which deliberately returns a
+ * LOCAL date for callers that read month and day off it.
+ */
+function keyToUtcMidnight(key: string): Date {
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
+/** Upper bound on the days one range may enumerate. */
+const MAX_RANGE_DAYS = 400;
+
+/**
+ * Every local day key a range covers, inclusive of both ends.
+ *
+ * A booking is a range, so a five-day job must be drawable as one continuous
+ * run rather than five unrelated marks.
+ *
+ * @param from - ISO start instant
+ * @param to - ISO end instant
+ * @returns ordered day keys; empty when the range is reversed or unparseable,
+ *   and capped so corrupt data cannot spin the caller
+ */
+export function calendarDaysCovered(
+  from: string,
+  to: string,
+  clip?: { from: Date; to: Date },
+  timeZone?: string
+): string[] {
+  const start = new Date(from);
+  const end = new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  // Iterate pure calendar dates, anchored to UTC midnight so the walk cannot
+  // drift across a DST boundary. Which date each instant belongs to is decided
+  // by calendarDayKey, in `timeZone` when one is given.
+  const cursor = keyToUtcMidnight(calendarDayKey(start, timeZone));
+  const last = keyToUtcMidnight(calendarDayKey(end, timeZone));
+
+  /**
+   * With a clip, only the days inside it are enumerated. A caller drawing one
+   * month does not need the other 900 days of a two-year booking, and without
+   * this the MAX_RANGE_DAYS cap counts from the booking's own start - so a
+   * booking longer than the cap produced no keys at all for the month on
+   * screen, and simply vanished from it.
+   */
+  if (clip) {
+    const clipFrom = keyToUtcMidnight(calendarDayKey(clip.from, timeZone));
+    const clipTo = keyToUtcMidnight(calendarDayKey(clip.to, timeZone));
+    if (cursor < clipFrom) cursor.setTime(clipFrom.getTime());
+    if (last > clipTo) last.setTime(clipTo.getTime());
+  }
+
+  const keys: string[] = [];
+  while (cursor <= last && keys.length < MAX_RANGE_DAYS) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
+}

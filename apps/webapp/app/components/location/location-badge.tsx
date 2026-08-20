@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Location } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ListTree } from "lucide-react";
 import useApiQuery from "~/hooks/use-api-query";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -158,14 +157,12 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
           </>
         </Tag>
       </HoverCardTrigger>
-      <HoverCardPortal>
-        <HoverCardContent
-          className="max-w-md"
-          style={{ width: "max-content", minWidth: "18rem" }}
-        >
-          {content}
-        </HoverCardContent>
-      </HoverCardPortal>
+      <HoverCardContent
+        className="max-w-md"
+        style={{ width: "max-content", minWidth: "18rem" }}
+      >
+        {content}
+      </HoverCardContent>
     </HoverCard>
   );
 }

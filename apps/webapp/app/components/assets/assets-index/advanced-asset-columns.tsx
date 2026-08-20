@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
   PopoverTrigger,
@@ -989,47 +988,44 @@ function UpcomingBookingsColumn({
                     | {title}
                   </HoverCardTrigger>
 
-                  <HoverCardPortal>
-                    <HoverCardContent className="!mt-0 w-full rounded-md border bg-white px-4 py-2">
-                      <EventCardContent
-                        booking={{
-                          id: booking.id,
-                          name: booking.name,
-                          description: booking.description,
-                          status: booking.status,
-                          tags: booking.tags,
-                          start: booking.from,
-                          end: booking.to,
-                          custodian: {
-                            name: custodianName ?? "",
-                            user: booking.custodianUser
-                              ? {
-                                  id: booking.custodianUser.id,
-                                  firstName: booking.custodianUser.firstName,
-                                  lastName: booking.custodianUser.lastName,
-                                  profilePicture:
-                                    booking.custodianUser.profilePicture,
-                                }
-                              : null,
-                          },
-                          creator: {
-                            name: booking.creator
-                              ? resolveUserDisplayName(booking.creator)
-                              : "Unknown",
-                            user: booking.creator
-                              ? {
-                                  id: booking.creator.id,
-                                  firstName: booking.creator.firstName,
-                                  lastName: booking.creator.lastName,
-                                  profilePicture:
-                                    booking.creator.profilePicture,
-                                }
-                              : null,
-                          },
-                        }}
-                      />
-                    </HoverCardContent>
-                  </HoverCardPortal>
+                  <HoverCardContent className="!mt-0 w-full rounded-md border bg-white px-4 py-2">
+                    <EventCardContent
+                      booking={{
+                        id: booking.id,
+                        name: booking.name,
+                        description: booking.description,
+                        status: booking.status,
+                        tags: booking.tags,
+                        start: booking.from,
+                        end: booking.to,
+                        custodian: {
+                          name: custodianName ?? "",
+                          user: booking.custodianUser
+                            ? {
+                                id: booking.custodianUser.id,
+                                firstName: booking.custodianUser.firstName,
+                                lastName: booking.custodianUser.lastName,
+                                profilePicture:
+                                  booking.custodianUser.profilePicture,
+                              }
+                            : null,
+                        },
+                        creator: {
+                          name: booking.creator
+                            ? resolveUserDisplayName(booking.creator)
+                            : "Unknown",
+                          user: booking.creator
+                            ? {
+                                id: booking.creator.id,
+                                firstName: booking.creator.firstName,
+                                lastName: booking.creator.lastName,
+                                profilePicture: booking.creator.profilePicture,
+                              }
+                            : null,
+                        },
+                      }}
+                    />
+                  </HoverCardContent>
                 </HoverCard>
               );
             })}

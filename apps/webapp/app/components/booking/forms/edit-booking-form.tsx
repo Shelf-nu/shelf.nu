@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -14,7 +15,6 @@ import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { useHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -60,8 +60,6 @@ type BookingFormData = {
   booking: {
     id: string;
     name: string;
-    startDate: string;
-    endDate: string;
     custodianRef: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     bookingFlags: BookingFlags;
     description: string | null;
@@ -110,13 +108,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
 
   const isProcessing = isFormProcessing(navigation.state);
-  const hints = useHints();
   // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
   // user's RESOLVED timezone preference (the same one date DISPLAY uses), so
   // the edit form shows the same wall-clock the display shows. Seeding from
   // the raw stored UTC instant via `dateForDateTimeInputValue` (browser/runtime
   // zone) produced a different wall-clock whenever the browser zone differed
-  // from the pref zone. Locale still comes from `hints`.
+  // from the pref zone.
   const prefs = useFormatPrefs();
   const incomingStartDate = toIsoDateTimeToUserTimezone(
     loaderBooking.from,
@@ -177,7 +174,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     BookingFormSchema({
       // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
       // (matches display + the server parse), not the browser hint.
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,
@@ -335,13 +332,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets
                     ? {
+                        // Wording lives in @shelf/labels so the tooltip, the
+                        // mobile route's 400, the in-transaction guard and the
+                        // companion's inline note can never say four different
+                        // things about the same rule (they did, and this copy
+                        // carried an "unavailble" typo).
                         reason: bookingFlags?.hasUnavailableAssets
-                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
                           : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
-                          : "You need to add assets or reserve at least one model on your booking before you can reserve it",
+                          : BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
                       }
                     : false
                 }

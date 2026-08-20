@@ -7,6 +7,10 @@ import {
   OrganizationRoles,
   ConsumptionType,
 } from "@prisma/client";
+import {
+  BOOKING_EMPTY_RESERVED_MESSAGE,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+} from "@shelf/labels";
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
@@ -98,6 +102,14 @@ vitest.mock("~/database/db.server", () => ({
           : Promise.all(callbackOrArray)
       ),
     $executeRaw: vitest.fn().mockResolvedValue(0),
+    // why: `lockBookingForStatusCheck` issues a raw `SELECT … FOR UPDATE`,
+    // which the model-shaped mock below cannot express. Defaults to an OPEN
+    // status so every pre-existing test is unaffected; the status-guard tests
+    // override it. ONGOING specifically: it is the only status that satisfies
+    // BOTH assertions (open for the asset-mutation paths, in-flight for
+    // check-in), so one default serves every caller. A string literal, not
+    // BookingStatus.ONGOING — this factory is hoisted above the imports.
+    $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -243,12 +255,18 @@ vitest.mock("~/database/db.server", () => ({
       // why: Phase 3c qty-tracked flows call tx.bookingAsset.count when
       // deciding whether a shared pool can flip back to AVAILABLE.
       count: vitest.fn().mockResolvedValue(0),
+      // why: reserveBooking's in-transaction eligibility probe looks for a
+      // single slice whose asset is flagged unavailable.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     // why: Phase 3d checkoutBooking queries tx.bookingModelRequest.findMany
     // to block RESERVED → ONGOING when model-level reservations haven't
     // been materialised into concrete BookingAsset rows yet.
     bookingModelRequest: {
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: reserveBooking's eligibility probe falls back to counting model
+      // reservations when a booking holds no concrete assets.
+      count: vitest.fn().mockResolvedValue(0),
     },
     consumptionLog: {
       create: vitest.fn().mockResolvedValue({}),
@@ -893,6 +911,10 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
+      // The base fixture is DRAFT, but this scenario checks assets back IN and
+      // mocks them CHECKED_OUT — a combination that cannot exist. Nothing read
+      // the status before, so the mismatch went unnoticed.
+      status: BookingStatus.ONGOING,
       bookingAssets: [
         {
           asset: { id: "asset-1", assetKits: [] },
@@ -942,6 +964,9 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
+      // Same fixture mismatch as the sibling test: the scenario is a booking
+      // in flight, but the base fixture is DRAFT.
+      status: BookingStatus.ONGOING,
       assets: [
         { id: "asset-1", kitId: null },
         { id: "asset-2", kitId: null },
@@ -1733,6 +1758,40 @@ describe("updateBasicBooking", () => {
 describe("updateBookingAssets", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ])("refuses to change the items on a %s booking", async (status) => {
+    // All four callers DO check the status — but each in a read of its own,
+    // before calling this function. A booking closed in between was still
+    // written to. The guard now reads the status inside the same transaction
+    // as the write, which closes that window rather than narrowing it.
+    // (detail.dev D055)
+    // why: the guard takes a row lock via raw SQL, so this is the read it
+    // asserts on. Once, not persistent: clearAllMocks clears call history but
+    // NOT implementations, and a persistent closed status would fail every
+    // later test in this describe for the wrong reason.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status },
+    ]);
+
+    await expect(
+      updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        assetIds: ["asset-1"],
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/closed records/);
+
+    // The guard bails before anything else in the transaction runs: the asset
+    // validation immediately after it never fires. Asserting on a downstream
+    // effect rather than only on the throw, so this still fails if the guard is
+    // moved somewhere that lets writes happen first.
+    expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 
   /**
@@ -2566,7 +2625,72 @@ describe("buildKitSlicesForBooking", () => {
 describe("reserveBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // Healthy eligibility on the OUTER client. The tests below hand the
+    // transaction a client that disagrees, so a guard reading through `db`
+    // instead of `tx` sees a booking that is fine and fails to refuse.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValue(1);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findFirst.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.bookingModelRequest.count.mockResolvedValue(1);
   });
+
+  afterEach(() => {
+    // Restore the module-level defaults: implementations set with
+    // `mockResolvedValue` survive `clearAllMocks`, so without this the
+    // reserve-friendly values above leak into every later describe.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValue(0);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findFirst.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.bookingModelRequest.count.mockResolvedValue(0);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callbackOrArray) =>
+      typeof callbackOrArray === "function"
+        ? callbackOrArray(db)
+        : Promise.all(callbackOrArray)
+    );
+  });
+
+  /**
+   * Hands the transaction callback a client whose eligibility answers differ
+   * from the outer `db` mock.
+   *
+   * This is what makes the tests below able to tell an IN-transaction guard
+   * from a pre-transaction one. With the default `$transaction` mock the
+   * callback receives `db` itself, so `tx.x` IS `db.x` and relocating the
+   * guard out of the transaction — the exact regression this describe exists
+   * to prevent — would leave every assertion green.
+   */
+  function installTxEligibility(eligibility: {
+    sliceCount: number;
+    unavailableSlice: { id: string } | null;
+    modelRequestCount: number;
+  }) {
+    const tx = {
+      ...db,
+      bookingAsset: {
+        ...db.bookingAsset,
+        count: vitest.fn().mockResolvedValue(eligibility.sliceCount),
+        findFirst: vitest.fn().mockResolvedValue(eligibility.unavailableSlice),
+      },
+      bookingModelRequest: {
+        ...db.bookingModelRequest,
+        count: vitest.fn().mockResolvedValue(eligibility.modelRequestCount),
+      },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callbackOrArray) =>
+      typeof callbackOrArray === "function"
+        ? callbackOrArray(tx)
+        : Promise.all(callbackOrArray)
+    );
+
+    return tx;
+  }
 
   const mockReserveParams = {
     id: "booking-1",
@@ -2582,6 +2706,135 @@ describe("reserveBooking", () => {
     tags: [],
   };
 
+  /**
+   * Race-safe twin of the caller-side checks. The web overview only disables
+   * its Reserve button from loader flags and the mobile route checks before it
+   * reads working hours and settings, so both leave a window in which a
+   * concurrent edit can empty the booking or mark an asset unavailable.
+   *
+   * Every test here states the healthy answer on the outer `db` mock and the
+   * concurrently-edited answer on the transaction client, so they fail both
+   * ways: deleting the guard drops the refusal, and moving it back OUT of the
+   * transaction makes it read the stale outer values and also drop it.
+   */
+  describe("eligibility re-check on the read immediately before the write", () => {
+    /** The booking as the outer read still sees it: one healthy asset. */
+    const healthyOuterRead = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      modelRequests: [],
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+        },
+      ],
+    };
+
+    it("refuses a booking that lost its last asset and holds no model request", async () => {
+      expect.assertions(1);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(healthyOuterRead);
+      // Emptied by a concurrent request after the outer read.
+      installTxEligibility({
+        sliceCount: 0,
+        unavailableSlice: null,
+        modelRequestCount: 0,
+      });
+
+      await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+        BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
+      );
+    });
+
+    it("reserves a booking that holds only a model request", async () => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.DRAFT,
+        from: mockReserveParams.from,
+        to: mockReserveParams.to,
+        bookingAssets: [],
+        modelRequests: [{ id: "mr-1", assetModelId: "model-1", quantity: 2 }],
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [],
+        modelRequests: [],
+      });
+      installTxEligibility({
+        sliceCount: 0,
+        unavailableSlice: null,
+        modelRequestCount: 1,
+      });
+
+      await expect(reserveBooking(mockReserveParams)).resolves.toBeDefined();
+    });
+
+    it("refuses when an asset was marked unavailable after the caller checked", async () => {
+      expect.assertions(1);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(healthyOuterRead);
+      // Flipped to unavailable by another request between the two reads.
+      installTxEligibility({
+        sliceCount: 1,
+        unavailableSlice: { id: "ba-1" },
+        modelRequestCount: 0,
+      });
+
+      await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+        BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
+      );
+    });
+
+    it("reads eligibility through the transaction client, not the outer one", async () => {
+      expect.assertions(3);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(healthyOuterRead);
+      const tx = installTxEligibility({
+        sliceCount: 1,
+        unavailableSlice: null,
+        modelRequestCount: 0,
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...healthyOuterRead,
+        status: BookingStatus.RESERVED,
+      });
+
+      await reserveBooking(mockReserveParams);
+
+      // The probes ran on the transaction client...
+      expect(tx.bookingAsset.count).toHaveBeenCalledWith({
+        where: { bookingId: mockReserveParams.id },
+      });
+      expect(tx.bookingAsset.findFirst).toHaveBeenCalledWith({
+        where: {
+          bookingId: mockReserveParams.id,
+          asset: { availableToBook: false },
+        },
+        select: { id: true },
+      });
+      // ...and not on the outer one.
+      expect(db.bookingAsset.count).not.toHaveBeenCalled();
+    });
+  });
+
   it("should reserve booking successfully with no conflicts", async () => {
     expect.assertions(2);
 
@@ -2596,6 +2849,7 @@ describe("reserveBooking", () => {
             id: "asset-1",
             title: "Asset 1",
             status: "AVAILABLE",
+            availableToBook: true,
             bookingAssets: [], // No conflicting bookings
           },
           assetId: "asset-1",
@@ -2607,6 +2861,7 @@ describe("reserveBooking", () => {
             id: "asset-2",
             title: "Asset 2",
             status: "AVAILABLE",
+            availableToBook: true,
             bookingAssets: [], // No conflicting bookings
           },
           assetId: "asset-2",
@@ -2653,6 +2908,7 @@ describe("reserveBooking", () => {
             id: "asset-1",
             title: "Asset 1",
             status: "CHECKED_OUT",
+            availableToBook: true,
             bookingAssets: [
               {
                 booking: {
@@ -2733,6 +2989,7 @@ describe("reserveBooking", () => {
               id: QT_ASSET_ID,
               title: "Folding Chairs",
               type: AssetType.QUANTITY_TRACKED,
+              availableToBook: true,
               status: "AVAILABLE",
               unitOfMeasure: "chairs",
               // QUANTITY_TRACKED assets are exempt from the whole-asset
@@ -2967,7 +3224,6 @@ describe("reserveBooking", () => {
     });
   });
 });
-
 describe("checkoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -3689,6 +3945,13 @@ describe("fulfilModelRequestsAndCheckout", () => {
     });
     const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
 
+    // why: no database in unit tests, so every booking read this flow makes
+    // has to be queued here — the pre-tx load, then the post-tx hydrate. The
+    // in-tx status guard does NOT consume an entry: it reads through
+    // `$queryRaw` (row lock), which is stubbed separately in the db mock.
+    // Ordering matters — a missing or surplus entry does not fail loudly, it
+    // shifts every later read by one and the function returns whatever the
+    // exhausted mock yields.
     (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
       .mockResolvedValueOnce(mockBooking)
       .mockResolvedValueOnce(hydratedBooking);
@@ -4392,9 +4655,35 @@ describe("checkinBooking", () => {
     });
   });
 
-  it("should handle checkin for non-ongoing booking", async () => {
-    expect.assertions(1);
+  it("refuses a checkin whose booking is completed between the read and the write", async () => {
+    // The race the row lock exists for. The pre-transaction read sees ONGOING
+    // and passes the early exit; by the time the write transaction opens, a
+    // concurrent check-in has committed COMPLETE. Modelled by letting the two
+    // reads disagree — which is precisely what a non-locking SELECT permits
+    // under READ COMMITTED.
+    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    // why: the unlocked pre-transaction read — still the old status.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the locked in-transaction read — the booking has moved on.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.COMPLETE },
+    ]);
 
+    await expect(checkinBooking(mockCheckinParams)).rejects.toThrow(
+      /ongoing or overdue/
+    );
+    // Without the locked check the early exit would have waved this through
+    // and the booking would have been written a second time.
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses checkin of a booking that was never checked out", async () => {
+    // This test used to assert the OPPOSITE — that checking in a DRAFT
+    // booking "works" — and so pinned the defect in place: `checkinBooking`
+    // writes COMPLETE unconditionally, while the asset filter keeps only
+    // CHECKED_OUT assets, of which a DRAFT booking has none. The booking came
+    // out marked finished with nothing checked in. (detail.dev D084)
     const mockBooking = { ...mockBookingData, status: BookingStatus.DRAFT };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
@@ -4404,8 +4693,12 @@ describe("checkinBooking", () => {
       status: BookingStatus.COMPLETE,
     });
 
-    const result = await checkinBooking(mockCheckinParams);
-    expect(result).toBeDefined();
+    await expect(checkinBooking(mockCheckinParams)).rejects.toThrow(
+      /ongoing or overdue/
+    );
+    // Assert on the WRITE, not only the throw: the point of the guard is that
+    // the booking is never stamped COMPLETE.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("should schedule auto-archive when enabled", async () => {
@@ -7015,6 +7308,84 @@ describe("removeAssets", () => {
     vitest.clearAllMocks();
   });
 
+  /**
+   * The zero-asset invariant, approached from the removal side.
+   *
+   * `reserveBooking` refuses to take an empty booking into RESERVED, but that
+   * only guards the transition: emptying the booking afterwards reached the
+   * same state — a booking that reserves nothing — from the other direction.
+   */
+  describe("refuses to leave a stock-holding booking empty", () => {
+    const emptyingBooking = { id: "booking-1", assetIds: ["asset-1"] };
+
+    /** Nothing left on the booking after the delete. */
+    function nothingRemains(status: BookingStatus) {
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...emptyingBooking,
+        name: "Test Booking",
+        status,
+      });
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mockResolvedValue(0);
+      //@ts-expect-error missing vitest type
+      db.bookingModelRequest.count.mockResolvedValue(0);
+    }
+
+    const baseArgs = {
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+    };
+
+    it("refuses when the booking is RESERVED", async () => {
+      expect.assertions(1);
+      nothingRemains(BookingStatus.RESERVED);
+
+      await expect(
+        removeAssets({ booking: emptyingBooking, ...baseArgs })
+      ).rejects.toThrow(BOOKING_EMPTY_RESERVED_MESSAGE);
+    });
+
+    // The guard is RESERVED-only on purpose. DRAFT is work-in-progress, and a
+    // live booking must stay emptiable so a checked-out asset can be pulled
+    // off it — the bug #99 describe below covers that reconciliation.
+    it.each([
+      BookingStatus.DRAFT,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ])("allows a %s booking to be emptied", async (status) => {
+      nothingRemains(status);
+
+      await expect(
+        removeAssets({ booking: emptyingBooking, ...baseArgs })
+      ).resolves.not.toThrow();
+    });
+
+    it("allows emptying the assets while a model reservation still holds the booking", async () => {
+      nothingRemains(BookingStatus.RESERVED);
+      // Model reservations survive asset removal, so the booking still holds
+      // something and the guard must not fire.
+      //@ts-expect-error missing vitest type
+      db.bookingModelRequest.count.mockResolvedValue(1);
+
+      await expect(
+        removeAssets({ booking: emptyingBooking, ...baseArgs })
+      ).resolves.not.toThrow();
+    });
+
+    afterEach(() => {
+      // Restore the module-level defaults for the sibling tests below.
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mockResolvedValue(0);
+      //@ts-expect-error missing vitest type
+      db.bookingModelRequest.count.mockResolvedValue(0);
+    });
+  });
+
   it("should remove assets from booking successfully", async () => {
     expect.assertions(2);
 
@@ -9229,6 +9600,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["bk-arch-1", "bk-arch-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Service no longer wraps the updateMany + notes in an interactive
@@ -9275,6 +9647,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9318,6 +9691,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9339,6 +9713,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -9372,6 +9747,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["r1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
     expect(db.booking.updateMany).not.toHaveBeenCalled();
@@ -9395,6 +9771,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["o1"],
         organizationId: "org-1",
         userId: "user-1",
+        role: OrganizationRoles.OWNER,
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9423,6 +9800,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["c1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // COMPLETE rows archive without the flag…
@@ -9472,6 +9850,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -9532,6 +9911,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
     });
 
     // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
@@ -9595,6 +9975,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-canc-1", "bk-canc-2"],
       organizationId: "org-1",
       userId: "user-1",
+      role: OrganizationRoles.OWNER,
       hints: mockClientHints,
     });
 
@@ -9617,6 +9998,40 @@ describe("bulkCancelBookings", () => {
 describe("addScannedAssetsToBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ])("refuses to add scanned assets to a %s booking", async (status) => {
+    // This path had no booking-status check anywhere before: the route action
+    // only called requirePermission, and the loader's canUserManageBookingAssets
+    // decided what to RENDER, not what to accept. A direct POST could therefore
+    // append assets to a closed booking. (detail.dev D097)
+    //
+    // Asserting through the public service function rather than the assertion
+    // helper directly, so this fails if the guard is ever unwired from the path.
+    // why: the guard takes a row lock via raw SQL, so this is the read it
+    // asserts on. Once, not persistent: clearAllMocks clears call history but
+    // NOT implementations, so a persistent closed status would answer every
+    // later test in this describe and fail them for the wrong reason.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status },
+    ]);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: ["asset-1"],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/closed records/);
+
+    // The booking must be untouched — the guard runs before any write.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("rejects when a scanned asset is reserved for an overlapping booking", async () => {

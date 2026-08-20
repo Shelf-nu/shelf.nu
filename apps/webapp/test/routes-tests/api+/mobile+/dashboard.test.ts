@@ -106,6 +106,8 @@ function actAs(role: OrganizationRoles) {
   requireOrganizationAccessMock.mockResolvedValue(ORG_ID);
   getMobileUserContextMock.mockResolvedValue({
     role,
+    // The guard reads the full array, not roles[0].
+    roles: [role],
     canUseBarcodes: true,
     canUseAudits: true,
     canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
