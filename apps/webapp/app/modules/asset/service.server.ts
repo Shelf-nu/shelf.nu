@@ -112,6 +112,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -956,6 +957,13 @@ export async function getAssets(params: {
 
     return { assets, totalAssets };
   } catch (cause) {
+    // A deliberate client error — e.g. the >65k bind-param ceiling 400 thrown by
+    // resolveAssetSearchIds — must reach the caller with its own actionable
+    // message intact. The generic wrapper below inherits the 400 status from the
+    // cause but overwrites the message ("refine your search" → "something went
+    // wrong"), so pass it straight through. Also covers Cmd+K, which shares
+    // getAssets without the getPaginatedAndFilterableAssets wrapper.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching assets",
@@ -4367,6 +4375,11 @@ export async function getPaginatedAndFilterableAssets({
       ...teamMembersData,
     };
   } catch (cause) {
+    // Preserve deliberate client errors (e.g. the search-id ceiling 400 from
+    // getAssets) so the actionable message survives this second wrapper — the
+    // web /assets index and admin org-assets route both come through here. See
+    // getAssets' catch for the rationale.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Fail to fetch paginated and filterable assets",

@@ -23,6 +23,7 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { MAX_MATCHED_ASSET_SEARCH_IDS } from "./search.server";
 import {
   BULK_CREATE_MAX,
   bulkAssignAssetTags,
@@ -4481,6 +4482,32 @@ describe("getAssets search via UNION", () => {
     expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
       { id: { in: [] } },
     ]);
+  });
+
+  it("over-ceiling: rethrows the refine-search 400 unchanged, no asset fetch", async () => {
+    // A match set past the bind-param ceiling makes resolveAssetSearchIds throw a
+    // deliberate 400; getAssets' catch must let that reach the caller with its
+    // actionable message intact, not re-wrapped as "something went wrong".
+    queryRawMock.mockResolvedValue(
+      Array.from({ length: MAX_MATCHED_ASSET_SEARCH_IDS + 1 }, (_, i) => ({
+        id: `a${i}`,
+      }))
+    );
+
+    let thrown: unknown;
+    try {
+      await getAssets({ ...base, search: "a" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    expect((thrown as ShelfError).status).toBe(400);
+    expect((thrown as ShelfError).message).toMatch(/refine/i);
+    // the generic wrapper must NOT have replaced the actionable message
+    expect((thrown as ShelfError).message).not.toMatch(/something went wrong/i);
+    // short-circuited before the asset fetch
+    expect(findManyMock).not.toHaveBeenCalled();
   });
 });
 
