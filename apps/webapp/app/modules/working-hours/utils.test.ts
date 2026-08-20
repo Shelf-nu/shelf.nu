@@ -142,7 +142,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       mockWorkingHours,
-      false // skipClosedDays = false
+      false, // skipClosedDays = false
+      "UTC"
     );
 
     expect(result).toBe(endDate);
@@ -159,7 +160,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       disabledWorkingHours,
-      true // skipClosedDays = true, but working hours disabled
+      true, // skipClosedDays = true, but working hours disabled
+      "UTC"
     );
 
     expect(result).toBe(endDate);
@@ -175,7 +177,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       null, // no working hours
-      true
+      true,
+      "UTC"
     );
 
     expect(result).toBe(endDate);
@@ -191,7 +194,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       mockWorkingHours,
-      true
+      true,
+      "UTC"
     );
 
     // Should extend by 2 days (Saturday + Sunday)
@@ -226,7 +230,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       workingHoursWithOverride,
-      true
+      true,
+      "UTC"
     );
 
     // Should extend by 3 days (Saturday + Sunday + Monday holiday)
@@ -261,7 +266,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       workingHoursWithOverride,
-      true
+      true,
+      "UTC"
     );
 
     // Should extend by 1 day (only Sunday, Saturday is now open)
@@ -279,7 +285,8 @@ describe("calculateEffectiveEndDate", () => {
       startDate,
       endDate,
       mockWorkingHours,
-      true
+      true,
+      "UTC"
     );
 
     // No closed days in between, should return original
@@ -311,7 +318,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      mockWorkingHours
+      mockWorkingHours,
+      "UTC"
     );
 
     // Total: 74 hours, Closed: 48 hours (Sat + Sun), Effective: 26 hours
@@ -327,7 +335,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      mockWorkingHours
+      mockWorkingHours,
+      "UTC"
     );
 
     // 5 hours on an open day
@@ -343,7 +352,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      mockWorkingHours
+      mockWorkingHours,
+      "UTC"
     );
 
     // Total: 29 hours, All closed: 29 hours, Effective: 0 hours
@@ -359,7 +369,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      mockWorkingHours
+      mockWorkingHours,
+      "UTC"
     );
 
     // Total: 170 hours, Closed: 48 hours (1 weekend: Sat + Sun), Effective: 122 hours
@@ -392,7 +403,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      workingHoursWithHoliday
+      workingHoursWithHoliday,
+      "UTC"
     );
 
     // Total: 98 hours, Closed: 72 hours (Sat + Sun + Mon holiday), Effective: 26 hours
@@ -409,7 +421,8 @@ describe("calculateBusinessHoursDuration", () => {
     const result = calculateBusinessHoursDuration(
       startDate,
       endDate,
-      mockWorkingHours
+      mockWorkingHours,
+      "UTC"
     );
 
     // Total: 71 hours, Closed: 48 hours (full weekend), Effective: 23 hours
@@ -773,5 +786,72 @@ describe("getOverrideDateKey", () => {
     expect(getOverrideDateKey(new Date("2026-04-24T23:30:00-05:00"))).toBe(
       "2026-04-25"
     );
+  });
+});
+
+/**
+ * Closed-day math must be done in the zone the caller supplies.
+ *
+ * Both of these walk day-by-day and ask "is this day open?", so the answer turns
+ * entirely on which calendar day an instant falls in. They previously read that
+ * off the DEVICE clock, which is what made two cases in this file fail under
+ * `TZ=Asia/Tokyo` while passing on UTC CI — green in CI, wrong in production for
+ * anyone whose device differed from their preference zone.
+ *
+ * Each case passes the SAME instants through two zones and asserts different
+ * results, so a build that ignores the zone cannot pass.
+ */
+describe("closed-day math is zone-driven", () => {
+  const weekdaysOpen: WorkingHoursData = {
+    enabled: true,
+    weeklySchedule: {
+      "0": { isOpen: false }, // Sunday
+      "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "2": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "3": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "4": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "5": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "6": { isOpen: false }, // Saturday
+    } as WeeklyScheduleJson,
+    overrides: [],
+  };
+
+  it("calculateBusinessHoursDuration attributes closed hours per zone", () => {
+    expect.assertions(2);
+
+    // 8 calendar hours spanning the UTC Friday→Saturday midnight boundary.
+    const start = new Date("2025-07-25T20:00:00Z");
+    const end = new Date("2025-07-26T04:00:00Z");
+
+    // UTC: 20:00-24:00 is Friday (open), 00:00-04:00 is Saturday (closed).
+    // 8 total - 4 closed = 4.
+    expect(calculateBusinessHoursDuration(start, end, weekdaysOpen, "UTC")).toBe(
+      4
+    );
+
+    // Asia/Tokyo (+9): the window is Sat 05:00 → Sat 13:00 local, entirely
+    // inside a closed Saturday. 8 total - 8 closed = 0.
+    expect(
+      calculateBusinessHoursDuration(start, end, weekdaysOpen, "Asia/Tokyo")
+    ).toBe(0);
+  });
+
+  it("calculateEffectiveEndDate counts closed days per zone", () => {
+    expect.assertions(2);
+
+    const start = new Date("2025-07-25T20:00:00Z");
+    const end = new Date("2025-07-27T20:00:00Z");
+
+    // UTC: the walk sees Friday (open) then Saturday (closed) → 1 closed day,
+    // so the end shifts out by one.
+    expect(
+      calculateEffectiveEndDate(start, end, weekdaysOpen, true, "UTC")
+    ).toEqual(new Date("2025-07-28T20:00:00Z"));
+
+    // Asia/Tokyo: the same instants are Sat 05:00 → Mon 05:00 local, so the
+    // walk sees Saturday AND Sunday closed → 2 closed days.
+    expect(
+      calculateEffectiveEndDate(start, end, weekdaysOpen, true, "Asia/Tokyo")
+    ).toEqual(new Date("2025-07-29T20:00:00Z"));
   });
 });
