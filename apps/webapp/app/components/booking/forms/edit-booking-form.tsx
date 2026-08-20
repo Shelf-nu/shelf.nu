@@ -60,8 +60,6 @@ type BookingFormData = {
   booking: {
     id: string;
     name: string;
-    startDate: string;
-    endDate: string;
     custodianRef: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     bookingFlags: BookingFlags;
     description: string | null;

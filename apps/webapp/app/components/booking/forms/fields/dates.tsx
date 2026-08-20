@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import { DateTime } from "luxon";
 import FormRow from "~/components/forms/form-row";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoBox } from "~/components/shared/info-box";
@@ -11,7 +12,7 @@ import type {
   useWorkingHours,
   UseWorkingHoursResult,
 } from "~/hooks/use-working-hours";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 
 export function DatesFields({
@@ -82,22 +83,36 @@ export function DatesFields({
             const inputValue = wire;
             if (isNewBooking && endDate && inputValue) {
               try {
-                // Safari-friendly date parsing: datetime-local format is YYYY-MM-DDTHH:mm
-                const newStartDate = new Date(inputValue);
-                const currentEndDate = new Date(endDate);
+                // Both values are NAIVE wall-clock strings in the user's
+                // preference zone — that is what the field displays and what the
+                // server parses. So this comparison and the 6 PM adjustment stay
+                // entirely in wall-clock space: parse both in a single fixed
+                // zone, do the arithmetic, format straight back. Never convert to
+                // an absolute instant, or the device zone leaks in. UTC is used
+                // purely as a neutral reference so no DST transition can shift a
+                // wall clock that is not meant to move.
+                const newStartDate = DateTime.fromISO(inputValue, {
+                  zone: "utc",
+                });
+                const currentEndDate = DateTime.fromISO(endDate, {
+                  zone: "utc",
+                });
 
                 // Check if dates are valid before comparing
                 if (
-                  !isNaN(newStartDate.getTime()) &&
-                  !isNaN(currentEndDate.getTime()) &&
+                  newStartDate.isValid &&
+                  currentEndDate.isValid &&
                   newStartDate > currentEndDate
                 ) {
                   // Create new end date at 6 PM on the same day as start date
-                  const endDateTime = new Date(newStartDate);
-                  endDateTime.setHours(18, 0, 0, 0);
+                  const endDateTime = newStartDate.set({
+                    hour: 18,
+                    minute: 0,
+                    second: 0,
+                    millisecond: 0,
+                  });
 
-                  const newEndDate = dateForDateTimeInputValue(endDateTime);
-                  setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+                  setEndDate(endDateTime.toFormat(DATE_TIME_FORMAT));
                 }
               } catch (error) {
                 // If date parsing fails, just update the start date without affecting end date
