@@ -35,7 +35,7 @@ import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
-import { wallClockDateInZone, wallClockWireString } from "@shelf/datetime";
+import { addDaysInZone, wallClockWireInZone } from "@shelf/datetime";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -48,11 +48,9 @@ export default function EditBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // `from`/`to` below are wall-clock CARRIERS in the user's preference zone, not
-  // instants — their local fields are what the picker edits and what gets
-  // submitted. So the labels must read those local fields verbatim
-  // (`localeOnly`) and apply the user's FORMAT only: converting a carrier
-  // through a zone would shift it away from the value being edited.
+  // `from`/`to` are the booking's real instants throughout. Both pickers are
+  // driven in the preference zone via `timeZoneName`, so the times shown here
+  // match the detail screen the user just came from.
   const { formatDateTime, prefs } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -113,13 +111,8 @@ export default function EditBookingScreen() {
           ? { id: b.custodianTeamMember.id, name: b.custodianTeamMember.name }
           : null
       );
-      // The booking's stored instants become carriers of their wall clock in the
-      // preference zone, so the picker shows the same time the booking detail
-      // screen does — and re-submitting an untouched form is a no-op.
-      const fromCarrier = wallClockDateInZone(b.from, prefs.timeZone);
-      const toCarrier = wallClockDateInZone(b.to, prefs.timeZone);
-      setFrom(fromCarrier);
-      setTo(toCarrier);
+      setFrom(new Date(b.from));
+      setTo(new Date(b.to));
       setSelectedTagIds(new Set(b.tags.map((t) => t.id)));
       setIsDraft(b.status === "DRAFT");
       // Snapshot the loaded values so the discard guard only fires on a REAL
@@ -128,11 +121,8 @@ export default function EditBookingScreen() {
         name: b.name,
         description: b.description ?? "",
         custodianId: b.custodianTeamMember?.id ?? null,
-        // Snapshot the CARRIERS, not the instants: the guard below compares
-        // these against the picker state, which is carriers. Mixing the two
-        // makes an untouched form look edited by the zone's offset.
-        from: fromCarrier.getTime(),
-        to: toCarrier.getTime(),
+        from: new Date(b.from).getTime(),
+        to: new Date(b.to).getTime(),
         tagIds: [...b.tags.map((t) => t.id)].sort().join(","),
       };
       if (tagsRes.data?.tags) setTags(tagsRes.data.tags);
@@ -141,11 +131,7 @@ export default function EditBookingScreen() {
     return () => {
       active = false;
     };
-    // `prefs.timeZone` is inert here in practice: this effect returns early
-    // until `currentOrg` exists, and the org and the user profile are set from
-    // the same `/me` response — so the zone is already resolved by the time a
-    // load runs. Listed because the seeding above genuinely depends on it.
-  }, [id, currentOrg, prefs.timeZone]);
+  }, [id, currentOrg]);
 
   // ── Unsaved-changes guard (only after a REAL edit) ─────
   const navigation = useNavigation();
@@ -186,19 +172,18 @@ export default function EditBookingScreen() {
       if (event.type === "dismissed") return;
       if (selected) {
         setFrom(selected);
-        // Keep `to` after `from`: if it's now invalid, push it to +1 day. Step
-        // the calendar field rather than adding 24h — these are wall-clock
-        // carriers, and a fixed 24h shifts the clock across a device DST edge.
-        setTo((prev) => {
-          if (!prev || prev > selected) return prev;
-          const next = new Date(selected);
-          next.setDate(next.getDate() + 1);
-          return next;
-        });
+        // Keep `to` after `from`: if it's now invalid, push it to +1 day. A
+        // calendar day in the preference zone, not a fixed 24h — across a DST
+        // boundary the day is 23 or 25 hours and the clock would shift.
+        setTo((prev) =>
+          !prev || prev > selected
+            ? prev
+            : addDaysInZone(selected, 1, prefs.timeZone)
+        );
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
-    []
+    [prefs.timeZone]
   );
 
   const onToChange = useCallback(
@@ -248,8 +233,8 @@ export default function EditBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: wallClockWireString(from),
-      endDate: wallClockWireString(to),
+      startDate: wallClockWireInZone(from, prefs.timeZone),
+      endDate: wallClockWireInZone(to, prefs.timeZone),
       // The wire strings carry no offset, so the zone they were written in has
       // to travel with them — that is the preference zone the pickers edit in.
       timeZone: prefs.timeZone,
@@ -405,9 +390,7 @@ export default function EditBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              from
-                ? `Starts ${formatDateTime(from, { localeOnly: true })}`
-                : "Start"
+              from ? `Starts ${formatDateTime(from)}` : "Start"
             }
           >
             <Text
@@ -415,9 +398,7 @@ export default function EditBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from
-                ? formatDateTime(from, { localeOnly: true })
-                : "Choose start..."}
+              {from ? formatDateTime(from) : "Choose start..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -435,6 +416,7 @@ export default function EditBookingScreen() {
                 value={from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 onChange={onFromChange}
                 accentColor={colors.primary}
               />
@@ -454,14 +436,12 @@ export default function EditBookingScreen() {
               setShowFromPicker(false);
             }}
             accessibilityRole="button"
-            accessibilityLabel={
-              to ? `Ends ${formatDateTime(to, { localeOnly: true })}` : "End"
-            }
+            accessibilityLabel={to ? `Ends ${formatDateTime(to)}` : "End"}
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDateTime(to, { localeOnly: true }) : "Choose end..."}
+              {to ? formatDateTime(to) : "Choose end..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -479,6 +459,7 @@ export default function EditBookingScreen() {
                 value={to ?? from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 minimumDate={from ?? undefined}
                 onChange={onToChange}
                 accentColor={colors.primary}

@@ -1,84 +1,128 @@
-import { wallClockDateInZone, wallClockWireString } from "@shelf/datetime";
+import {
+  addDaysInZone,
+  instantFromWallClockInZone,
+  wallClockOnDayInZone,
+  wallClockPartsInZone,
+  wallClockWireInZone,
+} from "@shelf/datetime";
 
 // @vitest-environment node
 
 /**
- * How a wall-clock carrier behaves against the RUNTIME zone's own DST.
+ * The wall-clock primitives must not depend on the zone the code runs in.
  *
- * why a separate file that moves the clock: a carrier holds its wall clock in a
- * `Date`'s local fields, so the runtime zone decides which clocks are
- * representable at all. That is invisible to the main suite, which is
- * deliberately runtime-zone-independent and would agree with a broken
- * implementation under CI's UTC.
+ * This is the property the booking pickers need and the one that is easiest to
+ * lose: any `new Date(y, m, d, h)` or `getHours()` reaches for the runtime zone,
+ * which is the device in the companion and UTC on the server. A helper that does
+ * so answers differently on a Los Angeles phone than on CI for the same booking,
+ * and the main suite cannot see it — that suite runs in one zone, where a
+ * runtime-dependent implementation and a correct one agree exactly.
  *
- * `process.env.TZ` is re-read per `Date` operation, so setting it immediately
- * around a construction works. Setting it once in a hook and expecting later
- * operations to follow does not — pin the zone at the point of use, as
- * `inRuntimeZone` does.
+ * So every case here runs the SAME call under three runtime zones and asserts
+ * ONE answer. Add cases in that shape; a single-zone assertion belongs in
+ * wall-clock.test.ts instead.
  *
- * @see {@link file://./wall-clock.test.ts} the zone-independent contract
+ * `process.env.TZ` is re-read per `Date` operation, so setting it around a call
+ * works. Setting it once in a hook and expecting later operations to follow does
+ * not — pin it at the point of use, as `inEachRuntimeZone` does.
+ *
+ * @see {@link file://./wall-clock.test.ts} the per-zone contract
  */
 
-/** Runs `assert` with the process clock moved to `timeZone`, then restores it. */
-function inRuntimeZone(timeZone: string, assert: () => void) {
+const RUNTIME_ZONES = ["UTC", "America/Los_Angeles", "Asia/Tokyo"];
+
+/** Runs `compute` once per runtime zone and returns the distinct results. */
+function inEachRuntimeZone(compute: () => string): string[] {
   const previous = process.env.TZ;
-  process.env.TZ = timeZone;
   try {
-    assert();
+    return [
+      ...new Set(
+        RUNTIME_ZONES.map((zone) => {
+          process.env.TZ = zone;
+          return compute();
+        })
+      ),
+    ];
   } finally {
     if (previous === undefined) delete process.env.TZ;
     else process.env.TZ = previous;
   }
 }
 
-describe("carrier day arithmetic across a runtime DST edge", () => {
-  it("preserves the wall clock when the calendar field is stepped", () => {
+describe("runtime-zone independence", () => {
+  it("reads an instant's wall clock identically wherever it runs", () => {
     expect.assertions(1);
 
-    // 2026-03-08 is the PST→PDT spring forward, so that calendar day is 23h.
-    inRuntimeZone("America/Los_Angeles", () => {
-      const carrier = wallClockDateInZone("2026-03-07T18:00:00Z", "UTC");
-      carrier.setDate(carrier.getDate() + 1);
-
-      expect(wallClockWireString(carrier)).toBe("2026-03-08T18:00");
-    });
+    expect(
+      inEachRuntimeZone(() =>
+        JSON.stringify(wallClockPartsInZone("2026-08-20T23:30:00Z", "UTC"))
+      )
+    ).toHaveLength(1);
   });
 
-  it("does NOT preserve it when a fixed 24h is added instead", () => {
+  it("writes the wire string identically wherever it runs", () => {
     expect.assertions(1);
 
-    // The reason both booking screens step the calendar field. Pinned so the
-    // shorter-looking `+ 24h` cannot come back unnoticed.
-    inRuntimeZone("America/Los_Angeles", () => {
-      const carrier = wallClockDateInZone("2026-03-07T18:00:00Z", "UTC");
-      const shifted = new Date(carrier.getTime() + 24 * 60 * 60 * 1000);
-
-      expect(wallClockWireString(shifted)).toBe("2026-03-08T19:00");
-    });
+    expect(
+      inEachRuntimeZone(() =>
+        wallClockWireInZone("2026-08-20T23:30:00Z", "Europe/Amsterdam")
+      )
+    ).toEqual(["2026-08-21T01:30"]);
   });
-});
 
-describe("wall clocks the runtime zone skips", () => {
-  it("normalises forward by an hour — a known limitation", () => {
-    expect.assertions(2);
+  it("locates a wall clock at one instant wherever it runs", () => {
+    expect.assertions(1);
 
-    // 02:30 does not exist on 2026-03-08 in Los Angeles, so a `Date` cannot
-    // carry it and resolves forward. A booking stored as 02:30 UTC therefore
-    // re-submits as 03:30 from an LA device even if untouched.
-    //
-    // Driving the picker with its `timeZoneName` prop instead would remove the
-    // device-local hop entirely; that is a different contract, not a patch.
-    inRuntimeZone("America/Los_Angeles", () => {
-      expect(
-        wallClockWireString(wallClockDateInZone("2026-03-08T02:30:00Z", "UTC"))
-      ).toBe("2026-03-08T03:30");
-    });
+    // A clock in the RUNTIME zone's spring-forward gap. Assembling it from a
+    // runtime-local `Date` normalises it an hour, so this is the case that
+    // separates a zone-solved implementation from a device-local one: under
+    // `America/Los_Angeles` a local-fields build answers 03:30 here.
+    expect(
+      inEachRuntimeZone(() =>
+        wallClockWireInZone(
+          instantFromWallClockInZone(
+            { year: 2026, month: 3, day: 8, hour: 2, minute: 30 },
+            "UTC"
+          ),
+          "UTC"
+        )
+      )
+    ).toEqual(["2026-03-08T02:30"]);
+  });
 
-    // Same instant, same carried zone, a runtime zone with no gap there: exact.
-    inRuntimeZone("UTC", () => {
-      expect(
-        wallClockWireString(wallClockDateInZone("2026-03-08T02:30:00Z", "UTC"))
-      ).toBe("2026-03-08T02:30");
-    });
+  it("steps a calendar day identically wherever it runs", () => {
+    expect.assertions(1);
+
+    // The step crosses the RUNTIME zone's DST boundary as well as the carried
+    // zone's, so a runtime-local implementation drifts under Los Angeles only.
+    expect(
+      inEachRuntimeZone(() =>
+        wallClockWireInZone(
+          addDaysInZone("2026-03-07T18:00:00Z", 1, "America/Los_Angeles"),
+          "America/Los_Angeles"
+        )
+      )
+    ).toEqual(["2026-03-08T10:00"]);
+  });
+
+  it("resolves a form default identically wherever it runs", () => {
+    expect.assertions(1);
+
+    // 23:00Z is already tomorrow in Tokyo and still today in Los Angeles, so a
+    // default anchored to the runtime's calendar day lands on the wrong date.
+    expect(
+      inEachRuntimeZone(() =>
+        wallClockWireInZone(
+          wallClockOnDayInZone(
+            "2026-08-20T23:00:00Z",
+            1,
+            9,
+            0,
+            "Europe/Amsterdam"
+          ),
+          "Europe/Amsterdam"
+        )
+      )
+    ).toEqual(["2026-08-22T09:00"]);
   });
 });

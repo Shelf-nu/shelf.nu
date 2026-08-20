@@ -38,7 +38,11 @@ import DateTimePicker, {
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
-import { wallClockDateInZone, wallClockWireString } from "@shelf/datetime";
+import {
+  addDaysInZone,
+  wallClockOnDayInZone,
+  wallClockWireInZone,
+} from "@shelf/datetime";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -48,22 +52,18 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 /**
  * The default booking window — tomorrow 09:00-17:00 as `timeZone` reads it.
  *
- * Returns wall-clock carriers, not instants: their LOCAL fields spell the
- * preference-zone wall clock, which is what the native picker edits and what
- * `wallClockWireString` submits. See {@link wallClockDateInZone}.
+ * Both are real instants. "Tomorrow" and the hours are resolved in `timeZone`,
+ * so the window means the same wall clock regardless of where the device is.
  *
  * @param timeZone - the acting user's preference zone
- * @returns carriers for the start and end of the default window
+ * @returns the start and end instants of the default window
  */
 function defaultBookingWindow(timeZone: string): { from: Date; to: Date } {
-  const tomorrow = wallClockDateInZone(new Date(), timeZone);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const from = new Date(tomorrow);
-  from.setHours(9, 0, 0, 0);
-  const to = new Date(tomorrow);
-  to.setHours(17, 0, 0, 0);
-  return { from, to };
+  const now = new Date();
+  return {
+    from: wallClockOnDayInZone(now, 1, 9, 0, timeZone),
+    to: wallClockOnDayInZone(now, 1, 17, 0, timeZone),
+  };
 }
 
 export default function CreateBookingScreen() {
@@ -71,11 +71,9 @@ export default function CreateBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // `from`/`to` below are wall-clock CARRIERS in the user's preference zone, not
-  // instants — their local fields are what the picker edits and what gets
-  // submitted. So the labels must read those local fields verbatim
-  // (`localeOnly`) and apply the user's FORMAT only: converting a carrier
-  // through a zone would shift it away from the value being edited.
+  // `from`/`to` are real instants throughout. Both pickers are driven in the
+  // preference zone via `timeZoneName`, so what the user picks, what the labels
+  // render, and what the detail screen shows after saving are one wall clock.
   const { formatDateTime, prefs } = useDateFormatter();
 
   // ── Form state ──────────────────────────────────
@@ -155,19 +153,18 @@ export default function CreateBookingScreen() {
       if (selected) {
         datesTouchedRef.current = true;
         setFrom(selected);
-        // Keep `to` after `from`: if it's now invalid, push it to +1 day. Step
-        // the calendar field rather than adding 24h — these are wall-clock
-        // carriers, and a fixed 24h shifts the clock across a device DST edge.
-        setTo((prev) => {
-          if (!prev || prev > selected) return prev;
-          const next = new Date(selected);
-          next.setDate(next.getDate() + 1);
-          return next;
-        });
+        // Keep `to` after `from`: if it's now invalid, push it to +1 day. A
+        // calendar day in the preference zone, not a fixed 24h — across a DST
+        // boundary the day is 23 or 25 hours and the clock would shift.
+        setTo((prev) =>
+          !prev || prev > selected
+            ? prev
+            : addDaysInZone(selected, 1, prefs.timeZone)
+        );
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
-    []
+    [prefs.timeZone]
   );
 
   const onToChange = useCallback(
@@ -231,8 +228,8 @@ export default function CreateBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: wallClockWireString(from),
-      endDate: wallClockWireString(to),
+      startDate: wallClockWireInZone(from, prefs.timeZone),
+      endDate: wallClockWireInZone(to, prefs.timeZone),
       // The wire strings carry no offset, so the zone they were written in has
       // to travel with them — that is the preference zone the pickers edit in.
       timeZone: prefs.timeZone,
@@ -361,9 +358,7 @@ export default function CreateBookingScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               from
-                ? `Starts ${formatDateTime(from, {
-                    localeOnly: true,
-                  })}, tap to change`
+                ? `Starts ${formatDateTime(from)}, tap to change`
                 : "Choose start"
             }
           >
@@ -372,9 +367,7 @@ export default function CreateBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from
-                ? formatDateTime(from, { localeOnly: true })
-                : "Choose start date & time..."}
+              {from ? formatDateTime(from) : "Choose start date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -390,6 +383,7 @@ export default function CreateBookingScreen() {
                 value={from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 onChange={onFromChange}
                 accentColor={colors.primary}
               />
@@ -409,19 +403,13 @@ export default function CreateBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              to
-                ? `Ends ${formatDateTime(to, {
-                    localeOnly: true,
-                  })}, tap to change`
-                : "Choose end"
+              to ? `Ends ${formatDateTime(to)}, tap to change` : "Choose end"
             }
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to
-                ? formatDateTime(to, { localeOnly: true })
-                : "Choose end date & time..."}
+              {to ? formatDateTime(to) : "Choose end date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -437,6 +425,7 @@ export default function CreateBookingScreen() {
                 value={to ?? from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 minimumDate={from ?? undefined}
                 onChange={onToChange}
                 accentColor={colors.primary}
