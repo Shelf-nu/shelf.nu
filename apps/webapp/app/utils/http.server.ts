@@ -12,6 +12,7 @@ import {
 } from "./error";
 import type { ValidationError } from "./http";
 import { Logger } from "./logger";
+import { redactSensitive } from "./redact";
 
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
@@ -172,7 +173,12 @@ export function parseData<Schema extends ZodType<any, any, any>>(
       ...options,
       additionalData: {
         ...options?.additionalData,
-        data,
+        // Redacted: this is the WHOLE submitted payload, and additionalData is
+        // written to the log line verbatim (and to Sentry `extra` when
+        // captured). On the password-reset form the payload carries the OTP and
+        // the user's new password, so an ordinary mistyped confirmation logged
+        // both in plaintext. See ~/utils/redact.
+        data: redactSensitive(data),
         validationErrors,
       },
     });

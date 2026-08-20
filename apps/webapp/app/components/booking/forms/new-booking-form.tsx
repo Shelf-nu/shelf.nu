@@ -14,7 +14,6 @@ import type {
   NewBookingActionReturnType,
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
-import { useHints } from "~/utils/client-hints";
 
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -62,10 +61,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const disabled = useDisabled(fetcher);
-  const hints = useHints();
   // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
   // timezone preference (the same one display uses), not the browser hint, so
-  // it agrees with the server parse. Locale still comes from `hints`.
+  // it agrees with the server parse.
   const prefs = useFormatPrefs();
 
   // Fetch working hours for validation
@@ -89,7 +87,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       action: "new",
       workingHours: workingHours,
       bookingSettings,

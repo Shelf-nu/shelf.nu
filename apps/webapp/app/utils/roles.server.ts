@@ -9,6 +9,10 @@ import type {
   PermissionEntity,
 } from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
@@ -69,11 +73,18 @@ export function resolveEffectiveRole({
   }>;
   organizationId: string;
 }): OrganizationRoles {
-  const roles = userOrganizations.find(
-    (o) => o.organization.id === organizationId
-  )?.roles;
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
 
-  return roles?.[0] ?? OrganizationRoles.BASE;
+  // Most privileged, not roles[0]. Both callers use this to decide how much a
+  // user may see — the custodian picker's scope and booking visibility — so a
+  // membership ordered [SELF_SERVICE, ADMIN] would otherwise hand an actual
+  // admin the restricted view. Shares its ordering with SSO group resolution.
+  return (
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    OrganizationRoles.BASE
+  );
 }
 
 /**
@@ -251,6 +262,76 @@ export async function requirePermission({
 }
 
 /**
+ * Whether the user holds OWNER in the given organization.
+ *
+ * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
+ * which returns `roles[0]` — a user carrying more than one role could be the
+ * owner without OWNER being first. This mirrors the check the loaders already
+ * use to decide whether to render the purchase UI, so the server gate and the
+ * UI gate cannot disagree.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @returns `true` if the caller owns this workspace
+ */
+export function isOrganizationOwner({
+  userOrganizations,
+  organizationId,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+}): boolean {
+  return (
+    userOrganizations
+      .find((o) => o.organization.id === organizationId)
+      ?.roles.includes(OrganizationRoles.OWNER) ?? false
+  );
+}
+
+/**
+ * Asserts the caller owns the workspace.
+ *
+ * `requirePermission(subscription, update)` is NOT sufficient for anything that
+ * spends money or burns a one-time entitlement: ADMIN short-circuits to
+ * allow-all in `hasPermission`, so it passes that gate. The add-on purchase UI
+ * is owner-only, but the actions behind it were not — letting an ADMIN burn the
+ * workspace's single free trial (an irreversible flag) and commit the workspace
+ * to a charge on the owner's card.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @param action - Verb phrase completing "Only the workspace owner can …"
+ * @throws {ShelfError} 403 if the caller is not the owner
+ */
+export function assertIsOrganizationOwner({
+  userOrganizations,
+  organizationId,
+  action,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+  action: string;
+}): void {
+  if (!isOrganizationOwner({ userOrganizations, organizationId })) {
+    throw new ShelfError({
+      cause: null,
+      title: "Owner only",
+      message: `Only the workspace owner can ${action}.`,
+      additionalData: { organizationId },
+      label: "Subscription",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Splits a comma-separated `SsoDetails` group-id field into a normalized list of
  * lower-cased, trimmed, non-empty ids. Mirrors the comma-separated convention
  * already used by `SsoDetails.domain`, so one role can map to several IdP groups
@@ -318,14 +399,22 @@ export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles | null {
-  // We prioritize the admin group. If the user is in several, the highest role wins.
-  if (groupClaimMatches(ssoDetails.adminGroupId, groupIds)) {
-    return OrganizationRoles.ADMIN;
-  } else if (groupClaimMatches(ssoDetails.selfServiceGroupId, groupIds)) {
-    return OrganizationRoles.SELF_SERVICE;
-  } else if (groupClaimMatches(ssoDetails.baseUserGroupId, groupIds)) {
-    return OrganizationRoles.BASE;
-  } else {
-    return null;
-  }
+  // Which SsoDetails field configures the group for each role.
+  const groupField: Record<
+    (typeof SSO_ASSIGNABLE_ROLE_PRECEDENCE)[number],
+    string | null
+  > = {
+    [OrganizationRoles.ADMIN]: ssoDetails.adminGroupId,
+    [OrganizationRoles.SELF_SERVICE]: ssoDetails.selfServiceGroupId,
+    [OrganizationRoles.BASE]: ssoDetails.baseUserGroupId,
+  };
+
+  // Walk in precedence order so the highest matching role wins. The order is
+  // shared with the booking ownership guard (see role-precedence.ts) rather
+  // than restated here, so the two cannot drift.
+  return (
+    SSO_ASSIGNABLE_ROLE_PRECEDENCE.find((role) =>
+      groupClaimMatches(groupField[role], groupIds)
+    ) ?? null
+  );
 }

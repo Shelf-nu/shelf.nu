@@ -9,7 +9,10 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -104,11 +107,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // `fulfilModelRequestsAndCheckout` does NOT check ownership itself (unlike
     // the scan-add path, whose guard lives in `processBooking`), so without
     // this the mobile route would be more permissive than web.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role,
+      role: resolveMostPrivilegedRole(roles),
       action: "check out",
     });
 

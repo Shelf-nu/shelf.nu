@@ -5,7 +5,7 @@
  * The webapp vitest harness has no real DB, so these assert the generated SQL
  * STRING and bound params (the @map-column guard from
  * .claude/rules/raw-sql-respects-prisma-map.md), not row-level results.
- * Row-level parity (UNION id-set == the old buildFullAssetSearchOr id-set) is
+ * Row-level parity (UNION id-set == the old Prisma OR clause's id-set) is
  * verified out-of-harness against a staging copy of a large org, plus the
  * post-deploy EXPLAIN ANALYZE — see the PR's verification notes.
  */

@@ -35,6 +35,12 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: external service — we mock the booking checkin to avoid database calls
+// why: the route now loads creatorId/custodianUserId for the ownership guard;
+// mock the org-scoped lookup rather than hitting a database.
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
+}));
+
 vi.mock("~/modules/booking/service.server", () => ({
   checkinBooking: vi.fn(),
 }));
@@ -63,6 +69,7 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -99,9 +106,18 @@ describe("POST /api/mobile/bookings/checkin", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    // Default: the caller owns the booking, so the ownership guard is a
+    // no-op and the pre-existing cases still test what they were written for.
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "user-1",
+      custodianUserId: null,
+    });
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
     // Default: admin role + explicit check-in NOT required (quick check-in OK).
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      roles: ["ADMIN"],
+    });
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: false,
       requireExplicitCheckinForSelfService: false,
@@ -158,7 +174,10 @@ describe("POST /api/mobile/bookings/checkin", () => {
   it("blocks quick check-in (403) when the workspace requires explicit check-in for the role", async () => {
     // Admin in a workspace that mandates explicit (scan/select) check-in for
     // admins — quick "check in all" must be refused, mirroring the web policy.
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      roles: ["ADMIN"],
+    });
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: true,
       requireExplicitCheckinForSelfService: false,
@@ -174,5 +193,60 @@ describe("POST /api/mobile/bookings/checkin", () => {
     expect((result as unknown as Response).status).toBe(403);
     // The quick check-in must NOT run — the user is forced to scan/select.
     expect(checkinBooking).not.toHaveBeenCalled();
+  });
+
+  it("refuses a SELF_SERVICE user checking in someone else's booking", async () => {
+    // SELF_SERVICE holds `booking:checkin`, so the role gate above passes for
+    // ANY booking id in the organization, and `checkinBooking` does not check
+    // ownership itself. Only the ownership guard stops this.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      roles: ["SELF_SERVICE"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    // The assertion that matters: the check-in never happens.
+    expect(checkinBooking).not.toHaveBeenCalled();
+  });
+
+  it("still lets ADMIN check in a booking they do not own", async () => {
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      roles: ["ADMIN"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    expect(checkinBooking).toHaveBeenCalled();
+  });
+
+  it("does not block a real ADMIN whose roles array starts with SELF_SERVICE", async () => {
+    // `getMobileUserContext.role` is roles[0], so a membership ordered
+    // [SELF_SERVICE, ADMIN] resolves to SELF_SERVICE — the guard would refuse
+    // an actual admin. The guard reads the whole array instead.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      roles: ["SELF_SERVICE", "ADMIN"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    expect(checkinBooking).toHaveBeenCalled();
   });
 });

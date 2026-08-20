@@ -55,6 +55,7 @@ import {
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -131,15 +132,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    // Matches the action's gate: this screen exists only to check out, so a
+    // role without `booking:checkout` should not reach it at all.
     const { organizationId, role, userOrganizations } = await requirePermission(
       {
         userId,
         request,
         entity: PermissionEntity.booking,
-        action: PermissionAction.update,
+        action: PermissionAction.checkout,
       }
     );
 
+    // NOTE: BASE is deliberately not folded in here. `canUserManageBookingAssets`
+    // takes an is-self-service flag, and BASE reaching this loader would get the
+    // permissive branch — but BASE does not hold `booking:checkout`, so the gate
+    // above now stops it before this matters.
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const booking = await getBooking({
@@ -148,6 +155,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    // `canUserManageBookingAssets` takes only (status, from, to) plus an
+    // is-self-service flag — it never sees `userId`, so it cannot answer "is
+    // this MY booking". Without this, a SELF_SERVICE user could load another
+    // member's booking, its model requests and its asset data through this
+    // screen, even though the action would refuse the checkout. Read access is
+    // the leak; the write guard does not cover it.
+    if (isSelfService) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "check out",
+      });
+    }
 
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
@@ -262,12 +284,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    // `checkout`, not `update`: BASE holds `update` and deliberately does NOT
+    // hold `checkout`, so gating on `update` let a BASE user check out through
+    // this route. The dedicated action exists precisely to withhold this.
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      });
 
     const formData = await request.formData();
 
@@ -283,8 +309,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      // creatorId/custodianUserId feed the ownership guard below.
+      select: {
+        from: true,
+        to: true,
+        creatorId: true,
+        custodianUserId: true,
+      },
     });
+
+    // The loader restricts via `canUserManageBookingAssets`, but the ACTION had
+    // no equivalent — a direct POST skipped it entirely. SELF_SERVICE holds
+    // `booking:checkout`, and `fulfilModelRequestsAndCheckout` does not check
+    // ownership itself, so this is what stops a cross-user checkout. No-op for
+    // ADMIN/OWNER. Mirrors api+/mobile+/bookings.fulfil-and-checkout.ts.
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: "check out",
+      });
+    }
 
     await fulfilModelRequestsAndCheckout({
       bookingId,

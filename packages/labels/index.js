@@ -150,3 +150,38 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
   }
   return AUDIT_ASSET_STATUS_LABELS[status];
 }
+
+// Why a booking cannot be reserved yet — the three rules web's Reserve button
+// disables on, in one register for every surface that states them.
+//
+// Before this there were FOUR wordings for the same two rules: the web tooltip
+// (which also carried an "unavailble" typo), the mobile route's 400, the
+// in-transaction guard's 400, and the companion's client-side note. A wording
+// change fixed at most one of them, and the phone told users something the
+// website did not. `ALREADY_BOOKED` is the rule the companion could not state
+// at all until the booking detail payload started carrying the flag.
+//
+// These are the *reasons the button is blocked*, not the outcome of a failed
+// write: `reserveBooking`'s race-safe conflict check names the specific
+// offending assets and deliberately keeps its own richer message.
+export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
+  NOTHING_TO_RESERVE:
+    "Add assets or reserve at least one model on this booking before you reserve it.",
+  UNAVAILABLE_ASSETS:
+    "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
+  ALREADY_BOOKED:
+    "This booking holds assets already booked for that period. Remove them, or change the dates, before reserving.",
+});
+
+// Refusal shown when emptying a RESERVED booking. Such a booking with nothing
+// in it reserves nothing — the very state the Reserve guards exist to prevent —
+// so the removal paths defend the same invariant rather than letting users
+// reach it from the other side.
+//
+// RESERVED only, deliberately. An empty DRAFT is normal work-in-progress; a
+// COMPLETE / ARCHIVED / CANCELLED booking is not holding anything any more; and
+// ONGOING / OVERDUE bookings must stay emptiable, because pulling a
+// checked-out asset off a live booking is a real correction flow (the service
+// reconciles the asset's status when it happens).
+export const BOOKING_EMPTY_RESERVED_MESSAGE =
+  "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
