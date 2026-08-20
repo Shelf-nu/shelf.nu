@@ -1,4 +1,4 @@
-import { addDays, format, differenceInHours } from "date-fns";
+import { differenceInHours } from "date-fns";
 import { DateTime } from "luxon";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
@@ -436,7 +436,8 @@ export function calculateEffectiveEndDate(
   startDate: Date,
   endDate: Date,
   workingHoursData: WorkingHoursData | null | undefined,
-  skipClosedDays: boolean
+  skipClosedDays: boolean,
+  timeZone: string
 ): Date {
   // If not skipping closed days or no working hours data, use original endDate
   if (!skipClosedDays || !workingHoursData?.enabled) {
@@ -444,41 +445,29 @@ export function calculateEffectiveEndDate(
   }
 
   let closedDaysCount = 0;
-  const currentDate = new Date(startDate);
-  const originalEndDate = new Date(endDate);
+  let cursor = DateTime.fromJSDate(startDate).setZone(timeZone);
+  const end = DateTime.fromJSDate(endDate).setZone(timeZone);
 
   // Count closed days between start and original end date
-  while (currentDate < originalEndDate) {
-    const dateString = format(currentDate, "yyyy-MM-dd");
-    const dayOfWeek = currentDate.getDay().toString();
+  while (cursor < end) {
+    // Which day this is, and whether it is open, are decided in `timeZone` —
+    // see the shared resolver. Reading them off a device-local Date put the
+    // count on the wrong days whenever the device and preference zones
+    // straddled midnight.
+    const isOpen =
+      resolveDaySchedule(cursor, workingHoursData)?.isOpen ?? false;
 
-    // Check for date-specific override first
-    const override = workingHoursData.overrides.find(
-      (override) => getOverrideDateKey(override.date) === dateString
-    );
-
-    let isOpen: boolean;
-
-    if (override) {
-      isOpen = override.isOpen;
-    } else {
-      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
-      isOpen = daySchedule?.isOpen || false;
-    }
-
-    // If this day is closed, count it
     if (!isOpen) {
       closedDaysCount++;
     }
 
-    // Move to next day
-    currentDate.setTime(addDays(currentDate, 1).getTime());
+    // Move to next day. `plus({ days })` steps by calendar day in `timeZone`,
+    // so the walk stays correct across a DST boundary.
+    cursor = cursor.plus({ days: 1 });
   }
 
   // Extend the end date by the number of closed days
-  const finalEndDate = addDays(originalEndDate, closedDaysCount);
-
-  return finalEndDate;
+  return end.plus({ days: closedDaysCount }).toJSDate();
 }
 
 /**
@@ -495,51 +484,43 @@ export function calculateEffectiveEndDate(
 export function calculateBusinessHoursDuration(
   startDate: Date,
   endDate: Date,
-  workingHoursData: WorkingHoursData
+  workingHoursData: WorkingHoursData,
+  timeZone: string
 ): number {
-  // Start with total calendar hours
+  // Total calendar hours is pure instant arithmetic — no zone involved.
   const totalCalendarHours = differenceInHours(endDate, startDate);
   let closedDaysHours = 0;
 
-  const currentDate = new Date(startDate);
+  let cursor = DateTime.fromJSDate(startDate).setZone(timeZone);
+  const end = DateTime.fromJSDate(endDate).setZone(timeZone);
 
   // Process each day from start to end to count closed days
-  while (currentDate < endDate) {
-    const nextDay = addDays(currentDate, 1);
-    nextDay.setHours(0, 0, 0, 0); // Start of next day
+  while (cursor < end) {
+    // Midnight is a WALL-CLOCK boundary, so it has to be taken in `timeZone`.
+    // `setHours(0,0,0,0)` cut the day on the device clock, which sliced the
+    // window on the wrong boundary for anyone whose device differed from their
+    // preference zone — and shifted how many hours got attributed to a closed
+    // day.
+    const nextDay = cursor.plus({ days: 1 }).startOf("day");
 
-    // Get the actual time window for this day (intersection of booking with day)
-    const windowStart = currentDate;
-    const windowEnd = nextDay > endDate ? endDate : nextDay;
+    // Intersection of the booking with this day
+    const windowEnd = nextDay > end ? end : nextDay;
 
-    // Check if this day is closed
-    const dateString = format(windowStart, "yyyy-MM-dd");
-    const dayOfWeek = windowStart.getDay().toString();
-
-    // Check for date-specific override first
-    const override = workingHoursData.overrides.find(
-      (override) => getOverrideDateKey(override.date) === dateString
-    );
-
-    let isOpen: boolean;
-    if (override) {
-      isOpen = override.isOpen;
-    } else {
-      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
-      isOpen = daySchedule?.isOpen || false;
-    }
+    const isOpen =
+      resolveDaySchedule(cursor, workingHoursData)?.isOpen ?? false;
 
     if (!isOpen) {
-      // This day is closed, subtract its hours from the total
-      const hoursInThisDay = differenceInHours(windowEnd, windowStart);
-      closedDaysHours += hoursInThisDay;
+      // This day is closed, subtract its hours from the total. Kept on
+      // `differenceInHours` so the truncation matches the calendar-hours total
+      // it is subtracted from.
+      closedDaysHours += differenceInHours(
+        windowEnd.toJSDate(),
+        cursor.toJSDate()
+      );
     }
 
-    // Move to next day
-    currentDate.setTime(nextDay.getTime());
+    cursor = nextDay;
   }
 
-  const effectiveHours = totalCalendarHours - closedDaysHours;
-
-  return effectiveHours;
+  return totalCalendarHours - closedDaysHours;
 }
