@@ -4,6 +4,7 @@ import {
   deleteAuditImage,
   getAuditImages,
 } from "~/modules/audit/image.service.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, parseData, payload } from "~/utils/http.server";
 import {
@@ -22,7 +23,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
@@ -34,6 +35,17 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       z.object({ auditId: z.string(), assetId: z.string() }),
       { additionalData: { userId } }
     );
+
+    // `audit: read` authorizes reading audits in general, never THIS audit.
+    // Without an assignment check a BASE or SELF_SERVICE member could read the
+    // evidence attached to any audit in the workspace, including ones they
+    // were never assigned to. ADMIN/OWNER are unrestricted.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
 
     // Fetch images for the specific audit asset
     const images = await getAuditImages({
@@ -53,18 +65,27 @@ export async function action({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
 
-    const { auditId } = getParams(
+    const { auditId, assetId } = getParams(
       params,
       z.object({ auditId: z.string(), assetId: z.string() }),
       { additionalData: { userId } }
     );
+
+    // Deleting evidence is destructive and irreversible — the storage objects
+    // go too — so the same assignment rule as the read applies here.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
 
     const { intent, imageId } = parseData(
       await request.formData(),
@@ -76,7 +97,16 @@ export async function action({ request, context, params }: LoaderFunctionArgs) {
     );
 
     if (intent === "delete") {
-      await deleteAuditImage({ imageId, organizationId });
+      // `auditSessionId` and `auditAssetId` bind the caller-supplied `imageId`
+      // to the parent named in the URL. Without them the org filter was the
+      // only constraint, so this route could delete an image belonging to an
+      // entirely different audit.
+      await deleteAuditImage({
+        imageId,
+        organizationId,
+        auditSessionId: auditId,
+        auditAssetId: assetId,
+      });
       return data(payload({ success: true }));
     }
 
