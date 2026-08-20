@@ -86,7 +86,16 @@ describe("redactUrlCredentials", () => {
     expect(redactUrlCredentials(prose)).toBe(prose);
   });
 
-  it("returns an unparseable http string unchanged rather than guessing", () => {
+  it("strips the password from an UNPARSEABLE url", () => {
+    // The case that matters most in practice: a malformed URL is precisely the
+    // one that gets logged, because being malformed is why the import failed.
+    const out = redactUrlCredentials("https://alice:hunter2@");
+
+    expect(out).not.toContain("hunter2");
+    expect(out).not.toContain("alice");
+  });
+
+  it("leaves an unparseable url with no credentials alone", () => {
     const broken = "https://";
     expect(redactUrlCredentials(broken)).toBe(broken);
   });

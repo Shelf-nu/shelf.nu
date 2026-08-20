@@ -96,10 +96,24 @@ export function redactUrlCredentials(value: string): string {
   try {
     url = new URL(value);
   } catch {
-    // Unparseable, so there is no structure to reason about. Returning it
-    // unchanged is safe: the guard above proved it is not a bare secret, and
-    // guessing at delimiters would be worse than leaving it alone.
-    return value;
+    // Unparseable — and these are exactly the URLs that get logged, because a
+    // malformed one is why the import failed in the first place.
+    //
+    // We can still strip the credential without a parser: the guard above
+    // proved the string starts `http(s)://`, so anything between that and the
+    // last `@` before the first `/`, `?` or `#` IS the userinfo. That is not a
+    // guess, it is where the delimiter has to be. `[^/?#]*` is greedy, so it
+    // binds to the LAST `@` in the authority, matching how a real parser
+    // reads it.
+    //
+    // Only the userinfo is handled here. A secret in a query parameter of an
+    // unparseable URL still gets through; covering that would mean redacting
+    // the whole string, which costs the debuggability this function exists to
+    // preserve. Narrow and useful beats broad and blinding.
+    return value.replace(
+      /^(https?:\/\/)[^/?#]*@/i,
+      `$1${REDACTED_URL_PART}:${REDACTED_URL_PART}@`
+    );
   }
 
   let redacted = false;
