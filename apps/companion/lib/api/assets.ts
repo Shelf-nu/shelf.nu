@@ -9,6 +9,7 @@ import type {
   BarcodeResponse,
   TeamMembersResponse,
   LocationsResponse,
+  AssetBookingsResponse,
 } from "./types";
 
 export const assetsApi = {
@@ -245,4 +246,23 @@ export const assetsApi = {
       method: "POST",
       body: JSON.stringify({ assetId, content }),
     }),
+
+  /**
+   * Bookings this asset appears in — past and upcoming. Mirrors web's
+   * Bookings tab on the asset page.
+   */
+  assetBookings: (
+    assetId: string,
+    orgId: string,
+    params: { page?: number; perPage?: number } = {}
+  ) => {
+    const qs = new URLSearchParams({ orgId });
+    if (params.page) qs.set("page", String(params.page));
+    if (params.perPage) qs.set("perPage", String(params.perPage));
+    return apiFetch<AssetBookingsResponse>(
+      `/api/mobile/assets/${encodeURIComponent(
+        assetId
+      )}/bookings?${qs.toString()}`
+    );
+  },
 };

@@ -1,6 +1,9 @@
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { useState } from "react";
+import { useAssetBookings } from "@/hooks/use-asset-bookings";
+import type { AssetBookingRow } from "@/lib/api/types";
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -25,6 +28,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useOrg } from "@/lib/org-context";
+import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
@@ -63,6 +67,37 @@ try {
     require("react-native-qrcode-svg");
 } catch {
   // Will render graceful fallback instead of QR code
+}
+
+/** Canonical wording for a booking status, shared with web via @shelf/labels. */
+function bookingStatusLabel(status: string): string {
+  return (
+    BOOKING_STATUS_LABELS[status as keyof typeof BOOKING_STATUS_LABELS] ??
+    status
+  );
+}
+
+/**
+ * A booking's status, drawn the way every other booking surface draws it.
+ *
+ * Kept as a component rather than inlined so the asset screen, the bookings
+ * list and the calendar cannot drift apart again by editing one of them.
+ */
+function BookingStatusPill({ status }: { status: string }) {
+  const { colors, bookingStatusBadge } = useTheme();
+  const styles = useStyles();
+  const badge = bookingStatusBadge[status] ?? {
+    bg: colors.borderLight,
+    text: colors.muted,
+  };
+
+  return (
+    <View style={[styles.bookingStatusPill, { backgroundColor: badge.bg }]}>
+      <Text style={[styles.bookingStatusText, { color: badge.text }]}>
+        {bookingStatusLabel(status)}
+      </Text>
+    </View>
+  );
 }
 
 export default function AssetDetailScreen() {
@@ -122,6 +157,19 @@ export default function AssetDetailScreen() {
     performAssignQuantity,
     performReleaseQuantity,
   } = useCustodyActions({ asset, currentOrg, fetchAsset });
+
+  // Bookings this asset appears in — lazy, only once the section is opened.
+  const assetBookings = useAssetBookings(asset?.id, currentOrg?.id);
+
+  /** Collapsed by default: the recent few, not the whole history. */
+  const [showAllBookings, setShowAllBookings] = useState(false);
+  const BOOKINGS_PREVIEW_COUNT = 3;
+  const visibleBookings = showAllBookings
+    ? assetBookings.bookings
+    : assetBookings.bookings.slice(0, BOOKINGS_PREVIEW_COUNT);
+  const hiddenBookingCount =
+    assetBookings.bookings.length - visibleBookings.length;
+  const [showBookings, setShowBookings] = useState(false);
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -691,6 +739,122 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
+          {/* ── Bookings ────────────────────────────────── */}
+          {/* why: "when is this out, and where has it been" is the question
+              people ask holding the asset. Web answers it on a Bookings tab of
+              the asset page; the phone could not ask it at all. Collapsed by
+              default and fetched on expand, so the screen's usual load is
+              unchanged for the visits that never open it. */}
+          <View style={styles.sectionContainer}>
+            <TouchableOpacity
+              style={styles.bookingsHeader}
+              onPress={() => {
+                const next = !showBookings;
+                setShowBookings(next);
+                if (next && !assetBookings.hasLoaded) {
+                  void assetBookings.load();
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showBookings }}
+              accessibilityLabel={
+                showBookings ? "Hide bookings" : "Show bookings for this asset"
+              }
+            >
+              <Text style={styles.sectionTitle}>Bookings</Text>
+              <View style={styles.bookingsHeaderRight}>
+                {assetBookings.hasLoaded && (
+                  <Text style={styles.bookingsCount}>
+                    {assetBookings.totalCount}
+                  </Text>
+                )}
+                <Ionicons
+                  name={showBookings ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={colors.muted}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {showBookings && (
+              <View style={styles.bookingsBody}>
+                {assetBookings.isLoading && !assetBookings.hasLoaded ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : assetBookings.error ? (
+                  <Text style={styles.bookingsEmpty}>
+                    {assetBookings.error}
+                  </Text>
+                ) : assetBookings.bookings.length === 0 ? (
+                  <Text style={styles.bookingsEmpty}>
+                    This asset has never been booked.
+                  </Text>
+                ) : (
+                  visibleBookings.map((b: AssetBookingRow) => (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={styles.bookingRow}
+                      onPress={() => router.push(`/bookings/${b.id}`)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${b.name}, ${bookingStatusLabel(
+                        b.status
+                      )}, ${formatDate(b.from)} to ${formatDate(b.to)}`}
+                    >
+                      <View style={styles.bookingRowMain}>
+                        <Text style={styles.bookingName} numberOfLines={1}>
+                          {b.name}
+                        </Text>
+                        <Text style={styles.bookingDates}>
+                          {formatDate(b.from)} → {formatDate(b.to)}
+                        </Text>
+                        {b.custodianName ? (
+                          <Text style={styles.bookingCustodian}>
+                            {b.custodianName}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {/* The same pill the bookings list, the booking detail
+                          and the calendar's day panel draw. This was plain
+                          text, so an asset's bookings were the one place in
+                          the app where a booking status did not look like a
+                          booking status. */}
+                      <BookingStatusPill status={b.status} />
+                    </TouchableOpacity>
+                  ))
+                )}
+
+                {/* why a cap: this sits on the densest screen in the app, and an
+                    asset that gets booked weekly has dozens of rows. Twenty of
+                    them buried the QR code and the activity feed below. The
+                    first few answer "what is it on now"; the rest are history,
+                    so they are one tap away rather than always on screen.
+                    Without this the list also ended at 20 with nothing saying
+                    so, which is worse than showing fewer on purpose. */}
+                {hiddenBookingCount > 0 ? (
+                  <TouchableOpacity
+                    style={styles.bookingsMore}
+                    onPress={() => setShowAllBookings(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${hiddenBookingCount} older bookings`}
+                  >
+                    <Text style={styles.bookingsMoreText}>
+                      {`Show ${hiddenBookingCount} older`}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {assetBookings.hasLoaded &&
+                assetBookings.totalCount > assetBookings.bookings.length ? (
+                  <Text style={styles.bookingsEmpty}>
+                    {/* why: not "most recent". Rows come back newest-START-first,
+                        so on an asset with future reservations these are the
+                        furthest-ahead bookings, not the latest past ones. */}
+                    {`Showing ${assetBookings.bookings.length} of ${assetBookings.totalCount}. Open this asset on the web app to see them all.`}
+                  </Text>
+                ) : null}
+              </View>
+            )}
+          </View>
+
           {/* ── QR Code ─────────────────────────────────── */}
           {asset.qrCodes.length > 0 && (
             <View style={styles.sectionContainer}>
@@ -1099,6 +1263,86 @@ const useStyles = createStyles((colors, shadows) => ({
 
   // Section containers (tags, QR)
   sectionContainer: { paddingHorizontal: spacing.lg, marginTop: spacing.xl },
+  bookingsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 44,
+  },
+  bookingsHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  bookingsCount: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    overflow: "hidden",
+  },
+  bookingsBody: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  bookingsEmpty: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  bookingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  bookingRowMain: {
+    flex: 1,
+    gap: 2,
+  },
+  bookingName: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  bookingDates: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  bookingCustodian: {
+    fontSize: fontSize.xs,
+    // why: NOT `mutedLight` — that token is for icons and large text (4.35:1
+    // light, 3.77:1 dark) and misses 4.5:1 at this 12px size. `muted` still
+    // reads quieter than the dates line above it and clears the bar in both
+    // themes.
+    color: colors.muted,
+  },
+  bookingsMore: {
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+  },
+  bookingsMoreText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
+  },
+  bookingStatusPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.pill,
+  },
+  bookingStatusText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+  },
   sectionTitle: {
     fontSize: fontSize.sm,
     fontWeight: "600",
