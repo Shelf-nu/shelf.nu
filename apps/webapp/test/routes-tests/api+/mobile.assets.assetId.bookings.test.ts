@@ -258,19 +258,54 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       return { skip: call?.skip, take: call?.take };
     }
 
-    it("floors a fractional page instead of handing Prisma 1.5", async () => {
-      // `Number("1.5")` is 1.5, which reached `skip` unchanged. Prisma rejects
-      // a fractional skip, so the endpoint answered 500 for a typo in a URL.
-      await loader(
-        createLoaderArgs({ request: request("orgId=org-1&page=1.5"), ...ARGS })
+    /** What the endpoint reported back to the caller. */
+    async function body(res: unknown) {
+      return (await (res as Response).json()) as {
+        page: number;
+        perPage: number;
+      };
+    }
+
+    it("floors a fractional page rather than falling back to page 1", async () => {
+      // 2.5 discriminates: flooring gives page 2, a fallback would give 1.
+      // `page=1.5` could not tell the two apart - both land on skip 0.
+      const res = await loader(
+        createLoaderArgs({ request: request("orgId=org-1&page=2.5"), ...ARGS })
       );
 
-      const { skip, take } = lastPaging();
-      expect(Number.isInteger(skip)).toBe(true);
-      expect(Number.isInteger(take)).toBe(true);
+      expect((await body(res)).page).toBe(2);
+      expect(lastPaging().skip).toBe(20);
     });
 
-    it("ignores a non-finite page rather than passing Infinity through", async () => {
+    it("floors a fractional perPage to the page size it reports", async () => {
+      const res = await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&perPage=2.5"),
+          ...ARGS,
+        })
+      );
+
+      expect((await body(res)).perPage).toBe(2);
+      expect(lastPaging().take).toBe(2);
+    });
+
+    it("does not let a huge page overflow the computed skip", async () => {
+      // 1.79e308 is finite AND an integer, so validating the input alone lets
+      // it through; the overflow only appears once it is multiplied by perPage.
+      const res = await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&page=1.7976931348623157e308"),
+          ...ARGS,
+        })
+      );
+
+      const { skip } = lastPaging();
+      expect(Number.isSafeInteger(skip)).toBe(true);
+      expect(skip).toBe(0);
+      expect((await body(res)).page).toBe(1);
+    });
+
+    it("ignores a non-finite page", async () => {
       await loader(
         createLoaderArgs({
           request: request("orgId=org-1&page=Infinity"),
@@ -278,9 +313,7 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
         })
       );
 
-      const { skip } = lastPaging();
-      expect(Number.isFinite(skip)).toBe(true);
-      expect(skip).toBe(0);
+      expect(lastPaging().skip).toBe(0);
     });
 
     it.each(["0", "-3", "abc", ""])(
@@ -297,21 +330,14 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       }
     );
 
-    it("keeps perPage within its ceiling and integral", async () => {
-      await loader(
-        createLoaderArgs({
-          request: request("orgId=org-1&perPage=2.5"),
-          ...ARGS,
-        })
-      );
-      expect(Number.isInteger(lastPaging().take)).toBe(true);
-
+    it("keeps perPage within its ceiling", async () => {
       await loader(
         createLoaderArgs({
           request: request("orgId=org-1&perPage=999"),
           ...ARGS,
         })
       );
+
       expect(lastPaging().take).toBe(50);
     });
   });

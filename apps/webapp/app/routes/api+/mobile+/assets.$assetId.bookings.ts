@@ -102,11 +102,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return floored >= 1 ? floored : fallback;
     };
 
-    const page = positiveInt(url.searchParams.get("page"), 1);
     const perPage = Math.min(
       50,
       positiveInt(url.searchParams.get("perPage"), 20)
     );
+    const requestedPage = positiveInt(url.searchParams.get("page"), 1);
+
+    /**
+     * Validating the inputs is not enough: `skip` is a product, and a page like
+     * 1.79e308 is a perfectly finite integer that overflows to Infinity once
+     * multiplied by perPage. Prisma rejects that exactly as it rejects a
+     * fraction, so the product has to be checked, not only its operands.
+     */
+    const page = Number.isSafeInteger((requestedPage - 1) * perPage)
+      ? requestedPage
+      : 1;
 
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =
