@@ -23,7 +23,10 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
-import { MAX_MATCHED_ASSET_SEARCH_IDS } from "./search.server";
+import {
+  ASSET_SEARCH_CEILING_MESSAGE,
+  MAX_MATCHED_ASSET_SEARCH_IDS,
+} from "./search.server";
 import {
   BULK_CREATE_MAX,
   bulkAssignAssetTags,
@@ -4485,9 +4488,9 @@ describe("getAssets search via UNION", () => {
   });
 
   it("over-ceiling: rethrows the refine-search 400 unchanged, no asset fetch", async () => {
-    // A match set past the bind-param ceiling makes resolveAssetSearchIds throw a
-    // deliberate 400; getAssets' catch must let that reach the caller with its
-    // actionable message intact, not re-wrapped as "something went wrong".
+    // why: return more ids than the bind-param ceiling without building real DB
+    // rows, so resolveAssetSearchIds throws its deliberate 400 and we can assert
+    // getAssets' catch propagates it unchanged rather than re-wrapping it.
     queryRawMock.mockResolvedValue(
       Array.from({ length: MAX_MATCHED_ASSET_SEARCH_IDS + 1 }, (_, i) => ({
         id: `a${i}`,
@@ -4503,11 +4506,11 @@ describe("getAssets search via UNION", () => {
 
     expect(thrown).toBeInstanceOf(ShelfError);
     expect((thrown as ShelfError).status).toBe(400);
-    expect((thrown as ShelfError).message).toMatch(/refine/i);
-    // the generic wrapper must NOT have replaced the actionable message
-    expect((thrown as ShelfError).message).not.toMatch(/something went wrong/i);
-    // short-circuited before the asset fetch
+    // exact message — proves the generic catch wrapper did NOT replace it
+    expect((thrown as ShelfError).message).toBe(ASSET_SEARCH_CEILING_MESSAGE);
+    // short-circuited before the asset fetch (both findMany and count)
     expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
   });
 });
 
