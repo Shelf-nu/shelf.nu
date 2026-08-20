@@ -15,7 +15,6 @@ import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { useHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -111,13 +110,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
 
   const isProcessing = isFormProcessing(navigation.state);
-  const hints = useHints();
   // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
   // user's RESOLVED timezone preference (the same one date DISPLAY uses), so
   // the edit form shows the same wall-clock the display shows. Seeding from
   // the raw stored UTC instant via `dateForDateTimeInputValue` (browser/runtime
   // zone) produced a different wall-clock whenever the browser zone differed
-  // from the pref zone. Locale still comes from `hints`.
+  // from the pref zone.
   const prefs = useFormatPrefs();
   const incomingStartDate = toIsoDateTimeToUserTimezone(
     loaderBooking.from,
@@ -178,7 +176,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     BookingFormSchema({
       // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
       // (matches display + the server parse), not the browser hint.
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,
