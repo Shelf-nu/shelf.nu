@@ -30,6 +30,7 @@ import {
   parseData,
   readFormData,
 } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { validEmail } from "~/utils/misc";
 import { passwordSchema } from "~/utils/zod";
 
@@ -131,7 +132,32 @@ export async function action({ request, context }: ActionFunctionArgs) {
         });
 
         if (user && !user.sso) {
-          await sendResetPasswordLink(email);
+          /**
+           * A delivery failure must not become an observable difference.
+           *
+           * `sendResetPasswordLink` throws on a Supabase error, and an
+           * unhandled throw here lands in the route's catch and renders an
+           * error — which only ever happens for an address that reached this
+           * branch, i.e. one that exists and is not SSO. That hands back the
+           * exact bit the uniform response was hiding.
+           *
+           * Swallowed rather than surfaced: the user is told to check their
+           * inbox either way, and the alternative is telling an anonymous
+           * caller which addresses are real. Logged so a genuine outage is
+           * still visible to us.
+           */
+          try {
+            await sendResetPasswordLink(email);
+          } catch (cause) {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message: "Failed to send the password reset link",
+                additionalData: { email },
+                label: "Auth",
+              })
+            );
+          }
         }
 
         return redirect("/forgot-password?email=" + email);

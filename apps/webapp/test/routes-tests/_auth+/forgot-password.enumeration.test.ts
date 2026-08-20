@@ -111,6 +111,21 @@ describe("forgot-password enumeration", () => {
     expect(mockSendResetPasswordLink).not.toHaveBeenCalled();
   });
 
+  it("responds identically when DELIVERY fails", async () => {
+    // `sendResetPasswordLink` throws on a Supabase error, and an unhandled
+    // throw renders an error page — which only ever happens for an address
+    // that reached the send branch, i.e. one that exists and is not SSO. That
+    // hands back the exact bit the uniform response hides.
+    mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
+    mockSendResetPasswordLink.mockRejectedValueOnce(new Error("smtp down"));
+    const failed = observable(await requestReset("real@example.com"));
+
+    mockUserFindFirst.mockResolvedValueOnce(null);
+    const unknown = observable(await requestReset("real@example.com"));
+
+    expect(failed).toEqual(unknown);
+  });
+
   it("still sends for a LEGACY password account on an SSO domain", async () => {
     // The reason the decision is made on the per-user flag rather than the
     // domain's SSO configuration. `sso: true` is only set when a user actually

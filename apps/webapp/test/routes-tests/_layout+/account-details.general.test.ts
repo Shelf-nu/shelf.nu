@@ -6,6 +6,7 @@
  *
  * @see {@link file://./account-details.general.tsx}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
@@ -101,7 +102,16 @@ describe("account-details.general action — deleteUser recipients", () => {
    */
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rolesServer.requirePermission).mockResolvedValue({} as never);
+    // Typed rather than `as never`: the deleteUser branch reads nothing off
+    // this result, but `as never` would also accept a shape that no longer
+    // matches if `requirePermission` changes. `as unknown as` is still needed
+    // because this is a deliberate partial — the branch under test does not
+    // touch the other fields.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.OWNER,
+      isSelfServiceOrBase: false,
+    } as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>);
   });
 
   /** POSTs a deletion request claiming `claimedEmail` in the form body. */
