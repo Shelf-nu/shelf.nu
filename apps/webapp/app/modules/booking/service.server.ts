@@ -15,6 +15,10 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
+import {
+  BOOKING_EMPTY_RESERVED_MESSAGE,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+} from "@shelf/labels";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
@@ -145,7 +149,10 @@ import type {
   SchedulerData,
 } from "./types";
 import {
+  assertBookingIsCheckinable,
+  assertBookingIsOpen,
   createBookingConflictConditions,
+  lockBookingForStatusCheck,
   getBulkBookingsWhereInput,
   isBookingExpired,
 } from "./utils.server";
@@ -1558,6 +1565,12 @@ export async function reserveBooking({
                   ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
                     .asset.select,
                   status: true,
+                  // why: `availableToBook` is deliberately NOT selected here.
+                  // The availability guard reads it through `tx` immediately
+                  // before the status write (see the transaction below); this
+                  // outer read happens before the working-hours and settings
+                  // queries, so its copy would be stale at exactly the moment
+                  // it mattered.
                   // Needed for the QUANTITY_TRACKED windowed-availability
                   // guard's shortfall message (see the DRAFT → RESERVED
                   // transaction below).
@@ -1784,6 +1797,65 @@ export async function reserveBooking({
     );
 
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * Eligibility, re-read through `tx` immediately before the status write.
+       *
+       * The callers check this earlier - the web overview disables its Reserve
+       * button from loader flags, the mobile route refuses up front with a
+       * better message - but both read the booking before the working-hours and
+       * settings queries, so a concurrent edit could still land in RESERVED.
+       * `availableToBook` is the one that really moves: it is an asset-level
+       * flag toggled from the asset page, with nothing to do with this booking.
+       *
+       * This does not make the transition serializable on its own. Closing the
+       * window completely would mean locking every asset in the booking, which
+       * the QT path below already does for the assets whose pool is contested.
+       * This narrows it to the width of the transaction.
+       */
+      // Constant-cost probes, not a materialised list. Both questions are
+      // existence questions, and this runs inside the transaction that goes on
+      // to take a per-asset advisory lock for every QT asset below — loading N
+      // slices and their assets here would widen that lock window for nothing.
+      const sliceCount = await tx.bookingAsset.count({
+        where: { bookingId: id },
+      });
+
+      if (sliceCount === 0) {
+        const modelRequestCount = await tx.bookingModelRequest.count({
+          where: { bookingId: id },
+        });
+
+        if (modelRequestCount === 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Nothing to reserve",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      // Only worth asking when the booking actually holds assets.
+      if (sliceCount > 0) {
+        const unavailableSlice = await tx.bookingAsset.findFirst({
+          where: { bookingId: id, asset: { availableToBook: false } },
+          select: { id: true },
+        });
+
+        if (unavailableSlice) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Unavailable assets",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
       if (uniqueQtyTrackedAssetIds.length > 0) {
         const assetById = new Map(
           qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
@@ -2352,7 +2424,6 @@ async function runCheckoutSideEffects({
   bookingFound,
   userId,
   effectiveStatus,
-  effectiveBooking,
   effectiveTo,
   hints,
   organizationId,
@@ -2361,7 +2432,6 @@ async function runCheckoutSideEffects({
   bookingFound: BookingForEmail;
   userId?: string;
   effectiveStatus: BookingStatus;
-  effectiveBooking: BookingForEmail;
   effectiveTo: Date | null | undefined;
   hints: ClientHint;
   organizationId: Booking["organizationId"];
@@ -2380,10 +2450,6 @@ async function runCheckoutSideEffects({
       custodianUserId: bookingFound.custodianUserId || undefined,
     });
   }
-
-  /** Calculate the time difference between the booking.to and the current time */
-  const { hours } = calcTimeDifference(effectiveTo!, new Date());
-  const lessThanOneHourToCheckin = hours < 1;
 
   /** We cancel just in case there is something pending */
   await cancelScheduler(bookingFound);
@@ -2471,6 +2537,21 @@ export async function checkoutBooking({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // Not a reported finding — the twin of D084 on the check-out side, swept
+    // in because it is the same missing guard. Unlocked early exit; the
+    // authoritative locked check runs inside the write transaction below.
+    // Deliberately rejects only the
+    // CLOSED statuses: an existing pinned test checks out a DRAFT booking, so
+    // narrowing this to RESERVED would be a behaviour change rather than a
+    // fix. Re-running a FULL checkout on an ONGOING booking is a separate
+    // integrity problem (it re-processes every asset and duplicates events)
+    // and is left alone here for the same reason.
+    assertBookingIsOpen({
+      status: bookingFound.status,
+      operation: "check out",
+      bookingId: id,
+    });
 
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
@@ -2660,6 +2741,19 @@ export async function checkoutBooking({
 
     await db.$transaction(
       async (tx) => {
+        // Authoritative status check. The pre-transaction assert above is a
+        // cheap early exit; THIS one is the one that holds, because it locks
+        // the row and the lock is kept until this transaction commits.
+        //
+        // The race is not theoretical: cancelling a RESERVED booking from
+        // another tab while this checkout is in flight would otherwise leave a
+        // CANCELLED booking whose assets are all CHECKED_OUT.
+        assertBookingIsOpen({
+          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          operation: "check out",
+          bookingId: id,
+        });
+
         await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           // SECURITY (cross-org IDOR): the helper scopes the asset/kit
@@ -2706,22 +2800,13 @@ export async function checkoutBooking({
       { timeout: 15000 }
     );
 
-    /** Build effective post-checkout values by merging bookingFound with any
-     * fields modified by dataToUpdate (adjusted dates, status). This avoids
-     * re-reading from the DB and ensures downstream logic (notes, scheduling)
-     * uses the correct post-checkout values. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, taken from `dataToUpdate` where it changed
+     * them and from `bookingFound` otherwise. Avoids re-reading the row, and
+     * keeps downstream logic (notes, scheduling) on post-checkout truth. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     // Extracted to a shared helper so `fulfilModelRequestsAndCheckout`
     // can run the same post-commit work (status transition note,
@@ -2735,7 +2820,6 @@ export async function checkoutBooking({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
@@ -3093,27 +3177,18 @@ export async function fulfilModelRequestsAndCheckout({
       userId,
     });
 
-    /** Build an effective snapshot so the status-transition note + email
-     * scheduler see the post-checkout truth without re-reading the row. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, so the status-transition note and the email
+     * scheduler see post-checkout truth without re-reading the row. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     /** Post-commit checkout side-effects shared with `checkoutBooking` */
     return await runCheckoutSideEffects({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
@@ -4213,6 +4288,17 @@ export async function checkinBooking({
         });
       });
 
+    // `dataToUpdate` below sets COMPLETE unconditionally. Without this guard a
+    // direct POST against a DRAFT or RESERVED booking marked it COMPLETE while
+    // checking in nothing: the asset filter keeps only CHECKED_OUT assets, and
+    // on those statuses there are none. The booking then reads as finished
+    // although it never happened. (detail.dev D084)
+    //
+    // This read is NOT locked — `bookingFound` is loaded outside the write
+    // transaction — so treat it as a cheap early exit only. The authoritative,
+    // locked check runs inside the transaction below.
+    assertBookingIsCheckinable({ status: bookingFound.status, bookingId: id });
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.COMPLETE,
     };
@@ -4424,6 +4510,15 @@ export async function checkinBooking({
 
     const updatedBooking = await db.$transaction(
       async (tx) => {
+        // Authoritative status check — the pre-transaction assert above is a
+        // cheap early exit, this is the one that holds. Locking matters here
+        // because two concurrent check-ins would otherwise both read ONGOING
+        // and both run the completion writes.
+        assertBookingIsCheckinable({
+          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          bookingId: id,
+        });
+
         /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
@@ -8156,6 +8251,26 @@ export async function updateBookingAssets({
         },
       });
 
+      // The four callers each validate the status before getting here, but
+      // every one of them does so in a read of its own, so a booking closed in
+      // between was still written to. (detail.dev D055)
+      //
+      // Re-reading inside this transaction is NOT sufficient on its own: under
+      // READ COMMITTED the `findUniqueOrThrow` above takes no lock, so a
+      // concurrent check-in or cancellation can still commit between it and
+      // the writes below. The row lock is what actually closes the window —
+      // it is held until this transaction commits.
+      const lockedStatus = await lockBookingForStatusCheck(
+        tx,
+        id,
+        organizationId
+      );
+      assertBookingIsOpen({
+        status: lockedStatus,
+        operation: "change the items on",
+        bookingId: id,
+      });
+
       const slices = kitSlices ?? [];
 
       // Validate the UNION of standalone asset ids and the asset ids
@@ -10347,6 +10462,53 @@ export async function removeAssets({
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
       /**
+       * The zero-asset invariant, defended from the removal side.
+       *
+       * `reserveBooking` refuses to take a booking into RESERVED with nothing
+       * in it, but that only guards the transition — emptying the booking
+       * afterwards reached exactly the same state from the other direction,
+       * leaving a booking that reserves nothing and cannot be checked out.
+       * Enforced here, in the shared service, rather than at the six call
+       * sites (web overview bulk + single, manage-assets, manage-kits, the
+       * mobile endpoint), so no future caller can miss it.
+       *
+       * RESERVED only, deliberately. An empty DRAFT is normal
+       * work-in-progress; COMPLETE / ARCHIVED / CANCELLED hold nothing any
+       * more; and ONGOING / OVERDUE must stay emptiable, because pulling a
+       * checked-out asset off a live booking is a real correction flow that
+       * this service already reconciles asset status for (bug #99 coverage).
+       *
+       * Throwing inside the tx rolls the delete back, so the booking is never
+       * observably empty.
+       */
+      if (sourceBooking.status === BookingStatus.RESERVED) {
+        const remainingSlices = await tx.bookingAsset.count({
+          where: { bookingId: id },
+        });
+
+        if (remainingSlices === 0) {
+          // Model reservations survive asset removal (the rollback below only
+          // decrements `fulfilledQuantity`), so a booking held purely by
+          // outstanding model requests is still holding something.
+          const remainingModelRequests = await tx.bookingModelRequest.count({
+            where: { bookingId: id },
+          });
+
+          if (remainingModelRequests === 0) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              title: "Booking would be left empty",
+              message: BOOKING_EMPTY_RESERVED_MESSAGE,
+              status: 400,
+              shouldBeCaptured: false,
+              additionalData: { bookingId: id, organizationId },
+            });
+          }
+        }
+      }
+
+      /**
        * Re-open reservations that the removed rows had discharged.
        *
        * Counted from `bookingModelRequestId` — the row's own record of which
@@ -11371,9 +11533,16 @@ export async function getBookingFlags(
       id: { in: booking.assetIds },
       organizationId: booking.organizationId,
     },
-    include: {
-      category: true,
-      custody: true,
+    // why: `select`, not `include`. This function returns only booleans, so the
+    // row shape is private to it — and the previous `include` fetched every
+    // Asset scalar plus `category` and `custody` relations that no flag below
+    // reads (`hasAssetsInCustody` is derived from `status`, not the relation).
+    // On a large booking that payload is paid on every Reserve tap.
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      availableToBook: true,
       assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
@@ -11415,7 +11584,7 @@ export async function getBookingFlags(
               : { id: { not: booking.id } }),
           },
         },
-        include: {
+        select: {
           booking: {
             select: { id: true, status: true },
           },
@@ -12433,6 +12602,24 @@ async function addScannedAssetsToBookingWithinTx(
     },
     tx
   );
+
+  // This path had NO booking-status check anywhere — not in the route action,
+  // not here. The scan-assets loader computes `canUserManageBookingAssets`,
+  // but that only decides what to render, so a direct POST could add assets to
+  // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
+  //
+  // Locked rather than merely re-read: this runs inside the caller's
+  // transaction, and a plain SELECT there takes no lock under READ COMMITTED.
+  const scanTargetStatus = await lockBookingForStatusCheck(
+    tx,
+    bookingId,
+    organizationId
+  );
+  assertBookingIsOpen({
+    status: scanTargetStatus,
+    operation: "add scanned items to",
+    bookingId,
+  });
 
   /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add

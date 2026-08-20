@@ -56,6 +56,7 @@ import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
+import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
 import {
   HoverCard,
   HoverCardContent,
@@ -1229,33 +1230,32 @@ export const AssetForm = ({
             value={locationId || ""}
           />
           {isKitAsset ? (
-            <HoverCard openDelay={50} closeDelay={50}>
-              <HoverCardTrigger className="disabled w-full cursor-not-allowed">
-                <DynamicSelect
-                  disabled={locationDisabled}
-                  selectionMode="set"
-                  fieldName="newLocationId"
-                  triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-                  defaultValue={locationId || undefined}
-                  model={{ name: "location", queryKey: "name" }}
-                  contentLabel="Locations"
-                  label="Location"
-                  hideLabel
-                  initialDataKey="locations"
-                  countKey="totalLocations"
-                  closeOnSelect
-                  allowClear
-                />
-              </HoverCardTrigger>
-              <HoverCardContent side="left">
-                <h5 className="text-left text-[14px]">Action disabled</h5>
-                <p className="text-left text-[14px]">
+            <DisabledReasonHoverCard
+              triggerClassName="disabled w-full cursor-not-allowed"
+              reason={
+                <>
                   This asset's location is managed by its parent kit{" "}
                   <strong>"{kitMembership?.name}"</strong>. Update the kit's
                   location instead.
-                </p>
-              </HoverCardContent>
-            </HoverCard>
+                </>
+              }
+            >
+              <DynamicSelect
+                disabled={locationDisabled}
+                selectionMode="set"
+                fieldName="newLocationId"
+                triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+                defaultValue={locationId || undefined}
+                model={{ name: "location", queryKey: "name" }}
+                contentLabel="Locations"
+                label="Location"
+                hideLabel
+                initialDataKey="locations"
+                countKey="totalLocations"
+                closeOnSelect
+                allowClear
+              />
+            </DisabledReasonHoverCard>
           ) : (
             <DynamicSelect
               disabled={disabled}

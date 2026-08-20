@@ -5,7 +5,6 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -91,8 +90,7 @@ import {
   canUserRemoveBookingAssets,
 } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getClientHint, getHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { getClientHint } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -1380,8 +1378,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      archive: PermissionAction.update,
-      cancel: PermissionAction.update,
+      // archive/cancel have dedicated permissions, and BASE deliberately holds
+      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
+      // user archive or cancel bookings the role was never granted.
+      archive: PermissionAction.archive,
+      cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.extend,
@@ -1497,7 +1498,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, from: true, to: true },
+          // creatorId/custodianUserId feed the ownership guard below.
+          select: {
+            id: true,
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
         }),
         getWorkingHoursForOrganization(organizationId),
         getBookingSettingsForOrganization(organizationId),
@@ -1537,22 +1546,47 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * Cross-user guard for every mutating intent.
+     *
+     * Hoisted rather than repeated per case, deliberately: the route had one
+     * ownership check (inside `delete`) and fifteen intents, so each new intent
+     * silently arrived unguarded. SELF_SERVICE legitimately holds
+     * `booking:checkout`, `checkin`, `archive`, `cancel` and `extend`, and none
+     * of the services behind them checks ownership -- `checkoutBooking`,
+     * `checkinBooking`, `archiveBooking` and `cancelBooking` all have zero
+     * ownership references -- so this is the only thing standing between a
+     * restricted role and someone else's booking.
+     *
+     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
+     * before this point, with its own check, because it must not fetch the
+     * booking first. The compiler confirms it: `intent` has already narrowed to
+     * exclude it.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: intent,
+      });
+    }
+
     switch (intent) {
       case "save": {
-        const hints = getHints(request);
         // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
         // RESOLVED timezone preference (the same one date DISPLAY uses), not the
         // browser hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (
-          await resolveUserFormatPrefsById(userId, getClientHint(request))
-        ).timeZone;
-        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+        const prefs = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
         const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints: hintsWithPrefTz,
+            prefs,
             workingHours,
             bookingSettings,
             isAdminOrOwner,
@@ -1562,20 +1596,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
-
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
+        // Use the schema-coerced instants rather than re-parsing the raw form
+        // fields: `coerceLocalDate` accepts second precision via `fromISO`,
+        // while DATE_TIME_FORMAT is minute-only, so a value the schema accepted
+        // could re-parse to an Invalid Date and reach the service. Same
+        // reasoning as the duplicate dialog and the extend branch below.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const tags = buildTagsSet(parsedData.tags).set;
 
@@ -1605,19 +1632,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
-        const hints = getHints(request);
         // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
         // RESOLVED timezone preference (the same one date DISPLAY uses), not the
         // browser hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (
-          await resolveUserFormatPrefsById(userId, getClientHint(request))
-        ).timeZone;
-        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+        const prefs = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
 
         const parsedData = parseData(
           formData,
           BookingFormSchema({
-            hints: hintsWithPrefTz,
+            prefs,
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
@@ -1629,21 +1655,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
         const tags = buildTagsSet(parsedData.tags).set;
 
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
+        // Schema-coerced instants, not a re-parse of the raw form fields — see
+        // the "save" branch above for why the minute-only DATE_TIME_FORMAT
+        // cannot be used on a value `coerceLocalDate` already accepted.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const booking = await reserveBooking({
           id,
@@ -2018,14 +2036,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // TIMEZONE FIX: parse the submitted wall-clock end date in the acting
         // user's RESOLVED pref timezone (matches display), not the browser
         // hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (await resolveUserFormatPrefsById(userId, hints))
-          .timeZone;
+        const prefs = await resolveUserFormatPrefsById(userId, hints);
 
         const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
-            timeZone: prefTimeZone,
+            prefs,
             bookingSettings,
             isAdminOrOwner,
           }),
