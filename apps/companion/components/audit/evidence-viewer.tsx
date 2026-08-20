@@ -30,10 +30,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
-import type {
-  AuditEvidenceImage,
-  AuditEvidenceNote,
-} from "@/lib/api/types";
+import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -46,6 +43,16 @@ type EvidenceViewerProps = {
   error?: string | null;
   /** Opens one photo full-screen. Omitted when there is nothing to open into. */
   onImagePress?: (image: AuditEvidenceImage) => void;
+  /**
+   * Fetches again after a failure.
+   *
+   * why it is needed: the sheet caches per audit, so a failed load left the
+   * error on screen with no way forward — the reader had to close the sheet
+   * and reopen it to get another attempt, which is not a thing anyone guesses.
+   * Audits run in stockrooms and basements, so a request timing out is the
+   * normal case, not the exceptional one.
+   */
+  onRetry?: () => void;
 };
 
 export function EvidenceViewer({
@@ -57,6 +64,7 @@ export function EvidenceViewer({
   isLoading = false,
   error = null,
   onImagePress,
+  onRetry,
 }: EvidenceViewerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -79,7 +87,8 @@ export function EvidenceViewer({
     [styles, formatDateTime]
   );
 
-  const isEmpty = !isLoading && !error && notes.length === 0 && images.length === 0;
+  const isEmpty =
+    !isLoading && !error && notes.length === 0 && images.length === 0;
 
   return (
     <Modal
@@ -111,6 +120,16 @@ export function EvidenceViewer({
           ) : error ? (
             <View style={styles.centered}>
               <Text style={styles.empty}>{error}</Text>
+              {onRetry ? (
+                <TouchableOpacity
+                  onPress={onRetry}
+                  style={styles.retryButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Try loading the evidence again"
+                >
+                  <Text style={styles.retryText}>Try again</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : isEmpty ? (
             <View style={styles.centered}>
@@ -126,7 +145,9 @@ export function EvidenceViewer({
               {images.length > 0 ? (
                 <>
                   <Text style={styles.sectionLabel}>
-                    {images.length === 1 ? "1 photo" : `${images.length} photos`}
+                    {images.length === 1
+                      ? "1 photo"
+                      : `${images.length} photos`}
                   </Text>
                   <View style={styles.grid}>
                     {images.map((image) => (
@@ -214,6 +235,19 @@ const useStyles = createStyles((colors) => ({
     padding: spacing.xl,
     alignItems: "center",
     justifyContent: "center",
+  },
+  retryButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  retryText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
   },
   empty: {
     fontSize: fontSize.sm,

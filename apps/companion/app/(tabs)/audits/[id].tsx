@@ -1140,6 +1140,10 @@ function AuditDetailContent() {
         images={openEvidenceBucket.images}
         isLoading={evidenceLoading}
         error={evidenceError}
+        onRetry={() => {
+          setEvidenceError(null);
+          void loadEvidence();
+        }}
       />
     </View>
   );
