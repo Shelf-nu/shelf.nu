@@ -55,8 +55,20 @@ function requestReset(email: string) {
 
 /** Reduces a response to what an attacker can actually observe. */
 function observable(res: unknown) {
-  const r = res as Response;
-  return { status: r.status, location: r.headers?.get?.("Location") ?? null };
+  // The action returns two different shapes: a `Response` for the redirect,
+  // and React Router's `DataWithResponseInit` (`{ type, data, init }`) for the
+  // error path. Reading only `.status` would report `undefined` for the latter
+  // and quietly compare two `undefined`s, so both are normalized here.
+  const r = res as Response & {
+    init?: ResponseInit;
+    data?: { error?: { message?: string } };
+  };
+
+  return {
+    status: r.status ?? r.init?.status ?? null,
+    location: r.headers?.get?.("Location") ?? null,
+    errorMessage: r.data?.error?.message ?? null,
+  };
 }
 
 describe("forgot-password enumeration", () => {
@@ -111,12 +123,43 @@ describe("forgot-password enumeration", () => {
     expect(mockSendResetPasswordLink).not.toHaveBeenCalled();
   });
 
+  it("does not WAIT for the reset email to be sent", async () => {
+    // The response time must not depend on the answer. Awaiting the send made
+    // a real address pay for a Supabase round trip (~50-300ms) that an unknown
+    // one did not, so averaging repeated requests re-enumerated accounts even
+    // with identical status and body — the uniform response undone by the
+    // clock.
+    //
+    // Modelled with a promise that never settles: if the action awaited it,
+    // this test could not return at all.
+    mockUserFindFirst.mockResolvedValue({ id: "user-1", sso: false });
+    mockSendResetPasswordLink.mockImplementation(() => new Promise(() => {}));
+
+    const res = observable(await requestReset("real@example.com"));
+
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
+    expect(res.status).toBe(302);
+  });
+
+  it("percent-encodes the address it echoes into the redirect", async () => {
+    // `+` is valid in an email (gmail-style aliases) and is also the query
+    // string's encoding for a space — so unencoded, `a+b@example.com` comes
+    // back out of the URL as `a b@example.com`.
+    mockUserFindFirst.mockResolvedValue(null);
+
+    const res = observable(await requestReset("a+b@example.com"));
+
+    expect(res.location).toContain("a%2Bb%40example.com");
+  });
+
   it("responds identically when DELIVERY fails", async () => {
     // `sendResetPasswordLink` throws on a Supabase error, and an unhandled
     // throw renders an error page — which only ever happens for an address
     // that reached the send branch, i.e. one that exists and is not SSO. That
     // hands back the exact bit the uniform response hides.
     mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
+    // Rejects, and is no longer awaited — the `.catch()` on the fire-and-forget
+    // call is what keeps this from becoming an unhandled rejection.
     mockSendResetPasswordLink.mockRejectedValueOnce(new Error("smtp down"));
     const failed = observable(await requestReset("real@example.com"));
 

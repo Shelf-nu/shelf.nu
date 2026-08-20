@@ -133,22 +133,28 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         if (user && !user.sso) {
           /**
-           * A delivery failure must not become an observable difference.
+           * Deliberately NOT awaited.
            *
-           * `sendResetPasswordLink` throws on a Supabase error, and an
-           * unhandled throw here lands in the route's catch and renders an
-           * error — which only ever happens for an address that reached this
-           * branch, i.e. one that exists and is not SSO. That hands back the
-           * exact bit the uniform response was hiding.
+           * Awaiting it made the response time depend on the answer: a real
+           * non-SSO address paid for a second DB read inside
+           * `validateNonSSOUser` plus a Supabase API call (~50-300ms), while
+           * an unknown or SSO address returned straight after the first
+           * lookup. Averaging that over repeated requests re-enumerates
+           * accounts even though the status and body are identical — the
+           * uniform response is undone by the clock.
            *
-           * Swallowed rather than surfaced: the user is told to check their
-           * inbox either way, and the alternative is telling an anonymous
-           * caller which addresses are real. Logged so a genuine outage is
-           * still visible to us.
+           * Safe here because the server is a long-lived Node process
+           * (`react-router-hono-server` in Docker on Fly), not a serverless
+           * function that would be frozen once the response is returned. On a
+           * platform that suspends after response this would need a queue
+           * instead.
+           *
+           * The rejection is swallowed for the same reason it was before: a
+           * delivery failure is only reachable for an address that exists, so
+           * surfacing it re-opens the leak by a different route. Logged so a
+           * genuine outage stays visible.
            */
-          try {
-            await sendResetPasswordLink(email);
-          } catch (cause) {
+          void sendResetPasswordLink(email).catch((cause: unknown) => {
             Logger.error(
               new ShelfError({
                 cause,
@@ -157,10 +163,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
                 label: "Auth",
               })
             );
-          }
+          });
         }
 
-        return redirect("/forgot-password?email=" + email);
+        // Encoded: an address containing `&` or `#` would otherwise
+        // truncate or corrupt the redirect target.
+        return redirect("/forgot-password?email=" + encodeURIComponent(email));
       }
       case "confirm-otp": {
         const { email, otp, password } = parseData(
