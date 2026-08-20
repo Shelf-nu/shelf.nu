@@ -149,10 +149,11 @@ export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must ke
 export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";
 
 /** Tone for each audit session status. */
-export declare const AUDIT_STATUS_TONES: Record<AuditStatusKey, StatusTone>;
+export declare const AUDIT_STATUS_TONES: Readonly<
+  Record<AuditStatusKey, StatusTone>
+>;
 
 /** Tone for each per-asset audit outcome, escalating neutral → danger. */
-export declare const AUDIT_ASSET_STATUS_TONES: Record<
-  AuditAssetStatusKey,
-  StatusTone
+export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
+  Record<AuditAssetStatusKey, StatusTone>
 >;

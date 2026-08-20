@@ -203,13 +203,13 @@ export const BOOKING_EMPTY_RESERVED_MESSAGE =
  * reddens the due line), so the status badge itself stays a plain statement of
  * where the audit is.
  */
-export const AUDIT_STATUS_TONES = {
+export const AUDIT_STATUS_TONES = Object.freeze({
   PENDING: "neutral",
   ACTIVE: "info",
   COMPLETED: "success",
   CANCELLED: "neutral",
   ARCHIVED: "neutral",
-};
+});
 
 /**
  * Tone for each per-asset audit outcome, read as one escalating scale: neutral
@@ -219,9 +219,9 @@ export const AUDIT_STATUS_TONES = {
  * lost or stolen and someone has to act on it; an unexpected asset is a
  * surprise, but it is physically in the auditor's hands and merely filed wrong.
  */
-export const AUDIT_ASSET_STATUS_TONES = {
+export const AUDIT_ASSET_STATUS_TONES = Object.freeze({
   PENDING: "neutral",
   FOUND: "success",
   MISSING: "danger",
   UNEXPECTED: "warning",
-};
+});
