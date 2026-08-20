@@ -6,6 +6,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   recordAuditScan,
   requireAuditAssignee,
@@ -60,9 +61,8 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
-    const { auditSessionId, qrId, assetId } = z
-      .object({
+    const { auditSessionId, qrId, assetId } = await parseMobileBody(
+      z.object({
         auditSessionId: z.string().min(1),
         qrId: z.string().min(1),
         assetId: z.string().min(1),
@@ -71,8 +71,10 @@ export async function action({ request }: ActionFunctionArgs) {
         // own AuditAsset row. A device queues scans offline, so its cached
         // expected list can be hours out of date by the time they land.
         isExpected: z.boolean().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Audit"
+    );
 
     // Scanning writes audit data, so it is gated exactly like note, photo and
     // complete: ADMIN/OWNER act on any audit, BASE/SELF_SERVICE must be

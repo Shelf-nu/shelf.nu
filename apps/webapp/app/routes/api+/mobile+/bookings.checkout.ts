@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import {
   resolveMostPrivilegedRole,
@@ -45,13 +46,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, timeZone } = z
-      .object({
+    const { bookingId, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Load the booking's reservation window so checkoutBooking can run its
     // asset-conflict guard. That guard is gated on `from && to`; without these
