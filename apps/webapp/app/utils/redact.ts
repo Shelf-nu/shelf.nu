@@ -34,6 +34,15 @@ const SENSITIVE_KEY =
 export const REDACTED = "[REDACTED]";
 
 /**
+ * Replacement for a credential embedded inside a URL.
+ *
+ * Distinct from {@link REDACTED} because it is written back through
+ * `URL.toString()`, which percent-encodes the brackets and would turn the
+ * marker into noise in the middle of an otherwise readable URL.
+ */
+export const REDACTED_URL_PART = "REDACTED";
+
+/**
  * Replacement for a subtree deeper than {@link MAX_DEPTH}.
  *
  * Returning such a subtree unchanged would defeat the whole function: a
@@ -44,6 +53,66 @@ export const TRUNCATED = "[TRUNCATED]";
 
 /** How deep to walk nested objects before giving up. */
 const MAX_DEPTH = 4;
+
+/**
+ * Query parameters that carry a credential in a URL.
+ *
+ * {@link SENSITIVE_KEY} already covers the obvious names (`token`, `api_key`,
+ * `secret`). These are the signed-URL specific ones it does not — and they are
+ * exactly what an image URL from a private bucket carries.
+ */
+const SENSITIVE_URL_PARAM =
+  /^(?:sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|access[._-]?token|auth)$/i;
+
+/**
+ * Removes credentials embedded in a URL string.
+ *
+ * A secret does not have to sit under a sensitive key to end up in a log line —
+ * it can be inside the value, where key-based redaction cannot see it because
+ * the key is just `url`.
+ *
+ * This is not hypothetical: asset CSV import accepts arbitrary image URLs and
+ * `ssrf.server.ts` logs the URL on every failure path, so a row pointing at
+ * `https://user:pass@host/img.jpg` or `https://host/img.jpg?token=...` wrote a
+ * live credential to the platform logs (CWE-532).
+ *
+ * Both halves matter: basic-auth userinfo and signed-URL query parameters.
+ *
+ * Deliberately narrow — only strings that parse as http(s) URLs are touched, so
+ * ordinary prose in an error message is never mangled.
+ *
+ * @param value - Any string bound for a log line
+ * @returns The string with embedded credentials replaced, or unchanged
+ */
+export function redactUrlCredentials(value: string): string {
+  // Cheap guard first: this runs over every string in every error payload.
+  if (!/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    // Unparseable, so there is no structure to reason about. Returning it
+    // unchanged is safe: the guard above proved it is not a bare secret, and
+    // guessing at delimiters would be worse than leaving it alone.
+    return value;
+  }
+
+  if (url.username || url.password) {
+    url.username = REDACTED_URL_PART;
+    url.password = REDACTED_URL_PART;
+  }
+
+  for (const param of Array.from(url.searchParams.keys())) {
+    if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+      url.searchParams.set(param, REDACTED_URL_PART);
+    }
+  }
+
+  return url.toString();
+}
 
 /**
  * Returns a copy of `value` with any sensitively-named field replaced by
@@ -63,6 +132,12 @@ const MAX_DEPTH = 4;
  * @returns A redacted copy, or the original for primitives
  */
 export function redactSensitive<T>(value: T, depth = 0): T {
+  // Strings are inspected, not waved through: a secret does not have to sit
+  // under a sensitive KEY to reach a log line — it can be inside the value.
+  if (typeof value === "string") {
+    return redactUrlCredentials(value) as unknown as T;
+  }
+
   if (value === null || typeof value !== "object") {
     return value;
   }

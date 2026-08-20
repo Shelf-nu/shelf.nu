@@ -1,0 +1,100 @@
+// @vitest-environment node
+/**
+ * Credentials embedded in URL VALUES must not reach the logs.
+ *
+ * `redactSensitive` matches on key names, so `{ url: "..." }` passed straight
+ * through — the key is just `url`, and the secret is inside the value.
+ *
+ * That is reachable, not theoretical: asset CSV import accepts arbitrary image
+ * URLs, and `ssrf.server.ts` puts the URL into `additionalData` on every
+ * failure path. A row pointing at a basic-auth or signed URL therefore wrote a
+ * live credential to the platform logs (CWE-532).
+ *
+ * detail.dev finding D110.
+ *
+ * @see {@link file://./redact.ts}
+ * @see {@link file://./ssrf.server.ts}
+ */
+import { describe, expect, it } from "vitest";
+
+import { redactSensitive, redactUrlCredentials } from "./redact";
+
+describe("redactUrlCredentials", () => {
+  it("strips basic-auth userinfo", () => {
+    const out = redactUrlCredentials(
+      "https://alice:hunter2@example.com/img.jpg"
+    );
+
+    expect(out).not.toContain("hunter2");
+    expect(out).not.toContain("alice");
+    // The rest of the URL survives — the point is a usable log line, not a
+    // blanked one.
+    expect(out).toContain("example.com/img.jpg");
+  });
+
+  it.each([
+    "token",
+    "access_token",
+    "api_key",
+    "signature",
+    "X-Amz-Signature",
+    "X-Amz-Security-Token",
+  ])("redacts the %s query parameter", (param) => {
+    const out = redactUrlCredentials(
+      `https://bucket.example.com/img.jpg?${param}=s3cr3t-value&w=200`
+    );
+
+    expect(out).not.toContain("s3cr3t-value");
+    // Non-sensitive params are untouched, so the URL stays diagnosable.
+    expect(out).toContain("w=200");
+  });
+
+  it("leaves an ordinary URL alone", () => {
+    const url = "https://example.com/img.jpg?w=200&h=100";
+    expect(redactUrlCredentials(url)).toBe(url);
+  });
+
+  it("leaves non-URL strings alone", () => {
+    // Runs over every string in every error payload, so it must not mangle
+    // ordinary prose.
+    const prose = "Failed to fetch image: connection reset by peer";
+    expect(redactUrlCredentials(prose)).toBe(prose);
+  });
+
+  it("returns an unparseable http string unchanged rather than guessing", () => {
+    const broken = "https://";
+    expect(redactUrlCredentials(broken)).toBe(broken);
+  });
+});
+
+describe("redactSensitive — URL values", () => {
+  it("redacts a credential under a NON-sensitive key", () => {
+    // The whole point: `url` is not a sensitive key name, so key-based
+    // redaction could never have caught this.
+    const out = redactSensitive({
+      url: "https://user:pw@host/img.jpg?token=abc123",
+      status: 403,
+    });
+
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain("pw@");
+    expect(serialized).not.toContain("abc123");
+    expect(out.status).toBe(403);
+  });
+
+  it("reaches URLs nested inside additionalData", () => {
+    const out = redactSensitive({
+      additionalData: { url: "https://host/i.jpg?signature=deadbeef" },
+    });
+
+    expect(JSON.stringify(out)).not.toContain("deadbeef");
+  });
+
+  it("still redacts by key name", () => {
+    // The pre-existing behaviour must survive the string branch being added.
+    const out = redactSensitive({ password: "hunter2", email: "a@b.c" });
+
+    expect(out.password).not.toBe("hunter2");
+    expect(out.email).toBe("a@b.c");
+  });
+});
