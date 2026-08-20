@@ -305,14 +305,17 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       expect((await body(res)).page).toBe(1);
     });
 
-    it("ignores a non-finite page", async () => {
-      await loader(
+    it("ignores a non-finite page, and says so in the response", async () => {
+      const res = await loader(
         createLoaderArgs({
           request: request("orgId=org-1&page=Infinity"),
           ...ARGS,
         })
       );
 
+      // The caller-visible answer matters as much as the query: a client
+      // paging on the reported page would otherwise loop on Infinity.
+      expect((await body(res)).page).toBe(1);
       expect(lastPaging().skip).toBe(0);
     });
 
