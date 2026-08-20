@@ -149,8 +149,17 @@ function AuditDetailContent() {
   //
   // why a separate fetch: this is the heavy half (image URLs, note bodies,
   // authors) and is only wanted once someone opens a row, so the detail
-  // payload stays cheap. Loaded lazily on first open and then kept, because
-  // a completed audit's evidence cannot change underneath us.
+  // payload stays cheap.
+  //
+  // Re-fetched on every open, NOT cached for the life of the screen. The
+  // first version cached it on the reasoning that "a completed audit's
+  // evidence cannot change" — true of a completed one, but this screen also
+  // serves ACTIVE audits, where the same person adds a photo and reopens the
+  // sheet seconds later. They would have been shown the set from before their
+  // own upload, with the row's count already disagreeing with it.
+  //
+  // Stale-while-revalidate: whatever was loaded stays on screen during the
+  // refetch, so reopening a sheet never flashes empty.
   const [evidence, setEvidence] = useState<AuditEvidenceResponse | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
@@ -159,15 +168,27 @@ function AuditDetailContent() {
     name: string;
   } | null>(null);
 
+  // Guards concurrent opens without freezing the data, which is what the old
+  // `evidence` guard did. A ref, not state, so it cannot itself trigger a
+  // render or go stale inside the callback.
+  const evidenceInFlight = useRef(false);
+
   const loadEvidence = useCallback(async () => {
-    if (!currentOrg?.id || !id || evidence) return;
-    setEvidenceLoading(true);
+    if (!currentOrg?.id || !id || evidenceInFlight.current) return;
+    evidenceInFlight.current = true;
+    // Only show the spinner when there is nothing to show yet — on a refetch
+    // the previous evidence stays put underneath.
+    setEvidence((current) => {
+      if (!current) setEvidenceLoading(true);
+      return current;
+    });
     setEvidenceError(null);
     const { data, error } = await api.auditEvidence(id, currentOrg.id);
     if (error) setEvidenceError(error);
     else if (data) setEvidence(data);
     setEvidenceLoading(false);
-  }, [currentOrg?.id, id, evidence]);
+    evidenceInFlight.current = false;
+  }, [currentOrg?.id, id]);
 
   /** Opens the viewer for one asset, or for the audit itself (`null`). */
   const onEvidencePress = useCallback(

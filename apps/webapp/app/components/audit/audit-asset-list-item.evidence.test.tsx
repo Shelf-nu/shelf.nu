@@ -47,9 +47,13 @@ vi.mock("~/hooks/use-current-organization", () => ({
 vi.mock("~/hooks/user-user-role-helper", () => ({
   useUserRoleHelper: () => ({ roles: [], isBaseOrSelfService: false }),
 }));
+// why: the row asks this to decide whether to offer the remove action. False
+// keeps that column out of the way — the evidence chip is what is under test.
 vi.mock("~/utils/permissions/permission.validator.client", () => ({
   userHasPermission: () => false,
 }));
+// why: the real hook needs a router. The chip does not read search params, so
+// a stable empty set keeps the render deterministic.
 vi.mock("~/hooks/search-params", () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));

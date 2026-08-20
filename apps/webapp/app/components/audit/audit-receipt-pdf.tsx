@@ -430,7 +430,14 @@ const AuditPDFContent = ({
 
               {generalNotes.map((note) => (
                 <div key={note.id} className="mb-2 border border-gray-300 p-2">
-                  <p className="text-xs text-gray-900">{note.content}</p>
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
                   <p className="mt-1 text-[10px] text-gray-500">
                     {note.user
                       ? resolveUserDisplayName(note.user) || note.user.email
@@ -470,7 +477,14 @@ const AuditPDFContent = ({
 
               {notes.map((note) => (
                 <div key={note.id} className="mb-2 border border-gray-300 p-2">
-                  <p className="text-xs text-gray-900">{note.content}</p>
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
                   <p className="mt-1 text-[10px] text-gray-500">
                     {note.user
                       ? resolveUserDisplayName(note.user) || note.user.email

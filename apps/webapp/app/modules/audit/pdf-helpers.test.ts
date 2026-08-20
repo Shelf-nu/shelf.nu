@@ -54,14 +54,21 @@ function noteQueryFor(type: "COMMENT" | "UPDATE") {
 }
 
 describe("audit receipt — what it may truncate", () => {
+  /**
+   * why this helper: the same `ReturnType<typeof vi.fn>` shape `noteQueryFor`
+   * already uses one function up. Casting each mock to `any` at the call site
+   * threw away the mock's own typing six times over for no benefit.
+   */
+  const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
   beforeEach(async () => {
     vi.clearAllMocks();
-    (db.auditSession.findUnique as any).mockResolvedValue(SESSION);
-    (db.auditAsset.findMany as any).mockResolvedValue([]);
-    (db.auditImage.findMany as any).mockResolvedValue([]);
-    (db.auditNote.findMany as any).mockResolvedValue([]);
-    (db.asset.findMany as any).mockResolvedValue([]);
-    (db.organization.findUnique as any).mockResolvedValue({
+    mockOf(db.auditSession.findUnique).mockResolvedValue(SESSION);
+    mockOf(db.auditAsset.findMany).mockResolvedValue([]);
+    mockOf(db.auditImage.findMany).mockResolvedValue([]);
+    mockOf(db.auditNote.findMany).mockResolvedValue([]);
+    mockOf(db.asset.findMany).mockResolvedValue([]);
+    mockOf(db.organization.findUnique).mockResolvedValue({
       id: "org-1",
       name: "Org",
     });

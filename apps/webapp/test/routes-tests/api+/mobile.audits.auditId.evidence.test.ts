@@ -146,18 +146,16 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       );
       const json = await body(res);
 
-      expect(json.general.notes.map((n: any) => n.id)).toEqual([
-        "note-general",
-      ]);
-      expect(json.general.images.map((i: any) => i.id)).toEqual([
-        "img-general",
-      ]);
-      expect(json.byAuditAsset["aa-1"].notes.map((n: any) => n.id)).toEqual([
-        "note-asset",
-      ]);
-      expect(json.byAuditAsset["aa-1"].images.map((i: any) => i.id)).toEqual([
-        "img-asset",
-      ]);
+      // why the typed shape rather than `any`: these assertions are about
+      // WHICH bucket each row lands in, so the id is the only field that
+      // matters. Naming it keeps a typo in the property a compile error
+      // instead of a silently-undefined comparison.
+      const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+
+      expect(ids(json.general.notes)).toEqual(["note-general"]);
+      expect(ids(json.general.images)).toEqual(["img-general"]);
+      expect(ids(json.byAuditAsset["aa-1"].notes)).toEqual(["note-asset"]);
+      expect(ids(json.byAuditAsset["aa-1"].images)).toEqual(["img-asset"]);
       // A general row must never leak into an asset bucket.
       expect(json.byAuditAsset["aa-1"].notes).toHaveLength(1);
     });
