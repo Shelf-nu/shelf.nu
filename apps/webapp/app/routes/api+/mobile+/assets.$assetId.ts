@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -331,15 +332,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImage: flattened.mainImage,
         thumbnailImage: flattened.thumbnailImage,
         imageSource: flattened.imageSource,
-        // Expiration describes the asset's OWN signed URL only — a model
-        // cover is a public URL that never expires, and the row's date can
-        // be stale residue from a removed own image. Send it only for the
-        // tier it describes, or a client-side expiry check discards a
-        // valid image.
-        mainImageExpiration:
-          flattened.imageSource === "asset"
-            ? assetData.mainImageExpiration
-            : null,
+        mainImageExpiration: serializeImageExpiration(
+          flattened.imageSource,
+          assetData.mainImageExpiration
+        ),
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,

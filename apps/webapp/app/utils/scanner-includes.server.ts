@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import type { AssetImageSource } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 
 export const CUSTODY_INCLUDE = {
@@ -126,8 +127,20 @@ export type ScannerAssetPickerMeta = {
   unitOfMeasure: string | null;
 } | null;
 
-export type AssetFromScanner = Prisma.AssetGetPayload<{
-  include: typeof ASSET_INCLUDE;
-}> & {
+/**
+ * An asset as the scanned-item endpoints RESPOND with it — not as Prisma
+ * returns it. The endpoints collapse the model-image cascade via
+ * `serializeAssetImage`, which drops the `assetModel` relation and adds
+ * `imageSource`, so this type mirrors that serialized shape.
+ */
+export type AssetFromScanner = Omit<
+  Prisma.AssetGetPayload<{
+    include: typeof ASSET_INCLUDE;
+  }>,
+  "assetModel"
+> & {
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  imageSource: AssetImageSource;
   pickerMeta?: ScannerAssetPickerMeta;
 };

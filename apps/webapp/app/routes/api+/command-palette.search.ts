@@ -3,7 +3,10 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
@@ -388,15 +391,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               return {
                 mainImage: isPlaceholder ? null : image.fullUrl,
                 thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
-                // Expiration describes the asset's OWN signed URL only — a
-                // model cover is a public URL that never expires, and the
-                // row's date can be stale residue from a removed own image.
-                // Send it only for the tier it describes, or the palette's
-                // expiry check discards a valid image.
-                mainImageExpiration:
-                  image.source === "asset"
-                    ? asset.mainImageExpiration?.toISOString() ?? null
-                    : null,
+                mainImageExpiration: serializeImageExpiration(
+                  image.source,
+                  asset.mainImageExpiration?.toISOString() ?? null
+                ),
               };
             })(),
             // `getAssets` widens its `extraInclude` arg to

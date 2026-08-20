@@ -5,7 +5,10 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   resolveDisplayCode,
@@ -143,13 +146,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
               mainImage: isPlaceholder ? null : image.fullUrl,
               thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
               imageSource: image.source,
-              // Expiration describes the asset's OWN signed URL only — a
-              // model cover is a public URL that never expires, and the
-              // row's date can be stale residue from a removed own image.
-              // Send it only for the tier it describes, or a client-side
-              // expiry check discards a valid image.
-              mainImageExpiration:
-                image.source === "asset" ? asset.mainImageExpiration : null,
+              mainImageExpiration: serializeImageExpiration(
+                image.source,
+                asset.mainImageExpiration
+              ),
             };
           })(),
           // Kit linkage moved to the AssetKit pivot (quantities restructure);

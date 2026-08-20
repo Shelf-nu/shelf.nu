@@ -251,6 +251,8 @@ describe("GET /api/mobile/assets", () => {
       },
     ] as never);
 
+    // why: the loader runs findMany + count in parallel for the pagination
+    // envelope; the count must match the two mocked rows above.
     countMock.mockResolvedValueOnce(2);
 
     const args = createLoaderArgs({

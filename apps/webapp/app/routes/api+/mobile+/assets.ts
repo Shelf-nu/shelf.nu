@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -254,13 +255,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         custody: visibleCustody,
         custodyList,
         custodyListOthersCount,
-        // Expiration describes the asset's OWN signed URL only — a model
-        // cover is a public URL that never expires, and the row's date can
-        // be stale residue from a removed own image. Send it only for the
-        // tier it describes, or the client's lazy refresh check discards a
-        // valid image.
-        mainImageExpiration:
-          shaped.imageSource === "asset" ? mainImageExpiration : null,
+        mainImageExpiration: serializeImageExpiration(
+          shaped.imageSource,
+          mainImageExpiration
+        ),
       };
     });
 
