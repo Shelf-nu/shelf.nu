@@ -229,12 +229,23 @@ export async function resolveServerForEmail(
     return { ok: true };
   }
 
-  // Already connected to the right server.
-  if (normalizeBaseUrl(baseUrl) === getActiveServer().baseUrl) {
-    return { ok: true };
-  }
+  // Deliberately NOT short-circuiting when we are already on this server. The
+  // config is re-read on every login so a customer who rotates their Supabase
+  // project — same base URL, new anon key — is picked up. Short-circuiting here
+  // left every enrolled device holding stale credentials with no in-app way to
+  // recover. `setActiveServer` decides whether anything actually changed, so a
+  // no-op login costs one request and touches nothing.
+  const alreadyConnected =
+    normalizeBaseUrl(baseUrl) === getActiveServer().baseUrl;
 
   const fetched = await fetchServerConfig(baseUrl);
+
+  // Already working against this server and the refresh failed: keep going with
+  // the config we have. A transient blip must not block a login that would have
+  // succeeded before this refresh existed.
+  if (!fetched.ok && alreadyConnected) {
+    return { ok: true };
+  }
 
   if (!fetched.ok) {
     // A stale cached entry is the likely cause, so drop it and re-resolve once

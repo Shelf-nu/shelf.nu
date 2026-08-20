@@ -20,6 +20,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSupabase, rebuildSupabase } from "../supabase";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
+  classifyServerChange,
   normalizeBaseUrl,
   SERVER_SCOPED_KEY_PREFIXES,
   SERVER_SCOPED_STORAGE_KEYS,
@@ -165,17 +166,65 @@ async function clearServerScopedState(): Promise<void> {
 }
 
 /**
- * Switches the app to a different Shelf server.
+ * Persists the active server config, best-effort.
  *
- * Order matters: sign out of the old client while it is still live, then
- * rebuild, then wipe persisted state, and only then notify subscribers — they
- * must observe the fully-switched state, never a half-applied one.
+ * @param config - The config to store.
+ * @returns Resolves once stored. A failure leaves the change standing for this
+ *   session; it just will not survive a restart, which beats aborting midway.
+ */
+async function persistActiveServer(config: ServerConfig): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      ACTIVE_SERVER_STORAGE_KEY,
+      JSON.stringify(config)
+    );
+  } catch (e) {
+    if (__DEV__) console.error("[Server] persist failed:", e);
+  }
+}
+
+/**
+ * Applies a server config: a no-op, a credential refresh, or a full switch.
  *
- * @param config - The server to switch to. A no-op when already active.
- * @returns Resolves once the switch and teardown are complete.
+ * The three cases exist because a customer can rotate their Supabase project
+ * while keeping the same base URL. Treating that as "already active" — which an
+ * earlier `baseUrl`-only guard did — left every enrolled device holding a stale
+ * anon key with no in-app way to recover.
+ *
+ * A credential refresh deliberately does NOT tear down server-scoped state: the
+ * selected organisation and audit drafts still belong to this same instance, so
+ * wiping them would turn a silent config update into visible data loss. It also
+ * does not force a sign-out — if the session is still valid under the new
+ * credentials it keeps working, and if it is not, the existing 401 handling
+ * routes the user to login.
+ *
+ * On a full switch, order matters: sign out of the old client while it is still
+ * live, then rebuild, then wipe persisted state, and only then notify
+ * subscribers — they must observe the fully-switched state, never a
+ * half-applied one.
+ *
+ * @param config - The config to apply.
+ * @returns Resolves once the change and any teardown are complete.
  */
 export async function setActiveServer(config: ServerConfig): Promise<void> {
-  if (config.baseUrl === activeServer.baseUrl) return;
+  const change = classifyServerChange(activeServer, config);
+  if (change === "none") return;
+
+  if (change === "credentials") {
+    const credentialsChanged =
+      activeServer.supabaseUrl !== config.supabaseUrl ||
+      activeServer.supabaseAnonKey !== config.supabaseAnonKey;
+
+    activeServer = config;
+    // A rename alone needs no new client — rebuilding would drop the auth
+    // subscription and reset the token cache for nothing.
+    if (credentialsChanged) rebuildSupabase(config);
+    await persistActiveServer(config);
+    // Notify regardless: the display name is user-visible on the login chip
+    // and the Settings row, and subscribers rearm caches after a rebuild.
+    notifyServerChange();
+    return;
+  }
 
   try {
     await getSupabase().auth.signOut();
@@ -187,17 +236,7 @@ export async function setActiveServer(config: ServerConfig): Promise<void> {
   activeServer = config;
   rebuildSupabase(config);
   await clearServerScopedState();
-
-  try {
-    await AsyncStorage.setItem(
-      ACTIVE_SERVER_STORAGE_KEY,
-      JSON.stringify(config)
-    );
-  } catch (e) {
-    // The switch still stands for this session; it just won't survive a
-    // restart. Better than aborting mid-switch.
-    if (__DEV__) console.error("[Server] persist failed:", e);
-  }
+  await persistActiveServer(config);
 
   notifyServerChange();
 }

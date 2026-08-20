@@ -318,6 +318,47 @@ export function parseServerConfigResponse(
 }
 
 /**
+ * How a newly fetched server config differs from the active one.
+ *
+ * - `none` — nothing to apply.
+ * - `credentials` — SAME instance, but its Supabase URL, anon key or display
+ *   name changed. The app must adopt them without tearing down data that still
+ *   belongs to this server.
+ * - `switch` — a different instance entirely; everything server-scoped goes.
+ */
+export type ServerChange = "none" | "credentials" | "switch";
+
+/**
+ * Classifies what changed between the active server config and a fresh one.
+ *
+ * why this exists: both the discovery short-circuit and `setActiveServer`
+ * originally keyed on `baseUrl` alone, so a customer who rotated their Supabase
+ * project while keeping the same base URL left every enrolled device holding a
+ * stale anon key, with no in-app way to recover. Distinguishing a credential
+ * refresh from a full switch is what lets the app adopt the new values without
+ * wiping the selected organisation and audit drafts, which are still valid for
+ * that same instance.
+ *
+ * @param current - The active server config.
+ * @param next - The config just fetched from `/api/mobile/config`.
+ * @returns Which of the three cases applies.
+ */
+export function classifyServerChange(
+  current: ServerConfig,
+  next: ServerConfig
+): ServerChange {
+  if (normalizeBaseUrl(current.baseUrl) !== normalizeBaseUrl(next.baseUrl)) {
+    return "switch";
+  }
+  const sameCredentials =
+    normalizeBaseUrl(current.supabaseUrl) ===
+      normalizeBaseUrl(next.supabaseUrl) &&
+    current.supabaseAnonKey === next.supabaseAnonKey &&
+    current.name === next.name;
+  return sameCredentials ? "none" : "credentials";
+}
+
+/**
  * Whether the live Supabase client belongs to a different project than the
  * active server.
  *

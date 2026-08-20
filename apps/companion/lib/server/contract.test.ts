@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  classifyServerChange,
   extractEmailDomain,
   isAppVersionSupported,
   isResolutionFresh,
@@ -399,5 +400,71 @@ test("isSessionServerMismatched is false before a client exists", () => {
   assert.equal(
     isSessionServerMismatched(null, "https://xyz.supabase.co"),
     false
+  );
+});
+
+// ── classifyServerChange ─────────────────────────────────
+
+const baseServer = {
+  baseUrl: "https://acme.i.shelf.nu",
+  supabaseUrl: "https://xyz.supabase.co",
+  supabaseAnonKey: "anon-key-123",
+  name: "Acme University",
+  isCloud: false,
+};
+
+test("classifyServerChange reports none for an identical config", () => {
+  assert.equal(classifyServerChange(baseServer, { ...baseServer }), "none");
+});
+
+test("classifyServerChange reports credentials for a rotated anon key", () => {
+  // The whole point: same instance, new key. Previously invisible, because
+  // both the discovery and setActiveServer guards keyed only on baseUrl.
+  assert.equal(
+    classifyServerChange(baseServer, {
+      ...baseServer,
+      supabaseAnonKey: "anon-key-456",
+    }),
+    "credentials"
+  );
+});
+
+test("classifyServerChange reports credentials for a moved Supabase project", () => {
+  assert.equal(
+    classifyServerChange(baseServer, {
+      ...baseServer,
+      supabaseUrl: "https://new.supabase.co",
+    }),
+    "credentials"
+  );
+});
+
+test("classifyServerChange reports credentials for a renamed instance", () => {
+  // Cheap to apply and the name is user-visible on the login chip and in
+  // Settings, so a rename should not need a reinstall to show up.
+  assert.equal(
+    classifyServerChange(baseServer, { ...baseServer, name: "Acme Corp" }),
+    "credentials"
+  );
+});
+
+test("classifyServerChange reports switch for a different base URL", () => {
+  assert.equal(
+    classifyServerChange(baseServer, {
+      ...baseServer,
+      baseUrl: "https://other.i.shelf.nu",
+    }),
+    "switch"
+  );
+});
+
+test("classifyServerChange reports switch when moving to or from cloud", () => {
+  assert.equal(
+    classifyServerChange(baseServer, {
+      ...baseServer,
+      baseUrl: "https://app.shelf.nu",
+      isCloud: true,
+    }),
+    "switch"
   );
 });
