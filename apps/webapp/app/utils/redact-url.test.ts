@@ -54,6 +54,31 @@ describe("redactUrlCredentials", () => {
     expect(redactUrlCredentials(url)).toBe(url);
   });
 
+  it("returns a clean URL BYTE-for-byte, without normalizing it", () => {
+    // The previous version returned `url.toString()` unconditionally, so a
+    // URL with nothing to redact still came back rewritten:
+    // `HTTPS://EXAMPLE.COM:443/a` -> `https://example.com/a`. The earlier test
+    // above missed it by picking a URL that was already normalized.
+    //
+    // A redactor that quietly edits non-secrets is its own debugging problem —
+    // the log line no longer matches what the user submitted.
+    const url = "HTTPS://EXAMPLE.COM:443/a?B=2&a=1";
+    expect(redactUrlCredentials(url)).toBe(url);
+  });
+
+  it.each(["X-Goog-Signature", "X-Goog-Credential"])(
+    "redacts the Google Cloud %s parameter",
+    (param) => {
+      // Signed URLs come in both AWS (`X-Amz-*`) and Google (`X-Goog-*`)
+      // spellings; an imported image URL can point at either bucket.
+      const out = redactUrlCredentials(
+        `https://storage.googleapis.com/b/o.jpg?${param}=deadbeefsig`
+      );
+
+      expect(out).not.toContain("deadbeefsig");
+    }
+  );
+
   it("leaves non-URL strings alone", () => {
     // Runs over every string in every error payload, so it must not mangle
     // ordinary prose.

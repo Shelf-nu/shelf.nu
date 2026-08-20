@@ -59,10 +59,12 @@ const MAX_DEPTH = 4;
  *
  * {@link SENSITIVE_KEY} already covers the obvious names (`token`, `api_key`,
  * `secret`). These are the signed-URL specific ones it does not — and they are
- * exactly what an image URL from a private bucket carries.
+ * exactly what an image URL from a private bucket carries. Both the AWS
+ * (`X-Amz-*`) and Google Cloud (`X-Goog-*`) V4 spellings, since an imported
+ * image URL can point at either.
  */
 const SENSITIVE_URL_PARAM =
-  /^(?:sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|access[._-]?token|auth)$/i;
+  /^(?:sig|signature|x-(?:amz|goog)-(?:signature|credential|security-token)|access[._-]?token|auth)$/i;
 
 /**
  * Removes credentials embedded in a URL string.
@@ -100,18 +102,28 @@ export function redactUrlCredentials(value: string): string {
     return value;
   }
 
+  let redacted = false;
+
   if (url.username || url.password) {
     url.username = REDACTED_URL_PART;
     url.password = REDACTED_URL_PART;
+    redacted = true;
   }
 
   for (const param of Array.from(url.searchParams.keys())) {
     if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
       url.searchParams.set(param, REDACTED_URL_PART);
+      redacted = true;
     }
   }
 
-  return url.toString();
+  // Return the ORIGINAL string when there was nothing to redact. `URL.toString()`
+  // normalizes — `HTTPS://EXAMPLE.COM:443/a` comes back as
+  // `https://example.com/a` — so returning it unconditionally would silently
+  // rewrite every clean URL in every log line. The point of this function is a
+  // log entry that still matches what the user submitted; a redactor that
+  // quietly edits non-secrets is a debugging problem of its own.
+  return redacted ? url.toString() : value;
 }
 
 /**

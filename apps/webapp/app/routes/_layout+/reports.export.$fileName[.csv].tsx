@@ -450,10 +450,15 @@ function escapeCsvField(field: string): string {
   // values with a single quote so the cell is treated as literal text. Applied
   // here in the shared helper so every report export is protected.
   const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
+  // consumers that accept CR as a line ending, so an unquoted one lets a
+  // user-controlled value split the row and forge structure — which also puts
+  // the injected content at the start of a "line", back inside formula range.
   if (
     safeField.includes(",") ||
     safeField.includes('"') ||
-    safeField.includes("\n")
+    safeField.includes("\n") ||
+    safeField.includes("\r")
   ) {
     return `"${safeField.replace(/"/g, '""')}"`;
   }
