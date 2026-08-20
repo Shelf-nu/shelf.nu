@@ -375,8 +375,17 @@ function AuditDetailContent() {
               : "Deleted asset"
             : snapshotTitle || "Untitled asset",
           mainImage: null,
-          status: "UNEXPECTED",
-          isExpected: false,
+          // why NOT a hardcoded UNEXPECTED: this branch handles scans with no
+          // matching expected row, and a DELETED asset always lands here — its
+          // assetId is empty, so it can never match expectedIds. Hardcoding
+          // false threw away the very fact this PR added: the server restores
+          // expectedness from the scan's own snapshot
+          // (`auditAsset?.expected ?? scan.wasExpected`) and sends it as
+          // `isExpected`. Without this, a deleted asset that WAS expected still
+          // reads "Unexpected" on the phone — the exact mislabelling the
+          // snapshot exists to prevent, and it contradicts the activity feed.
+          status: scan.isExpected ? "FOUND" : "UNEXPECTED",
+          isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
           scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location

@@ -23,6 +23,7 @@ import {
   deleteAuditSession,
   bulkDeleteAudits,
   duplicateAuditSession,
+  getAuditScans,
   recordAuditScan,
   requireAuditAssignee,
 } from "./service.server";
@@ -131,6 +132,7 @@ vi.mock("~/database/db.server", () => {
     },
     auditScan: {
       findFirst: vi.fn(),
+      findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -187,6 +189,7 @@ const mockDb = db as unknown as {
   };
   auditScan: {
     findFirst: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
@@ -2690,5 +2693,91 @@ describe("audit service", () => {
         requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
       ).rejects.toMatchObject({ status: 404 });
     });
+  });
+});
+
+describe("getAuditScans — a scan whose asset was deleted", () => {
+  /**
+   * why this suite exists: the write side snapshots `wasExpected` onto the
+   * scan, and this is the read side that gives it back. Between them sits the
+   * whole point of the change — a deleted asset's row must still say whether
+   * it belonged to the audit. The phone renders straight off this payload and
+   * has no test harness of its own, so if the restore is wrong here, nothing
+   * catches it before a user sees a found asset labelled "Unexpected".
+   */
+  const ARGS = { auditSessionId: "audit-1", organizationId: "org-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.auditSession.findFirst.mockResolvedValue({ id: "audit-1" });
+  });
+
+  it("restores expectedness from the scan's own snapshot", async () => {
+    // The asset and its AuditAsset row are both gone — Cascade took the
+    // AuditAsset, SetNull emptied AuditScan.assetId. Only the snapshot is left.
+    mockDb.auditScan.findMany.mockResolvedValue([
+      {
+        code: "mg1be33uew",
+        assetId: null,
+        asset: null,
+        auditAsset: null,
+        assetTitle: "Arri Fresnel 650 Plus",
+        wasExpected: true,
+        scannedAt: new Date("2026-08-19T10:00:00Z"),
+      },
+    ]);
+
+    const [scan] = await getAuditScans(ARGS);
+
+    expect(scan.isExpected).toBe(true);
+    expect(scan.assetDeleted).toBe(true);
+    expect(scan.assetTitle).toBe("Arri Fresnel 650 Plus");
+  });
+
+  it("reports a deleted UNEXPECTED scan as unexpected, not as expected", async () => {
+    // why the pair: without this, "always true" would pass the test above.
+    mockDb.auditScan.findMany.mockResolvedValue([
+      {
+        code: "zz9",
+        assetId: null,
+        asset: null,
+        auditAsset: null,
+        assetTitle: "Some stray thing",
+        wasExpected: false,
+        scannedAt: new Date("2026-08-19T10:00:00Z"),
+      },
+    ]);
+
+    const [scan] = await getAuditScans(ARGS);
+
+    expect(scan.isExpected).toBe(false);
+    expect(scan.assetDeleted).toBe(true);
+  });
+
+  it("prefers the live AuditAsset over the snapshot while the asset exists", async () => {
+    // why: the snapshot is a survival mechanism, not a cache. An asset moved
+    // onto the audit after the scan must read as expected NOW, even though the
+    // scan was snapshotted as unexpected.
+    mockDb.auditScan.findMany.mockResolvedValue([
+      {
+        code: "abc",
+        assetId: "asset-1",
+        asset: { id: "asset-1", title: "Live title", assetLocations: [] },
+        auditAsset: {
+          id: "aa-1",
+          expected: true,
+          _count: { notes: 0, images: 0 },
+        },
+        assetTitle: "Stale snapshot title",
+        wasExpected: false,
+        scannedAt: new Date("2026-08-19T10:00:00Z"),
+      },
+    ]);
+
+    const [scan] = await getAuditScans(ARGS);
+
+    expect(scan.isExpected).toBe(true);
+    expect(scan.assetTitle).toBe("Live title");
+    expect(scan.assetDeleted).toBe(false);
   });
 });
