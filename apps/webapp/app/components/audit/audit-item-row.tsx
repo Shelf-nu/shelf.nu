@@ -166,9 +166,9 @@ export function AuditItemRow({
             // why: amber, not red. AUDIT_ASSET_STATUS_TONES in @shelf/labels
             // makes UNEXPECTED a `warning` and reserves danger for MISSING —
             // an asset in your hands but filed wrong is not the same problem
-            // as one that is gone. This drawer was the last place still
-            // deciding the colour for itself, so it read red while the badge
-            // beside it read amber. 4.5:1+ on warning-50.
+            // as one that is gone. Take the tone from that map rather than
+            // choosing here, so this drawer and the badge beside it cannot
+            // disagree. warning-800 on warning-50 is 7.2:1.
             className: "border-warning-200 bg-warning-50 text-warning-800",
           },
         ];
