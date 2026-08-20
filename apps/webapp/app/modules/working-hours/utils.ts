@@ -430,6 +430,8 @@ function getOriginalDefaultTimes(
  * @param endDate - The end date of the booking
  * @param workingHoursData - Working hours configuration with schedules and overrides
  * @param skipClosedDays - Whether to skip closed days in the calculation
+ * @param timeZone - IANA zone that decides which calendar day the walk is on.
+ *   Same contract as {@link calculateBusinessHoursDuration}.
  * @returns Effective end date for validation (or original endDate if not skipping)
  */
 export function calculateEffectiveEndDate(
@@ -479,6 +481,11 @@ export function calculateEffectiveEndDate(
  * @param startDate - The start date of the booking
  * @param endDate - The end date of the booking
  * @param workingHoursData - Working hours configuration with schedules and overrides
+ * @param timeZone - IANA zone that decides which calendar day each hour belongs
+ *   to, and where midnight falls. Pass the acting user's resolved preference
+ *   zone — see `.claude/rules/working-hours-are-location-local.md` for why that
+ *   is the accepted proxy, and why leaving it to the ambient clock is worse
+ *   (it differs between the browser and the server for the same submission).
  * @returns Calendar hours minus closed days hours
  */
 export function calculateBusinessHoursDuration(
