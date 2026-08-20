@@ -22,8 +22,53 @@ const TELEMETRY_WINDOW_MS = 60_000;
  */
 const TELEMETRY_MAX_TRACKED_BUCKETS = 5_000;
 
-/** Bucket key → epoch ms of the last telemetry entry emitted for it. */
+/**
+ * Bucket key → epoch ms of the last telemetry entry emitted for it.
+ *
+ * Held in ascending timestamp order: every write goes through a delete-then-set
+ * (see {@link shouldEmitTelemetry}), so the oldest entry is always first. The
+ * expiry sweep relies on that to stop at the first still-live entry instead of
+ * walking all {@link TELEMETRY_MAX_TRACKED_BUCKETS} of them on a path that is
+ * meant to reject cheaply.
+ */
 const lastLoggedAt = new Map<string, number>();
+
+/**
+ * Epoch ms of the last "tracker saturated" notice.
+ *
+ * Deliberately NOT a reserved key inside {@link lastLoggedAt}: that map is full
+ * by definition whenever saturation is being reported, so a reserved key would
+ * be denied by the very code trying to report it.
+ */
+let saturationNoticeAt = 0;
+
+/**
+ * Emit at most one notice per window that telemetry is being dropped because
+ * the tracker is saturated.
+ *
+ * Without this, the fail-closed branch is indistinguishable from "no rate
+ * limiting happened" — a silent empty result that looks perfectly healthy,
+ * which is the failure mode this repo has been bitten by before.
+ *
+ * @param now - Current epoch ms
+ */
+function noticeTelemetrySaturation(now: number) {
+  if (now - saturationNoticeAt < TELEMETRY_WINDOW_MS) {
+    return;
+  }
+  saturationNoticeAt = now;
+
+  Logger.handledClientError(
+    new ShelfError({
+      cause: null,
+      label: "Rate limit",
+      message: `Rate limit telemetry tracker saturated (${TELEMETRY_MAX_TRACKED_BUCKETS} live buckets) — per-bucket entries are being dropped this window`,
+      status: 429,
+      shouldBeCaptured: false,
+      additionalData: {},
+    })
+  );
+}
 
 /**
  * Whether this bucket may emit a telemetry entry now, recording the emission
@@ -40,39 +85,54 @@ const lastLoggedAt = new Map<string, number>();
  * unbounded, a runaway client could bury the very incident trail this telemetry
  * exists to preserve.
  *
+ * When the tracker is saturated this fails CLOSED: new buckets emit nothing
+ * until a slot frees up. Evicting a live entry instead would be a bypass —
+ * an attacker who can mint more than {@link TELEMETRY_MAX_TRACKED_BUCKETS}
+ * buckets could evict a bucket's own suppressor and make it emit again inside
+ * its window, degrading the throttle back to roughly one entry per request.
+ * Minting that many is cheap: `appLoaderRateLimit` keys on
+ * `app:${identity}:${path}` and runs on ANY `.data` path, so one client can
+ * rotate paths. Failing closed is the narrower harm — the silence is scoped to
+ * one window on one machine and self-heals, whereas a flood burns the shared
+ * Sentry logs quota and denies telemetry org-wide for far longer.
+ *
  * @param bucket - The limiter's OWN bucket key. Callers must pass the real key
  *   rather than the log message: `calendarFeedRateLimit`'s message detail is a
  *   redacted placeholder shared by every feed, so throttling on that would
  *   collapse all feeds into one bucket and silence all but the first.
  * @param now - Current epoch ms, injected so tests stay deterministic
  * @returns `true` when the caller should emit
+ * @internal Exported only so the throttle can be unit-tested directly; driving
+ *   these paths over HTTP would take tens of thousands of requests.
  */
-function shouldEmitTelemetry(bucket: string, now: number): boolean {
+export function shouldEmitTelemetry(bucket: string, now: number): boolean {
   const last = lastLoggedAt.get(bucket);
   if (last !== undefined && now - last < TELEMETRY_WINDOW_MS) {
     return false;
   }
 
   if (lastLoggedAt.size >= TELEMETRY_MAX_TRACKED_BUCKETS) {
-    // Drop anything that can no longer suppress an emit (its window has long
-    // passed) before falling back to evicting the least recently emitted.
+    // Sweep entries that can no longer suppress anything — the exact
+    // complement of the liveness test above, so nothing live is dropped.
+    // Ascending order lets the first live entry end the scan.
     for (const [key, at] of lastLoggedAt) {
-      if (now - at >= TELEMETRY_WINDOW_MS * 2) {
-        lastLoggedAt.delete(key);
-      }
-    }
-    while (lastLoggedAt.size >= TELEMETRY_MAX_TRACKED_BUCKETS) {
-      const oldest = lastLoggedAt.keys().next();
-      if (oldest.done) {
+      if (now - at < TELEMETRY_WINDOW_MS) {
         break;
       }
-      lastLoggedAt.delete(oldest.value);
+      lastLoggedAt.delete(key);
+    }
+
+    // Still full: every survivor is a live suppressor, so there is nothing
+    // safe to evict. Drop this emit rather than punch a hole in the throttle.
+    if (lastLoggedAt.size >= TELEMETRY_MAX_TRACKED_BUCKETS) {
+      noticeTelemetrySaturation(now);
+      return false;
     }
   }
 
   // Delete before set so the entry moves to the end of the Map's insertion
   // order — `set` on an existing key keeps its original position, which would
-  // make the eviction above evict by first-seen rather than by least-recent.
+  // break the ascending-timestamp invariant the sweep's early `break` needs.
   lastLoggedAt.delete(bucket);
   lastLoggedAt.set(bucket, now);
   return true;

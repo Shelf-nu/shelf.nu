@@ -217,3 +217,96 @@ describe("appLoaderRateLimit middleware", () => {
     });
   });
 });
+
+/**
+ * Direct unit tests for the telemetry throttle.
+ *
+ * Driven through the exported `shouldEmitTelemetry` with an injected clock
+ * rather than over HTTP: saturating the tracker takes thousands of distinct
+ * buckets, which would mean tens of thousands of requests through Hono.
+ *
+ * Each test re-imports the module so the module-scope tracker starts empty —
+ * a shared tracker would let one test's buckets suppress the next test's.
+ */
+describe("telemetry throttle saturation", () => {
+  const MAX = 5_000;
+  const WINDOW = 60_000;
+
+  async function freshModule() {
+    vi.resetModules();
+    return import("./rate-limit");
+  }
+
+  it("keeps a bucket suppressed even after the tracker fills with other buckets", async () => {
+    // why: the first version evicted the least-recently-emitted entry to make
+    // room, so rotating past the cap could evict a live suppressor and let its
+    // bucket emit again inside its own window — degrading the throttle to
+    // roughly one entry per request, which is what it exists to prevent.
+    const { shouldEmitTelemetry } = await freshModule();
+    const now = 1_000_000;
+
+    expect(shouldEmitTelemetry("victim", now)).toBe(true);
+
+    // Fill well past the cap, all inside the victim's window.
+    for (let i = 0; i < MAX + 500; i++) {
+      shouldEmitTelemetry(`filler-${i}`, now + 1);
+    }
+
+    expect(shouldEmitTelemetry("victim", now + WINDOW - 1)).toBe(false);
+  });
+
+  it("never grows past the cap", async () => {
+    const { shouldEmitTelemetry } = await freshModule();
+    const now = 2_000_000;
+
+    for (let i = 0; i < MAX + 1_000; i++) {
+      shouldEmitTelemetry(`bucket-${i}`, now);
+    }
+
+    // Every survivor is live, so the tracker refuses new buckets rather than
+    // evicting — and the map cannot exceed its ceiling.
+    expect(shouldEmitTelemetry("one-more", now)).toBe(false);
+  });
+
+  it("lets a bucket emit again once its own window has expired", async () => {
+    const { shouldEmitTelemetry } = await freshModule();
+    const now = 3_000_000;
+
+    expect(shouldEmitTelemetry("recurring", now)).toBe(true);
+    expect(shouldEmitTelemetry("recurring", now + WINDOW - 1)).toBe(false);
+    expect(shouldEmitTelemetry("recurring", now + WINDOW)).toBe(true);
+  });
+
+  it("recovers once the saturating buckets age out", async () => {
+    // Fail-closed silence must self-heal — otherwise one flood would mute
+    // telemetry permanently on that machine.
+    const { shouldEmitTelemetry } = await freshModule();
+    const now = 4_000_000;
+
+    for (let i = 0; i < MAX + 100; i++) {
+      shouldEmitTelemetry(`flood-${i}`, now);
+    }
+    expect(shouldEmitTelemetry("after-flood", now)).toBe(false);
+
+    // A full window later the flood's entries can no longer suppress anything.
+    expect(shouldEmitTelemetry("after-flood", now + WINDOW)).toBe(true);
+  });
+
+  it("reports saturation once per window instead of silently dropping", async () => {
+    // why: a fail-closed branch that logs nothing is indistinguishable from
+    // "no rate limiting happened" — a silent empty result that looks healthy.
+    const { shouldEmitTelemetry } = await freshModule();
+    mockHandledClientError.mockReset();
+    const now = 5_000_000;
+
+    for (let i = 0; i < MAX + 200; i++) {
+      shouldEmitTelemetry(`sat-${i}`, now);
+    }
+
+    const saturationLogs = mockHandledClientError.mock.calls.filter(
+      (call) => typeof call[0]?.message === "string" && call[0].message.includes("saturated")
+    );
+    expect(saturationLogs).toHaveLength(1);
+    expect(saturationLogs[0][0].label).toBe("Rate limit");
+  });
+});
