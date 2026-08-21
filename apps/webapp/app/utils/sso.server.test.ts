@@ -301,15 +301,15 @@ describe("checkDomainSSOStatus", () => {
 
     await expect(checkDomainSSOStatus("jane@example.com")).resolves.toEqual({
       isConfiguredForSSO: false,
-      linkedOrganization: null,
+      linkedOrganizations: [],
       ssoProviderId: null,
     });
   });
 
   it("links the organization that claims the domain", async () => {
-    // The SCIM-governance check downstream compares this id against the
-    // organization being invited to, so a null here reads as Pure SSO and
-    // lets a manual invite through.
+    // The SCIM-governance check downstream looks for the invited-to
+    // organization in this list, so an empty one reads as Pure SSO and lets a
+    // manual invite through.
     federated();
     // @ts-expect-error mock setup
     mockDb.db.organization.findMany.mockResolvedValue([
@@ -319,8 +319,29 @@ describe("checkDomainSSOStatus", () => {
     const result = await checkDomainSSOStatus("jane@acme.com");
 
     expect(result.isConfiguredForSSO).toBe(true);
-    expect(result.linkedOrganization?.id).toBe("org-acme");
+    expect(result.linkedOrganizations.map((org) => org.id)).toEqual([
+      "org-acme",
+    ]);
     expect(result.ssoProviderId).toBe("provider-1");
+  });
+
+  it("links every organization that claims the domain", async () => {
+    // `SsoDetails.domain` has no unique constraint and one SsoDetails row is
+    // shared by an `Organization[]`, so co-ownership is a supported state.
+    // Answering with a single owner exempts the others from the SCIM rule.
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([
+      orgWithDomains("org-acme-eu", "acme.com"),
+      orgWithDomains("org-acme-us", "acme.com,acme.us"),
+    ]);
+
+    const result = await checkDomainSSOStatus("jane@acme.com");
+
+    expect(result.linkedOrganizations.map((org) => org.id)).toEqual([
+      "org-acme-eu",
+      "org-acme-us",
+    ]);
   });
 
   it("does not link an organization whose domain merely contains the queried one", async () => {
@@ -335,10 +356,10 @@ describe("checkDomainSSOStatus", () => {
     const result = await checkDomainSSOStatus("jane@acme.com");
 
     expect(result.isConfiguredForSSO).toBe(true);
-    expect(result.linkedOrganization).toBeNull();
+    expect(result.linkedOrganizations).toEqual([]);
   });
 
-  it("picks the real owner past a substring collision", async () => {
+  it("finds the real owner past a substring collision", async () => {
     // A single-row read would stop at "org-other", exact-match it to false,
     // and report Pure SSO — silently skipping the organization that does own
     // the domain.
@@ -351,7 +372,9 @@ describe("checkDomainSSOStatus", () => {
 
     const result = await checkDomainSSOStatus("jane@acme.com");
 
-    expect(result.linkedOrganization?.id).toBe("org-acme");
+    expect(result.linkedOrganizations.map((org) => org.id)).toEqual([
+      "org-acme",
+    ]);
   });
 
   it("matches the domain case-insensitively", async () => {
@@ -363,13 +386,15 @@ describe("checkDomainSSOStatus", () => {
 
     const result = await checkDomainSSOStatus("Jane@Acme.COM");
 
-    expect(result.linkedOrganization?.id).toBe("org-acme");
+    expect(result.linkedOrganizations.map((org) => org.id)).toEqual([
+      "org-acme",
+    ]);
   });
 
   it("returns not-configured for an address with no domain", async () => {
     await expect(checkDomainSSOStatus("not-an-email")).resolves.toEqual({
       isConfiguredForSSO: false,
-      linkedOrganization: null,
+      linkedOrganizations: [],
       ssoProviderId: null,
     });
 
