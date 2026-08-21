@@ -413,6 +413,13 @@ All code must include inline documentation and JSDoc comments. This applies to e
 - Especially important: when a variable name could be confused (e.g., `userId` referring to different users in different contexts), add a clarifying comment
 - Explain "why" rather than "what" — the code shows what, comments explain why
 
+**Timeless, not historical:**
+
+- Write comments in the present tense, for a reader who never saw the PR that introduced them — describe what the thing is and how to use it, not the bug that prompted it
+- Phrase a reason as a standing constraint ("read `completedAt`, never `status`, because archiving rewrites the status"), never as an incident report ("this used to read `status`, which broke on archive")
+- When you edit a file, rewrite any JSDoc/inline comment there that narrates history or describes behaviour the code no longer has — in the same change
+- 📖 Full rule: [.claude/rules/comments-describe-code-not-history.md](./.claude/rules/comments-describe-code-not-history.md)
+
 **Example:**
 
 ```typescript
