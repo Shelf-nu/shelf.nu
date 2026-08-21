@@ -66,9 +66,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       });
     }
 
-    /** Cannot manage users for PERSONAL organization */
+    /**
+     * Personal workspaces can't manage invites. Send them to the Team page
+     * (which explains how to upgrade) instead of a contextless redirect.
+     */
     if (organization?.type === "PERSONAL") {
-      return redirect("/settings/general");
+      return redirect("/settings/team/nrm");
     }
 
     const { page, perPage, search, items, totalItems, totalPages } =
