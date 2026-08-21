@@ -47,17 +47,19 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-/** Wires the happy-path mocks for a successful redeem + fresh-session mint. */
 /**
- * A valid PKCE pair. Redemption now REQUIRES a bound challenge, so every test
- * that reaches the mint has to present one — the challenge-less shortcut these
- * tests used to take is the vulnerability, and is pinned as refused below.
+ * A valid PKCE pair: `TEST_CHALLENGE` is the S256 hash of `TEST_VERIFIER`.
+ *
+ * Redemption requires a bound challenge, so every test that expects to reach
+ * the mint must present one. A challenge-less redemption is pinned as refused
+ * below — that is the property this suite exists to protect.
  */
 const TEST_VERIFIER = "t".repeat(64);
 const TEST_CHALLENGE = createHash("sha256")
   .update(TEST_VERIFIER)
   .digest("base64url");
 
+/** Wires the happy-path mocks for a successful redeem + fresh-session mint. */
 function mockSuccessfulMint(
   email = "sso@acme.com",
   codeChallenge: string | null = TEST_CHALLENGE
@@ -261,7 +263,7 @@ describe("redeemMobileAuthCode", () => {
     // `shelf://` deeplink and account takeover, so it is mandatory — a code that
     // was minted without a binding can never be redeemed, and presenting a
     // verifier against a NULL challenge does not rescue it either.
-    for (const verifier of [undefined, "some-verifier"]) {
+    for (const verifier of [undefined, TEST_VERIFIER]) {
       mockSuccessfulMint("sso@acme.com", null);
 
       await expect(
@@ -283,26 +285,21 @@ describe("redeemMobileAuthCode", () => {
 
   it("rejects a PKCE code with a wrong verifier (400, no mint) but consumes it", async () => {
     const challenge = createHash("sha256")
-      .update("the-real-verifier")
+      .update("r".repeat(64))
       .digest("base64url");
     mockSuccessfulMint("sso@acme.com", challenge);
 
     await expect(
-      redeemMobileAuthCode("good-code", "a-different-verifier")
+      redeemMobileAuthCode("good-code", "w".repeat(64))
     ).rejects.toMatchObject({ status: 400 });
     expect(dbMocks.updateMany).toHaveBeenCalledTimes(1); // single-use consume ran
     expect(supabaseMocks.generateLink).not.toHaveBeenCalled(); // never minted
   });
 
   it("rejects a PKCE code when no verifier is supplied", async () => {
-    const challenge = createHash("sha256")
-      .update("verifier")
-      .digest("base64url");
-    mockSuccessfulMint("sso@acme.com", challenge);
+    mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
 
-    await expect(
-      redeemMobileAuthCode("good-code", TEST_VERIFIER)
-    ).rejects.toMatchObject({
+    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
       status: 400,
     });
     expect(supabaseMocks.generateLink).not.toHaveBeenCalled();

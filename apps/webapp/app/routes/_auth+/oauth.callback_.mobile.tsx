@@ -147,10 +147,12 @@ export async function action({ request }: ActionFunctionArgs) {
           formatPrefs,
         });
 
-        // PKCE: if a PKCE-capable app started this login, the S256 challenge is
-        // waiting in the cookie `/sso-login` set at the start of the flow. Bind
-        // it to the auth code so the exchange must present a matching verifier.
-        // Absent → legacy (pre-PKCE) flow, redeemed without a verifier.
+        // PKCE: the S256 challenge is waiting in the cookie `/sso-login` set at
+        // the start of the flow. Bind it to the auth code so the exchange must
+        // present a matching verifier. `/sso-login` refuses to start a mobile
+        // flow without a valid challenge, so absent here means only that the
+        // cookie was lost or outlived its TTL — the resulting unbound code is
+        // refused at redemption rather than redeemed as a bearer token.
         const codeChallenge = await mobilePkceChallengeCookie.parse(
           request.headers.get("Cookie")
         );

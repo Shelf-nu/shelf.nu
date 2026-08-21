@@ -33,8 +33,10 @@ const ExchangeSchema = z.object({
 /**
  * POST /api/mobile/exchange
  *
- * Body: `{ code: string, codeVerifier?: string }` — the single-use code from
- * the SSO deeplink, plus the PKCE verifier when the app build supports it.
+ * Body: `{ code: string, codeVerifier: string }` — the single-use code from
+ * the SSO deeplink, plus the PKCE verifier that proves ownership of it. Both
+ * are mandatory: every code is minted bound to an S256 challenge, so a request
+ * without a matching verifier can never succeed.
  *
  * @param args - React Router action args (carrying the incoming request)
  * @returns `{ accessToken, refreshToken }` on success (the app passes them to

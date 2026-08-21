@@ -9,8 +9,10 @@
  * @see apps/webapp/app/routes/_auth+/sso-login.tsx
  * @see apps/webapp/app/modules/auth/mobile-sso.server.ts — the redemption half
  */
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createLoaderArgs } from "@mocks/remix";
 import { describe, expect, it, vi } from "vitest";
+import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
 
 // why: importing the route pulls the Prisma client transitively; without this
 // the suite emits an unhandled P1001 trying to reach a database it never uses.
@@ -44,9 +46,31 @@ function invoke(query: string) {
   );
 }
 
+/**
+ * Invokes the loader for a query expected to be refused, and returns what it
+ * threw so the caller can assert on the status.
+ *
+ * @param query - The query string to append to `/sso-login`
+ * @returns The thrown value
+ * @throws If the loader resolved instead of refusing
+ */
+async function invokeExpectingRefusal(query: string) {
+  try {
+    await invoke(query);
+  } catch (thrown) {
+    return thrown;
+  }
+  throw new Error(`Expected "${query}" to be refused`);
+}
+
 describe("GET /sso-login — PKCE requirement", () => {
   it("refuses a mobile start with no challenge", async () => {
-    await expect(invoke("?platform=mobile")).rejects.toBeDefined();
+    const thrown = await invokeExpectingRefusal("?platform=mobile");
+    // The loader converts its ShelfError through `data()`, so the status lives
+    // on `init` — the thrown value is a DataWithResponseInit, not a Response.
+    // Asserting it pins the refusal to PKCE rather than to any stray failure.
+    assertIsDataWithResponseInit(thrown);
+    expect(thrown.init?.status).toBe(400);
   });
 
   it("refuses a mobile start with a malformed challenge", async () => {
@@ -56,9 +80,11 @@ describe("GET /sso-login — PKCE requirement", () => {
       "a".repeat(44),
       "!".repeat(43),
     ]) {
-      await expect(
-        invoke(`?platform=mobile&code_challenge=${bad}`)
-      ).rejects.toBeDefined();
+      const thrown = await invokeExpectingRefusal(
+        `?platform=mobile&code_challenge=${bad}`
+      );
+      assertIsDataWithResponseInit(thrown);
+      expect(thrown.init?.status).toBe(400);
     }
   });
 
@@ -66,7 +92,15 @@ describe("GET /sso-login — PKCE requirement", () => {
     const result = await invoke(
       `?platform=mobile&code_challenge=${VALID_CHALLENGE}`
     );
-    expect(result).toBeDefined();
+    assertIsDataWithResponseInit(result);
+
+    const setCookie = new Headers(result.init?.headers).get("set-cookie");
+    expect(setCookie).toContain("mobile_pkce_challenge=");
+    // `createCookie` stores base64-encoded JSON, so the challenge is never
+    // literal in the header — read it back through the cookie's own decoder.
+    await expect(mobilePkceChallengeCookie.parse(setCookie)).resolves.toBe(
+      VALID_CHALLENGE
+    );
   });
 
   it("leaves the web flow untouched — no challenge required", async () => {
