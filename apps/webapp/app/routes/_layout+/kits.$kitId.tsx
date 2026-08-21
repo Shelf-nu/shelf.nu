@@ -47,8 +47,7 @@ import {
 import { createNote } from "~/modules/note/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
+import { getLastScanForViewer } from "~/modules/scan/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
@@ -176,14 +175,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan
+     * And using the ID of tha qr code, we find the latest scan.
+     *
+     * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
+     * returns null without it. The parsed scan carries the scanner's name and
+     * email, GPS coordinates and user-agent; the component renders
+     * `<ScanDetails>` behind the same check, but a client-side check only
+     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
+     * receiving all of it in the page payload.
+     *
+     * The asset route was moved onto this helper in `109d02857`; the kit route
+     * was not, and kept calling `parseScanData` directly.
      */
-    const lastScan = kit.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
-          userId,
-        })
-      : null;
+    const lastScan = await getLastScanForViewer({
+      qrId: kit.qrCodes[0]?.id,
+      userId,
+      organizationId,
+      // The caller's FULL role list, mirroring the asset route. Not the single
+      // resolved `role` from requirePermission: passing one role would hand
+      // `hasPermission` a narrower view of the membership than it has, which
+      // is the `roles[0]` trap that bit the mobile audit guards.
+      roles: userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles,
+    });
     const currentBooking = getKitCurrentBooking({
       id: kit.id,
       assets: kit.assetKits.map((ak) => ak.asset),

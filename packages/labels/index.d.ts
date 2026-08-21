@@ -34,11 +34,7 @@ export declare const BOOKING_STATUS_LABELS: {
   readonly CANCELLED: "Cancelled";
 };
 
-/**
- * Audit session lifecycle (AuditStatus in the Prisma schema). Covers ARCHIVED,
- * which a hand-written status chain on the companion used to fall through to
- * "Cancelled".
- */
+/** Audit session lifecycle (AuditStatus in the Prisma schema). */
 export declare const AUDIT_STATUS_LABELS: {
   readonly PENDING: "Pending";
   readonly ACTIVE: "Active";
@@ -62,9 +58,8 @@ export declare const AUDIT_UNASSIGNED_LABELS: {
 /**
  * Per-asset audit outcome (AuditAssetStatus in the Prisma schema).
  *
- * PENDING reads "Not scanned", not "Expected"/"Pending"/"Remaining": all of
- * those were live at once for one and the same set of assets, and "Expected"
- * was already taken by the tile counting EVERY expected asset. Prefer
+ * PENDING reads "Not scanned" rather than "Expected", which is the name of the
+ * tile counting EVERY asset the audit covers. Prefer
  * {@link auditAssetStatusLabel} over indexing this map for PENDING, since only
  * that helper applies the completion rule.
  */
@@ -77,6 +72,9 @@ export declare const AUDIT_ASSET_STATUS_LABELS: {
 
 /** Enum keys of {@link AUDIT_ASSET_STATUS_LABELS} — the Prisma status values. */
 export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;
+
+/** Enum keys of {@link AUDIT_STATUS_LABELS} — the Prisma AuditStatus values. */
+export type AuditStatusKey = keyof typeof AUDIT_STATUS_LABELS;
 
 /** The user-facing strings those keys resolve to. */
 export type AuditAssetStatusLabel =
@@ -139,3 +137,23 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
  * a checked-out asset can still be pulled off a live booking.
  */
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
+
+/**
+ * The semantic weight a status badge carries, independent of any palette. Each
+ * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
+ * the companion's light/dark theme), so the VALUES stay app-owned while the
+ * DECISION is shared.
+ *
+ * neutral → grey · info → blue · success → green · warning → amber · danger → red
+ */
+export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+/** Tone for each audit session status. */
+export declare const AUDIT_STATUS_TONES: Readonly<
+  Record<AuditStatusKey, StatusTone>
+>;
+
+/** Tone for each per-asset audit outcome, escalating neutral → danger. */
+export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
+  Record<AuditAssetStatusKey, StatusTone>
+>;
