@@ -333,12 +333,20 @@ export async function redeemMobileAuthCode(
       select: { codeChallenge: true, user: { select: { email: true } } },
     });
 
-    // PKCE check — only for codes minted with a challenge. Same uniform 400 as
-    // an invalid code (no oracle about why redemption failed). The code is
-    // already consumed above, so a wrong/absent verifier burns it.
+    // PKCE is MANDATORY. A code minted without a challenge is a bearer token —
+    // whoever holds the plaintext from the `shelf://` deeplink gets a session —
+    // and the custom-scheme callback is exactly the channel PKCE exists to
+    // protect (RFC 8252 §8.1). So a NULL challenge is unredeemable rather than
+    // a check to skip: refusing here means a code that somehow reached the
+    // database unbound can never be spent.
+    //
+    // Same uniform 400 as an invalid code, so redemption failures give no
+    // oracle about why. The code is already consumed above, so a wrong or
+    // absent verifier burns it.
     if (
-      codeChallenge &&
-      (!codeVerifier || !verifyPkceChallenge(codeVerifier, codeChallenge))
+      !codeChallenge ||
+      !codeVerifier ||
+      !verifyPkceChallenge(codeVerifier, codeChallenge)
     ) {
       throw new ShelfError({
         cause: null,
