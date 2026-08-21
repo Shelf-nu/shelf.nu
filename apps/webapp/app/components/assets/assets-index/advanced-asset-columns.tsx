@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import {
   Popover,
@@ -42,10 +42,7 @@ import type {
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import type {
-  ColumnLabelKey,
-  BarcodeField,
-} from "~/modules/asset-index-settings/helpers";
+import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
@@ -63,14 +60,13 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
-import { AssetCodeBadge } from "../asset-code-badge";
+import { BarcodeCell } from "./advanced-columns/barcode-cell";
 import { QrIdCell } from "./advanced-columns/qr-id-cell";
 import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
-import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { CategoryBadge } from "../category-badge";
@@ -316,7 +312,7 @@ export function AdvancedIndexColumn({
     case "barcode_ExternalQR":
     case "barcode_EAN13":
       return (
-        <BarcodeColumn
+        <BarcodeCell
           column={column}
           item={item}
           workspacePreference={currentOrganization.qrIdDisplayPreference}
@@ -807,122 +803,6 @@ function UpcomingReminderColumn({
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
         </TooltipContent>
       </Tooltip>
-    </Td>
-  );
-}
-
-function BarcodeColumn({
-  column,
-  item,
-  workspacePreference,
-}: {
-  column: BarcodeField;
-  item: AdvancedIndexAsset;
-  workspacePreference: QrIdDisplayPreference;
-}) {
-  // Map column names to actual enum values
-  const typeMapping: Record<string, string> = {
-    Code128: "Code128",
-    Code39: "Code39",
-    DataMatrix: "DataMatrix",
-    ExternalQR: "ExternalQR",
-    EAN13: "EAN13",
-  };
-
-  const columnType = column.split("_")[1];
-  const actualBarcodeType = typeMapping[columnType] || columnType;
-
-  const barcodes =
-    item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
-
-  if (barcodes.length === 0) {
-    return (
-      <Td>
-        <EmptyTableValue />
-      </Td>
-    );
-  }
-
-  // If only one barcode, show as a single clickable chip — same visual
-  // language as the qrId column: AssetCodeBadge inside a button so the
-  // CodePreviewDialog still opens on click, with hover/focus affordances
-  // and the trailing "expand" glyph (`interactive`) signaling clickability.
-  if (barcodes.length === 1) {
-    const barcode = barcodes[0];
-    return (
-      <CodePreviewDialog
-        item={{
-          id: item.id,
-          title: item.title,
-          qrId: item.qrId,
-          type: "asset",
-          sequentialId: item.sequentialId,
-        }}
-        selectedBarcodeId={barcode.id}
-        trigger={
-          <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-            <button
-              type="button"
-              aria-label={`Show code preview for ${item.title}`}
-              className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-            >
-              <AssetCodeBadge
-                value={barcode.value}
-                type={barcode.type}
-                isFallback={false}
-                workspacePreference={workspacePreference}
-                interactive
-                // Explicit column: barcode column shows literal barcode values,
-                // not the workspace-preferred one. Tooltip simplifies to
-                // "<Type>: <value>".
-                explicit
-                className="cursor-pointer transition-colors hover:bg-gray-200"
-              />
-            </button>
-          </Td>
-        }
-      />
-    );
-  }
-
-  // If multiple barcodes of this type, show each as its own clickable chip in
-  // a flex row. Replaces the previous comma-separated link list — chips have
-  // their own padding so commas would be redundant visual noise.
-  return (
-    <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {barcodes.map((barcode) => (
-          <CodePreviewDialog
-            key={barcode.id}
-            item={{
-              id: item.id,
-              title: item.title,
-              sequentialId: item.sequentialId,
-              qrId: item.qrId,
-              type: "asset",
-            }}
-            selectedBarcodeId={barcode.id}
-            trigger={
-              <button
-                type="button"
-                aria-label={`Show code preview for ${item.title} (${barcode.value})`}
-                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              >
-                <AssetCodeBadge
-                  value={barcode.value}
-                  type={barcode.type}
-                  isFallback={false}
-                  workspacePreference={workspacePreference}
-                  interactive
-                  // Explicit column: see single-barcode case above.
-                  explicit
-                  className="cursor-pointer transition-colors hover:bg-gray-200"
-                />
-              </button>
-            }
-          />
-        ))}
-      </div>
     </Td>
   );
 }
