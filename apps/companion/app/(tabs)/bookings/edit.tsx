@@ -35,7 +35,8 @@ import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
-import { addDaysInZone, wallClockWireInZone } from "@shelf/datetime";
+import { wallClockWireInZone } from "@shelf/datetime";
+import { keepEndAfterStart } from "@/lib/booking-dates";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -172,14 +173,7 @@ export default function EditBookingScreen() {
       if (event.type === "dismissed") return;
       if (selected) {
         setFrom(selected);
-        // Keep `to` after `from`: if it's now invalid, push it to +1 day. A
-        // calendar day in the preference zone, not a fixed 24h — across a DST
-        // boundary the day is 23 or 25 hours and the clock would shift.
-        setTo((prev) =>
-          !prev || prev > selected
-            ? prev
-            : addDaysInZone(selected, 1, prefs.timeZone)
-        );
+        setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
