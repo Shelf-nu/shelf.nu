@@ -39,10 +39,22 @@ of the surface grid:
 
 **When you surface a new attribute or code on ANY surface, in order:**
 
-1. Use the shared **resolver** — `resolveDisplayCode({ entity, organization })`
-   from `~/modules/barcode/display`. The `EntityForCodeResolution` type
-   accepts both Asset and Kit shapes (kit-specific fields are optional).
-   Don't re-implement.
+1. Use the shared **resolver** —
+   `resolveDisplayCode({ entity, organization, entityKind })` from
+   `~/modules/barcode/display`. The `EntityForCodeResolution` type accepts both
+   Asset and Kit shapes (kit-specific fields are optional). Don't re-implement.
+
+   **`entityKind` is required, and it is not on the row.** It is a fact the
+   call site knows, so no loader payload carries it and no default can infer
+   it. It never changes WHICH code is chosen — only the fallback help text —
+   which is exactly why it is required rather than defaulted: pass the wrong
+   one and the chip still renders, still shows the right code, and only the
+   advice turns impossible ("add a SAM ID" to a kit, which has no
+   `sequentialId` column and no UI to set one). Nothing observable breaks, so
+   the compiler is the only thing that can catch it. Pinned by a
+   `@ts-expect-error` case in `display.test.ts` — if that directive ever goes
+   unused, someone has made the argument optional again.
+
 2. Use the shared **rendering primitive** — `<AssetCodeBadge>` from
    `~/components/assets/asset-code-badge`. Same chip everywhere. Use the
    `interactive` prop when the chip opens a code preview, so the trailing
@@ -76,7 +88,13 @@ deciding what to render:
 
 ```tsx
 const displayCode = currentOrganization
-  ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+  ? resolveDisplayCode({
+      entity: item,
+      organization: currentOrganization,
+      // "kit" on a kit surface — see rule 1; the compiler will not let you
+      // omit it, but it cannot tell you which one is right.
+      entityKind: "asset",
+    })
   : null;
 
 // ...

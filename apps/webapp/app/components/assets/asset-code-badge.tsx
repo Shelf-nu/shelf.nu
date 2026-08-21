@@ -8,7 +8,9 @@
  * Pairs with `resolveDisplayCode` from `~/modules/barcode/display`; the
  * `ResolvedDisplayCode` shape can be spread directly onto the badge:
  *
- *   <AssetCodeBadge {...resolveDisplayCode({ asset, organization })} />
+ *   <AssetCodeBadge
+ *     {...resolveDisplayCode({ entity, organization, entityKind: "asset" })}
+ *   />
  *
  * Renders nothing when `value` is empty (defensive — should not normally
  * happen because every asset has a QR fallback, but the loader could omit
@@ -26,11 +28,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import type {
+  CodeEntityKind,
+  ResolvedDisplayCode,
+} from "~/modules/barcode/display";
 import { labelForPreference } from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
 
-type AssetCodeBadgeProps = ResolvedDisplayCode & {
+type AssetCodeBadgeProps = Omit<ResolvedDisplayCode, "entityKind"> & {
+  /**
+   * Optional here, unlike on {@link ResolvedDisplayCode}, where the resolver
+   * always sets it. Preview chips in the workspace and per-asset preference
+   * pickers hand-build these props with `isFallback={false}`, and the kind is
+   * only ever read on the fallback path — so demanding it there would be
+   * ceremony with no safety to show for it.
+   */
+  entityKind?: CodeEntityKind;
+
   className?: string;
   /**
    * Set true when the chip is wrapped in a click target (e.g., opens a code
@@ -71,7 +85,7 @@ function buildTooltipContent(
   type: ResolvedDisplayCode["type"],
   isFallback: boolean,
   workspacePreference: ResolvedDisplayCode["workspacePreference"],
-  entityKind: NonNullable<ResolvedDisplayCode["entityKind"]> = "asset"
+  entityKind: CodeEntityKind = "asset"
 ): { title: string; body?: string } {
   const typeLabel = labelForPreference(type);
   const wsLabel = labelForPreference(workspacePreference);

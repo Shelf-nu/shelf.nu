@@ -83,8 +83,9 @@ export default function KitRow({
   // is SAM.
   const displayCode = currentOrganization
     ? resolveDisplayCode({
-        entity: { ...kit, entityKind: "kit" },
+        entity: kit,
         organization: currentOrganization,
+        entityKind: "kit",
       })
     : null;
 

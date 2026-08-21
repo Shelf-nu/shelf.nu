@@ -398,8 +398,9 @@ const Row = ({
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
     ? resolveDisplayCode({
-        entity: { ...item, entityKind: "kit" },
+        entity: item,
         organization: currentOrganization,
+        entityKind: "kit",
       })
     : null;
 

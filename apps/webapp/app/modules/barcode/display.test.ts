@@ -43,6 +43,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ qrCodes: [{ id: "qr-abc" }] }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -60,6 +61,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ qrCodes: [] }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("");
@@ -72,6 +74,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ sequentialId: "SAM-0042" }),
       organization: org({ qrIdDisplayPreference: "SAM_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -91,6 +94,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
         qrCodes: [{ id: "qr-fallback" }],
       }),
       organization: org({ qrIdDisplayPreference: "SAM_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -110,6 +114,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-1", type: BarcodeType.Code128, value: "ABC-123" }],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -132,6 +137,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("A-FIRST");
@@ -148,6 +154,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("C128-1");
@@ -161,6 +168,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-1", type: BarcodeType.Code39, value: "C39-1" }],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -184,6 +192,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-x", type: preferred, value: `${preferred}-val` }],
       }),
       organization: org({ qrIdDisplayPreference: preferred }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe(`${preferred}-val`);
@@ -204,6 +213,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
       }),
       // Workspace prefers Code128, but the override forces Code39 for this asset
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -227,6 +237,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     // Falls through to workspace pref → picks bc-present
@@ -248,6 +259,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("https://x.example");
@@ -264,6 +276,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "QR_ID",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -283,6 +296,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "SAM_ID",
       }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("SAM-0001");
@@ -301,6 +315,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -333,6 +348,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -361,6 +377,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -377,11 +394,12 @@ describe("resolveDisplayCode — non-addon organizations", () => {
     // field never changes WHICH code wins. It exists so the badge can avoid
     // telling a kit to add a SAM ID, which kits cannot have.
     const result = resolveDisplayCode({
-      entity: { qrCodes: [{ id: "kit-qr" }], entityKind: "kit" },
+      entity: { qrCodes: [{ id: "kit-qr" }] },
       organization: {
         qrIdDisplayPreference: "SAM_ID",
         barcodesEnabled: false,
       },
+      entityKind: "kit",
     });
 
     expect(result.entityKind).toBe("kit");
@@ -389,14 +407,25 @@ describe("resolveDisplayCode — non-addon organizations", () => {
     expect(result.isFallback).toBe(true);
   });
 
-  it("treats an unmarked entity as an asset", () => {
-    // why: every existing call site omits entityKind; none of them may change
-    // meaning because this field was added.
+  it("refuses to resolve without an entityKind", () => {
+    // The failure this guards is invisible at runtime: an entity resolved as
+    // the wrong kind still renders, still shows the RIGHT code, and only the
+    // fallback advice becomes impossible to follow ("add a SAM ID" to a kit).
+    // Nothing observable is wrong, so no ordinary assertion can catch it and
+    // the compiler has to be the guard.
+    //
+    // The directive below IS that guard: make `entityKind` optional again and
+    // it stops suppressing anything, so `tsc` fails the build on an unused
+    // directive. Deleting this case removes the only enforcement there is.
+    // (Keep any mention of the directive off the start of a comment line —
+    // TypeScript reads one there as real, wherever it appears.)
+    // @ts-expect-error - entityKind is deliberately required
     const result = resolveDisplayCode({
       entity: { qrCodes: [{ id: "qr" }] },
       organization: { qrIdDisplayPreference: "QR_ID", barcodesEnabled: false },
     });
 
-    expect(result.entityKind).toBe("asset");
+    // Still resolves at runtime — which is exactly why the type must object.
+    expect(result.value).toBe("qr");
   });
 });

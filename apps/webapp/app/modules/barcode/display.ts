@@ -76,21 +76,19 @@ export type EntityForCodeResolution = {
   qrCodes?: Pick<Qr, "id">[];
   barcodes?: Pick<Barcode, "id" | "type" | "value">[];
   preferredBarcodeId?: string | null;
-  /**
-   * What kind of thing this is. Only affects the fallback HELP TEXT, never
-   * which code is chosen.
-   *
-   * why it exists: the fallback tooltip tells the reader how to fix the
-   * fallback — "this item has no SAM ID, add one". For a KIT that sentence is
-   * an instruction nobody can follow: `Kit` has no `sequentialId` column and
-   * no UI to set one, so the reader is told to do something impossible and
-   * then blames themselves. Kits still resolve normally on the other six
-   * preference values, so this is help text, not behaviour.
-   *
-   * Defaults to "asset" so no existing call site changes meaning.
-   */
-  entityKind?: "asset" | "kit";
 };
+
+/**
+ * Which kind of code-bearing entity a row is.
+ *
+ * Deliberately NOT part of {@link EntityForCodeResolution}: it is a fact the
+ * CALL SITE knows, not a column on the row, and no loader payload carries it.
+ * It is a required argument to {@link resolveDisplayCode} so a new surface
+ * cannot silently inherit the wrong one — the failure it guards against is
+ * invisible at runtime (wrong tooltip wording, right code) and so would never
+ * be caught by a test nobody thought to write.
+ */
+export type CodeEntityKind = "asset" | "kit";
 
 /**
  * Back-compat alias. New code should use `EntityForCodeResolution`.
@@ -137,14 +135,14 @@ export type ResolvedDisplayCode = {
   /** True when the workspace-preferred type was unavailable and we fell back to QR. */
   isFallback: boolean;
   /**
-   * Carried through so the badge can word the fallback honestly. A kit
-   * cannot be given a SAM ID, so it must not be told to add one.
+   * Carried through so the badge can word the fallback honestly. A kit cannot
+   * be given a SAM ID, so it must not be told to add one.
    *
-   * Optional, and the badge treats absence as "asset": several call sites
-   * hand-build this object for an explicit column where the entity kind is
-   * already obvious from the surface.
+   * Always set here, because {@link resolveDisplayCode} requires it. The badge
+   * accepts it optionally, for preview chips that are hand-built rather than
+   * resolved — see `AssetCodeBadgeProps`.
    */
-  entityKind?: "asset" | "kit";
+  entityKind: CodeEntityKind;
   /**
    * What the workspace ASKED FOR — included so callers can craft good
    * help/tooltip copy when `isFallback` is true (so the badge can say
@@ -155,17 +153,26 @@ export type ResolvedDisplayCode = {
 };
 
 /**
- * Resolves the display code for one asset given its workspace's preference.
+ * Resolves the display code for one code-bearing entity given its workspace's
+ * preference.
  *
- * @param input - The asset + organization slices needed to resolve
- * @returns A `ResolvedDisplayCode` ready to pass into `<AssetCodeBadge>`
+ * @param input - The entity + organization slices needed to resolve, plus the
+ *   kind of entity being resolved
+ * @param input.entityKind - Required. Only ever affects the fallback HELP TEXT,
+ *   never which code is chosen — but getting it wrong tells a kit's reader to
+ *   "add a SAM ID", which kits cannot have. Required rather than defaulted
+ *   precisely because the wrong value is invisible: the badge still renders,
+ *   still shows the right code, and only the advice is impossible to follow.
+ * @returns A `ResolvedDisplayCode` ready to spread into `<AssetCodeBadge>`
  */
 export function resolveDisplayCode({
   entity,
   organization,
+  entityKind,
 }: {
   entity: EntityForCodeResolution;
   organization: OrganizationForCodeResolution;
+  entityKind: CodeEntityKind;
 }): ResolvedDisplayCode {
   // Defensive: if the loader didn't include these relations (e.g. older
   // call site, partial select, or a test fixture), treat them as empty.
@@ -173,8 +180,6 @@ export function resolveDisplayCode({
   // value rather than a runtime crash.
   const qrCodes = entity.qrCodes ?? [];
   const barcodes = entity.barcodes ?? [];
-  // Only ever affects help text — see EntityForCodeResolution.entityKind.
-  const entityKind = entity.entityKind ?? "asset";
 
   // Universal fallback: every code-bearing entity has at least one active
   // QR. If the QR relation isn't included in the query, value is "" —

@@ -997,8 +997,9 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
     ? resolveDisplayCode({
-        entity: { ...kit, entityKind: "kit" },
+        entity: kit,
         organization: currentOrganization,
+        entityKind: "kit",
       })
     : null;
 

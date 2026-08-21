@@ -160,6 +160,7 @@ export const AssetsList = ({
                           barcodes: resource.extendedProps?.barcodes,
                         },
                         organization: currentOrganization,
+                        entityKind: "asset",
                       })
                     : null;
                   return (
@@ -253,7 +254,11 @@ export const ListAssetContent = ({
   } = formatCustodyList(custodyArray);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>
