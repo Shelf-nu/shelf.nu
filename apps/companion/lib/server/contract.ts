@@ -176,8 +176,9 @@ function parseVersionSegments(value: string): number[] | null {
  * `MIN_SERVER_MOBILE_API_VERSION`, which guards the other direction — neither
  * side can update the other, so both checks have to exist.
  *
- * Compare segment-by-segment as NUMBERS, never as strings: `"1.10.0" < "1.9.0"`
- * lexically, which would lock every user out one release after the tenth.
+ * Compares segment-by-segment as NUMBERS. A lexical string compare would make
+ * "1.10.0" sort below "1.9.0" and lock every user out one release after the
+ * tenth — the classic force-update bug.
  *
  * Fails OPEN on anything unparseable: a typo in the server's env var must never
  * brick a working install.
@@ -330,14 +331,13 @@ export type ServerChange = "none" | "credentials" | "switch";
 /**
  * Classifies what changed between the active server config and a fresh one.
  *
- * A customer can rotate their Supabase project while keeping the same base URL,
- * so `baseUrl` alone does not tell you whether anything changed — compare the
- * credentials too, or enrolled devices keep using a stale anon key with no
- * in-app way to recover.
- *
- * The credentials case must stay distinct from a switch: the selected
- * organisation and audit drafts still belong to that same instance, so adopting
- * new credentials must not wipe them.
+ * why this exists: both the discovery short-circuit and `setActiveServer`
+ * originally keyed on `baseUrl` alone, so a customer who rotated their Supabase
+ * project while keeping the same base URL left every enrolled device holding a
+ * stale anon key, with no in-app way to recover. Distinguishing a credential
+ * refresh from a full switch is what lets the app adopt the new values without
+ * wiping the selected organisation and audit drafts, which are still valid for
+ * that same instance.
  *
  * @param current - The active server config.
  * @param next - The config just fetched from `/api/mobile/config`.
