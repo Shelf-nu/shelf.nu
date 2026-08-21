@@ -191,6 +191,11 @@ function buildBookingStatusBadge(c: Colors) {
     DRAFT: { bg: c.borderLight, text: c.gray700 },
     RESERVED: { bg: c.inCustodyBg, text: c.inCustody },
     ONGOING: { bg: c.checkedOutBg, text: c.checkedOut },
+    // why: `error` and `success` are FILL tokens — as badge TEXT they read
+    // 3.46:1 and 2.49:1 on their own backgrounds in light mode, under the
+    // 4.5:1 bar. `errorText` / `successText` are their foreground twins
+    // (6.05:1 and 7.26:1) and alias the base colours in dark mode, so dark is
+    // unchanged. Same fix the audit badges got; these were simply missed.
     OVERDUE: { bg: c.errorBg, text: c.errorText },
     COMPLETE: { bg: c.successBg, text: c.successText },
     ARCHIVED: { bg: c.borderLight, text: c.muted },

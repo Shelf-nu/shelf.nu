@@ -35,26 +35,13 @@ import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { wallClockWireInZone } from "@shelf/datetime";
+import { keepEndAfterStart } from "@/lib/booking-dates";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
-
-function getTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
-function toLocalWire(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
-}
 
 export default function EditBookingScreen() {
   const router = useRouter();
@@ -62,11 +49,10 @@ export default function EditBookingScreen() {
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
-  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
-  // are device-local, so formatting them in the preferred timezone would show a
-  // different time than the one being edited and submitted (CodeRabbit, #2798).
-  const { formatDateTime } = useDateFormatter();
+  // `from`/`to` are the booking's real instants throughout. Both pickers are
+  // driven in the preference zone via `timeZoneName`, so the times shown here
+  // match the detail screen the user just came from.
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -187,15 +173,11 @@ export default function EditBookingScreen() {
       if (event.type === "dismissed") return;
       if (selected) {
         setFrom(selected);
-        setTo((prev) =>
-          prev && prev <= selected
-            ? new Date(selected.getTime() + 24 * 60 * 60 * 1000)
-            : prev
-        );
+        setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
-    []
+    [prefs.timeZone]
   );
 
   const onToChange = useCallback(
@@ -245,9 +227,11 @@ export default function EditBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: toLocalWire(from),
-      endDate: toLocalWire(to),
-      timeZone: getTimeZone(),
+      startDate: wallClockWireInZone(from, prefs.timeZone),
+      endDate: wallClockWireInZone(to, prefs.timeZone),
+      // The wire strings carry no offset, so the zone they were written in has
+      // to travel with them — that is the preference zone the pickers edit in.
+      timeZone: prefs.timeZone,
       tags: Array.from(selectedTagIds),
     });
     setIsSubmitting(false);
@@ -400,9 +384,7 @@ export default function EditBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              from
-                ? `Starts ${formatDateTime(from, { localeOnly: true })}`
-                : "Start"
+              from ? `Starts ${formatDateTime(from)}` : "Start"
             }
           >
             <Text
@@ -410,9 +392,7 @@ export default function EditBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from
-                ? formatDateTime(from, { localeOnly: true })
-                : "Choose start..."}
+              {from ? formatDateTime(from) : "Choose start..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -430,6 +410,7 @@ export default function EditBookingScreen() {
                 value={from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 onChange={onFromChange}
                 accentColor={colors.primary}
               />
@@ -449,14 +430,12 @@ export default function EditBookingScreen() {
               setShowFromPicker(false);
             }}
             accessibilityRole="button"
-            accessibilityLabel={
-              to ? `Ends ${formatDateTime(to, { localeOnly: true })}` : "End"
-            }
+            accessibilityLabel={to ? `Ends ${formatDateTime(to)}` : "End"}
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDateTime(to, { localeOnly: true }) : "Choose end..."}
+              {to ? formatDateTime(to) : "Choose end..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -474,6 +453,7 @@ export default function EditBookingScreen() {
                 value={to ?? from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 minimumDate={from ?? undefined}
                 onChange={onToChange}
                 accentColor={colors.primary}

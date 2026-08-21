@@ -9,12 +9,12 @@ import { reportServerMismatch } from "../sentry";
 /**
  * Base URL of the Shelf server the app is currently connected to.
  *
- * Deliberately a function rather than the exported constant this used to be: a
- * captured `const` would silently keep pointing at whichever server was active
- * at import time, and neither typecheck nor unit tests can see that mistake —
- * only using the app against a second server would.
+ * Must stay a function, never an exported constant: the app switches servers at
+ * runtime, and a captured `const` would keep pointing at whichever server was
+ * active at import time. Neither typecheck nor the unit tests can see that
+ * mistake — only running the app against a second server would.
  *
- * The Shelf Cloud default (including the `__DEV__` fallback split) now lives on
+ * The Shelf Cloud default, including the `__DEV__` fallback split, lives on
  * `CLOUD_SERVER` in `lib/server/active-server.ts`.
  *
  * @returns The active server's origin, without a trailing slash.
@@ -100,11 +100,11 @@ subscribeToServerChange(() => {
  * multi-server support can actually be enforced: the token we are about to send
  * was minted by the server we are about to send it to.
  *
- * It should never fire — `setActiveServer` signs out and rebuilds before
- * notifying anyone, and sessions are namespaced per Supabase project. It exists
- * because "cannot happen by construction" is exactly what was believed about
- * several guards on this feature that turned out to be reachable. Failing
- * closed converts a silent cross-server credential leak into a clean re-auth.
+ * Defence in depth: it should never fire, because `setActiveServer` signs out
+ * and rebuilds before notifying anyone and sessions are namespaced per Supabase
+ * project. Keep it anyway — the invariant is otherwise only believed, not
+ * checked, and failing closed turns a silent cross-server credential leak into
+ * a clean re-auth.
  *
  * @returns An error result when the request must not proceed, otherwise null.
  */
