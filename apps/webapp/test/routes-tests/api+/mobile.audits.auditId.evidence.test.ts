@@ -303,6 +303,51 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       );
     });
 
+    it("caps how many rows one response can carry", async () => {
+      // why: without a bound, one tap pulls every note and photo in the audit.
+      // Every other mobile list route clamps, and the calendar route added the
+      // same guard for the same reason.
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(mockDb.auditNote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 200 })
+      );
+      expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 200 })
+      );
+    });
+
+    it("narrows to one audited asset when the caller asks for one", async () => {
+      // why: the sheet shows a single row, so this is the shape the client
+      // actually wants — the audit-wide response is the heavy half.
+      await loader(
+        createLoaderArgs({
+          request: request("orgId=org-1&auditAssetId=aa-1"),
+          ...ARGS,
+        })
+      );
+
+      expect(mockDb.auditNote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ auditAssetId: "aa-1" }),
+        })
+      );
+      expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ auditAssetId: "aa-1" }),
+        })
+      );
+    });
+
+    it("returns the whole audit when no asset is named", async () => {
+      // why: the audit-wide shape still has one caller — the completion
+      // notes and photos, which belong to no single asset.
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      const noteWhere = mockDb.auditNote.findMany.mock.calls[0][0].where;
+      expect(noteWhere).not.toHaveProperty("auditAssetId");
+    });
+
     it("asks only for COMMENT notes, not the system activity trail", async () => {
       // why: `AuditNote` mixes human comments with UPDATE rows written as
       // MARKDOC SOURCE (`{% link to="/settings/team/users/..." /%}`). The web

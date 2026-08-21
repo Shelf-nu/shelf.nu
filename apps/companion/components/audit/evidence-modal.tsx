@@ -132,10 +132,13 @@ export function EvidenceModal({
     const controller = new AbortController();
     setExistingLoading(true);
     void (async () => {
+      // Narrowed to this asset: the sheet shows one row, and the audit-wide
+      // response carries every note and photo in the audit.
       const { data } = await api.auditEvidence(
         auditSessionId,
         currentOrg.id,
-        controller.signal
+        controller.signal,
+        auditAssetId
       );
       if (controller.signal.aborted) return;
       setExisting(

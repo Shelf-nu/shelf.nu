@@ -197,36 +197,67 @@ function AuditDetailContent() {
     evidenceInFlight.current = null;
   }, [evidenceContext]);
 
-  const loadEvidence = useCallback(async () => {
-    if (!currentOrg?.id || !id || !evidenceContext) return;
-    // Only one fetch per context at a time; a fetch for a DIFFERENT context is
-    // never blocked by an older one still in flight.
-    if (evidenceInFlight.current === evidenceContext) return;
-    const requestFor = evidenceContext;
-    evidenceInFlight.current = requestFor;
-    // Only show the spinner when there is nothing to show yet — on a refetch
-    // the previous evidence stays put underneath.
-    setEvidence((current) => {
-      if (!current) setEvidenceLoading(true);
-      return current;
-    });
-    setEvidenceError(null);
-    const { data, error } = await api.auditEvidence(id, currentOrg.id);
-    // The context may have changed while this was in the air. Anything from a
-    // superseded request is discarded, including its in-flight marker, so it
-    // cannot clear a newer fetch's claim.
-    if (evidenceInFlight.current !== requestFor) return;
-    if (error) setEvidenceError(error);
-    else if (data) setEvidence(data);
-    setEvidenceLoading(false);
-    evidenceInFlight.current = null;
-  }, [currentOrg?.id, id, evidenceContext]);
+  /**
+   * Loads the evidence for ONE target: a single audited asset, or the audit
+   * itself when `auditAssetId` is null.
+   *
+   * Scoped rather than audit-wide because the sheet shows one target at a
+   * time. An audit-wide fetch returns every note and photo in the audit, so a
+   * large audit would move thousands of rows on each open, over whatever
+   * connection a stockroom has.
+   *
+   * Results merge into what is already held rather than replacing it, so
+   * reopening a row keeps the rest of what has been loaded.
+   */
+  const loadEvidence = useCallback(
+    async (auditAssetId: string | null) => {
+      if (!currentOrg?.id || !id || !evidenceContext) return;
+      // One fetch per target at a time. A fetch for a DIFFERENT target, or for
+      // a different context, is never blocked by an older one still in flight.
+      const requestFor = `${evidenceContext}:${auditAssetId ?? "general"}`;
+      if (evidenceInFlight.current === requestFor) return;
+      evidenceInFlight.current = requestFor;
+      // Only show the spinner when there is nothing to show yet — on a refetch
+      // the previous evidence stays put underneath.
+      setEvidence((current) => {
+        if (!current) setEvidenceLoading(true);
+        return current;
+      });
+      setEvidenceError(null);
+      const { data, error } = await api.auditEvidence(
+        id,
+        currentOrg.id,
+        undefined,
+        auditAssetId
+      );
+      // The context may have changed while this was in the air. Anything from
+      // a superseded request is discarded, including its in-flight marker, so
+      // it cannot clear a newer fetch's claim.
+      if (evidenceInFlight.current !== requestFor) return;
+      if (error) setEvidenceError(error);
+      else if (data) {
+        setEvidence((current) => ({
+          general:
+            auditAssetId === null
+              ? data.general
+              : current?.general ?? { notes: [], images: [] },
+          byAuditAsset: {
+            ...(current?.byAuditAsset ?? {}),
+            ...data.byAuditAsset,
+          },
+        }));
+      }
+      setEvidenceLoading(false);
+      evidenceInFlight.current = null;
+    },
+    [currentOrg?.id, id, evidenceContext]
+  );
 
   /** Opens the viewer for one asset, or for the audit itself (`null`). */
   const onEvidencePress = useCallback(
     (target: { auditAssetId: string | null; name: string }) => {
       setOpenEvidence(target);
-      void loadEvidence();
+      void loadEvidence(target.auditAssetId);
     },
     [loadEvidence]
   );
@@ -1142,7 +1173,7 @@ function AuditDetailContent() {
         error={evidenceError}
         onRetry={() => {
           setEvidenceError(null);
-          void loadEvidence();
+          void loadEvidence(openEvidence?.auditAssetId ?? null);
         }}
       />
     </View>

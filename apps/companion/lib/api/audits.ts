@@ -81,9 +81,22 @@ export const auditsApi = {
    * @param orgId Active organization id from `useOrg`.
    * @param signal AbortSignal so navigating away mid-flight cancels.
    */
-  auditEvidence: (auditId: string, orgId: string, signal?: AbortSignal) =>
+  auditEvidence: (
+    auditId: string,
+    orgId: string,
+    signal?: AbortSignal,
+    /**
+     * Narrows the response to one audited asset. Pass it whenever the caller
+     * is showing a single row: the audit-wide response carries every note and
+     * photo in the audit, which is the heavy half of this feature.
+     */
+    auditAssetId?: string | null
+  ) =>
     apiFetch<AuditEvidenceResponse>(
-      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}`,
+      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}` +
+        (auditAssetId
+          ? `&auditAssetId=${encodeURIComponent(auditAssetId)}`
+          : ""),
       { signal }
     ),
 

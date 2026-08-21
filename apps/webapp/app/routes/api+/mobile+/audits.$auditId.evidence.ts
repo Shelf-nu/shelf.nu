@@ -42,6 +42,15 @@ import { getParams } from "~/utils/http.server";
  * @see {@link file://./audits.note.ts} and {@link file://./audits.image.ts}
  *   the write halves this completes
  */
+/**
+ * Upper bound on rows of each kind in one response.
+ *
+ * Matches the clamp every other mobile list route applies. An audit that
+ * somehow holds more than this is past the point where a phone can usefully
+ * render it, and the caller narrows with `auditAssetId` instead.
+ */
+const MAX_EVIDENCE_ROWS = 200;
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
@@ -67,6 +76,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       params,
       z.object({ auditId: z.string().min(1) })
     );
+
+    /**
+     * Narrows the response to one audited asset.
+     *
+     * The client opens one row at a time, so this is the shape it actually
+     * wants. Without it a single tap pulls every note and every photo of the
+     * whole audit — on a large audit that is thousands of rows over cellular,
+     * repeated on every open.
+     */
+    const url = new URL(request.url);
+    const auditAssetId = url.searchParams.get("auditAssetId");
 
     // Gate the READ on assignment, exactly as the audit detail route does.
     // This route returns the notes and photos people recorded, which is the
@@ -107,6 +127,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const [notes, images] = await Promise.all([
       db.auditNote.findMany({
+        take: MAX_EVIDENCE_ROWS,
         // why COMMENT only: `AuditNote` holds two unrelated things. `UPDATE`
         // rows are the system activity trail ("X started this audit") and are
         // written as MARKDOC SOURCE — `{% link to="/settings/team/users/..." /%}`.
@@ -119,7 +140,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // It also keeps this route agreeing with the COUNTS the client already
         // has — `getAssetsForAuditSession` filters its `_count` the same way,
         // so a row promising 1 attachment opens a sheet holding exactly 1.
-        where: { auditSessionId: auditId, type: "COMMENT" },
+        where: {
+          auditSessionId: auditId,
+          type: "COMMENT",
+          ...(auditAssetId ? { auditAssetId } : {}),
+        },
         select: {
           id: true,
           content: true,
@@ -132,7 +157,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         orderBy: { createdAt: "desc" },
       }),
       db.auditImage.findMany({
-        where: { auditSessionId: auditId, organizationId },
+        take: MAX_EVIDENCE_ROWS,
+        where: {
+          auditSessionId: auditId,
+          organizationId,
+          ...(auditAssetId ? { auditAssetId } : {}),
+        },
         select: {
           id: true,
           imageUrl: true,
