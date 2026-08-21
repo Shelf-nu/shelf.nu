@@ -163,7 +163,13 @@ export function AuditItemRow({
             tooltipContent:
               "This asset was not expected in this audit context.",
             priority: 90,
-            className: "border-red-200 bg-red-50 text-red-700",
+            // Warning, not danger: an asset in your hands but filed wrong is a
+            // lesser problem than one that is gone, which is what danger is
+            // reserved for. AUDIT_ASSET_STATUS_TONES in @shelf/labels holds the
+            // same pairing for the badge on this screen; these classes must stay
+            // visually equivalent to it, so change both together. warning-800 on
+            // warning-50 is 7.2:1.
+            className: "border-warning-200 bg-warning-50 text-warning-800",
           },
         ];
 
