@@ -412,9 +412,9 @@ export default function KitsIndexPage() {
                           resource.extendedProps?.availableToBook
                         }
                       />
-                      {/* why: the list view of this same page shows the code
-                          chip, so switching to the calendar used to lose it.
-                          Same resolver, same primitive — see
+                      {/* The list view of this page shows the code chip, and the calendar
+                          view of the same rows must show it too — same resolver, same
+                          primitive. See
                           `.claude/rules/code-bearing-entity-list-consistency.md`. */}
                       {(() => {
                         if (!organization) return null;
