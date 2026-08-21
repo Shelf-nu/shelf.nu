@@ -9,6 +9,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { assertCategoryBelongsToOrg } from "~/utils/org-validation.server";
 import { getFileUploadPath, parseFileFormData } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -31,6 +32,18 @@ export async function createAssetModel({
   defaultValuation?: number | null;
   userId: User["id"];
 }) {
+  // why: defaultCategoryId comes from form input and Prisma's foreign key
+  // only proves the row exists, not that it belongs to this workspace —
+  // without this the model would connect another tenant's category. Runs
+  // outside the try so its 400 reaches the form instead of being rewritten
+  // into the generic constraint-violation message.
+  if (defaultCategoryId) {
+    await assertCategoryBelongsToOrg({
+      categoryId: defaultCategoryId,
+      organizationId,
+    });
+  }
+
   try {
     return await db.assetModel.create({
       data: {
@@ -162,6 +175,18 @@ export async function updateAssetModel({
   defaultCategoryId?: string | null;
   defaultValuation?: number | null;
 }) {
+  // why: defaultCategoryId comes from form input and Prisma's foreign key
+  // only proves the row exists, not that it belongs to this workspace —
+  // without this the model would connect another tenant's category. Runs
+  // outside the try so its 400 reaches the form instead of being rewritten
+  // into the generic constraint-violation message.
+  if (defaultCategoryId) {
+    await assertCategoryBelongsToOrg({
+      categoryId: defaultCategoryId,
+      organizationId,
+    });
+  }
+
   try {
     return await db.assetModel.update({
       where: { id, organizationId },
