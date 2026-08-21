@@ -100,6 +100,7 @@ export default function ListAssetContent({
     ? resolveDisplayCode({
         entity: item,
         organization: currentOrganization,
+        entityKind: "asset",
       })
     : null;
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(

@@ -126,7 +126,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       assets: assets.map((asset) => {
         const codeEntity = codeByAssetId.get(asset.id);
         const resolved = codeEntity
-          ? resolveDisplayCode({ entity: codeEntity, organization: org })
+          ? resolveDisplayCode({
+              entity: codeEntity,
+              organization: org,
+              entityKind: "asset",
+            })
           : null;
         return {
           id: asset.id,
