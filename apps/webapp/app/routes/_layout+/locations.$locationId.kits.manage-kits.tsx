@@ -58,6 +58,7 @@ import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -133,7 +134,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
       showSidebar: true,
       noScroll: true,
-      items: kits,
+      // The custodian's name and user.email are on every row regardless of
+      // whether the UI draws them, so a viewer without custody visibility can
+      // read them straight out of the route's data payload. Redact here, not
+      // in the component.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       page,
       search,
       totalItems: totalKits,

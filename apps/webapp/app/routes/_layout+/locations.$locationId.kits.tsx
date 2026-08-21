@@ -40,6 +40,7 @@ import {
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -128,7 +129,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       modelName,
-      items: kits,
+      // The custodian's name and user.email are on every row regardless of
+      // whether the UI draws them, so a viewer without custody visibility can
+      // read them straight out of the route's data payload. Redact here, not
+      // in the component.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       page,
       totalItems: totalKits,
       perPage,
