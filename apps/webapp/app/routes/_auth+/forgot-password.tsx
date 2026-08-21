@@ -101,27 +101,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         /**
-         * Every outcome below responds IDENTICALLY, and the decision to send
-         * is made on the PER-USER `sso` flag.
+         * Every outcome below MUST respond identically — same status, same
+         * redirect target — whether or not the address belongs to an account.
+         * Distinguishable responses let anyone enumerate which addresses are
+         * registered, and which are federated, one request at a time.
          *
-         * The previous version returned three distinguishable outcomes — an
-         * "unconfirmed user" error, an "SSO user" error, and a redirect — so
-         * anyone could enumerate which addresses were registered, and which
-         * were federated, one request at a time.
+         * Eligibility to receive a link is decided by the PER-USER `sso` flag,
+         * never by the domain's SSO configuration. `sso: true` is only set when
+         * a user actually arrives through SSO, so a domain configured for SSO
+         * can still hold password accounts created before it was federated;
+         * gating on the domain locks those users out of recovery entirely.
+         * `validateNonSSOUser` in `auth/service.server` gates the same way.
          *
-         * An earlier revision of this fix short-circuited on the DOMAIN's SSO
-         * configuration instead, to keep a helpful "use SSO" message. That was
-         * wrong: `sso: true` is only ever set when a user actually arrives
-         * through SSO, so a domain configured for SSO can still hold legacy
-         * password accounts with `sso: false`. Gating on the domain locked
-         * those users out of password recovery entirely — a worse outcome than
-         * the silence it was trying to avoid, and inconsistent with
-         * `validateNonSSOUser`, which gates on the per-user flag for exactly
-         * this reason.
-         *
-         * If the SSO hint is wanted back, it belongs in the page as static
-         * copy shown to everyone ("if your organization uses SSO, sign in that
-         * way") — that helps without answering a question about any address.
+         * A "use SSO instead" hint belongs in the page as static copy shown to
+         * everyone — that helps without answering a question about any
+         * particular address.
          */
         const user = await db.user.findFirst({
           where: { email },
@@ -133,26 +127,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         if (user && !user.sso) {
           /**
-           * Deliberately NOT awaited.
+           * NOT awaited, and its failure never reaches the client.
            *
-           * Awaiting it made the response time depend on the answer: a real
-           * non-SSO address paid for a second DB read inside
-           * `validateNonSSOUser` plus a Supabase API call (~50-300ms), while
-           * an unknown or SSO address returned straight after the first
-           * lookup. Averaging that over repeated requests re-enumerates
-           * accounts even though the status and body are identical — the
-           * uniform response is undone by the clock.
+           * Response time must not depend on the answer. Awaiting this costs a
+           * second DB read inside `validateNonSSOUser` plus a Supabase API call
+           * (~50-300ms) that an unknown or SSO address never pays, and
+           * averaging repeated requests reads accounts off that difference —
+           * the uniform response above, undone by the clock.
            *
-           * Safe here because the server is a long-lived Node process
-           * (`react-router-hono-server` in Docker on Fly), not a serverless
-           * function that would be frozen once the response is returned. On a
-           * platform that suspends after response this would need a queue
-           * instead.
+           * Requires a long-lived server process: this deploys under
+           * `react-router-hono-server` in Docker on Fly, so the promise settles
+           * after the response. On a runtime that suspends once the response is
+           * sent, this must become a queued job or reset emails silently stop.
            *
-           * The rejection is swallowed for the same reason it was before: a
-           * delivery failure is only reachable for an address that exists, so
-           * surfacing it re-opens the leak by a different route. Logged so a
-           * genuine outage stays visible.
+           * The rejection is swallowed because a delivery failure is only
+           * reachable for an address that exists, so surfacing it re-opens the
+           * leak by another route.
            */
           void sendResetPasswordLink(email).catch((cause: unknown) => {
             Logger.error(

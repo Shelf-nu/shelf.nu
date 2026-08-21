@@ -2,18 +2,14 @@
 /**
  * Forgot-password must not reveal whether an account exists.
  *
- * The action returned three distinguishable outcomes: an "unconfirmed user"
- * error for an unknown address, an "SSO user" error, and a redirect on
- * success. Anyone could therefore enumerate which addresses were registered,
- * and which were federated, one request at a time — `user.sso` is a per-user
- * flag, so answering it at all confirmed the account existed.
+ * The invariant: every outcome responds identically — same status, same
+ * redirect target — whether the address is registered, federated, or unknown.
+ * A reset link is still sent only to a real, non-SSO account; the response
+ * simply does not say which case occurred.
  *
- * The reset link is still only sent to a real, non-SSO account. What changed
- * is that the RESPONSE no longer distinguishes the cases.
- *
- * The send decision is made on the PER-USER `sso` flag, never on the domain's
- * SSO configuration: a federated domain can still hold legacy password
- * accounts, and gating on the domain locked those users out of recovery.
+ * Eligibility follows the PER-USER `sso` flag, never the domain's SSO
+ * configuration: a federated domain can still hold password accounts created
+ * before it was configured, and those users must keep recovery.
  *
  * detail.dev finding D100.
  *
@@ -124,14 +120,12 @@ describe("forgot-password enumeration", () => {
   });
 
   it("does not WAIT for the reset email to be sent", async () => {
-    // The response time must not depend on the answer. Awaiting the send made
-    // a real address pay for a Supabase round trip (~50-300ms) that an unknown
-    // one did not, so averaging repeated requests re-enumerated accounts even
-    // with identical status and body — the uniform response undone by the
-    // clock.
+    // Delivery must not block the response: response time cannot be allowed
+    // to depend on whether the address exists, or repeated requests read the
+    // answer off the clock.
     //
-    // Modelled with a promise that never settles: if the action awaited it,
-    // this test could not return at all.
+    // The unsettled promise is the assertion — if the action awaited delivery,
+    // this test could never return.
     mockUserFindFirst.mockResolvedValue({ id: "user-1", sso: false });
     mockSendResetPasswordLink.mockImplementation(() => new Promise(() => {}));
 
@@ -153,13 +147,13 @@ describe("forgot-password enumeration", () => {
   });
 
   it("responds identically when DELIVERY fails", async () => {
-    // `sendResetPasswordLink` throws on a Supabase error, and an unhandled
-    // throw renders an error page — which only ever happens for an address
-    // that reached the send branch, i.e. one that exists and is not SSO. That
-    // hands back the exact bit the uniform response hides.
+    // A rejected delivery must leave the response identical to an unknown
+    // address. Delivery is only attempted for an address that exists and is
+    // not SSO, so any response that differs on failure states exactly what the
+    // uniform response withholds.
     mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
-    // Rejects, and is no longer awaited — the `.catch()` on the fire-and-forget
-    // call is what keeps this from becoming an unhandled rejection.
+    // The `.catch()` on the non-blocking call is what keeps a rejection here
+    // from surfacing as an unhandled rejection.
     mockSendResetPasswordLink.mockRejectedValueOnce(new Error("smtp down"));
     const failed = observable(await requestReset("real@example.com"));
 
@@ -170,11 +164,9 @@ describe("forgot-password enumeration", () => {
   });
 
   it("still sends for a LEGACY password account on an SSO domain", async () => {
-    // The reason the decision is made on the per-user flag rather than the
-    // domain's SSO configuration. `sso: true` is only set when a user actually
-    // arrives through SSO, so a federated domain can still hold password
-    // accounts created before it was configured. Gating on the domain locked
-    // those users out of password recovery entirely.
+    // Eligibility follows the per-user `sso` flag, not the domain's SSO
+    // configuration: a federated domain can still hold password accounts
+    // created before it was configured, and those users must keep recovery.
     mockUserFindFirst.mockResolvedValue({ id: "legacy-1", sso: false });
 
     await requestReset("old-timer@sso-corp.com");
