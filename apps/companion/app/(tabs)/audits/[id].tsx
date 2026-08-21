@@ -354,11 +354,12 @@ function AuditDetailContent() {
          * A scan whose asset has since been DELETED, not an unexpected one.
          *
          * Deleting an asset cascades away its AuditAsset row and SetNulls the
-         * scan's asset, so the row survives pointing at nothing. It used to
-         * render blank and badged "Unexpected" — doubly wrong, because the
-         * scan was of an expected asset. The server now flags it outright and
-         * snapshots the title at scan time, so the row can still name what it
-         * was; the scanned code covers rows written before that existed.
+         * scan's asset, so the scan survives pointing at nothing. Read
+         * `assetDeleted` to tell the two apart: a deleted asset can never match
+         * the expected list, so treating an unmatched scan as unexpected would
+         * mislabel it. `assetTitle` is the name captured at scan time and names
+         * the row; the scanned code covers rows written before that column
+         * existed.
          */
         const isDeletedAsset = scan.assetDeleted || !scan.assetId;
         const snapshotTitle = scan.assetTitle?.trim();
