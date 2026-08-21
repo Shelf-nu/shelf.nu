@@ -355,7 +355,8 @@ function buildBookingDateSchemas({
         durationInHours = calculateBusinessHoursDuration(
           startDate,
           endDate,
-          workingHours
+          workingHours,
+          prefs.timeZone
         );
       } else {
         // Standard calendar hours calculation
@@ -646,7 +647,8 @@ export function ExtendBookingSchema({
           durationInHours = calculateBusinessHoursDuration(
             startDate,
             endDate,
-            workingHours
+            workingHours,
+            timeZone
           );
         } else {
           // Standard calendar hours calculation
