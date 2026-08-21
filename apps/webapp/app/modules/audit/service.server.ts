@@ -234,6 +234,8 @@ export type AuditScanData = {
   auditImagesCount: number;
   /** Asset location name for display */
   assetLocationName: string | null;
+  /** True when the scanned asset has since been deleted. */
+  assetDeleted: boolean;
 };
 
 export async function createAuditSession(
@@ -1431,6 +1433,13 @@ export async function recordAuditScan(
             assetId,
             scannedById: userId,
             scannedAt: new Date(),
+            // Snapshot what was scanned, so this row still means something
+            // once the asset is gone. `scannedAsset` is the org-verified
+            // fetch above, so this is the title as it stood at scan time.
+            // `wasExpected` is not known yet — it is derived from the audit's
+            // own rows below and written with `auditAssetId` in the same
+            // transaction.
+            assetTitle: scannedAsset.title,
           },
         });
 
@@ -1568,7 +1577,15 @@ export async function recordAuditScan(
         // resolvable now: every branch above either found or created the row.
         await tx.auditScan.update({
           where: { id: scan.id },
-          data: { auditAssetId },
+          data: {
+            auditAssetId,
+            // why: recorded here rather than at create because expectedness is
+            // derived from AuditAsset above, never trusted from the request.
+            // Snapshotting it means a deleted asset's row can still say
+            // whether it belonged to the audit — today that fact dies with
+            // the cascaded AuditAsset row and the scan gets mislabelled.
+            wasExpected: isExpected,
+          },
         });
 
         // Update the audit session counts.
@@ -1783,13 +1800,25 @@ export async function getAuditScans({
         scan.auditAsset ??
         (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
 
+      // why the live row wins over the snapshot: a rename should show the
+      // CURRENT name, not the one from the day of the scan. The snapshot's job
+      // is to survive DELETION, not to freeze naming. Rows written before the
+      // snapshot columns existed have neither, and fall back to "" — the
+      // client then has the `code`, which also outlives the asset.
+      const assetTitle = scan.asset?.title ?? scan.assetTitle ?? "";
+      const isExpected = auditAsset?.expected ?? scan.wasExpected ?? false;
+
       return {
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,
         scannedAt: scan.scannedAt,
-        isExpected: auditAsset?.expected ?? false,
-        assetTitle: scan.asset?.title ?? "",
+        isExpected,
+        assetTitle,
+        // Distinguishes "the asset is gone" from "this scan predates the
+        // snapshot columns", so the client can say which it is instead of
+        // guessing from an empty title.
+        assetDeleted: scan.assetId === null,
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
