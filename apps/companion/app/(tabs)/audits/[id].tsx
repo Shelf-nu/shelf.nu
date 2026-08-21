@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,10 +21,14 @@ import {
   type AuditExpectedAsset,
   type AuditScanData,
   type AuditAssetStatus,
+  type AuditEvidenceResponse,
+  type AuditEvidenceNote,
+  type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { EvidenceViewer } from "@/components/audit/evidence-viewer";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_STATUS_LABELS,
@@ -114,6 +118,14 @@ type DisplayAsset = {
   locationName: string | null;
   categoryName: string | null;
   custodianName: string | null;
+  /**
+   * The audit-asset row id, present only once the asset has been scanned.
+   * Keys this asset's evidence in the `byAuditAsset` payload.
+   */
+  auditAssetId: string | null;
+  /** Counts from the detail payload — what the row advertises before any fetch. */
+  notesCount: number;
+  imagesCount: number;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -132,6 +144,137 @@ function AuditDetailContent() {
   const { currentOrg } = useOrg();
   const { colors, auditStatusBadge, auditAssetStatusBadge } = useTheme();
   const { formatDateTime } = useDateFormatter();
+
+  // ── Evidence (notes + photos recorded on this audit) ──
+  //
+  // why a separate fetch: this is the heavy half (image URLs, note bodies,
+  // authors) and is only wanted once someone opens a row, so the detail
+  // payload stays cheap.
+  //
+  // Re-fetched on every open, NOT cached for the life of the screen. The
+  // first version cached it on the reasoning that "a completed audit's
+  // evidence cannot change" — true of a completed one, but this screen also
+  // serves ACTIVE audits, where the same person adds a photo and reopens the
+  // sheet seconds later. They would have been shown the set from before their
+  // own upload, with the row's count already disagreeing with it.
+  //
+  // Stale-while-revalidate: whatever was loaded stays on screen during the
+  // refetch, so reopening a sheet never flashes empty.
+  const [evidence, setEvidence] = useState<AuditEvidenceResponse | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [openEvidence, setOpenEvidence] = useState<{
+    auditAssetId: string | null;
+    name: string;
+  } | null>(null);
+
+  /**
+   * Which audit, in which workspace, the loaded evidence belongs to.
+   *
+   * why this is not optional: evidence is workspace data. Without it, cached
+   * notes and photos survive a switch to another audit or another
+   * organization and are shown under the new one — and a request started
+   * before the switch can land after it and overwrite the new context with
+   * the old one's rows. Both are cross-workspace disclosure, not just a
+   * stale-cache annoyance.
+   */
+  const evidenceContext =
+    currentOrg?.id && id ? `${currentOrg.id}:${id}` : null;
+
+  // Guards concurrent opens without freezing the data, which is what the old
+  // `evidence` guard did. Holds the context it is fetching FOR, so a reply
+  // from a previous context can be recognised and dropped. A ref, not state,
+  // so it cannot itself trigger a render or go stale inside the callback.
+  const evidenceInFlight = useRef<string | null>(null);
+
+  // Drop everything the moment the context changes, before any render can
+  // show it. Clearing on arrival would be too late: the sheet would paint the
+  // previous workspace's rows for a frame first.
+  useEffect(() => {
+    setEvidence(null);
+    setEvidenceError(null);
+    setEvidenceLoading(false);
+    evidenceInFlight.current = null;
+  }, [evidenceContext]);
+
+  /**
+   * Loads the evidence for ONE target: a single audited asset, or the audit
+   * itself when `auditAssetId` is null.
+   *
+   * Scoped rather than audit-wide because the sheet shows one target at a
+   * time. An audit-wide fetch returns every note and photo in the audit, so a
+   * large audit would move thousands of rows on each open, over whatever
+   * connection a stockroom has.
+   *
+   * Results merge into what is already held rather than replacing it, so
+   * reopening a row keeps the rest of what has been loaded.
+   */
+  const loadEvidence = useCallback(
+    async (auditAssetId: string | null) => {
+      if (!currentOrg?.id || !id || !evidenceContext) return;
+      // One fetch per target at a time. A fetch for a DIFFERENT target, or for
+      // a different context, is never blocked by an older one still in flight.
+      const requestFor = `${evidenceContext}:${auditAssetId ?? "general"}`;
+      if (evidenceInFlight.current === requestFor) return;
+      evidenceInFlight.current = requestFor;
+      // Only show the spinner when there is nothing to show yet — on a refetch
+      // the previous evidence stays put underneath.
+      setEvidence((current) => {
+        if (!current) setEvidenceLoading(true);
+        return current;
+      });
+      setEvidenceError(null);
+      const { data, error } = await api.auditEvidence(
+        id,
+        currentOrg.id,
+        undefined,
+        auditAssetId
+      );
+      // The context may have changed while this was in the air. Anything from
+      // a superseded request is discarded, including its in-flight marker, so
+      // it cannot clear a newer fetch's claim.
+      if (evidenceInFlight.current !== requestFor) return;
+      if (error) setEvidenceError(error);
+      else if (data) {
+        setEvidence((current) => ({
+          general:
+            auditAssetId === null
+              ? data.general
+              : current?.general ?? { notes: [], images: [] },
+          byAuditAsset: {
+            ...(current?.byAuditAsset ?? {}),
+            ...data.byAuditAsset,
+          },
+        }));
+      }
+      setEvidenceLoading(false);
+      evidenceInFlight.current = null;
+    },
+    [currentOrg?.id, id, evidenceContext]
+  );
+
+  /** Opens the viewer for one asset, or for the audit itself (`null`). */
+  const onEvidencePress = useCallback(
+    (target: { auditAssetId: string | null; name: string }) => {
+      setOpenEvidence(target);
+      void loadEvidence(target.auditAssetId);
+    },
+    [loadEvidence]
+  );
+
+  const openEvidenceBucket: {
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  } = (() => {
+    if (!evidence || !openEvidence) return { notes: [], images: [] };
+    if (openEvidence.auditAssetId === null) return evidence.general;
+    return (
+      evidence.byAuditAsset[openEvidence.auditAssetId] ?? {
+        notes: [],
+        images: [],
+      }
+    );
+  })();
   const styles = useStyles();
 
   // ── State ──────────────────────────────────────────────
@@ -336,6 +479,9 @@ function AuditDetailContent() {
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
+        auditAssetId: scan?.auditAssetId ?? null,
+        notesCount: scan?.auditNotesCount ?? 0,
+        imagesCount: scan?.auditImagesCount ?? 0,
       });
     }
 
@@ -357,6 +503,9 @@ function AuditDetailContent() {
           locationName: scan.assetLocationName,
           categoryName: null,
           custodianName: null,
+          auditAssetId: scan.auditAssetId,
+          notesCount: scan.auditNotesCount,
+          imagesCount: scan.auditImagesCount,
         });
       }
     }
@@ -408,9 +557,42 @@ function AuditDetailContent() {
         });
       }
 
+      // why: evidence is the ONE thing on this card worth opening. Everything
+      // else (image, name, location, category, custodian, status) is already
+      // shown, which is why the card is otherwise inert — see the note below.
+      // why two numbers and not their sum: see scanned-items-list.tsx. The
+      // sum changes for identical evidence depending on whether the auditor
+      // typed a caption, so it cannot be compared between rows.
+      const noteCount = item.notesCount;
+      const photoCount = item.imagesCount;
+      const hasEvidence =
+        (noteCount > 0 || photoCount > 0) && item.auditAssetId !== null;
+      const evidenceLabel = [
+        noteCount > 0
+          ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}`
+          : null,
+        photoCount > 0
+          ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const Card = hasEvidence ? TouchableOpacity : View;
+
       return (
-        <View
+        <Card
           style={styles.assetCard}
+          {...(hasEvidence
+            ? {
+                onPress: () =>
+                  onEvidencePress({
+                    auditAssetId: item.auditAssetId as string,
+                    name: item.name,
+                  }),
+                activeOpacity: 0.7,
+                accessibilityRole: "button" as const,
+              }
+            : { accessibilityRole: "summary" as const })}
           // why: React Native 0.81 treats a plain View as a container,
           // so VoiceOver/TalkBack would announce each child Text node
           // separately. `accessible` collapses the subtree into one
@@ -421,8 +603,10 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-          ].join(", ")}
-          accessibilityRole="summary"
+            hasEvidence ? `${evidenceLabel}, tap to view` : null,
+          ]
+            .filter(Boolean)
+            .join(", ")}
         >
           {/*
             why: the previous `router.push('/(tabs)/assets/...)' from
@@ -473,16 +657,44 @@ function AuditDetailContent() {
             )}
           </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
-            <Text style={[styles.statusText, { color: badge.text }]}>
-              {statusLabel}
-            </Text>
+          <View style={styles.assetRight}>
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <View
+                style={[styles.statusDot, { backgroundColor: badge.text }]}
+              />
+              <Text style={[styles.statusText, { color: badge.text }]}>
+                {statusLabel}
+              </Text>
+            </View>
+            {hasEvidence ? (
+              <View style={styles.evidenceChip}>
+                {noteCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{noteCount}</Text>
+                  </>
+                ) : null}
+                {photoCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="image-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{photoCount}</Text>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
           </View>
-        </View>
+        </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime]
+    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
   );
 
   // ── Loading / Error states ────────────────────────────
@@ -731,6 +943,40 @@ function AuditDetailContent() {
                     </Text>
                   </View>
                 )}
+
+                {/*
+                  why: the completion note and any photos attached when the
+                  audit closed are about the audit as a whole, so they belong
+                  with its details rather than on any one asset row. Shown
+                  once completed — before that there is nothing to read.
+                */}
+                {isCompleted && (
+                  <TouchableOpacity
+                    style={styles.auditEvidenceRow}
+                    onPress={() =>
+                      onEvidencePress({
+                        auditAssetId: null,
+                        name: "Completion notes and photos",
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel="View the completion notes and photos for this audit"
+                  >
+                    <Ionicons
+                      name="document-attach-outline"
+                      size={15}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.auditEvidenceText}>
+                      Completion notes and photos
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={15}
+                      color={colors.muted}
+                    />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
@@ -916,6 +1162,20 @@ function AuditDetailContent() {
           </View>
         }
       />
+
+      <EvidenceViewer
+        visible={openEvidence !== null}
+        onClose={() => setOpenEvidence(null)}
+        title={openEvidence?.name ?? ""}
+        notes={openEvidenceBucket.notes}
+        images={openEvidenceBucket.images}
+        isLoading={evidenceLoading}
+        error={evidenceError}
+        onRetry={() => {
+          setEvidenceError(null);
+          void loadEvidence(openEvidence?.auditAssetId ?? null);
+        }}
+      />
     </View>
   );
 }
@@ -1013,6 +1273,25 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     fontWeight: "600",
   },
+  assetRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  auditEvidenceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    marginTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  auditEvidenceText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
+  },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1020,6 +1299,23 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: 2,
     borderRadius: borderRadius.pill,
     gap: 4,
+  },
+  evidenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+  },
+  evidenceChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    // why: `primaryText`, not `primary` — the brand orange is ~3.1:1 on
+    // white and fails the 4.5:1 text bar; `primaryText` is its accessible
+    // twin, the same pairing the rest of the app uses for orange labels.
+    color: colors.primaryText,
   },
   statusDot: {
     width: 6,
