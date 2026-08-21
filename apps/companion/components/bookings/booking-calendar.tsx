@@ -747,7 +747,12 @@ export function BookingCalendar({
           {canCreate ? (
             <TouchableOpacity
               style={styles.newBooking}
-              onPress={() => router.push("/(tabs)/bookings/new")}
+              onPress={() =>
+                router.push({
+                  pathname: "/(tabs)/bookings/new",
+                  params: { day: selectedDay },
+                })
+              }
               accessibilityRole="button"
               accessibilityLabel="Create booking"
             >

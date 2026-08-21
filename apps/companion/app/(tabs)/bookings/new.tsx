@@ -28,7 +28,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,7 +38,11 @@ import DateTimePicker, {
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
-import { wallClockOnDayInZone, wallClockWireInZone } from "@shelf/datetime";
+import {
+  instantFromWallClockInZone,
+  wallClockOnDayInZone,
+  wallClockWireInZone,
+} from "@shelf/datetime";
 import { keepEndAfterStart } from "@/lib/booking-dates";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -47,15 +51,31 @@ import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 
 /**
- * The default booking window — tomorrow 09:00-17:00 as `timeZone` reads it.
+ * The default booking window — 09:00-17:00 as `timeZone` reads it, on `day`
+ * when one is given and on tomorrow otherwise.
  *
- * Both are real instants. "Tomorrow" and the hours are resolved in `timeZone`,
- * so the window means the same wall clock regardless of where the device is.
+ * Both are real instants. The day and the hours are resolved in `timeZone`, so
+ * the window means the same wall clock regardless of where the device is.
  *
  * @param timeZone - the acting user's preference zone
+ * @param day - a `YYYY-MM-DD` calendar date, as the calendar lens keys its days
  * @returns the start and end instants of the default window
  */
-function defaultBookingWindow(timeZone: string): { from: Date; to: Date } {
+function defaultBookingWindow(
+  timeZone: string,
+  day?: string
+): { from: Date; to: Date } {
+  const onDay = /^\d{4}-\d{2}-\d{2}$/.test(day ?? "")
+    ? (day as string).split("-").map(Number)
+    : null;
+  if (onDay) {
+    const at = (hour: number) =>
+      instantFromWallClockInZone(
+        { year: onDay[0], month: onDay[1], day: onDay[2], hour, minute: 0 },
+        timeZone
+      );
+    return { from: at(9), to: at(17) };
+  }
   const now = new Date();
   return {
     from: wallClockOnDayInZone(now, 1, 9, 0, timeZone),
@@ -65,6 +85,11 @@ function defaultBookingWindow(timeZone: string): { from: Date; to: Date } {
 
 export default function CreateBookingScreen() {
   const router = useRouter();
+  /**
+   * The calendar lens opens this screen from a day panel, so the booking
+   * defaults to the day the panel is showing rather than to tomorrow.
+   */
+  const { day } = useLocalSearchParams<{ day?: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -77,9 +102,11 @@ export default function CreateBookingScreen() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [custodian, setCustodian] = useState<TeamMember | null>(null);
-  // Default to a sensible near-future window (tomorrow 9:00–17:00) so the form
-  // is one-tap usable; the user can still adjust either picker.
-  const [initialWindow] = useState(() => defaultBookingWindow(prefs.timeZone));
+  // Default to a sensible working window (9:00–17:00) so the form is one-tap
+  // usable; the user can still adjust either picker.
+  const [initialWindow] = useState(() =>
+    defaultBookingWindow(prefs.timeZone, day)
+  );
   const [from, setFrom] = useState<Date | null>(initialWindow.from);
   const [to, setTo] = useState<Date | null>(initialWindow.to);
   // Capture the default window so a date-only change still counts as an unsaved
@@ -177,12 +204,12 @@ export default function CreateBookingScreen() {
   // a date the user has already picked.
   useEffect(() => {
     if (datesTouchedRef.current) return;
-    const seeded = defaultBookingWindow(prefs.timeZone);
+    const seeded = defaultBookingWindow(prefs.timeZone, day);
     setFrom(seeded.from);
     setTo(seeded.to);
     initialFromRef.current = seeded.from.getTime();
     initialToRef.current = seeded.to.getTime();
-  }, [prefs.timeZone]);
+  }, [prefs.timeZone, day]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) => {
