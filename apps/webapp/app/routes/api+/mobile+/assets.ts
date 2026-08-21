@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -29,10 +30,13 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  * modules/api/mobile-asset-search.server.ts), the same index-driven path the
  * web indexes use, in a single query.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect an expired URL — keeps this loader read-only and avoids fanning
- * out N writes per paginated read.
+ * Image URLs are returned with the model-image cascade already resolved
+ * (`shapeMobileAssetResponse`), not re-signed. `mainImageExpiration` is only
+ * sent when the asset's OWN signed URL won the cascade — model cover images
+ * are public and never expire. Mobile clients should call
+ * `/api/mobile/asset/refresh-image/:assetId` lazily when they detect an
+ * expired URL — keeps this loader read-only and avoids fanning out N writes
+ * per paginated read.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -251,7 +255,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         custody: visibleCustody,
         custodyList,
         custodyListOthersCount,
-        mainImageExpiration,
+        mainImageExpiration: serializeImageExpiration(
+          shaped.imageSource,
+          mainImageExpiration
+        ),
       };
     });
 

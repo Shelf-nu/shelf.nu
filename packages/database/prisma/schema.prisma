@@ -1823,9 +1823,10 @@ model MobileAuthCode {
   // lives in the deeplink + the exchange request body — never stored.
   codeHash String @unique
 
-  // PKCE (S256) challenge — base64url(SHA-256(verifier)) — set when the minting
-  // client is PKCE-capable. NULL for legacy (pre-PKCE) app builds, which redeem
-  // without a verifier (backward compatible).
+  // PKCE (S256) challenge — base64url(SHA-256(verifier)). Mandatory in practice:
+  // minting refuses a mobile SSO start without one, and redemption refuses a
+  // code that carries none, so an unbound row can never be spent. Nullable only
+  // because rows predating that rule may still exist; treat NULL as poison.
   codeChallenge String?
 
   // Single-use guard: set when redeemed. A non-null value rejects reuse.

@@ -100,6 +100,7 @@ export default function ListAssetContent({
     ? resolveDisplayCode({
         entity: item,
         organization: currentOrganization,
+        entityKind: "asset",
       })
     : null;
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
@@ -300,7 +301,7 @@ export default function ListAssetContent({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  assetModel: item.assetModel ?? null,
+                  assetModel: item.assetModel,
                 }}
                 alt={`Image of ${item.title}`}
                 className={tw(

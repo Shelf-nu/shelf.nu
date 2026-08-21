@@ -6,6 +6,7 @@ import type {
 } from "react-router";
 import { data, useParams } from "react-router";
 import z from "zod";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -30,6 +31,7 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
 import {
   getLocationKits,
@@ -38,6 +40,7 @@ import {
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -126,7 +129,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       modelName,
-      items: kits,
+      // The custodian's name and user.email are on every row regardless of
+      // whether the UI draws them, so a viewer without custody visibility can
+      // read them straight out of the route's data payload. Redact here, not
+      // in the component.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       page,
       totalItems: totalKits,
       perPage,
@@ -370,6 +377,8 @@ const Row = ({
   item: Prisma.KitGetPayload<{
     include: {
       category: true;
+      qrCodes: { take: 1; select: { id: true } };
+      barcodes: { select: { id: true; type: true; value: true } };
       custody: {
         select: {
           custodian: {
@@ -382,6 +391,18 @@ const Row = ({
   extraProps: { canReadCustody: boolean; userRoleCanManageKits: boolean };
 }) => {
   const { category, custody } = item;
+  // why: this is a kit-listing surface, and kits are code-bearing entities.
+  // It was the only one whose query did not even fetch the relations, so the
+  // chip could not be rendered here at all. See
+  // `.claude/rules/code-bearing-entity-list-consistency.md`.
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
+    : null;
 
   return (
     <>
@@ -414,6 +435,7 @@ const Row = ({
                 </Button>
               </span>
               <KitStatusBadge status={item.status} availableToBook />
+              {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
             </div>
           </div>
         </div>

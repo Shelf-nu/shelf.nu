@@ -8,7 +8,9 @@
  * Pairs with `resolveDisplayCode` from `~/modules/barcode/display`; the
  * `ResolvedDisplayCode` shape can be spread directly onto the badge:
  *
- *   <AssetCodeBadge {...resolveDisplayCode({ asset, organization })} />
+ *   <AssetCodeBadge
+ *     {...resolveDisplayCode({ entity, organization, entityKind: "asset" })}
+ *   />
  *
  * Renders nothing when `value` is empty (defensive — should not normally
  * happen because every asset has a QR fallback, but the loader could omit
@@ -26,11 +28,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import type {
+  CodeEntityKind,
+  ResolvedDisplayCode,
+} from "~/modules/barcode/display";
 import { labelForPreference } from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
 
-type AssetCodeBadgeProps = ResolvedDisplayCode & {
+type AssetCodeBadgeProps = Omit<ResolvedDisplayCode, "entityKind"> & {
+  /**
+   * Optional here, unlike on {@link ResolvedDisplayCode}, where the resolver
+   * always sets it. Preview chips in the workspace and per-asset preference
+   * pickers hand-build these props with `isFallback={false}`, and the kind is
+   * only ever read on the fallback path — so demanding it there would be
+   * ceremony with no safety to show for it.
+   */
+  entityKind?: CodeEntityKind;
+
   className?: string;
   /**
    * Set true when the chip is wrapped in a click target (e.g., opens a code
@@ -70,12 +84,26 @@ function buildTooltipContent(
   value: string,
   type: ResolvedDisplayCode["type"],
   isFallback: boolean,
-  workspacePreference: ResolvedDisplayCode["workspacePreference"]
+  workspacePreference: ResolvedDisplayCode["workspacePreference"],
+  entityKind: CodeEntityKind = "asset"
 ): { title: string; body?: string } {
   const typeLabel = labelForPreference(type);
   const wsLabel = labelForPreference(workspacePreference);
 
   if (isFallback) {
+    // why a kit gets different words: the generic body tells the reader to
+    // "add one", and for a kit on a SAM ID workspace that is impossible —
+    // `Kit` has no `sequentialId` column and there is no UI to set one. An
+    // instruction nobody can follow reads as the reader's fault rather than a
+    // product gap, so name the gap instead. Only SAM_ID can reach this for a
+    // kit; kits carry their own QR and barcodes, so every other preference
+    // resolves normally.
+    if (entityKind === "kit" && workspacePreference === "SAM_ID") {
+      return {
+        title: `${typeLabel}: ${value} (fallback)`,
+        body: `Your workspace prefers ${wsLabel}, which kits do not have. Showing the ${typeLabel} instead.`,
+      };
+    }
     return {
       title: `${typeLabel}: ${value} (fallback)`,
       body: `Your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`,
@@ -115,6 +143,7 @@ export function AssetCodeBadge({
   type,
   isFallback,
   workspacePreference,
+  entityKind = "asset",
   className,
   interactive = false,
   explicit = false,
@@ -133,7 +162,13 @@ export function AssetCodeBadge({
   // tooltip.
   const { title, body } = explicit
     ? { title: `${labelForPreference(type)}: ${value}`, body: undefined }
-    : buildTooltipContent(value, type, isFallback, workspacePreference);
+    : buildTooltipContent(
+        value,
+        type,
+        isFallback,
+        workspacePreference,
+        entityKind
+      );
 
   // aria-label concatenates title + body so screen-reader users get the full
   // explanation even without the tooltip mounting. Single string keeps SR

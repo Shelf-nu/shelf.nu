@@ -15,7 +15,10 @@ export const BADGE_COLORS = {
   },
   orange: {
     bg: "#FFF3E0",
-    text: "#E76F51",
+    // 5.0:1 on this background, and the design system's brand-orange text
+    // shade. Badge text is 12px, so the 3:1 large-text allowance does not
+    // apply here — keep any replacement at 4.5:1 or above.
+    text: "#B54708",
   },
   red: {
     bg: "#FFEBEE",
@@ -23,7 +26,10 @@ export const BADGE_COLORS = {
   },
   amber: {
     bg: "#FFF8E1",
-    text: "#A66E00",
+    // 6.7:1 on this background, and the same hex the companion uses for its
+    // amber badge text. The two apps must render the `warning` tone
+    // identically: change both or neither.
+    text: "#92400E",
   },
   green: {
     bg: "#E8F5E9",
@@ -35,7 +41,7 @@ export const BADGE_COLORS = {
   },
   blue: {
     bg: "#E1F5FE",
-    text: "#01579B", // Darkened to meet WCAG AA (4.5:1 contrast ratio)
+    text: "#01579B", // 6.6:1 on this background
   },
   violet: {
     bg: "#F3E5F5",
@@ -43,10 +49,14 @@ export const BADGE_COLORS = {
   },
   pink: {
     bg: "#FCE4EC",
-    text: "#D81B60",
+    // 5.8:1 on this background. color-contrast.test.ts asserts every entry
+    // in this map against 4.5:1 — measure before changing one, because a
+    // shade that merely looks dark enough is not.
+    text: "#AD1457",
   },
   brown: {
     bg: "#FFE0B2",
-    text: "#A85E32",
+    // 5.4:1 on this background.
+    text: "#8A4A22",
   },
 } as const;
