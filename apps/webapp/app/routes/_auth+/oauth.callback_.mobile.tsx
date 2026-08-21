@@ -1,3 +1,21 @@
+/**
+ * Mobile SSO callback (native-app web-delegated auth).
+ *
+ * Supabase redirects here (instead of `/oauth/callback`) after it validates the
+ * SAML assertion for a `platform=mobile` SSO sign-in. SSO completion is
+ * identical to the web callback — user/org provisioning + SCIM linking via
+ * `resolveUserAndOrgForSsoCallback` — except that instead of establishing a web
+ * session we mint a single-use authorization code and hand it back to the app
+ * through the `shelf://auth-callback?code=…` deeplink. The app then redeems the
+ * code at `POST /api/mobile/exchange` for a fresh, independent session.
+ *
+ * No tokens ever appear in the deeplink — only the short-lived, single-use code.
+ *
+ * @see apps/webapp/app/modules/auth/mobile-sso.server.ts
+ * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
+ * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx — web counterpart
+ */
+
 import { useEffect } from "react";
 
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
@@ -22,24 +40,6 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
-
-/**
- * Mobile SSO callback (native-app web-delegated auth).
- *
- * Supabase redirects here (instead of `/oauth/callback`) after it validates the
- * SAML assertion for a `platform=mobile` SSO sign-in. SSO completion is
- * identical to the web callback — user/org provisioning + SCIM linking via
- * `resolveUserAndOrgForSsoCallback` — except that instead of establishing a web
- * session we mint a single-use authorization code and hand it back to the app
- * through the `shelf://auth-callback?code=…` deeplink. The app then redeems the
- * code at `POST /api/mobile/exchange` for a fresh, independent session.
- *
- * No tokens ever appear in the deeplink — only the short-lived, single-use code.
- *
- * @see apps/webapp/app/modules/auth/mobile-sso.server.ts
- * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
- * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx — web counterpart
- */
 
 /** Custom-scheme deeplink the companion app registers and listens for. */
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
@@ -147,12 +147,11 @@ export async function action({ request }: ActionFunctionArgs) {
           formatPrefs,
         });
 
-        // PKCE: the S256 challenge is waiting in the cookie `/sso-login` set at
-        // the start of the flow. Bind it to the auth code so the exchange must
-        // present a matching verifier. `/sso-login` refuses to start a mobile
-        // flow without a valid challenge, so absent here means only that the
-        // cookie was lost or outlived its TTL — the resulting unbound code is
-        // refused at redemption rather than redeemed as a bearer token.
+        // PKCE: `/sso-login` stashes the S256 challenge in a short-lived cookie
+        // at the start of the flow. Bind it to the auth code so the exchange
+        // must present a matching verifier. Whenever that cookie does not reach
+        // us the code is minted unbound, and redemption refuses it outright —
+        // an unbound code is never honoured as a bearer token.
         const codeChallenge = await mobilePkceChallengeCookie.parse(
           request.headers.get("Cookie")
         );
