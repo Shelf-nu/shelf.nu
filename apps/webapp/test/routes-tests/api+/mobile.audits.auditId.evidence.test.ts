@@ -138,6 +138,7 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       role: "ADMIN",
       canUseAudits: true,
     });
+    (requireAuditAssignee as any).mockResolvedValue(undefined);
     mockDb.auditSession.findFirst.mockResolvedValue({ id: "audit-1" });
     mockDb.auditNote.findMany.mockResolvedValue([]);
     mockDb.auditImage.findMany.mockResolvedValue([]);
@@ -238,6 +239,35 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       );
 
       expect((res as unknown as Response).status).toBe(404);
+      expect(mockDb.auditNote.findMany).not.toHaveBeenCalled();
+      expect(mockDb.auditImage.findMany).not.toHaveBeenCalled();
+      // Assert the LOOKUP was org-scoped, not merely that a null lookup 404s.
+      // Without this the case passes with `organizationId` deleted from the
+      // where clause, because the mock returns null regardless of what was
+      // asked — so it would stop testing the guard it is named for.
+      expect(mockDb.auditSession.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "audit-1", organizationId: "org-1" },
+        })
+      );
+    });
+
+    it("reads no evidence when the assignment gate rejects", async () => {
+      // The other cases only ever let this guard resolve, so none of them
+      // notices if it stops blocking — dropping the `await` on the call makes
+      // it fire-and-forget and every one of them still passes. This is the
+      // case that fails when the gate is not awaited.
+      (requireAuditAssignee as any).mockRejectedValue(
+        new Error("not assigned")
+      );
+
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
+
+      // The route catches and shapes errors, so the observable outcome is a
+      // non-2xx response plus, crucially, no evidence read at all.
+      expect((res as unknown as Response).status).not.toBe(200);
       expect(mockDb.auditNote.findMany).not.toHaveBeenCalled();
       expect(mockDb.auditImage.findMany).not.toHaveBeenCalled();
     });

@@ -21,6 +21,7 @@ import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -143,6 +144,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         createdAt: true,
         user: {
           select: {
+            // `displayName` first: `resolveUserDisplayName` prefers it, and an
+            // SSO account often carries only that. Selecting just first/last
+            // renders those people as "Unknown" here while the PDF, which uses
+            // the same resolver over a fuller select, names them.
+            displayName: true,
             firstName: true,
             lastName: true,
             profilePicture: true,
@@ -626,14 +632,20 @@ export default function AuditOverview() {
               <Card className="mt-0 md:border">
                 {generalNotes.map((note) => (
                   <div key={note.id} className="mb-3 last:mb-0">
-                    <p className="whitespace-pre-wrap text-sm text-gray-900">
-                      {note.content}
-                    </p>
+                    {/* Audit notes are Markdoc source, not plain text: the
+                        completion note carries `**bold**` stats, a receipt
+                        link, and an `{% audit_images %}` tag. Rendering the
+                        string directly prints that source to the reader.
+                        `allowExternalLinks` stays false here — this bucket is
+                        where the SYSTEM-composed completion note lands, and
+                        only notes a person authored through the editor may
+                        link off-origin. */}
+                    <div className="text-sm text-gray-900">
+                      <MarkdownViewer content={note.content} />
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
-                      {[note.user?.firstName, note.user?.lastName]
-                        .filter(Boolean)
-                        .join(" ") || "Unknown"}{" "}
-                      &middot; <DateS date={note.createdAt} includeTime />
+                      {resolveUserDisplayName(note.user) || "Unknown"} &middot;{" "}
+                      <DateS date={note.createdAt} includeTime />
                     </p>
                   </div>
                 ))}
@@ -674,13 +686,17 @@ export default function AuditOverview() {
 
                   {notes.map((note) => (
                     <div key={note.id} className="mb-3">
-                      <p className="whitespace-pre-wrap text-sm text-gray-900">
-                        {note.content}
-                      </p>
+                      {/* Condition notes are authored through the editor, so
+                          they may link out — same treatment the details panel
+                          gives these exact rows. */}
+                      <div className="text-sm text-gray-900">
+                        <MarkdownViewer
+                          content={note.content}
+                          allowExternalLinks
+                        />
+                      </div>
                       <p className="mt-1 text-xs text-gray-500">
-                        {[note.user?.firstName, note.user?.lastName]
-                          .filter(Boolean)
-                          .join(" ") || "Unknown"}{" "}
+                        {resolveUserDisplayName(note.user) || "Unknown"}{" "}
                         &middot; <DateS date={note.createdAt} includeTime />
                       </p>
                     </div>
