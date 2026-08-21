@@ -185,22 +185,26 @@ function AuditDetailContent() {
   const evidenceContext =
     currentOrg?.id && id ? `${currentOrg.id}:${id}` : null;
 
-  // Guards concurrent opens without freezing the data, which is what the old
-  // `evidence` guard did. Holds the context it is fetching FOR, so a reply
-  // from a previous context can be recognised and dropped. A ref, not state,
-  // so it cannot itself trigger a render or go stale inside the callback.
-  const evidenceInFlight = useRef<string | null>(null);
-
-  // Aborts the requests themselves, not just their results. The discard check
-  // below already stops a superseded reply from being applied, but without this
-  // the socket stays open until the server answers — and this screen survives a
-  // trip to the scanner, so those add up on a stockroom connection. The client
-  // takes a signal for exactly this; the sibling evidence modal already passes
-  // one.
-  //
-  // Keyed by target, because concurrent fetches for DIFFERENT rows are
-  // deliberate here: opening row B must not cancel row A's fetch, or A's
-  // results never arrive to merge.
+  /**
+   * The evidence requests currently in the air, one entry per target.
+   *
+   * Does three jobs, which is why it is a map and not a flag:
+   *
+   * - **Dedupe.** A target already present is not fetched again.
+   * - **Staleness.** A reply is applied only if its own controller is still
+   *   the one registered for its target. Changing audit or workspace clears
+   *   the map, so every reply in the air at that moment is discarded.
+   * - **Cancellation.** Changing context or leaving the screen aborts the
+   *   requests themselves, not merely their results — this screen survives a
+   *   trip to the scanner, so an abandoned socket would otherwise stay open.
+   *
+   * Keyed by TARGET, never a single slot: concurrent fetches for different
+   * rows are deliberate, and a shared key makes the older reply look stale, so
+   * row A's evidence is thrown away whenever someone opens row B first.
+   *
+   * A ref, not state, so it cannot itself trigger a render or read stale
+   * inside the callback.
+   */
   const evidenceAborts = useRef(new Map<string, AbortController>());
 
   // Drop everything the moment the context changes, before any render can
@@ -210,7 +214,6 @@ function AuditDetailContent() {
     setEvidence(null);
     setEvidenceError(null);
     setEvidenceLoading(false);
-    evidenceInFlight.current = null;
     evidenceAborts.current.forEach((controller) => controller.abort());
     evidenceAborts.current.clear();
   }, [evidenceContext]);
@@ -239,11 +242,10 @@ function AuditDetailContent() {
   const loadEvidence = useCallback(
     async (auditAssetId: string | null) => {
       if (!currentOrg?.id || !id || !evidenceContext) return;
-      // One fetch per target at a time. A fetch for a DIFFERENT target, or for
-      // a different context, is never blocked by an older one still in flight.
+      // One fetch per target at a time; a fetch for a DIFFERENT target is
+      // never blocked, nor discarded, by an older one still in flight.
       const requestFor = `${evidenceContext}:${auditAssetId ?? "general"}`;
-      if (evidenceInFlight.current === requestFor) return;
-      evidenceInFlight.current = requestFor;
+      if (evidenceAborts.current.has(requestFor)) return;
       const controller = new AbortController();
       evidenceAborts.current.set(requestFor, controller);
       // Only show the spinner when there is nothing to show yet — on a refetch
@@ -259,19 +261,13 @@ function AuditDetailContent() {
         controller.signal,
         auditAssetId
       );
-      // Drop the controller the moment the request settles, BEFORE anything
-      // can return early. A superseded request still reaches this line, and
-      // cleaning up after the stale check below would retain its controller
-      // for the life of the context — one per row the user opened while an
-      // earlier fetch was still in the air.
-      if (evidenceAborts.current.get(requestFor) === controller) {
-        evidenceAborts.current.delete(requestFor);
-      }
-
-      // The context may have changed while this was in the air. Anything from
-      // a superseded request is discarded, including its in-flight marker, so
-      // it cannot clear a newer fetch's claim.
-      if (evidenceInFlight.current !== requestFor) return;
+      // Still ours? Only a context change clears the map, so this is the
+      // staleness test. Read it BEFORE releasing the entry, and release
+      // unconditionally — a reply that returns early still has to drop its
+      // controller or the map grows by one per superseded request.
+      const isCurrent = evidenceAborts.current.get(requestFor) === controller;
+      if (isCurrent) evidenceAborts.current.delete(requestFor);
+      if (!isCurrent) return;
       if (error) setEvidenceError(error);
       else if (data) {
         setEvidence((current) => ({
@@ -285,8 +281,9 @@ function AuditDetailContent() {
           },
         }));
       }
-      setEvidenceLoading(false);
-      evidenceInFlight.current = null;
+      // Only when nothing else is still loading, or a fast reply for one row
+      // would clear the spinner another row is still waiting behind.
+      if (evidenceAborts.current.size === 0) setEvidenceLoading(false);
     },
     [currentOrg?.id, id, evidenceContext]
   );
