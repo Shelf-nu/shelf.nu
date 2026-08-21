@@ -1,17 +1,15 @@
 /**
  * What the audit receipt is allowed to leave out.
  *
- * why this test exists: the receipt is the audit's OUTPUT — the artifact
- * somebody keeps, attaches to a claim, or hands to a client. It used to read
- * every `AuditNote` with one query and `take: 15`. `AuditNote` mixes two
- * unrelated things: the condition notes people typed, and the system trail,
- * which grows with every scan. So on any audit past a handful of assets the
- * trail won the fifteen slots and the observations fell off the record with no
- * warning anywhere.
+ * The receipt is the audit's OUTPUT: the artifact somebody keeps, attaches to
+ * a claim, or hands to a client.
  *
- * Truncating the trail is fine — it is a convenience summary. Truncating what
- * somebody wrote about a damaged asset is data loss, and it is silent, which
- * is why it needs a test rather than a comment.
+ * `AuditNote` mixes two unrelated things — the condition notes people typed,
+ * and the system trail, which grows with every scan. They must be read with
+ * separate queries, because only one of them may be truncated. Cutting the
+ * trail short is fine; it is a convenience summary. Cutting off what somebody
+ * wrote about a damaged asset is data loss, and it is silent, which is why the
+ * bound belongs in a test rather than a comment.
  *
  * @see {@link file://./pdf-helpers.ts}
  * @see {@link file://./../../components/audit/audit-receipt-pdf.tsx}
