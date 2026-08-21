@@ -28,8 +28,6 @@ import {
   setScanSoundEnabled,
   playScanSound,
 } from "@/lib/scan-sound";
-import { getActiveServer } from "@/lib/server";
-import { getApiBaseUrl } from "@/lib/api";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -54,18 +52,6 @@ export default function SettingsScreen() {
 
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
-
-  // Read at render rather than subscribed: a server switch signs the user out,
-  // so this screen is never mounted across one.
-  const server = getActiveServer();
-  /** Host only — the full URL would overflow the row on narrow screens. */
-  const serverLabel = (() => {
-    try {
-      return new URL(server.baseUrl).host;
-    } catch {
-      return server.name;
-    }
-  })();
 
   // Load persisted start page and scan sound preference on mount
   useEffect(() => {
@@ -329,19 +315,6 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.settingValue}>v{appVersion}</Text>
           </View>
-          {/* Which Shelf server this install is talking to. Read-only: the
-              server is chosen by the domain of the email used at sign-in. */}
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <Ionicons
-                name="server-outline"
-                size={20}
-                color={colors.foreground}
-              />
-              <Text style={styles.settingLabel}>Server</Text>
-            </View>
-            <Text style={styles.settingValue}>{serverLabel}</Text>
-          </View>
         </View>
       </View>
 
@@ -383,7 +356,7 @@ export default function SettingsScreen() {
                     style: "destructive",
                     onPress: () =>
                       WebBrowser.openBrowserAsync(
-                        `${getApiBaseUrl()}/settings/general`
+                        "https://app.shelf.nu/settings/general"
                       ),
                   },
                 ]
@@ -409,8 +382,6 @@ export default function SettingsScreen() {
         For advanced features, visit{" "}
         <Text
           style={styles.companionFooterLink}
-          // why: the marketing site, not the user's instance — this one stays
-          // Shelf Cloud even for self-hosted users.
           onPress={() => WebBrowser.openBrowserAsync("https://app.shelf.nu")}
         >
           app.shelf.nu

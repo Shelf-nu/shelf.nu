@@ -15,7 +15,6 @@
     "lint": "expo lint && node scripts/check-version-sync.mjs",
     "doctor": "react-doctor .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test 'lib/**/*.test.ts'",
     "test:e2e": "cd .maestro/scripts && bash run-all.sh",
     "test:e2e:suite": "cd .maestro/scripts && bash run-suite.sh",
     "android": "expo run:android",
@@ -69,12 +68,10 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@types/node": "^22.19.17",
     "@types/react": "^19.2.14",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
     "react-doctor": "0.0.39",
-    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   }
 }
