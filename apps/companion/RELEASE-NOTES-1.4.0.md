@@ -15,6 +15,10 @@ Bookings now have a calendar.
 Audits are easier to trust.
 
 - Add photos and condition notes right on the row you just scanned
+- Read them back later: open any audited asset to see its photos and notes in
+  full, with who recorded them and when
+- Notes and photos are counted separately, so a row with one note and one photo
+  no longer reads as "2"
 - Assets you have not reached yet are called "not scanned" instead of "missing",
   so a running audit no longer reads like an alarm
 - Audit colours and wording now match the website exactly
@@ -40,8 +44,8 @@ Fixes.
 Bookings now have a calendar: see the month at a glance, tap a day to see what
 is booked, and create a booking on that day.
 
-Audits: add photos and condition notes on the row you just scanned, with
-clearer wording for assets you have not reached yet.
+Audits: add photos and condition notes while scanning, then read them back on
+any audited asset. Clearer wording for assets you have not reached yet.
 
 Assets show their model and asset ID. Booking details show who created the
 booking and its tags.
