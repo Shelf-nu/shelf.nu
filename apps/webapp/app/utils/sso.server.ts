@@ -281,6 +281,13 @@ export async function checkDomainSSOStatus(
         ssoDetails: {
           domain: {
             contains: domain,
+            // Nothing constrains the stored casing — the admin form lowercases
+            // what it writes, but that is one write path and no migration
+            // normalised what came before. A case-sensitive filter would drop
+            // a stored "ACME.com" before the exact match ever sees it, and the
+            // organization would read as unclaimed. The auth.sso_domains query
+            // above compares through `lower()` for the same reason.
+            mode: "insensitive" as const,
           },
         },
       },
@@ -293,8 +300,8 @@ export async function checkDomainSSOStatus(
       emailMatchesDomains(domain, org.ssoDetails?.domain ?? null)
     );
 
-    // Return the first SSO provider ID if we found multiple
-    // This maintains backward compatibility while we handle multiple domains
+    // A domain can have several SSO providers configured; callers that act on
+    // one get the first.
     return {
       isConfiguredForSSO: true,
       linkedOrganizations,

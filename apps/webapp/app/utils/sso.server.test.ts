@@ -391,6 +391,28 @@ describe("checkDomainSSOStatus", () => {
     ]);
   });
 
+  it("asks the database for candidates case-insensitively", async () => {
+    // The exact match above runs on rows the query already returned, so it
+    // cannot prove anything about rows the query excludes. Stored casing is
+    // unconstrained, and a case-sensitive `contains` would drop "ACME.com"
+    // before any of this code runs — assert the filter itself.
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([]);
+
+    await checkDomainSSOStatus("jane@acme.com");
+
+    expect(mockDb.db.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ssoDetails: {
+            domain: { contains: "acme.com", mode: "insensitive" },
+          },
+        },
+      })
+    );
+  });
+
   it("returns not-configured for an address with no domain", async () => {
     await expect(checkDomainSSOStatus("not-an-email")).resolves.toEqual({
       isConfiguredForSSO: false,
