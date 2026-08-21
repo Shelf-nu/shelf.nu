@@ -7,10 +7,11 @@
  * runtime. Import `supabase` directly; there is nothing to resolve first.
  *
  * Sessions persist through {@link secureStoreAdapter} rather than
- * AsyncStorage, because a refresh token belongs in the keychain. iOS caps a
- * SecureStore item at ~2KB while a Supabase session exceeds that, so the
- * adapter splits a long value across numbered chunk keys and reassembles it on
- * read. Deleting a key must clear every chunk, or a stale tail corrupts the
+ * AsyncStorage, because a refresh token belongs in the keychain. SecureStore
+ * rejects values the platform considers oversized, and a Supabase session is
+ * long enough to be at risk, so the adapter splits anything past
+ * {@link CHUNK_SIZE} characters across numbered chunk keys and reassembles it
+ * on read. Deleting a key must clear every chunk, or a stale tail corrupts the
  * next read.
  */
 import { createClient } from "@supabase/supabase-js";

@@ -94,22 +94,10 @@ cd apps/companion
 eas env:exec production "npx expo export --clear --dump-sourcemap -p ios -p android"
 
 # 1b. GATE — prove the artifact before step 2 publishes it. Reads the baked
-#     values back out of the bundle rather than trusting step 1's environment,
-#     and EXITS NON-ZERO on a mismatch so a copy-pasted run cannot sail past it.
-#     `http://localhost:3000` in the bundle is expected and harmless: both sides
-#     of the `__DEV__` ternary in lib/api/client.ts are literals in every build.
-EXPECTED=$(eas env:list --environment production 2>/dev/null \
-  | sed -n 's/.*EXPO_PUBLIC_SUPABASE_URL=\(https:\/\/[a-z0-9]*\.supabase\.co\).*/\1/p' | head -1)
-[ -n "$EXPECTED" ] || { echo "GATE: cannot read the expected host"; exit 1; }
-
-FOUND=$(cat dist/_expo/static/js/*/*.hbc \
-  | strings | grep -oE 'https://[a-z0-9]+\.supabase\.co' | sort -u)
-[ "$FOUND" = "$EXPECTED" ] || {
-  echo "GATE FAILED — bundle points at: $FOUND"
-  echo "               expected only:  $EXPECTED"
-  exit 1
-}
-echo "GATE PASSED — $EXPECTED"
+#     values back out of the built bundles and exits non-zero on a mismatch, so
+#     a copy-pasted run cannot sail past it. Run under the SAME environment the
+#     export claimed, so expected and baked values arrive the same way.
+eas env:exec production "node scripts/check-bundle-env.mjs"
 
 # 2. Publish exactly that bundle. --skip-bundler is what makes this safe: it
 #    guarantees the artifact published here is byte-identical to the one
