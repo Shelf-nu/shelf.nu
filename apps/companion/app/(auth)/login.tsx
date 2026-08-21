@@ -19,7 +19,13 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
-import { API_BASE_URL } from "@/lib/api";
+import { getApiBaseUrl } from "@/lib/api";
+import { openAppStore } from "@/lib/app-update";
+import {
+  getActiveServer,
+  resolveServerForEmail,
+  subscribeToServerChange,
+} from "@/lib/server";
 import ShelfIcon from "@/components/brand/shelf-icon";
 import ShelfWordmark from "@/components/brand/shelf-wordmark";
 
@@ -34,8 +40,22 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  /** Set when discovery refused because THIS build is too old for the server. */
+  const [updateRequired, setUpdateRequired] = useState(false);
+  /** Immediate lock for the reset link — state cannot block a same-tick retap. */
+  const resetPendingRef = useRef(false);
   const router = useRouter();
   const params = useLocalSearchParams<{ error?: string }>();
+
+  // Which Shelf server we're connected to. Discovery can switch this mid-screen
+  // (the user types an enterprise email and taps Sign In), so it must re-render
+  // rather than be read once.
+  const [server, setServer] = useState(getActiveServer());
+  useEffect(
+    () => subscribeToServerChange(() => setServer(getActiveServer())),
+    []
+  );
 
   // Surface a sign-in error passed via navigation — e.g. an SSO exchange failure
   // that resolved while the auth-callback route was covering this screen on Android
@@ -54,8 +74,20 @@ export default function LoginScreen() {
   const changeCountRef = useRef({ email: 0, password: 0 });
   const autoSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Mirrors `isSsoSubmitting` so deferred callers (the auto-submit timer) can
+   * read the CURRENT value rather than the one captured when they were armed.
+   */
+  const isSsoSubmittingRef = useRef(false);
+  isSsoSubmittingRef.current = isSsoSubmitting;
+
   useEffect(() => {
-    if (!email.trim() || !password || isSubmitting) return;
+    // isSsoSubmitting is a dependency so that starting SSO re-runs this effect
+    // and its cleanup CANCELS a pending auto-submit timer. Without it the timer
+    // survives, and the 500ms-later callback carries the isSsoSubmitting=false
+    // captured by the render that armed it — so the guard inside handleLogin
+    // reads a stale false and signs in underneath the SSO exchange.
+    if (!email.trim() || !password || isSubmitting || isSsoSubmitting) return;
 
     const { email: ec, password: pc } = changeCountRef.current;
     if (ec === 1 && pc === 1) {
@@ -68,11 +100,19 @@ export default function LoginScreen() {
     // why: handleLogin is defined inline below and recreated each render; including it
     // in deps would cause the effect to re-fire on every keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [email, password, isSubmitting]);
+  }, [email, password, isSubmitting, isSsoSubmitting]);
 
   const handleLogin = async () => {
     Keyboard.dismiss();
     setError(null);
+    setUpdateRequired(false);
+
+    // why: the disabled prop covers the button, but not the password field's
+    // onSubmitEditing nor the Face ID auto-submit effect. A password sign-in
+    // starting mid-SSO would switch servers under the in-flight exchange.
+    // Read through the ref, not the state: a deferred caller (the auto-submit
+    // timer) holds the value from the render that created this closure.
+    if (isSsoSubmittingRef.current) return;
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
@@ -81,8 +121,10 @@ export default function LoginScreen() {
     }
 
     setIsSubmitting(true);
-    const { error: signInError } = await signIn(trimmedEmail, password);
+    const { error: signInError, updateRequired: loginUpdateRequired } =
+      await signIn(trimmedEmail, password);
     setIsSubmitting(false);
+    if (loginUpdateRequired) setUpdateRequired(true);
 
     if (signInError) {
       setError(signInError);
@@ -92,11 +134,30 @@ export default function LoginScreen() {
   const handleSsoLogin = async () => {
     Keyboard.dismiss();
     setError(null);
+    setUpdateRequired(false);
+
+    const trimmedEmail = email.trim();
+    // why: the server is resolved from the email domain, so with an empty field
+    // we would silently open Shelf Cloud's SSO page — wrong for every
+    // enterprise user, and it would look like the feature simply doesn't work.
+    if (!trimmedEmail) {
+      setError("Enter your work email so we can find your organization.");
+      return;
+    }
+
+    // why: clear the autofill counters before flipping the flag. Otherwise a
+    // FAILED SSO flips isSsoSubmitting back to false, the auto-submit effect
+    // re-runs with the counts still at {1,1}, and the user gets a surprise
+    // password sign-in 500ms after explicitly choosing SSO.
+    changeCountRef.current = { email: 0, password: 0 };
+
     setIsSsoSubmitting(true);
     // Opens the web SSO flow in the system browser; resolves once the app
     // receives the callback and installs the session (or the user cancels).
-    const { error: ssoError } = await signInViaWeb();
+    const { error: ssoError, updateRequired: ssoUpdateRequired } =
+      await signInViaWeb(trimmedEmail);
     setIsSsoSubmitting(false);
+    if (ssoUpdateRequired) setUpdateRequired(true);
     if (ssoError) {
       // On Android the auth-callback route is mounted on top of this screen while
       // the exchange runs, so a plain setError would be hidden — the user would sit
@@ -123,12 +184,42 @@ export default function LoginScreen() {
    * flow is the source of truth and rejects SSO users server-side; the in-app
    * sheet survives the user switching to their mail app for the code and back.
    */
-  const handleForgotPassword = () => {
+  const handleForgotPassword = async () => {
     Keyboard.dismiss();
     setError(null);
-    WebBrowser.openBrowserAsync(`${API_BASE_URL}/forgot-password`).catch(() => {
+    if (isSubmitting || isSsoSubmitting) return;
+    // why: the ref is what actually serializes. Discovery can take up to 15s on
+    // a cache miss with no visible feedback, which is exactly when a user taps
+    // again — and a state flag cannot block a second tap in the same tick.
+    if (resetPendingRef.current) return;
+    resetPendingRef.current = true;
+    setIsResetting(true);
+
+    try {
+      // Best-effort: land on the right server's reset page when we can tell
+      // which one it is. With an empty field this falls through to the active
+      // server, which for a first-run enterprise user means Shelf Cloud —
+      // acceptable, since SSO organizations disable password auth and never
+      // reach this link.
+      if (email.trim()) {
+        const discovery = await resolveServerForEmail(email.trim());
+        // Surfacing this matters: silently falling through would open Shelf
+        // Cloud's reset page for a user whose org server we could not reach.
+        if (!discovery.ok) {
+          setError(discovery.message);
+          return;
+        }
+      }
+      // Awaited inside the lock so it spans the presentation: releasing while
+      // the sheet is still opening would let a second tap hit expo-web-browser's
+      // "already presenting" rejection and paint a misleading error.
+      await WebBrowser.openBrowserAsync(`${getApiBaseUrl()}/forgot-password`);
+    } catch {
       setError("Couldn't open the password reset page. Please try again.");
-    });
+    } finally {
+      resetPendingRef.current = false;
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -155,6 +246,15 @@ export default function LoginScreen() {
             <View style={styles.wordmarkWrap}>
               <ShelfWordmark width={100} color={colors.foreground} />
             </View>
+            {/* Only for a non-cloud server: on Shelf Cloud the chip would be
+                noise on every user's login screen. */}
+            {!server.isCloud && (
+              <View style={styles.serverChip}>
+                <Text style={styles.serverChipText}>
+                  Connected to {server.name}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* ── Welcome Text ──────────────────────────────────────── */}
@@ -185,7 +285,7 @@ export default function LoginScreen() {
               returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
               blurOnSubmit={false}
-              editable={!isSubmitting}
+              editable={!isSubmitting && !isSsoSubmitting}
               accessibilityLabel="Email"
             />
 
@@ -213,7 +313,7 @@ export default function LoginScreen() {
               textContentType="password"
               returnKeyType="go"
               onSubmitEditing={handleLogin}
-              editable={!isSubmitting}
+              editable={!isSubmitting && !isSsoSubmitting}
               accessibilityLabel="Password"
             />
 
@@ -227,10 +327,30 @@ export default function LoginScreen() {
               </Text>
             )}
 
+            {/* Retrying can never fix a too-old build, so offer the store
+                rather than leaving the user to guess. */}
+            {updateRequired && (
+              <TouchableOpacity
+                testID="update-app-button"
+                style={styles.updateButton}
+                onPress={openAppStore}
+                activeOpacity={0.8}
+                accessibilityLabel="Update Shelf in the app store"
+                accessibilityRole="button"
+              >
+                <Text style={styles.updateButtonText}>Update Shelf</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               testID="forgot-password-link"
-              style={styles.forgotLink}
+              style={[
+                styles.forgotLink,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
+              ]}
               onPress={handleForgotPassword}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.7}
               accessibilityLabel="Forgot your password? Reset it on the web"
               accessibilityRole="link"
@@ -240,9 +360,13 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               testID="sign-in-button"
-              style={[styles.button, isSubmitting && styles.buttonDisabled]}
+              style={[
+                styles.button,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
+              ]}
               onPress={handleLogin}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.8}
               accessibilityLabel={
                 isSubmitting ? "Signing in" : "Sign in to your account"
@@ -267,10 +391,11 @@ export default function LoginScreen() {
               testID="sso-sign-in-button"
               style={[
                 styles.ssoButton,
-                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+                (isSubmitting || isSsoSubmitting || isResetting) &&
+                  styles.buttonDisabled,
               ]}
               onPress={handleSsoLogin}
-              disabled={isSubmitting || isSsoSubmitting}
+              disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.8}
               accessibilityLabel="Sign in with SSO"
               accessibilityRole="button"
@@ -308,6 +433,33 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   wordmarkWrap: {
     marginTop: spacing.md,
+  },
+  // borderLight/gray700 is the pair the DRAFT status badge already uses, so it
+  // is theme-aware and vetted for WCAG 2.1 AA contrast in light and dark.
+  updateButton: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.xl,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: spacing.md,
+  },
+  updateButtonText: {
+    color: colors.primary,
+    fontSize: fontSize.base,
+    fontWeight: "600",
+  },
+  serverChip: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.xl,
+    backgroundColor: colors.borderLight,
+  },
+  serverChipText: {
+    fontSize: fontSize.sm,
+    color: colors.gray700,
+    fontWeight: "500",
   },
   welcomeSection: {
     alignItems: "center",

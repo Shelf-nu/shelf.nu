@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
@@ -36,6 +37,10 @@ interface Props {
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
+  // Seed the extend dialog in the RESOLVED preference zone — the same zone this
+  // page displays the booking in and the extend action parses the submission in.
+  // Seeding from the device clock showed a different end date than the page.
+  const prefs = useFormatPrefs();
   const {
     isCompleted,
     isOngoing,
@@ -100,7 +105,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
-              currentEndDate={dateForDateTimeInputValue(new Date(booking.to))}
+              currentEndDate={dateForDateTimeInputValue(
+                new Date(booking.to),
+                prefs.timeZone
+              )}
             />
           </When>
           <When

@@ -6,7 +6,12 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -75,15 +80,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // can only see the bookings they are the custodian of (web parity — see
     // getBookings' `isSelfServiceOrBase` branch). Owners/admins see all. This
     // matters especially now that DRAFT bookings appear in the default view.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    /**
+     * Resolved from `roles`, not from the context's `role`, which is `roles[0]`
+     * and wrong for any privilege decision: a membership stored
+     * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE there, so a genuine admin
+     * was narrowed to their own bookings. The calendar lens must reach the same
+     * verdict from the same membership, or the two lenses on this screen
+     * disagree about what exists.
+     */
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
+    /**
+     * Custodian scope (web parity). Web matches a self-service or base user's
+     * bookings through their user link OR any of their team-member links -
+     * `custodianScopeClause`, fed by `resolveCustodianScope`. Mobile matched
+     * only the user link, so a booking whose custodian was assigned by picking
+     * a TEAM MEMBER rather than a user was visible on the website and missing
+     * from the phone, for the very user it belonged to.
+     */
+    const custodianScope = isSelfServiceOrBase
+      ? await resolveCustodianScope({ userId: user.id, organizationId })
+      : null;
+
     const where = {
       organizationId,
       status: { in: statusFilter },
-      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
       /**
        * Draft privacy (web parity). A DRAFT booking is private to whoever
        * created it — web enforces this in `getBookings`, the slim picker list
@@ -93,7 +118,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
        * AND-ed rather than merged into the search `OR` below: an OR at this
        * level would widen the search clause instead of restricting it.
        */
-      AND: [bookingDraftVisibilityClause(user.id)],
+      AND: [
+        bookingDraftVisibilityClause(user.id),
+        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
+      ],
       // Keyword search over booking name + description (the field-tech "find my
       // booking" case). Web also searches tags/custodian/asset names; name +
       // description covers the common case without a heavier query.
