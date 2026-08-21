@@ -51,6 +51,7 @@ const baseAsset = {
   id: "asset-123",
   title: "Test Asset",
   status: "AVAILABLE",
+  sequentialId: "SAM-0123" as string | null,
   mainImage: null,
   thumbnailImage: null,
   assetModel: null as {

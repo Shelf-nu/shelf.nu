@@ -75,6 +75,7 @@ beforeEach(() => {
   requireOrganizationAccessMock.mockResolvedValue("org-1");
   getMobileUserContextMock.mockResolvedValue({
     role: OrganizationRoles.ADMIN,
+    roles: [OrganizationRoles.ADMIN],
     canUseBarcodes: true,
     canUseAudits: true,
     canSeeAllCustody: true,

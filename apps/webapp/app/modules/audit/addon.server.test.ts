@@ -5,7 +5,7 @@ const { mockStripe } = vi.hoisted(() => ({
   mockStripe: {
     checkout: { sessions: { create: vi.fn() } },
     subscriptions: { create: vi.fn(), list: vi.fn(), update: vi.fn() },
-    prices: { list: vi.fn() },
+    prices: { list: vi.fn(), retrieve: vi.fn() },
     products: { retrieve: vi.fn() },
     paymentMethods: { list: vi.fn() },
   },
@@ -56,6 +56,19 @@ const baseParams = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // why: `assertPriceIsForAddon` resolves the price server-side before any
+  // subscription is created, so every path here needs a valid add-on price.
+  mockStripe.prices.retrieve.mockResolvedValue({
+    id: "price_123",
+    active: true,
+    type: "recurring",
+    product: {
+      id: "prod_1",
+      deleted: false,
+      active: true,
+      metadata: { product_type: "addon", addon_type: "audits" },
+    },
+  });
   mockPremiumIsEnabled.value = true;
 });
 
@@ -228,6 +241,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_month",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -235,6 +249,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_year",
       recurring: { interval: "year" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -242,6 +257,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_other",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "barcodes" },
       },
     };
@@ -260,6 +276,7 @@ describe("getAuditAddonPrices", () => {
       id: "price_month",
       recurring: { interval: "month" },
       product: {
+        active: true,
         metadata: { product_type: "addon", addon_type: "audits" },
       },
     };
@@ -299,6 +316,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -315,6 +333,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -337,6 +356,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("trialing");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -357,6 +377,7 @@ describe("linkAuditAddonToOrganization", () => {
     const sub = makeSubscription("active");
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -385,6 +406,7 @@ describe("linkAuditAddonToOrganization", () => {
       data: [linkedSub, unlinkedSub],
     });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -409,6 +431,7 @@ describe("linkAuditAddonToOrganization", () => {
     };
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
     mockStripe.subscriptions.update.mockResolvedValue({});
@@ -476,6 +499,7 @@ describe("getAuditSubscriptionInfo", () => {
       ],
     });
     mockStripe.products.retrieve.mockResolvedValue({
+      active: true,
       metadata: { product_type: "addon", addon_type: "audits" },
     });
 
@@ -652,5 +676,96 @@ describe("handleAuditAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("add-on price validation (entitlement bypass)", () => {
+  /**
+   * A TIER price is an ordinary active recurring price, so before this guard
+   * it was accepted here. The route enables the feature flag eagerly, and the
+   * resulting subscription carries a tierId — which makes `isAddonSubscription`
+   * return false, so the add-on webhook that would clear the flag never runs.
+   * Net effect: a one-time 7-day trial granted the paid feature permanently.
+   *
+   * detail.dev finding D094.
+   */
+  it("surfaces the price-validation message, not the generic wrapper text", async () => {
+    // The wrapping catch used to rewrite every failure to "Please try again
+    // later", handing back a 400 that asks the user to retry a request which
+    // can never succeed.
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createAuditAddonTrialSubscription({
+        customerId: "cus_123",
+        priceId: "price_tier",
+        userId: "user_1",
+        organizationId: "org_1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "The selected plan is not available for this add-on.",
+    });
+  });
+
+  it("refuses a tier price and never creates a subscription", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createAuditAddonTrialSubscription({
+        customerId: "cus_123",
+        priceId: "price_tier",
+        userId: "user_1",
+        organizationId: "org_1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tier price on the checkout path too", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createAuditAddonCheckoutSession({
+        priceId: "price_tier",
+        userId: "user_1",
+        domainUrl: "https://app.shelf.nu",
+        customerId: "cus_123",
+        organizationId: "org_1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });

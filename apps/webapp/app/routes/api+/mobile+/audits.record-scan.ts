@@ -6,6 +6,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   recordAuditScan,
   requireAuditAssignee,
@@ -30,7 +31,8 @@ import {
  *   - auditSessionId: string — the audit session being scanned
  *   - qrId: string — the QR code or barcode value that was scanned
  *   - assetId: string — the resolved asset ID
- *   - isExpected: boolean — whether the asset was expected in the audit
+ *   - isExpected: boolean (optional, ignored) — accepted so shipped builds keep
+ *     working; the server derives expectedness from the audit's own rows
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -59,15 +61,20 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
-    const { auditSessionId, qrId, assetId, isExpected } = z
-      .object({
+    const { auditSessionId, qrId, assetId } = await parseMobileBody(
+      z.object({
         auditSessionId: z.string().min(1),
         qrId: z.string().min(1),
         assetId: z.string().min(1),
-        isExpected: z.boolean(),
-      })
-      .parse(body);
+        // Accepted for wire compatibility with shipped app builds, but never
+        // forwarded: `recordAuditScan` derives expectedness from the audit's
+        // own AuditAsset row. A device queues scans offline, so its cached
+        // expected list can be hours out of date by the time they land.
+        isExpected: z.boolean().optional(),
+      }),
+      request,
+      "Audit"
+    );
 
     // Scanning writes audit data, so it is gated exactly like note, photo and
     // complete: ADMIN/OWNER act on any audit, BASE/SELF_SERVICE must be
@@ -85,7 +92,6 @@ export async function action({ request }: ActionFunctionArgs) {
         auditSessionId,
         qrId,
         assetId,
-        isExpected,
         userId: user.id,
         organizationId,
       });

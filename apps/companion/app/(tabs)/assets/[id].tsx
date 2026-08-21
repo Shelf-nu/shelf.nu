@@ -1,3 +1,4 @@
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { useState } from "react";
 import {
   View,
@@ -21,6 +22,7 @@ import {
   type AssetCustodyListEntry,
   type Location as LocationType,
   type TeamMember,
+  getApiBaseUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useOrg } from "@/lib/org-context";
@@ -457,22 +459,22 @@ export default function AssetDetailScreen() {
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label="Available"
+                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />
                     {breakdown && (
                       <>
                         <QuantityStat
-                          label="In custody"
+                          label={ASSET_QTY_STATUS_LABELS.IN_CUSTODY}
                           value={`${breakdown.inCustody}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Reserved"
+                          label={ASSET_QTY_STATUS_LABELS.RESERVED}
                           value={`${breakdown.reserved}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Checked out"
+                          label={ASSET_QTY_STATUS_LABELS.CHECKED_OUT}
                           value={`${breakdown.checkedOut}${unitSuffix}`}
                         />
                       </>
@@ -567,8 +569,10 @@ export default function AssetDetailScreen() {
                     label={entry.custodian.name}
                     value={
                       kitHeldQty > 0
-                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
-                        : qtyLabel ?? "In custody"
+                        ? `${
+                            qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                          } • ${kitHeldQty} via kit`
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                     }
                     onPress={
                       canReleaseRow
@@ -642,6 +646,26 @@ export default function AssetDetailScreen() {
                 )}
               />
             )}
+            {asset.assetModel?.name ? (
+              <InfoRow
+                icon="cube-outline"
+                label="Asset Model"
+                value={asset.assetModel.name}
+              />
+            ) : null}
+            {asset.sequentialId ? (
+              // why: the scanner's manual entry accepts a SAM ID, so the app
+              // has to be able to tell you what an asset's SAM ID is. Web has
+              // always shown it as "Asset ID".
+              <InfoRow
+                // `barcode-outline` rather than `pricetag-outline`: the Category
+                // row above already owns the pricetag, and it also matches the
+                // scanner affordance this row exists for.
+                icon="barcode-outline"
+                label="Asset ID"
+                value={asset.sequentialId}
+              />
+            ) : null}
             <InfoRow
               icon="calendar-outline"
               label="Created"
@@ -675,10 +699,7 @@ export default function AssetDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${asset.qrCodes[0].id}`}
+                    value={`${getApiBaseUrl()}/qr/${asset.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}

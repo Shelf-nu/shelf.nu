@@ -2,8 +2,12 @@ import type { User } from "@prisma/client";
 import type Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database/db.server";
+import {
+  assertPriceIsForAddon,
+  isAddonProduct,
+} from "~/modules/billing/price-validation.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, rethrowIfClientError } from "~/utils/error";
 import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
 
 const label: ErrorLabel = "Stripe";
@@ -23,6 +27,12 @@ export async function createAuditAddonCheckoutSession({
   organizationId: string;
 }): Promise<string> {
   try {
+    // The caller supplies `priceId` from the request, and an add-on price is
+    // distinguishable from a TIER price only by its product metadata. Without
+    // this, any active recurring price bought the add-on -- see
+    // ~/modules/billing/price-validation.server for why that granted it permanently.
+    await assertPriceIsForAddon({ priceId, addonType: "audits" });
+
     if (!stripe) {
       throw new ShelfError({
         cause: null,
@@ -55,6 +65,8 @@ export async function createAuditAddonCheckoutSession({
     }
     return url;
   } catch (cause) {
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -78,6 +90,12 @@ export async function createAuditAddonTrialSubscription({
   organizationId: string;
 }) {
   try {
+    // The caller supplies `priceId` from the request, and an add-on price is
+    // distinguishable from a TIER price only by its product metadata. Without
+    // this, any active recurring price bought the add-on -- see
+    // ~/modules/billing/price-validation.server for why that granted it permanently.
+    await assertPriceIsForAddon({ priceId, addonType: "audits" });
+
     if (!stripe) {
       throw new ShelfError({
         cause: null,
@@ -115,6 +133,8 @@ export async function createAuditAddonTrialSubscription({
 
     return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
   } catch (cause) {
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -139,13 +159,9 @@ export async function getAuditAddonPrices() {
       limit: 100,
     });
 
-    const auditPrices = pricesResponse.data.filter((p) => {
-      const product = p.product as Stripe.Product;
-      return (
-        product?.metadata?.product_type === "addon" &&
-        product?.metadata?.addon_type === "audits"
-      );
-    }) as PriceWithProduct[];
+    const auditPrices = pricesResponse.data.filter((p) =>
+      isAddonProduct(p.product, "audits")
+    ) as PriceWithProduct[];
 
     const monthlyPrice =
       auditPrices.find((p) => p.recurring?.interval === "month") || null;
@@ -215,10 +231,7 @@ export async function linkAuditAddonToOrganization({
         if (!productId) continue;
 
         const product = await stripe.products.retrieve(productId);
-        if (
-          product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
-        ) {
+        if (isAddonProduct(product, "audits")) {
           auditSubscription = sub;
           break;
         }
@@ -299,10 +312,7 @@ export async function getAuditSubscriptionInfo({
         if (!productId) continue;
 
         const product = await stripe.products.retrieve(productId);
-        if (
-          product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
-        ) {
+        if (isAddonProduct(product, "audits")) {
           return {
             interval:
               (item.price.recurring?.interval as "month" | "year") || "year",

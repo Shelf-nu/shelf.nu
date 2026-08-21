@@ -32,7 +32,7 @@ import { Prisma } from "@prisma/client";
 import { ShelfError } from "~/utils/error";
 // CUSTOM_FIELD_SEARCH_PATHS is owned by ./search.server (the pure, db-free
 // search module). Import it here so the UNION searches the SAME custom-field
-// paths as the Prisma buildFullAssetSearchOr — one list, no drift — and
+// paths as the old Prisma OR clause — one list, no drift — and
 // re-export for this module's existing importers/tests.
 import { CUSTOM_FIELD_SEARCH_PATHS } from "./search.server";
 

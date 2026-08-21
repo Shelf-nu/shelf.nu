@@ -137,6 +137,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
             title: true,
             status: true,
             mainImage: true,
+            // The scanner invites you to "Enter QR, barcode, or SAM ID", and
+            // this list is where that search lands — so each row has to be able
+            // to show WHICH SAM ID matched. Without it the user gets hits
+            // identified by title only and has to open each one to find out.
+            sequentialId: true,
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.
             ...ASSET_MODEL_IMAGE_SELECT,

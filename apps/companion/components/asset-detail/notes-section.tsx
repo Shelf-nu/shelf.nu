@@ -11,7 +11,7 @@ import { formatDate, type ResolvedFormatPrefs } from "@shelf/datetime";
 import type { AssetNote } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useFormatPrefs } from "@/lib/use-date-formatter";
 
 interface NotesSectionProps {
@@ -151,10 +151,11 @@ function markdocToPlainText(
       // {% tag name="..." ... /%} -> name
       .replace(/{%\s*tag\s+name="([^"]*)"[^%]*\/%}/g, "$1")
       // {% booking_status status="RESERVED" ... /%} -> Reserved
+      // why: the shared helper rather than a local sentence-caser, so a wording
+      // change in @shelf/labels reaches this preview too.
       .replace(
         /{%\s*booking_status\s+status="([^"]*)"[^%]*\/%}/g,
-        (_match, status: string) =>
-          status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, " ")
+        (_match, status: string) => formatStatus(status)
       )
       // {% assets_list count=3 ... action="added" /%} -> 3 assets added
       .replace(
