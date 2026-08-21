@@ -31,6 +31,12 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn(),
       updateMany: vitest.fn(),
     },
+    // why: `~/utils/org-validation.server` is NOT mocked here, so
+    // `assertCategoryBelongsToOrg` runs for real against this stub whenever a
+    // `defaultCategoryId` is supplied.
+    category: {
+      findFirst: vitest.fn(),
+    },
   },
 }));
 
@@ -113,6 +119,10 @@ describe("createAssetModel", () => {
     });
     // @ts-expect-error mock setup
     db.assetModel.create.mockResolvedValue(mockModel);
+    // why: the org-scope guard reads the category through this stub; a hit
+    // means the id belongs to the caller's workspace, so the create proceeds.
+    // @ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue({ id: "cat-123" });
 
     await createAssetModel({
       name: "Test Model",
@@ -126,6 +136,30 @@ describe("createAssetModel", () => {
         defaultCategory: { connect: { id: "cat-123" } },
       }),
     });
+  });
+
+  it("rejects a default category from a different organization", async () => {
+    expect.assertions(3);
+    // why: a miss is how the org-scoped lookup reports a foreign-org
+    // category. Prisma's foreign key would connect it regardless, so this
+    // guard is the only thing between form input and another tenant's data.
+    // @ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createAssetModel({
+        name: "Test Model",
+        userId: "user-123",
+        organizationId: "org-A",
+        defaultCategoryId: "cat-from-org-B",
+      })
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.category.findFirst).toHaveBeenCalledWith({
+      where: { id: "cat-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.assetModel.create).not.toHaveBeenCalled();
   });
 
   it("sets default valuation when provided", async () => {
@@ -331,6 +365,10 @@ describe("updateAssetModel", () => {
     });
     // @ts-expect-error mock setup
     db.assetModel.update.mockResolvedValue(mockModel);
+    // why: the org-scope guard reads the category through this stub; a hit
+    // means the id belongs to the caller's workspace, so the update proceeds.
+    // @ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue({ id: "cat-456" });
 
     await updateAssetModel({
       id: "asset-model-123",
@@ -344,6 +382,28 @@ describe("updateAssetModel", () => {
         defaultCategory: { connect: { id: "cat-456" } },
       }),
     });
+  });
+
+  it("rejects a default category from a different organization", async () => {
+    expect.assertions(3);
+    // why: a miss is how the org-scoped lookup reports a foreign-org category,
+    // which is what the guard has to refuse before the connect.
+    // @ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue(null);
+
+    await expect(
+      updateAssetModel({
+        id: "asset-model-123",
+        organizationId: "org-A",
+        defaultCategoryId: "cat-from-org-B",
+      })
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.category.findFirst).toHaveBeenCalledWith({
+      where: { id: "cat-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
+    expect(db.assetModel.update).not.toHaveBeenCalled();
   });
 });
 

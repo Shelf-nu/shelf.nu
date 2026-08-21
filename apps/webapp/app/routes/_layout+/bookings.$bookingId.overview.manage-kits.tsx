@@ -996,7 +996,11 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // For Case 1: Check if kit is checked out in current booking

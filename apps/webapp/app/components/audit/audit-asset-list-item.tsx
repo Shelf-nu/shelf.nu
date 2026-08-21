@@ -95,7 +95,11 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   // is the strongest case for the badge — the field worker matches the label
   // on their hand to a row on screen.
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
 
   // Show audit status column when "ALL" or "EXPECTED" filter is active

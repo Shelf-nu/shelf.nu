@@ -39,6 +39,7 @@ import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import type { EntityForCodeResolution } from "~/modules/barcode/display";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getPaginatedAndFilterableKits,
@@ -405,12 +406,16 @@ export default function KitsIndexPage() {
                       to={`/kits/${resource.id}/assets`}
                       title={resource.title}
                     />
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
                         availableToBook={
                           resource.extendedProps?.availableToBook
                         }
+                      />
+                      <KitCalendarCodeBadge
+                        qrCodes={resource.extendedProps?.qrCodes}
+                        barcodes={resource.extendedProps?.barcodes}
                       />
                     </div>
                   </div>
@@ -466,6 +471,42 @@ export default function KitsIndexPage() {
   );
 }
 
+/**
+ * The code chip for one kit row in the availability CALENDAR view.
+ *
+ * The list and calendar views of this page render the same kits, so they must
+ * render the same chip through the same resolver — see
+ * `.claude/rules/code-bearing-entity-list-consistency.md`. The calendar builds
+ * its rows from `extendedProps` rather than the loader payload, hence the two
+ * explicit props instead of a whole entity.
+ *
+ * A component rather than an inline block because it needs
+ * `useCurrentOrganization`, and the calendar renders rows inside a callback
+ * where a hook cannot go.
+ *
+ * @param qrCodes - QR rows forwarded by `useKitAvailabilityData`
+ * @param barcodes - Barcode rows forwarded by `useKitAvailabilityData`
+ * @returns The shared chip, or `null` before the organization resolves
+ */
+function KitCalendarCodeBadge({
+  qrCodes,
+  barcodes,
+}: {
+  qrCodes?: EntityForCodeResolution["qrCodes"];
+  barcodes?: EntityForCodeResolution["barcodes"];
+}) {
+  const organization = useCurrentOrganization();
+  if (!organization) return null;
+
+  const code = resolveDisplayCode({
+    entity: { qrCodes, barcodes },
+    organization,
+    entityKind: "kit",
+  });
+
+  return code ? <AssetCodeBadge {...code} /> : null;
+}
+
 function ListContent({
   item,
   bulkActions,
@@ -498,7 +539,11 @@ function ListContent({
   // back to QR when the workspace prefers SAM.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   return (
