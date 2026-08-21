@@ -2,7 +2,7 @@
   "expo": {
     "name": "Shelf",
     "slug": "shelf-companion",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shelf",
@@ -109,7 +109,7 @@
       }
     },
     "owner": "shelfassetmanagement",
-    "runtimeVersion": "1.3.0",
+    "runtimeVersion": "1.4.0",
     "updates": {
       "url": "https://u.expo.dev/b6d6a6cb-c242-4474-815f-b55d5e691c58",
       "enabled": true,
