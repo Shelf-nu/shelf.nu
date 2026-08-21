@@ -87,7 +87,23 @@ cd apps/companion
 #    HERE, not at publish time. Pin the platforms: `expo export` defaults to
 #    ALL platforms including web, which EAS excludes from updates — exporting
 #    it just ships a web bundle to Sentry in step 3.
-eas env:exec production "npx expo export --dump-sourcemap -p ios -p android"
+#    --clear is REQUIRED, not tidiness: Metro caches transformed modules keyed
+#    on file content alone, so a cached module keeps the EXPO_PUBLIC_* values
+#    that were inlined when it was cached. Without it, `eas env:exec production`
+#    is silently ignored and the last environment to bundle in this tree wins.
+eas env:exec production "npx expo export --clear --dump-sourcemap -p ios -p android"
+
+# 1b. GATE — prove the artifact before step 2 publishes it. Read the baked
+#     values out of the bundle rather than trusting step 1's environment.
+for f in dist/_expo/static/js/*/*.hbc; do
+  echo "$f"
+  strings "$f" | grep -oE 'https://[a-z0-9]+\.supabase\.co' | sort -u
+done
+# Expect ONLY the production Supabase host (`eas env:list --environment
+# production` is the source of truth for which that is). Any other host means
+# the bundle carries the wrong project — STOP, do not publish, re-run step 1.
+# `http://localhost:3000` appearing is expected and harmless: both sides of the
+# `__DEV__` ternary in lib/api/client.ts are string literals in the bundle.
 
 # 2. Publish exactly that bundle. --skip-bundler is what makes this safe: it
 #    guarantees the artifact published here is byte-identical to the one
@@ -95,8 +111,7 @@ eas env:exec production "npx expo export --dump-sourcemap -p ios -p android"
 #    artifact step 3's source maps describe. Without it eas re-bundles, and
 #    the three steps can disagree about what shipped.
 eas update --channel production --skip-bundler --input-dir dist \
-  --message "fix: <what changed> (#PR)" \
-  --private-key-path "$SHELF_OTA_PRIVATE_KEY"
+  --message "fix: <what changed> (#PR)"
 
 # 3. Upload the maps for the bundle that just shipped. All four vars are
 #    required: the app.json Sentry plugin is a bare string, so the uploader
@@ -106,9 +121,7 @@ SENTRY_AUTH_TOKEN=<token> SENTRY_ORG=<org> SENTRY_PROJECT=<project> \
   npx sentry-expo-upload-sourcemaps dist
 ```
 
-This is THE canonical publish procedure — every flag matters. Set
-`SHELF_OTA_PRIVATE_KEY` to wherever your copy of the signing key lives; it is
-never in the repo (see key custody below).
+This is THE canonical publish procedure — every flag matters.
 
 **Why source maps are step 3 and not optional:** native builds upload theirs in
 an Xcode build phase, which covers nothing that ships over the air. Skip step 3
@@ -127,11 +140,25 @@ precisely when we are shipping blind hotfixes and most need to read them.
 > **⚠️ The production environment is applied in step 1, not step 2 —
 > `EXPO_PUBLIC_*` values are inlined at export time.** With `--skip-bundler`, an
 > `--environment production` flag on `eas update` no longer influences what
-> shipped. Exporting from a dev shell without the production environment is what
-> bakes a wrong `EXPO_PUBLIC_API_URL` into a bundle that then reaches live users.
-> `lib/api/client.ts` falls back to `https://app.shelf.nu` outside `__DEV__` so
-> this can't strand users on localhost, but that is a backstop, not the
-> mechanism — export under the production environment.
+> shipped. Exporting without the production environment is what bakes wrong
+> `EXPO_PUBLIC_*` values into a bundle that then reaches live users.
+>
+> **`eas env:exec production` alone does not guarantee this.** Metro's transform
+> cache is keyed on file content, not on the environment, so a module cached by
+> an earlier bundle keeps the values inlined then. Running the export without
+> `--clear` in a tree that has bundled under any other environment — a dev
+> server, a local `expo export`, an e2e run — reproduces that earlier
+> environment's values and reports success. This is why step 1 carries `--clear`
+> and step 1b reads the values back out of the artifact.
+>
+> Only `EXPO_PUBLIC_API_URL` has a backstop: `lib/api/client.ts` falls back to
+> `https://app.shelf.nu` outside `__DEV__`, and only when the variable is UNSET,
+> not when it is set to something wrong. `lib/supabase.ts` has none — it reads
+> `EXPO_PUBLIC_SUPABASE_URL` / `_ANON_PUBLIC` with non-null assertions and builds
+> the client at module scope. A bundle carrying the wrong Supabase project points
+> every updated device at that project, where the session it holds was never
+> minted and will not validate. Step 1b is the only thing standing between that
+> and every live install.
 
 Users get it on the **next app launch**: the running app launches instantly from
 its cached bundle (`fallbackToCacheTimeout: 0`) and downloads the new bundle in
@@ -139,18 +166,14 @@ the background, applying it on the launch after that. No review, no store wait.
 
 Verify what's live: `eas update:list --branch production` (check the **runtime
 version** column, not just the message).
-**Rolling back.** Every command that publishes a directive needs the signing
-key, not just `eas update` — with code signing enabled these fail immediately
-without it, which is not what you want to discover mid-incident:
+**Rolling back.**
 
 ```bash
 # Send installs back to the bundle embedded in their build:
-eas update:roll-back-to-embedded --channel production \
-  --private-key-path "$SHELF_OTA_PRIVATE_KEY"
+eas update:roll-back-to-embedded --channel production
 
 # Or re-publish a known-good earlier update:
-eas update:republish --channel production \
-  --private-key-path "$SHELF_OTA_PRIVATE_KEY"
+eas update:republish --channel production
 ```
 
 Republish from a commit carrying the **same version** as the bad update, or the
@@ -158,68 +181,69 @@ rollback lands on a different runtime version and reaches nobody.
 
 ## ⚠️ Activation cost — this needs ONE build first
 
-OTA only works on builds that were **built with `expo-updates` in them**. Every
-store build up to and including 1.2.0 predates `expo-updates`, so none of them
-can receive OTA. The **1.3.0 build (build 32+) is the first OTA-capable one** —
-it is the activation build. From that build onward, every JS-only fix on that
-app version ships free via `eas update`.
+OTA needs two things in the installed binary, and both are compiled in:
 
-So: cut the 1.3.0 build (the last "paid" one for a while) → publish JS fixes
-over the air after that.
+| Requirement                | First build that has it |
+| -------------------------- | ----------------------- |
+| `expo-updates` present     | 1.3.0 (build 32)        |
+| accepts an unsigned bundle | **1.4.0**               |
 
-## Code signing (required — the client verifies every bundle)
+1.2.0 and earlier predate `expo-updates` entirely. 1.3.x has it but embeds a
+signing certificate and refuses anything unsigned, which this account cannot
+produce (see the code-signing section). So **1.4.0 is the first build that can
+actually receive an update**, and no 1.3.x install can ever be reached over the
+air — those users need a store update.
 
-OTA without code signing means the app trusts **any** bundle the EAS endpoint
-serves, so a compromised EAS account or CI token could push malicious JS to
-every install silently. Code signing closes that: the app embeds a public
-**certificate** and refuses any update not signed by the matching **private
-key**.
+From 1.4.0 onward, every JS-only fix on that app version ships free via
+`eas update`.
 
-- `app.json` → `updates.codeSigningCertificate` + `codeSigningMetadata`.
-- `ios/Shelf/Supporting/Expo.plist` → `EXUpdatesCodeSigningCertificate` (PEM
-  inline) + `EXUpdatesCodeSigningMetadata` (bare iOS reads the plist, not
-  app.json).
-- Public certificate: `certs/certificate.pem` — committed, embedded in the app.
-- Private key: `keys/private-key.pem` — **gitignored, never committed.**
+## Code signing (off — and why)
 
-Publish signs with the private key (kept as a temporary untracked local copy or
-injected by CI — see custody below). The command lives in the canonical publish
-procedure at the top of this document — one copy, so the two can never drift.
+Updates are published **unsigned**. `eas update` takes no key, and the app
+accepts any bundle the EAS endpoint serves for its channel and runtime version.
 
-### 🔑 Key custody
+The reason is a plan boundary, not a preference: **EAS Update code signing is
+sold only on the Enterprise plan**, and this account is on Starter. Attempting a
+signed publish fails at the signing step with
 
-Only the **public certificate** (`certs/certificate.pem`) is committed and
-embedded in the app. The **private key is never committed**: the `keys/`
-directory is gitignored, and any local copy used to sign must stay untracked (or
-be a CI-injected file). The whole point is that an **EAS-account compromise
-can't sign updates**, so the private key must live outside EAS.
+```
+EAS Update code signing requires a subscription to the EAS Enterprise plan.
+```
 
-**Current pair (committed cert):** generated 2026-07-29, valid to 2036-07-29,
-SHA1 `6A:70:1A:A1:70:F9:DA:F0:11:8F:EA:C7:E7:62:4C:AA:E5:2D:23:EA`. Generated by
-the CTO on his own machine; the private key has never left it. This is the pair
-the activation build (32+) embeds, so **do not rotate it again casually**: old
-builds keep trusting the certificate they shipped with, so a rotation strands
-every install until they update the binary. Rotating costs a build.
+and — the trap worth knowing — **the update group is created before signing
+runs**. A failed signed publish leaves an unsigned group sitting on the channel.
+After any failed publish, check and clean up:
 
-Ongoing rules:
+```bash
+eas update:list --branch production
+eas update:delete <group-id>
+```
 
-1. **Store the private key in a secrets manager / CI secret, NOT in the EAS
-   account and NOT in the repo.** Whoever runs `eas update` supplies it at
-   publish time via `--private-key-path`.
-2. **Rotate only when the key is exposed** (leaked, or ever tracked in git), and
-   treat it as build-worthy work, not a config tweak:
-   ```bash
-   cd apps/companion
-   npx expo-updates codesigning:generate \
-     --key-output-directory keys --certificate-output-directory certs \
-     --certificate-validity-duration-years 10 \
-     --certificate-common-name "Shelf Companion"
-   npx expo-updates codesigning:configure \
-     --certificate-input-directory=certs --key-input-directory=keys
-   ```
-   `codesigning:configure` updates `app.json` only. You must **also** paste the
-   new PEM into `ios/Shelf/Supporting/Expo.plist`
-   (`EXUpdatesCodeSigningCertificate`), because bare iOS reads the plist, not
-   `app.json`. Commit the new `certs/certificate.pem` **and** the plist, then cut
-   a new build: until users install it, updates signed with the new key are
-   rejected by every existing install.
+### What this costs
+
+The EAS account is the **only** trust boundary for every install. Anyone who can
+run `eas update` against this project can execute JavaScript inside the app on
+every phone, with the signed-in user's session, bypassing Apple and Google
+review. Two-factor authentication on the Expo account is therefore not optional
+housekeeping — it is the control that replaced the signature.
+
+Keep access tokens at zero unless a CI job genuinely needs one, and prefer a
+robot user scoped to this project over a personal token.
+
+### Reinstating it
+
+`certs/certificate.pem` is still committed and still valid, so signing can be
+turned back on without generating anything new:
+
+1. Restore `updates.codeSigningCertificate` and `updates.codeSigningMetadata`
+   in `app.json`, and the matching `EXUpdatesCodeSigningCertificate` /
+   `EXUpdatesCodeSigningMetadata` keys in `ios/Shelf/Supporting/Expo.plist`.
+2. Cut a new store build. The setting is compiled in, so it only governs builds
+   made after the change — it cannot be applied over the air.
+3. Publish with `--private-key-path <key>`, which requires the Enterprise plan.
+
+The private key is held outside the repo and pairs with the committed
+certificate (SHA-256 `41:AD:C3:E7:31:31:3E:5B:6D:72:81:69:3D:CC:38:19:E9:B0:C5:E5:D8:58:9D:02:3B:05:2E:E9:CB:5E:FB:78`).
+Never rotate the certificate to fix a key problem: installs verify against the
+certificate they shipped with, so a rotation strands every existing install
+until it takes a new store build.
