@@ -93,9 +93,17 @@ const Row = ({
 }: {
   item: Asset & {
     category: Pick<Category, "id" | "name" | "color"> | null;
-    /** Cover image of the asset's model, rendered when the asset has no image
-     * of its own. See `~/modules/asset/image-resolution`. */
-    assetModel?: { image: string | null; thumbnailImage: string | null } | null;
+    /**
+     * Cover image of the asset's model, rendered when the asset has no image
+     * of its own. See `~/modules/asset/image-resolution`.
+     *
+     * Required and nullable, which is what keeps the two cases apart: `null`
+     * says "this asset has no model" and is a real answer, while an absent key
+     * says the loader did not select the relation. Making it optional collapses
+     * that distinction, and so does `?? null` at the call site — both render
+     * every inheriting asset as the placeholder without anything failing.
+     */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
   };
 }) => {
   const { category } = item;
@@ -112,7 +120,7 @@ const Row = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
-                  assetModel: item.assetModel ?? null,
+                  assetModel: item.assetModel,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

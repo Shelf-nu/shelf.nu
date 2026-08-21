@@ -3,6 +3,7 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import {
   getScannerPickerMeta,
@@ -233,7 +234,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
           asset: barcode.asset
             ? {
-                ...barcode.asset,
+                // Collapse the model-image cascade into the flat image
+                // fields the scanner drawers read; the nested relation is
+                // dropped so the row carries one source of truth.
+                ...serializeAssetImage(barcode.asset),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

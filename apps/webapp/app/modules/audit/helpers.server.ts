@@ -343,11 +343,17 @@ export async function createAuditCompletedNote({
   // Build the note content starting with completion stats
   let content = `Audit completed. Found **${foundCount}/${expectedCount}** expected assets (**${percentage}%**), **${missingCount}** missing, **${unexpectedCount}** unexpected. [View receipt](/audits/${auditSessionId}/overview?receipt=1)`;
 
-  // Append user's completion note if provided
+  // Append user's completion note if provided. The note is untrusted text
+  // spliced into a body the feed renders through Markdoc, so its delimiters
+  // are stripped before it becomes literal blockquote content — otherwise a
+  // completer could forge the `{% audit_images %}` tag appended below and
+  // pull evidence from an audit they are not on.
   if (completionNote && completionNote.trim()) {
-    content += `\n\n**Completion note:**\n\n> ${completionNote
-      .trim()
-      .replace(/\n/g, "\n> ")}`;
+    const safeCompletionNote = stripMarkdocDelimiters(completionNote.trim());
+    content += `\n\n**Completion note:**\n\n> ${safeCompletionNote.replace(
+      /\n/g,
+      "\n> "
+    )}`;
   }
 
   // Fetch and append audit images if any were uploaded during completion

@@ -3,7 +3,10 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
@@ -388,10 +391,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               return {
                 mainImage: isPlaceholder ? null : image.fullUrl,
                 thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+                mainImageExpiration: serializeImageExpiration(
+                  image.source,
+                  asset.mainImageExpiration?.toISOString() ?? null
+                ),
               };
             })(),
-            mainImageExpiration:
-              asset.mainImageExpiration?.toISOString() ?? null,
             // `getAssets` widens its `extraInclude` arg to
             // `Prisma.AssetInclude`, so the return type can't narrow back
             // to the `assetLocations` shape we requested above. Cast at

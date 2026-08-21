@@ -112,6 +112,7 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -135,6 +136,7 @@ import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
   assertAssetsBelongToOrg,
+  assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
   assertKitsBelongToOrg,
   assertLocationBelongsToOrg,
@@ -163,10 +165,7 @@ import {
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
-import {
-  buildAssetSearchUnion,
-  type AssetSearchIdRow,
-} from "./search-union.server";
+import { resolveAssetSearchIds } from "./search-ids.server";
 import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
@@ -654,8 +653,12 @@ export async function getAssets(params: {
         where.id = { in: [] };
       } else {
         // Resolve the search to a set of matching asset ids via the shared
-        // org-scoped UNION (buildAssetSearchUnion) — index-driven, org-scoped
-        // branches, ~165ms vs the old multi-table OR's cross-org seq scans.
+        // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
+        // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
+        // cross-org seq scans. The helper is retry-wrapped (a raw $queryRaw
+        // bypasses the client's auto-retry extension) and guards the id set
+        // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
+        // rather than letting an extreme org + very broad term hard-fail.
         // Setting where.OR here — BEFORE the category/tag/location/team-member
         // filters below — preserves the historical OR-entanglement: those
         // filters append to where.OR, so search OR-combines with them exactly
@@ -664,27 +667,11 @@ export async function getAssets(params: {
         // subset and fell back on zero rows); id-shaped searches therefore now
         // return the full result set — a superset of before, the more-correct
         // answer.
-        // Wrapped in withPrismaRetry (operationIsRead) like the advanced
-        // index's raw query below — a raw $queryRaw bypasses the client's
-        // auto-retry extension, so a transient pool/connection blip on the
-        // id-resolution query would otherwise surface as a hard error (the
-        // SHELF-WEBAPP-227 class) instead of being retried.
-        const rows = await withPrismaRetry(
-          () =>
-            db.$queryRaw<AssetSearchIdRow[]>(
-              Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
-                organizationId,
-                terms: searchTerms,
-              })} AS "search_ids"`
-            ),
-          { operationIsRead: true }
-        );
-        // Materialize the matching ids into a Prisma `id: { in }` member.
-        // Bounded by the org's asset count; an extreme org + a very broad term
-        // could push the bind-param list toward Postgres' ~65k ceiling — if
-        // that ever bites, switch to a raw fetch-by-ids (like the advanced
-        // index's inlined subquery, which never materializes the id set).
-        where.OR = [{ id: { in: rows.map((row) => row.id) } }];
+        const ids = await resolveAssetSearchIds({
+          organizationId,
+          terms: searchTerms,
+        });
+        where.OR = [{ id: { in: ids } }];
       }
     }
 
@@ -971,6 +958,13 @@ export async function getAssets(params: {
 
     return { assets, totalAssets };
   } catch (cause) {
+    // A deliberate client error — e.g. the >65k bind-param ceiling 400 thrown by
+    // resolveAssetSearchIds — must reach the caller with its own actionable
+    // message intact. The generic wrapper below inherits the 400 status from the
+    // cause but overwrites the message ("refine your search" → "something went
+    // wrong"), so pass it straight through. Also covers Cmd+K, which shares
+    // getAssets without the getPaginatedAndFilterableAssets wrapper.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching assets",
@@ -1334,8 +1328,14 @@ export async function createAsset({
         );
       }
 
-      /** If a categoryId is passed, link the category to the asset. */
-      if (categoryId && categoryId !== "uncategorized") {
+      /**
+       * If a categoryId is passed, link the category to the asset. The id is
+       * proven to belong to this org inside the transaction below
+       * (assertCategoryBelongsToOrg), matching the kit / assetModel /
+       * custom-field IDOR guards.
+       */
+      const hasCategory = Boolean(categoryId && categoryId !== "uncategorized");
+      if (hasCategory) {
         Object.assign(data, {
           category: {
             connect: {
@@ -1345,13 +1345,13 @@ export async function createAsset({
         });
       }
 
-      /** If an assetModelId is passed, link the asset model to the asset.
-       * Org-scope-guard before the connect — Prisma's FK only enforces
-       * that the row exists, not that it belongs to the caller's
-       * organization, so without this check a user in Org A could
-       * link their new asset to Org B's model (hex-security r3341845640
-       * / r3350881506). Same pattern as the other org-scope guards
-       * in this file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
+      /**
+       * If an assetModelId is passed, link the asset model to the asset.
+       * Org-scope-guard before the connect — Prisma's FK only enforces that
+       * the row exists, not that it belongs to the caller's organization, so
+       * without this check a user in Org A could link their new asset to
+       * Org B's model. Same pattern as the other org-scope guards in this
+       * file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
        */
       if (assetModelId) {
         await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
@@ -1481,6 +1481,17 @@ export async function createAsset({
         // as the assetModel / custom-field guards).
         if (hasKit) {
           await assertKitsBelongToOrg({ kitIds: [kitId!], organizationId }, tx);
+        }
+
+        // SECURITY (cross-org IDOR): the categoryId comes from form/CSV input
+        // and is connected by the nested create above with no org scoping of
+        // its own. Prisma's foreign key only proves the row exists, not that
+        // it belongs to this workspace, so prove ownership before the write.
+        if (hasCategory) {
+          await assertCategoryBelongsToOrg(
+            { categoryId: categoryId!, organizationId },
+            tx
+          );
         }
 
         const created = await tx.asset.create({
@@ -1814,9 +1825,8 @@ export async function bulkCreateAssetsFromModel({
       organizationId,
     });
   }
-  // kitId + customFieldsValues + categoryId — createAsset's connect will
-  // throw a 400 on cross-org id (Prisma surfaces a foreign-key violation).
-  // Could harden with explicit asserts in a future polish.
+  // kitId, customFieldsValues and categoryId need no assert here: createAsset
+  // proves each of them against this organization inside its own transaction.
 
   // ── Read model + resolve defaults ────────────────────────────────────
 
@@ -4382,6 +4392,11 @@ export async function getPaginatedAndFilterableAssets({
       ...teamMembersData,
     };
   } catch (cause) {
+    // Preserve deliberate client errors (e.g. the search-id ceiling 400 from
+    // getAssets) so the actionable message survives this second wrapper — the
+    // web /assets index and admin org-assets route both come through here. See
+    // getAssets' catch for the rationale.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Fail to fetch paginated and filterable assets",
