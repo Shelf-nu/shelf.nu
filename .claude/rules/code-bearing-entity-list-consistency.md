@@ -87,13 +87,23 @@ of the surface grid:
 deciding what to render:
 
 ```tsx
+// On an ASSET surface:
 const displayCode = currentOrganization
   ? resolveDisplayCode({
       entity: item,
       organization: currentOrganization,
-      // "kit" on a kit surface — see rule 1; the compiler will not let you
-      // omit it, but it cannot tell you which one is right.
       entityKind: "asset",
+    })
+  : null;
+
+// On a KIT surface, the same call with the one word that changes. The compiler
+// will not let you omit it — but it cannot tell you which one is right, so
+// this is the line to check when you copy a row component between surfaces.
+const kitDisplayCode = currentOrganization
+  ? resolveDisplayCode({
+      entity: kit,
+      organization: currentOrganization,
+      entityKind: "kit",
     })
   : null;
 
