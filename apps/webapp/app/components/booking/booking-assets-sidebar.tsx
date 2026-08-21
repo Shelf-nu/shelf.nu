@@ -345,7 +345,11 @@ function AssetTitleAndStatus({
   // QR when the org has lost the barcode add-on, so this read is always safe.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: asset, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: asset,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   const qtyBooked = asset.bookedQuantity ?? 0;
   const qtyDispositioned = dispositionedByAsset?.[asset.id] ?? 0;

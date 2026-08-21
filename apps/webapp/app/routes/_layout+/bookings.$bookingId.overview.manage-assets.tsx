@@ -1612,6 +1612,7 @@ const RowComponent = ({
                     {...resolveDisplayCode({
                       entity: item,
                       organization: currentOrganization,
+                      entityKind: "asset",
                     })}
                   />
                 ) : null}
