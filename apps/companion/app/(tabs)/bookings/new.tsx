@@ -65,9 +65,21 @@ function defaultBookingWindow(
   timeZone: string,
   day?: string
 ): { from: Date; to: Date } {
-  const onDay = /^\d{4}-\d{2}-\d{2}$/.test(day ?? "")
+  // The shape check is not enough on its own: it passes "2026-13-45", which
+  // `instantFromWallClockInZone` would silently roll forward into 2027. Round
+  // trip through a Date and keep the value only if every part survives.
+  const parts = /^\d{4}-\d{2}-\d{2}$/.test(day ?? "")
     ? (day as string).split("-").map(Number)
     : null;
+  const probe = parts ? new Date(parts[0], parts[1] - 1, parts[2]) : null;
+  const onDay =
+    parts &&
+    probe &&
+    probe.getFullYear() === parts[0] &&
+    probe.getMonth() === parts[1] - 1 &&
+    probe.getDate() === parts[2]
+      ? parts
+      : null;
   if (onDay) {
     const at = (hour: number) =>
       instantFromWallClockInZone(
