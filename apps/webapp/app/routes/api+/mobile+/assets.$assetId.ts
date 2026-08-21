@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -331,6 +332,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImage: flattened.mainImage,
         thumbnailImage: flattened.thumbnailImage,
         imageSource: flattened.imageSource,
+        mainImageExpiration: serializeImageExpiration(
+          flattened.imageSource,
+          assetData.mainImageExpiration
+        ),
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,
