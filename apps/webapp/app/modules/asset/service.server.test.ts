@@ -1919,6 +1919,42 @@ describe("createAsset cross-org guards", () => {
       select: { id: true },
     });
   });
+
+  it("rejects a categoryId from a different organization", async () => {
+    expect.assertions(2);
+    // Prisma's foreign key only proves the Category row exists — it says
+    // nothing about which workspace owns it, so a foreign-org id would be
+    // connected verbatim without this guard.
+    (db.category.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        categoryId: "cat-from-org-B",
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.category.findFirst).toHaveBeenCalledWith({
+      where: { id: "cat-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+
+  it("does not look up a category when the asset is uncategorized", async () => {
+    // "uncategorized" is the form's empty sentinel, not an id.
+    await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      categoryId: "uncategorized",
+    } as any).catch(() => undefined);
+
+    expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 describe("updateAsset custom-field writes", () => {
