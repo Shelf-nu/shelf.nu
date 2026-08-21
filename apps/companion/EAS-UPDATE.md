@@ -20,11 +20,11 @@ ride an OTA bundle.
 
 ## Runtime version = app version
 
-`app.json` sets `runtimeVersion: "1.3.0"`, kept equal to the app version by
+`app.json` sets `runtimeVersion: "1.4.0"`, kept equal to the app version by
 hand. An OTA update only reaches builds whose **runtime version matches**, and
 only on the **channel** it was published to (see Channels below). So an update
-published to `production` for runtime `1.3.0` reaches the **OTA-capable**
-`1.3.0` production builds (ones built with `expo-updates`; the
+published to `production` for runtime `1.4.0` reaches the **update-capable**
+`1.4.0` production builds (ones that accept an unsigned bundle; the
 pre-`expo-updates` binaries — every store build up to and including 1.2.0 —
 can't check for updates at all), and is ignored by a future `1.4.0` build until
 you publish an update for `1.4.0`. This is the safety net: JS that assumes new
@@ -93,17 +93,23 @@ cd apps/companion
 #    is silently ignored and the last environment to bundle in this tree wins.
 eas env:exec production "npx expo export --clear --dump-sourcemap -p ios -p android"
 
-# 1b. GATE — prove the artifact before step 2 publishes it. Read the baked
-#     values out of the bundle rather than trusting step 1's environment.
-for f in dist/_expo/static/js/*/*.hbc; do
-  echo "$f"
-  strings "$f" | grep -oE 'https://[a-z0-9]+\.supabase\.co' | sort -u
-done
-# Expect ONLY the production Supabase host (`eas env:list --environment
-# production` is the source of truth for which that is). Any other host means
-# the bundle carries the wrong project — STOP, do not publish, re-run step 1.
-# `http://localhost:3000` appearing is expected and harmless: both sides of the
-# `__DEV__` ternary in lib/api/client.ts are string literals in the bundle.
+# 1b. GATE — prove the artifact before step 2 publishes it. Reads the baked
+#     values back out of the bundle rather than trusting step 1's environment,
+#     and EXITS NON-ZERO on a mismatch so a copy-pasted run cannot sail past it.
+#     `http://localhost:3000` in the bundle is expected and harmless: both sides
+#     of the `__DEV__` ternary in lib/api/client.ts are literals in every build.
+EXPECTED=$(eas env:list --environment production 2>/dev/null \
+  | sed -n 's/.*EXPO_PUBLIC_SUPABASE_URL=\(https:\/\/[a-z0-9]*\.supabase\.co\).*/\1/p' | head -1)
+[ -n "$EXPECTED" ] || { echo "GATE: cannot read the expected host"; exit 1; }
+
+FOUND=$(cat dist/_expo/static/js/*/*.hbc \
+  | strings | grep -oE 'https://[a-z0-9]+\.supabase\.co' | sort -u)
+[ "$FOUND" = "$EXPECTED" ] || {
+  echo "GATE FAILED — bundle points at: $FOUND"
+  echo "               expected only:  $EXPECTED"
+  exit 1
+}
+echo "GATE PASSED — $EXPECTED"
 
 # 2. Publish exactly that bundle. --skip-bundler is what makes this safe: it
 #    guarantees the artifact published here is byte-identical to the one
@@ -206,7 +212,7 @@ The reason is a plan boundary, not a preference: **EAS Update code signing is
 sold only on the Enterprise plan**, and this account is on Starter. Attempting a
 signed publish fails at the signing step with
 
-```
+```text
 EAS Update code signing requires a subscription to the EAS Enterprise plan.
 ```
 
