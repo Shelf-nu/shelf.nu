@@ -186,10 +186,10 @@ async function persistActiveServer(config: ServerConfig): Promise<void> {
 /**
  * Applies a server config: a no-op, a credential refresh, or a full switch.
  *
- * The three cases exist because a customer can rotate their Supabase project
- * while keeping the same base URL. Treating that as "already active" — which an
- * earlier `baseUrl`-only guard did — left every enrolled device holding a stale
- * anon key with no in-app way to recover.
+ * A matching `baseUrl` does NOT mean "already active": a customer can rotate
+ * their Supabase project while keeping the same base URL, and an app that
+ * skips such a config keeps using a stale anon key with no in-app way to
+ * recover. Compare the credentials, not just the URL.
  *
  * A credential refresh deliberately does NOT tear down server-scoped state: the
  * selected organisation and audit drafts still belong to this same instance, so
