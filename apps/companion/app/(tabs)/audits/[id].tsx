@@ -119,8 +119,12 @@ type DisplayAsset = {
   categoryName: string | null;
   custodianName: string | null;
   /**
-   * The audit-asset row id, present only once the asset has been scanned.
-   * Keys this asset's evidence in the `byAuditAsset` payload.
+   * The audit-asset row id, which keys this asset's evidence in the
+   * `byAuditAsset` payload.
+   *
+   * Carried for every EXPECTED asset, scanned or not — evidence can be
+   * attached without a scan. Null only for an unexpected asset the payload has
+   * no expected row for.
    */
   auditAssetId: string | null;
   /** Counts from the detail payload — what the row advertises before any fetch. */
@@ -187,6 +191,18 @@ function AuditDetailContent() {
   // so it cannot itself trigger a render or go stale inside the callback.
   const evidenceInFlight = useRef<string | null>(null);
 
+  // Aborts the requests themselves, not just their results. The discard check
+  // below already stops a superseded reply from being applied, but without this
+  // the socket stays open until the server answers — and this screen survives a
+  // trip to the scanner, so those add up on a stockroom connection. The client
+  // takes a signal for exactly this; the sibling evidence modal already passes
+  // one.
+  //
+  // Keyed by target, because concurrent fetches for DIFFERENT rows are
+  // deliberate here: opening row B must not cancel row A's fetch, or A's
+  // results never arrive to merge.
+  const evidenceAborts = useRef(new Map<string, AbortController>());
+
   // Drop everything the moment the context changes, before any render can
   // show it. Clearing on arrival would be too late: the sheet would paint the
   // previous workspace's rows for a frame first.
@@ -195,7 +211,18 @@ function AuditDetailContent() {
     setEvidenceError(null);
     setEvidenceLoading(false);
     evidenceInFlight.current = null;
+    evidenceAborts.current.forEach((controller) => controller.abort());
+    evidenceAborts.current.clear();
   }, [evidenceContext]);
+
+  // Nothing in flight should outlive the screen.
+  useEffect(() => {
+    const inFlight = evidenceAborts.current;
+    return () => {
+      inFlight.forEach((controller) => controller.abort());
+      inFlight.clear();
+    };
+  }, []);
 
   /**
    * Loads the evidence for ONE target: a single audited asset, or the audit
@@ -217,6 +244,8 @@ function AuditDetailContent() {
       const requestFor = `${evidenceContext}:${auditAssetId ?? "general"}`;
       if (evidenceInFlight.current === requestFor) return;
       evidenceInFlight.current = requestFor;
+      const controller = new AbortController();
+      evidenceAborts.current.set(requestFor, controller);
       // Only show the spinner when there is nothing to show yet — on a refetch
       // the previous evidence stays put underneath.
       setEvidence((current) => {
@@ -227,7 +256,7 @@ function AuditDetailContent() {
       const { data, error } = await api.auditEvidence(
         id,
         currentOrg.id,
-        undefined,
+        controller.signal,
         auditAssetId
       );
       // The context may have changed while this was in the air. Anything from
@@ -249,6 +278,9 @@ function AuditDetailContent() {
       }
       setEvidenceLoading(false);
       evidenceInFlight.current = null;
+      if (evidenceAborts.current.get(requestFor) === controller) {
+        evidenceAborts.current.delete(requestFor);
+      }
     },
     [currentOrg?.id, id, evidenceContext]
   );
@@ -479,9 +511,14 @@ function AuditDetailContent() {
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
-        auditAssetId: scan?.auditAssetId ?? null,
-        notesCount: scan?.auditNotesCount ?? 0,
-        imagesCount: scan?.auditImagesCount ?? 0,
+        // Read the EXPECTED asset first, the scan only as a fallback. Evidence
+        // does not require a scan — an auditor can photograph an empty shelf
+        // from the web — so sourcing these from the scan alone left a row with
+        // notes or photos looking empty and refusing to open. Both come from
+        // the same `AuditAsset._count`, so a scanned row is unchanged.
+        auditAssetId: asset.auditAssetId ?? scan?.auditAssetId ?? null,
+        notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
+        imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
       });
     }
 

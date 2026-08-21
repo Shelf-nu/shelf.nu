@@ -22,7 +22,6 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: external auth — no Supabase in tests
 // why: the assignee gate is a shared guard with its own suite; here it only
 // needs to be callable so the route's own behaviour is what is under test.
 vi.mock("~/modules/audit/service.server", () => ({
@@ -34,12 +33,17 @@ vi.mock("~/utils/booking-authorization.server", () => ({
   resolveMostPrivilegedRole: (roles: string[]) =>
     roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
 }));
+// why: external auth — verifying a bearer token needs Supabase, which these
+// tests neither have nor are testing; the route's own gates are what matter.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
 
+// why: the boundary under test. Every case here is about WHICH queries run and
+// with what where-clause, so the queries themselves must be observable and must
+// not need a database.
 vi.mock("~/database/db.server", () => ({
   db: {
     auditSession: { findFirst: vi.fn() },
@@ -48,6 +52,9 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: the real `makeShelfError` reaches for Sentry and the logger. The route
+// only needs it to turn a thrown error into a status, which is what the cases
+// assert on.
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
     message: cause?.message ?? "error",
