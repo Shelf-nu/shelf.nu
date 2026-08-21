@@ -1,7 +1,9 @@
 import { createHash } from "crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: testing auth logic without actual database lookups
+// why: testing auth logic without actual database lookups. The token row now
+// carries its organization's `workspaceDisabled`, so every stub below returns
+// an `organization` — a row without one would throw before the gate is reached.
 vi.mock("~/database/db.server", () => ({
   db: {
     scimToken: {
@@ -69,6 +71,7 @@ describe("authenticateScimRequest", () => {
         id: "token-1",
         organizationId: "org-123",
         tokenHash,
+        organization: { workspaceDisabled: false },
       });
 
       const request = new Request("http://localhost/api/scim/v2/Users", {
@@ -118,6 +121,44 @@ describe("authenticateScimRequest", () => {
     await expect(authenticateScimRequest(request)).rejects.toThrow(ScimError);
   });
 
+  describe("when the workspace is disabled", () => {
+    /** A valid token whose organization has been suspended by an admin. */
+    function suspendedTokenRequest() {
+      // @ts-expect-error - vitest mock type
+      mockDb.db.scimToken.findUnique.mockResolvedValue({
+        id: "token-1",
+        organizationId: "org-123",
+        organization: { workspaceDisabled: true },
+      });
+
+      return new Request("http://localhost/api/scim/v2/Users", {
+        headers: { Authorization: "Bearer some-valid-token" },
+      });
+    }
+
+    it("should throw 403 even though the token is valid", async () => {
+      // 403 rather than 401: the token is genuine, and the IdP admin needs to
+      // know the workspace is suspended so they stop retrying. Nothing is
+      // disclosed — the caller already holds a token for this workspace.
+      await expect(
+        authenticateScimRequest(suspendedTokenRequest())
+      ).rejects.toMatchObject({
+        status: 403,
+        message: expect.stringContaining("This workspace is disabled"),
+      });
+    });
+
+    it("should not record the token as used", async () => {
+      await expect(
+        authenticateScimRequest(suspendedTokenRequest())
+      ).rejects.toThrow(ScimError);
+
+      // `lastUsedAt` is the audit trail for successful authentication. A
+      // refused request must not appear in it.
+      expect(mockDb.db.scimToken.update).not.toHaveBeenCalled();
+    });
+  });
+
   it("should throw 401 when token is not found in database", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.scimToken.findUnique.mockResolvedValue(null);
@@ -139,6 +180,7 @@ describe("authenticateScimRequest", () => {
     mockDb.db.scimToken.findUnique.mockResolvedValue({
       id: "token-1",
       organizationId: "org-123",
+      organization: { workspaceDisabled: false },
     });
     // @ts-expect-error - vitest mock type
     mockDb.db.scimToken.update.mockResolvedValue({});
@@ -152,7 +194,11 @@ describe("authenticateScimRequest", () => {
     expect(result).toEqual({ organizationId: "org-123" });
     expect(mockDb.db.scimToken.findUnique).toHaveBeenCalledWith({
       where: { tokenHash },
-      select: { id: true, organizationId: true },
+      select: {
+        id: true,
+        organizationId: true,
+        organization: { select: { workspaceDisabled: true } },
+      },
     });
   });
 
@@ -161,6 +207,7 @@ describe("authenticateScimRequest", () => {
     mockDb.db.scimToken.findUnique.mockResolvedValue({
       id: "token-1",
       organizationId: "org-123",
+      organization: { workspaceDisabled: false },
     });
     // @ts-expect-error - vitest mock type
     mockDb.db.scimToken.update.mockResolvedValue({});
@@ -187,6 +234,7 @@ describe("authenticateScimRequest", () => {
     mockDb.db.scimToken.findUnique.mockResolvedValue({
       id: "token-1",
       organizationId: "org-123",
+      organization: { workspaceDisabled: false },
     });
     // @ts-expect-error - vitest mock type
     mockDb.db.scimToken.update.mockRejectedValue(new Error("db unavailable"));

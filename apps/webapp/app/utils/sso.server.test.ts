@@ -2,14 +2,21 @@ import { AuthApiError } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
-// why: isolate from Prisma — we only verify the resolve function's branching
+// why: isolate from Prisma — we only verify each function's branching.
+// `$queryRaw` stands in for the auth.sso_domains lookup (a raw query because
+// the auth schema is outside Prisma's model set) and `organization.findMany`
+// for the domain-ownership lookup.
 vi.mock("~/database/db.server", () => ({
   db: {
     user: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
     },
+    organization: {
+      findMany: vi.fn(),
+    },
     $executeRawUnsafe: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -29,7 +36,10 @@ const mockDb = await import("~/database/db.server");
 const mockAuth = await import("~/modules/auth/service.server");
 const mockUser = await import("~/modules/user/service.server");
 
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import {
+  checkDomainSSOStatus,
+  resolveUserAndOrgForSsoCallback,
+} from "~/utils/sso.server";
 
 const SUPABASE_UUID = "auth-user-supabase-uuid";
 
@@ -265,5 +275,106 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("checkDomainSSOStatus", () => {
+  /**
+   * Builds an organization row in the shape the function's `include` produces.
+   *
+   * @param id - Organization id
+   * @param domains - The organization's comma-separated `ssoDetails.domain`
+   */
+  function orgWithDomains(id: string, domains: string) {
+    return { id, name: id, ssoDetails: { id: `sso-${id}`, domain: domains } };
+  }
+
+  /** Marks the queried domain as federated at the auth layer. */
+  function federated() {
+    // @ts-expect-error mock setup
+    mockDb.db.$queryRaw.mockResolvedValue([{ ssoProviderId: "provider-1" }]);
+  }
+
+  it("reports a domain nobody has federated as not configured for SSO", async () => {
+    // @ts-expect-error mock setup
+    mockDb.db.$queryRaw.mockResolvedValue([]);
+
+    await expect(checkDomainSSOStatus("jane@example.com")).resolves.toEqual({
+      isConfiguredForSSO: false,
+      linkedOrganization: null,
+      ssoProviderId: null,
+    });
+  });
+
+  it("links the organization that claims the domain", async () => {
+    // The SCIM-governance check downstream compares this id against the
+    // organization being invited to, so a null here reads as Pure SSO and
+    // lets a manual invite through.
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([
+      orgWithDomains("org-acme", "acme.com,acme.co.uk"),
+    ]);
+
+    const result = await checkDomainSSOStatus("jane@acme.com");
+
+    expect(result.isConfiguredForSSO).toBe(true);
+    expect(result.linkedOrganization?.id).toBe("org-acme");
+    expect(result.ssoProviderId).toBe("provider-1");
+  });
+
+  it("does not link an organization whose domain merely contains the queried one", async () => {
+    // The database can only narrow a comma-separated column by substring, so
+    // "notacme.com" comes back for "acme.com" and must be rejected here.
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([
+      orgWithDomains("org-other", "notacme.com"),
+    ]);
+
+    const result = await checkDomainSSOStatus("jane@acme.com");
+
+    expect(result.isConfiguredForSSO).toBe(true);
+    expect(result.linkedOrganization).toBeNull();
+  });
+
+  it("picks the real owner past a substring collision", async () => {
+    // A single-row read would stop at "org-other", exact-match it to false,
+    // and report Pure SSO — silently skipping the organization that does own
+    // the domain.
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([
+      orgWithDomains("org-other", "notacme.com"),
+      orgWithDomains("org-acme", "acme.com"),
+    ]);
+
+    const result = await checkDomainSSOStatus("jane@acme.com");
+
+    expect(result.linkedOrganization?.id).toBe("org-acme");
+  });
+
+  it("matches the domain case-insensitively", async () => {
+    federated();
+    // @ts-expect-error mock setup
+    mockDb.db.organization.findMany.mockResolvedValue([
+      orgWithDomains("org-acme", "ACME.com"),
+    ]);
+
+    const result = await checkDomainSSOStatus("Jane@Acme.COM");
+
+    expect(result.linkedOrganization?.id).toBe("org-acme");
+  });
+
+  it("returns not-configured for an address with no domain", async () => {
+    await expect(checkDomainSSOStatus("not-an-email")).resolves.toEqual({
+      isConfiguredForSSO: false,
+      linkedOrganization: null,
+      ssoProviderId: null,
+    });
+
+    // Nothing to look up, so neither query runs.
+    expect(mockDb.db.$queryRaw).not.toHaveBeenCalled();
+    expect(mockDb.db.organization.findMany).not.toHaveBeenCalled();
   });
 });

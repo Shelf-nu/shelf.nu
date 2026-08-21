@@ -208,15 +208,37 @@ export async function getConfiguredSSODomains(): Promise<SSODomainConfig[]> {
 }
 
 /**
- * Checks domain's SSO status and organization linkage
- * Handles multiple domains per organization and multiple SSO providers per domain
- * @param email - Email to check domain for
+ * Checks a domain's SSO status and which organization, if any, owns it.
+ *
+ * The two halves of the result mean different things and callers act on them
+ * differently:
+ *
+ * - `isConfiguredForSSO` — the domain is federated at the auth layer, so the
+ *   user signs in through an IdP rather than a password.
+ * - `linkedOrganization` — an organization has claimed the domain in its
+ *   `ssoDetails`, which is what makes it **SCIM-managed**: membership belongs
+ *   to the IdP, so manual invites into that organization are refused.
+ *
+ * A federated domain no organization has claimed is Pure SSO, and invites into
+ * it are allowed for users who have already signed in.
+ *
+ * @param email - Email whose domain is checked
+ * @returns Federation status, the owning organization, and the first SSO
+ *   provider configured for the domain
  */
 export async function checkDomainSSOStatus(
   email: string
 ): Promise<DomainCheckResult> {
   try {
     const domain = email.split("@")[1]?.toLowerCase();
+
+    if (!domain) {
+      return {
+        isConfiguredForSSO: false,
+        linkedOrganization: null,
+        ssoProviderId: null,
+      };
+    }
 
     // Check all SSO providers configured for this domain
     const ssoConfigs = await db.$queryRaw<{ ssoProviderId: string }[]>`
@@ -236,8 +258,14 @@ export async function checkDomainSSOStatus(
     // Get all SSO provider IDs for this domain
     const ssoProviderIds = ssoConfigs.map((config) => config.ssoProviderId);
 
-    // Find organization where this domain is included in their comma-separated domains
-    const linkedOrg = await db.organization.findFirst({
+    // `ssoDetails.domain` is a comma-separated list, so the database can only
+    // narrow it by substring. That is a superset in both directions: it admits
+    // "notacme.com" for "acme.com", and one query row is not necessarily the
+    // organization that actually claimed the domain. Fetch every candidate and
+    // let `emailMatchesDomains` pick the exact one — taking only the first row
+    // and then exact-matching it lets an unrelated substring hit shadow the
+    // real owner, which silently reads as Pure SSO.
+    const candidateOrgs = await db.organization.findMany({
       where: {
         ssoDetails: {
           domain: {
@@ -250,16 +278,16 @@ export async function checkDomainSSOStatus(
       },
     });
 
-    // If we found an org, verify the domain is actually in their list
-    const isValidDomain = linkedOrg?.ssoDetails
-      ? emailMatchesDomains(email, linkedOrg.ssoDetails.domain)
-      : false;
+    const linkedOrg =
+      candidateOrgs.find((org) =>
+        emailMatchesDomains(domain, org.ssoDetails?.domain ?? null)
+      ) ?? null;
 
     // Return the first SSO provider ID if we found multiple
     // This maintains backward compatibility while we handle multiple domains
     return {
       isConfiguredForSSO: true,
-      linkedOrganization: isValidDomain ? linkedOrg : null,
+      linkedOrganization: linkedOrg,
       ssoProviderId: ssoProviderIds[0] || null,
     };
   } catch (cause) {
