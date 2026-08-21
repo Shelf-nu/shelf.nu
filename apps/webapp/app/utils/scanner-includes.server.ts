@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 
+import type { AssetImageSource } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+
 export const CUSTODY_INCLUDE = {
   custody: {
     select: {
@@ -32,6 +35,11 @@ export const CUSTODY_INCLUDE = {
  * without re-adding `status` and `type` explicitly.
  */
 export const ASSET_INCLUDE = {
+  // Model cover image — the scanned-item endpoints collapse the cascade
+  // into flat `mainImage`/`thumbnailImage` via `serializeAssetImage`, so
+  // assets with no image of their own render their model's cover in every
+  // scanner drawer.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // Asset placement lives on the `AssetLocation` pivot. Consumers read
   // the primary placement via `getPrimaryLocation`.
   assetLocations: {
@@ -119,8 +127,20 @@ export type ScannerAssetPickerMeta = {
   unitOfMeasure: string | null;
 } | null;
 
-export type AssetFromScanner = Prisma.AssetGetPayload<{
-  include: typeof ASSET_INCLUDE;
-}> & {
+/**
+ * An asset as the scanned-item endpoints RESPOND with it — not as Prisma
+ * returns it. The endpoints collapse the model-image cascade via
+ * `serializeAssetImage`, which drops the `assetModel` relation and adds
+ * `imageSource`, so this type mirrors that serialized shape.
+ */
+export type AssetFromScanner = Omit<
+  Prisma.AssetGetPayload<{
+    include: typeof ASSET_INCLUDE;
+  }>,
+  "assetModel"
+> & {
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  imageSource: AssetImageSource;
   pickerMeta?: ScannerAssetPickerMeta;
 };
