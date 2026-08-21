@@ -136,6 +136,7 @@ import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
   assertAssetsBelongToOrg,
+  assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
   assertKitsBelongToOrg,
   assertLocationBelongsToOrg,
@@ -1327,8 +1328,14 @@ export async function createAsset({
         );
       }
 
-      /** If a categoryId is passed, link the category to the asset. */
-      if (categoryId && categoryId !== "uncategorized") {
+      /**
+       * If a categoryId is passed, link the category to the asset. The id is
+       * proven to belong to this org inside the transaction below
+       * (assertCategoryBelongsToOrg), matching the kit / assetModel /
+       * custom-field IDOR guards.
+       */
+      const hasCategory = Boolean(categoryId && categoryId !== "uncategorized");
+      if (hasCategory) {
         Object.assign(data, {
           category: {
             connect: {
@@ -1338,13 +1345,13 @@ export async function createAsset({
         });
       }
 
-      /** If an assetModelId is passed, link the asset model to the asset.
-       * Org-scope-guard before the connect — Prisma's FK only enforces
-       * that the row exists, not that it belongs to the caller's
-       * organization, so without this check a user in Org A could
-       * link their new asset to Org B's model (hex-security r3341845640
-       * / r3350881506). Same pattern as the other org-scope guards
-       * in this file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
+      /**
+       * If an assetModelId is passed, link the asset model to the asset.
+       * Org-scope-guard before the connect — Prisma's FK only enforces that
+       * the row exists, not that it belongs to the caller's organization, so
+       * without this check a user in Org A could link their new asset to
+       * Org B's model. Same pattern as the other org-scope guards in this
+       * file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
        */
       if (assetModelId) {
         await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
@@ -1474,6 +1481,17 @@ export async function createAsset({
         // as the assetModel / custom-field guards).
         if (hasKit) {
           await assertKitsBelongToOrg({ kitIds: [kitId!], organizationId }, tx);
+        }
+
+        // SECURITY (cross-org IDOR): the categoryId comes from form/CSV input
+        // and is connected by the nested create above with no org scoping of
+        // its own. Prisma's foreign key only proves the row exists, not that
+        // it belongs to this workspace, so prove ownership before the write.
+        if (hasCategory) {
+          await assertCategoryBelongsToOrg(
+            { categoryId: categoryId!, organizationId },
+            tx
+          );
         }
 
         const created = await tx.asset.create({
@@ -1807,9 +1825,8 @@ export async function bulkCreateAssetsFromModel({
       organizationId,
     });
   }
-  // kitId + customFieldsValues + categoryId — createAsset's connect will
-  // throw a 400 on cross-org id (Prisma surfaces a foreign-key violation).
-  // Could harden with explicit asserts in a future polish.
+  // kitId, customFieldsValues and categoryId need no assert here: createAsset
+  // proves each of them against this organization inside its own transaction.
 
   // ── Read model + resolve defaults ────────────────────────────────────
 

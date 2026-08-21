@@ -70,6 +70,10 @@ vitest.mock("~/database/db.server", () => ({
     // shared buildAssetSearchUnion, executed as a raw query.
     $queryRaw: vitest.fn().mockResolvedValue([]),
     asset: {
+      // why: createAsset's transaction writes the row through this stub, so a
+      // test that needs the create to SUCCEED (rather than reject at a guard)
+      // has something to resolve.
+      create: vitest.fn().mockResolvedValue({ id: "asset-new" }),
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -825,11 +829,9 @@ describe("createAsset quantity validation", () => {
     );
   });
 
-  it("does not throw quantity validation for INDIVIDUAL assets", async () => {
-    // This test verifies that INDIVIDUAL assets skip quantity validation.
-    // The function will proceed past validation but will fail on
-    // other operations (e.g., sequential ID generation) which is expected.
-    // We assert the thrown error is NOT a quantity validation error.
+  it("does not require quantity or consumptionType for INDIVIDUAL assets", async () => {
+    // Quantity validation applies only to QUANTITY_TRACKED. An INDIVIDUAL
+    // asset omitting both fields must create normally.
     await expect(
       createAsset({
         title: "Test Laptop",
@@ -839,13 +841,8 @@ describe("createAsset quantity validation", () => {
         valuation: null,
         organizationId: "org-1",
         type: "INDIVIDUAL",
-        // No quantity or consumptionType — should not throw validation error
       })
-    ).rejects.toThrow(
-      expect.objectContaining({
-        message: expect.not.stringContaining("Quantity is required"),
-      })
-    );
+    ).resolves.toEqual({ id: "asset-new" });
   });
 });
 
@@ -1918,6 +1915,50 @@ describe("createAsset cross-org guards", () => {
       where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
       select: { id: true },
     });
+  });
+
+  it("rejects a categoryId from a different organization", async () => {
+    expect.assertions(2);
+    // why: a miss is how the org-scoped lookup reports a foreign-org category.
+    // Prisma's foreign key only proves the row exists — it says nothing about
+    // which workspace owns it, so without the guard the id is connected
+    // verbatim.
+    (db.category.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        categoryId: "cat-from-org-B",
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.category.findFirst).toHaveBeenCalledWith({
+      where: { id: "cat-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+
+  it("does not look up a category when the asset is uncategorized", async () => {
+    expect.assertions(2);
+
+    // The create has to run to completion: a rejection swallowed here would
+    // satisfy "findFirst was never called" without the guard ever being
+    // reached, and the test would pass for the wrong reason.
+    const created = await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      categoryId: "uncategorized",
+    } as any);
+
+    expect(created).toEqual({ id: "asset-new" });
+    // "uncategorized" is the form's empty sentinel, not an id, so it must
+    // never reach the org-scope lookup.
+    expect(db.category.findFirst).not.toHaveBeenCalled();
   });
 });
 
