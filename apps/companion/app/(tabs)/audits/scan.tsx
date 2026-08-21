@@ -29,8 +29,7 @@ import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
-import { getActiveServer } from "@/lib/server";
+import { extractQrId } from "@/lib/qr-utils";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
@@ -413,32 +412,6 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // A Shelf URL from ANOTHER server would otherwise be resolved against
-        // this one and reported as "not found" — a baffling error for a code
-        // that is perfectly valid on the instance that minted it.
-        if (
-          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
-          "foreign"
-        ) {
-          // Same feedback shape as every other rejected scan in this handler:
-          // a silent return would look like the camera simply ignored a code
-          // the user can see is valid.
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          showToast(
-            "error",
-            "Different Shelf Server",
-            "Sign in to that server to use this code."
-          );
-          announce("Different Shelf Server. Sign in to that server to use it.");
-          // finalizeScan() BEFORE returning: this handler has no `finally`, and
-          // a bare return would leave isProcessingRef.current true forever —
-          // the guard above would then reject every later scan and the camera
-          // would stop delivering codes entirely.
-          finalizeScan();
-          return;
-        }
-
         // 1. Resolve code -> asset (QR, SAM id, or barcode)
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's

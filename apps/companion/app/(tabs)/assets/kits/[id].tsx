@@ -26,7 +26,7 @@ import {
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { api, getApiBaseUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { KitDetail } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
@@ -311,7 +311,10 @@ export default function KitDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${getApiBaseUrl()}/qr/${kit.qrCodes[0].id}`}
+                    value={`${
+                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
+                      "https://app.shelf.nu"
+                    }/qr/${kit.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}
