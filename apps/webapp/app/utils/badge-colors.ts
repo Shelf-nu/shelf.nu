@@ -41,7 +41,7 @@ export const BADGE_COLORS = {
   },
   blue: {
     bg: "#E1F5FE",
-    text: "#01579B", // 4.5:1 on this background — the floor for 12px text
+    text: "#01579B", // 6.6:1 on this background
   },
   violet: {
     bg: "#F3E5F5",
