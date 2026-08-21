@@ -229,20 +229,20 @@ export async function resolveServerForEmail(
     return { ok: true };
   }
 
-  // Deliberately NOT short-circuiting when we are already on this server. The
-  // config is re-read on every login so a customer who rotates their Supabase
-  // project — same base URL, new anon key — is picked up. Short-circuiting here
-  // left every enrolled device holding stale credentials with no in-app way to
-  // recover. `setActiveServer` decides whether anything actually changed, so a
-  // no-op login costs one request and touches nothing.
+  // Re-read the config on every login, even when the resolved URL already
+  // matches the active server. A customer can rotate their Supabase project
+  // behind an unchanged base URL, and skipping the fetch leaves enrolled
+  // devices on a stale anon key with no in-app way to recover. `setActiveServer`
+  // decides whether anything actually changed, so a no-op login costs one
+  // request and touches nothing.
   const alreadyConnected =
     normalizeBaseUrl(baseUrl) === getActiveServer().baseUrl;
 
   const fetched = await fetchServerConfig(baseUrl);
 
   // Already working against this server and the refresh failed: keep going with
-  // the config we have. A transient blip must not block a login that would have
-  // succeeded before this refresh existed.
+  // the config we have. The refresh is an optimisation — a transient blip on it
+  // must never block a login that the stored config can still serve.
   if (!fetched.ok && alreadyConnected) {
     return { ok: true };
   }

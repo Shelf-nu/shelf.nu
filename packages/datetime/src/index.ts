@@ -180,6 +180,206 @@ export function calendarDayIndex(
   );
 }
 
+/** An instant's wall-clock reading in some zone, as plain calendar numbers. */
+export type WallClockParts = {
+  /** Full year, e.g. 2026. */
+  year: number;
+  /** 1-12, NOT the 0-11 a `Date` constructor wants. */
+  month: number;
+  /** 1-31. */
+  day: number;
+  /** 0-23. */
+  hour: number;
+  /** 0-59. */
+  minute: number;
+};
+
+/**
+ * What a clock on the wall in `timeZone` reads at the given instant.
+ *
+ * The returned numbers carry no zone of their own — they are what a person
+ * standing in `timeZone` would see, which is exactly what a naive wall-clock
+ * wire string (`"2026-08-20T09:00"`) and a native date picker both deal in.
+ * Pair them with the zone they were read in, or they mean nothing.
+ *
+ * `month` is 1-12 so the parts read like the wire format. Remember to subtract
+ * one when feeding a `Date` constructor.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone to read the clock in
+ * @returns the calendar/clock fields as seen in that zone
+ */
+export function wallClockPartsInZone(
+  value: string | Date,
+  timeZone: string
+): WallClockParts {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+/**
+ * `timeZone`'s offset from UTC at `date`, in milliseconds.
+ *
+ * Derived by reading the zone's own clock rather than from a table, so it is
+ * correct across DST and historical offset changes without any zone data of its
+ * own. Minute resolution — every IANA offset is a whole number of minutes.
+ *
+ * @param date - the instant to measure the offset at
+ * @param timeZone - the IANA zone
+ * @returns offset in ms, positive east of UTC
+ */
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const p = wallClockPartsInZone(date, timeZone);
+  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+  const truncatedToMinute = Math.floor(date.getTime() / 60_000) * 60_000;
+  return asIfUtc - truncatedToMinute;
+}
+
+/**
+ * The instant at which `timeZone`'s clock reads the given wall-clock fields.
+ *
+ * The inverse of {@link wallClockPartsInZone}. Solves for the offset by reading
+ * the zone at a guess and correcting, which converges for every real zone
+ * because offsets change by far less than a day. Day/month/hour values outside
+ * their normal range roll over, so `{ day: 32 }` is the 1st of the next month —
+ * which is what makes calendar arithmetic on the parts safe.
+ *
+ * DST leaves two wall clocks that are not a simple 1:1 with an instant, and
+ * this resolves both the way a calendar app should:
+ *
+ * - A clock the zone SKIPS (the spring-forward hour) exists nowhere on the
+ *   timeline. It resolves FORWARD, to the instant the clock jumps to — so
+ *   02:30 on a 02:00→03:00 morning is 03:30, never 01:30.
+ * - A clock the zone REPEATS (the autumn hour) has two instants. It resolves to
+ *   the FIRST, i.e. before the clocks go back.
+ *
+ * @param parts - the wall clock to locate, `month` 1-12
+ * @param timeZone - the IANA zone whose clock reads it
+ * @returns the instant, with zero seconds and milliseconds
+ */
+export function instantFromWallClockInZone(
+  parts: WallClockParts,
+  timeZone: string
+): Date {
+  const asIfUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute
+  );
+
+  // Guess with the offset in force AT the target clock read as UTC, then again
+  // with the offset in force at that guess. Either candidate is right when the
+  // offset it was built from still holds there.
+  const offsetAtGuess = zoneOffsetMs(new Date(asIfUtc), timeZone);
+  const candidate = asIfUtc - offsetAtGuess;
+  const offsetAtCandidate = zoneOffsetMs(new Date(candidate), timeZone);
+  if (offsetAtCandidate === offsetAtGuess) return new Date(candidate);
+
+  const corrected = asIfUtc - offsetAtCandidate;
+  if (zoneOffsetMs(new Date(corrected), timeZone) === offsetAtCandidate) {
+    return new Date(corrected);
+  }
+
+  // Neither holds: the clock falls in a gap, so it has no instant of its own.
+  // The later candidate is the far side of the transition — resolve forward.
+  return new Date(Math.max(candidate, corrected));
+}
+
+/**
+ * Format an instant as the naive wire string `yyyy-MM-ddTHH:mm` in `timeZone`.
+ *
+ * The string carries no offset, so it means nothing on its own — send the zone
+ * it was written in alongside it. Shelf's booking APIs take that as a sibling
+ * `timeZone` field, and the server decodes in the zone the client declares.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone to write the wall clock in
+ * @returns the naive `yyyy-MM-ddTHH:mm` string, no offset, no seconds
+ */
+export function wallClockWireInZone(
+  value: string | Date,
+  timeZone: string
+): string {
+  const { year, month, day, hour, minute } = wallClockPartsInZone(
+    value,
+    timeZone
+  );
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`;
+}
+
+/**
+ * Move an instant by whole CALENDAR days as `timeZone` counts them.
+ *
+ * Keeps the wall clock fixed across a DST boundary, where the day is 23 or 25
+ * hours — which is what a booking form means by "the next day at the same
+ * time". Adding `days * 86_400_000` instead keeps the elapsed time fixed and
+ * moves the clock, which is almost never what a date field wants.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param days - calendar days to add; may be negative
+ * @param timeZone - the IANA zone whose calendar and clock are used
+ * @returns the instant one wall-clock-identical calendar day away
+ */
+export function addDaysInZone(
+  value: string | Date,
+  days: number,
+  timeZone: string
+): Date {
+  const parts = wallClockPartsInZone(value, timeZone);
+  return instantFromWallClockInZone(
+    { ...parts, day: parts.day + days },
+    timeZone
+  );
+}
+
+/**
+ * The instant at which `timeZone`'s clock next reads `hour:minute` on the
+ * calendar day `dayOffset` days from `from`.
+ *
+ * Form defaults are written in wall-clock terms ("tomorrow at 9"), but the
+ * value a picker and an API want is an instant. This does both steps in one
+ * place so callers never assemble a `Date` from another zone's fields.
+ *
+ * @param from - the instant the offset counts from (usually now)
+ * @param dayOffset - calendar days ahead, in `timeZone`
+ * @param hour - target hour, 0-23 on that day's clock
+ * @param minute - target minute, 0-59
+ * @param timeZone - the IANA zone the wall clock belongs to
+ * @returns the instant of that wall clock
+ */
+export function wallClockOnDayInZone(
+  from: string | Date,
+  dayOffset: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const parts = wallClockPartsInZone(from, timeZone);
+  return instantFromWallClockInZone(
+    { ...parts, day: parts.day + dayOffset, hour, minute },
+    timeZone
+  );
+}
+
 /** Superset of the option shapes DateS callers pass today (facts-02 §C). */
 export type DateFormatOptions = {
   weekday?: "long" | "short" | "narrow";
