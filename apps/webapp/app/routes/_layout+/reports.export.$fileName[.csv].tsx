@@ -318,7 +318,7 @@ function generateBookingComplianceCsv(
 
   const csvRows = rows.map((row) => [
     row.bookingId,
-    escapeCsvField(row.bookingName),
+    row.bookingName,
     formatStatus(row.status),
     row.custodian || "",
     row.assetCount.toString(),
@@ -328,7 +328,7 @@ function generateBookingComplianceCsv(
     formatReturnStatus(row.isOnTime, row.latenessMs),
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -351,7 +351,7 @@ function generateCustodySnapshotCsv(
 
   const csvRows = rows.map((row) => [
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     row.category || "",
     row.location || "",
     row.custodianName,
@@ -361,7 +361,7 @@ function generateCustodySnapshotCsv(
     row.valuation?.toString() || "",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -418,6 +418,30 @@ function formatReturnStatus(
 }
 
 /**
+ * Assembles a CSV document, escaping EVERY cell.
+ *
+ * Escaping used to be applied per field, by hand, at each call site — and was
+ * missed on `custodianName`, `custodian`, `performedBy`, `category` and
+ * `location`, all of which are user-controlled workspace values. A name like
+ * `=cmd|'/c calc'!A1` therefore reached the file as a live formula.
+ *
+ * Escaping here instead means a new column is safe by default: a contributor
+ * adding one cannot forget, because there is no per-field decision left to
+ * make. That is the property the previous approach lacked, not the escaping
+ * itself — `escapeCsvField` was already correct, just unevenly applied.
+ *
+ * @param headers - Column headers, escaped like any other cell
+ * @param rows - Row cells, already stringified and formatted
+ * @returns The complete CSV document
+ */
+function buildCsv(headers: string[], rows: string[][]): string {
+  return [
+    headers.map(escapeCsvField).join(","),
+    ...rows.map((row) => row.map(escapeCsvField).join(",")),
+  ].join("\n");
+}
+
+/**
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
@@ -426,10 +450,15 @@ function escapeCsvField(field: string): string {
   // values with a single quote so the cell is treated as literal text. Applied
   // here in the shared helper so every report export is protected.
   const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
+  // consumers that accept CR as a line ending, so an unquoted one lets a
+  // user-controlled value split the row and forge structure — which also puts
+  // the injected content at the start of a "line", back inside formula range.
   if (
     safeField.includes(",") ||
     safeField.includes('"') ||
-    safeField.includes("\n")
+    safeField.includes("\n") ||
+    safeField.includes("\r")
   ) {
     return `"${safeField.replace(/"/g, '""')}"`;
   }
@@ -455,7 +484,7 @@ function generateOverdueItemsCsv(
 
   const csvRows = rows.map((row) => [
     row.bookingId,
-    escapeCsvField(row.bookingName),
+    row.bookingName,
     row.custodian || "",
     row.assetCount.toString(),
     // Datetime column: include the time part.
@@ -464,7 +493,7 @@ function generateOverdueItemsCsv(
     row.valueAtRisk?.toString() || "",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -486,7 +515,7 @@ function generateIdleAssetsCsv(
 
   const csvRows = rows.map((row) => [
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     row.category || "",
     row.location || "",
     // Date-only column: no time part.
@@ -495,7 +524,7 @@ function generateIdleAssetsCsv(
     row.valuation?.toString() || "",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -516,7 +545,7 @@ function generateTopBookedAssetsCsv(rows: TopBookedAssetRow[]): string {
   const csvRows = rows.map((row, index) => [
     (index + 1).toString(),
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     row.category || "",
     row.location || "",
     row.bookingCount.toString(),
@@ -526,7 +555,7 @@ function generateTopBookedAssetsCsv(rows: TopBookedAssetRow[]): string {
       : "0",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -546,10 +575,10 @@ function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
 
   const csvRows = rows.map((row, index) => [
     (index + 1).toString(),
-    escapeCsvField(row.kitId),
-    escapeCsvField(row.kitName),
-    escapeCsvField(row.category || ""),
-    escapeCsvField(row.location || ""),
+    row.kitId,
+    row.kitName,
+    row.category || "",
+    row.location || "",
     row.bookingCount.toString(),
     row.totalDaysBooked.toString(),
     row.bookingCount > 0
@@ -557,7 +586,7 @@ function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
       : "0",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -581,7 +610,7 @@ function generateAssetInventoryCsv(
 
   const csvRows = rows.map((row) => [
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     row.category || "",
     row.location || "",
     formatAssetStatus(row.status),
@@ -592,7 +621,7 @@ function generateAssetInventoryCsv(
     row.qrId || "",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -612,7 +641,7 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
 
   const csvRows = rows.map((row) => [
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     row.category || "",
     row.location || "",
     row.bookingCount.toString(),
@@ -621,7 +650,7 @@ function generateAssetUtilizationCsv(rows: AssetUtilizationRow[]): string {
     `${row.utilizationRate}%`,
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -644,13 +673,13 @@ function generateAssetActivityCsv(
     // Datetime column ("Date & Time"): include the time part.
     formatDateForCsv(row.occurredAt, prefs, { includeTime: true }),
     row.assetId,
-    escapeCsvField(row.assetName),
+    row.assetName,
     formatActivityType(row.activityType),
-    escapeCsvField(row.description || ""),
+    row.description || "",
     row.performedBy || "System",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }
 
 /**
@@ -704,7 +733,7 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
   ) =>
     rows.map((row) => [
       type,
-      escapeCsvField(row.groupName),
+      row.groupName,
       row.assetCount.toString(),
       `${row.percentage.toFixed(1)}%`,
       row.totalValue?.toString() || "",
@@ -716,7 +745,7 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
     ...formatRows("Status", breakdown.byStatus),
   ];
 
-  return [headers.join(","), ...allRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, allRows);
 }
 
 /**
@@ -743,5 +772,5 @@ function generateMonthlyBookingTrendsCsv(
       : "—",
   ]);
 
-  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+  return buildCsv(headers, csvRows);
 }

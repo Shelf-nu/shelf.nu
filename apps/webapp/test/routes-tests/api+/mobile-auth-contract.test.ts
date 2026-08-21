@@ -22,8 +22,22 @@ const MOBILE_DIR = path.resolve(__dirname, "../../../app/routes/api+/mobile+");
  * - `exchange.ts`: the mobile SSO token exchange. It is pre-session by design —
  *   the caller has no token yet; the single-use, short-TTL authorization code
  *   from the SSO deeplink IS the credential (see `modules/auth/mobile-sso.server`).
+ * - `resolve-server.ts`: multi-server discovery. Pre-session by definition — it
+ *   answers "which server should I authenticate against?", so requiring a token
+ *   would be circular. Reads nothing per-user: the only input is an email
+ *   domain and the only output is a public base URL from a static registry.
+ * - `config.ts`: the instance's own self-description (name, public Supabase URL
+ *   + anon key, API version). Pre-session for the same reason, and every field
+ *   it returns already ships publicly in the web client's `window.env`.
+ *
+ * Both additions are read-only, take no user-identifying input, and are covered
+ * by the per-IP rate limit on `/api/mobile/*` in `server/index.ts`.
  */
-const AUTH_EXEMPT = new Set<string>(["exchange.ts"]);
+const AUTH_EXEMPT = new Set<string>([
+  "exchange.ts",
+  "resolve-server.ts",
+  "config.ts",
+]);
 
 const ROUTE_FILES = readdirSync(MOBILE_DIR).filter((f) => f.endsWith(".ts"));
 const GUARDED_FILES = ROUTE_FILES.filter((f) => !AUTH_EXEMPT.has(f));
