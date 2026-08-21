@@ -413,8 +413,14 @@ export function BookingCalendar({
 
       if (res.error) {
         // A cached month stays on screen rather than being replaced by an
-        // error for data we already have.
-        if (!cached) setError(res.error);
+        // error for data we already have. Without one, the grid is emptied
+        // alongside the error: `month` still holds the month we came FROM, and
+        // leaving it would re-clip those bookings into the new month's squares
+        // and count them in "N more outside this month".
+        if (!cached) {
+          setError(res.error);
+          setMonth(EMPTY_MONTH);
+        }
       } else if (res.data) {
         const next: CachedMonth = {
           bookings: res.data.bookings,
