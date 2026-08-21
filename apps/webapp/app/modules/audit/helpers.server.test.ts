@@ -1,3 +1,15 @@
+/**
+ * Audit note builders.
+ *
+ * Every note in this module is assembled server-side from a mix of trusted
+ * text and user-supplied values, then rendered through Markdoc by the audit
+ * feed. These tests pin both halves: the stats and wording each builder
+ * produces, and the sanitisation that keeps a user value from becoming a live
+ * Markdoc tag.
+ *
+ * @see {@link file://./helpers.server.ts}
+ * @see {@link file://./note-content.server.ts}
+ */
 import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

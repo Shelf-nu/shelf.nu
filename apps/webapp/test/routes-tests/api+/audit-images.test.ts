@@ -40,6 +40,9 @@ vi.mock("~/utils/roles.server", () => ({
 const { mockFindMany } = vi.hoisted(() => ({
   mockFindMany: vi.fn().mockResolvedValue([]),
 }));
+// why: the Prisma read is the sink under test — stubbing it lets each case
+// assert the authorization predicate the route built, which is the whole
+// point of the fix, without standing up a database.
 vi.mock("~/database/db.server", () => ({
   db: { auditImage: { findMany: mockFindMany } },
 }));
@@ -49,6 +52,13 @@ import { loader } from "~/routes/api+/audit-images";
 const ORG_ID = "org-1";
 const USER_ID = "user-1";
 
+/**
+ * Builds the loader arguments for one request.
+ *
+ * @param ids - Value for the `ids` query parameter. Omit it to exercise the
+ *   no-parameter path, where the route must not read at all.
+ * @returns Loader args carrying the request and a session for `USER_ID`
+ */
 function args(ids?: string) {
   const url = new URL("https://app.shelf.nu/api/audit-images");
   if (ids !== undefined) {

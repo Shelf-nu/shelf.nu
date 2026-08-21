@@ -119,7 +119,8 @@ describe("createAssetModel", () => {
     });
     // @ts-expect-error mock setup
     db.assetModel.create.mockResolvedValue(mockModel);
-    // The category is in this workspace, so the org-scope guard passes.
+    // why: the org-scope guard reads the category through this stub; a hit
+    // means the id belongs to the caller's workspace, so the create proceeds.
     // @ts-expect-error mock setup
     db.category.findFirst.mockResolvedValue({ id: "cat-123" });
 
@@ -139,9 +140,9 @@ describe("createAssetModel", () => {
 
   it("rejects a default category from a different organization", async () => {
     expect.assertions(3);
-    // Foreign-org category → the org-scoped lookup finds nothing. Prisma's
-    // foreign key would happily connect it, so the guard is the only thing
-    // standing between form input and another tenant's category.
+    // why: a miss is how the org-scoped lookup reports a foreign-org
+    // category. Prisma's foreign key would connect it regardless, so this
+    // guard is the only thing between form input and another tenant's data.
     // @ts-expect-error mock setup
     db.category.findFirst.mockResolvedValue(null);
 
@@ -364,7 +365,8 @@ describe("updateAssetModel", () => {
     });
     // @ts-expect-error mock setup
     db.assetModel.update.mockResolvedValue(mockModel);
-    // The category is in this workspace, so the org-scope guard passes.
+    // why: the org-scope guard reads the category through this stub; a hit
+    // means the id belongs to the caller's workspace, so the update proceeds.
     // @ts-expect-error mock setup
     db.category.findFirst.mockResolvedValue({ id: "cat-456" });
 
@@ -384,6 +386,8 @@ describe("updateAssetModel", () => {
 
   it("rejects a default category from a different organization", async () => {
     expect.assertions(3);
+    // why: a miss is how the org-scoped lookup reports a foreign-org category,
+    // which is what the guard has to refuse before the connect.
     // @ts-expect-error mock setup
     db.category.findFirst.mockResolvedValue(null);
 
