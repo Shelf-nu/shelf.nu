@@ -180,6 +180,206 @@ export function calendarDayIndex(
   );
 }
 
+/** An instant's wall-clock reading in some zone, as plain calendar numbers. */
+export type WallClockParts = {
+  /** Full year, e.g. 2026. */
+  year: number;
+  /** 1-12, NOT the 0-11 a `Date` constructor wants. */
+  month: number;
+  /** 1-31. */
+  day: number;
+  /** 0-23. */
+  hour: number;
+  /** 0-59. */
+  minute: number;
+};
+
+/**
+ * What a clock on the wall in `timeZone` reads at the given instant.
+ *
+ * The returned numbers carry no zone of their own — they are what a person
+ * standing in `timeZone` would see, which is exactly what a naive wall-clock
+ * wire string (`"2026-08-20T09:00"`) and a native date picker both deal in.
+ * Pair them with the zone they were read in, or they mean nothing.
+ *
+ * `month` is 1-12 so the parts read like the wire format. Remember to subtract
+ * one when feeding a `Date` constructor.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone to read the clock in
+ * @returns the calendar/clock fields as seen in that zone
+ */
+export function wallClockPartsInZone(
+  value: string | Date,
+  timeZone: string
+): WallClockParts {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+/**
+ * `timeZone`'s offset from UTC at `date`, in milliseconds.
+ *
+ * Derived by reading the zone's own clock rather than from a table, so it is
+ * correct across DST and historical offset changes without any zone data of its
+ * own. Minute resolution — every IANA offset is a whole number of minutes.
+ *
+ * @param date - the instant to measure the offset at
+ * @param timeZone - the IANA zone
+ * @returns offset in ms, positive east of UTC
+ */
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const p = wallClockPartsInZone(date, timeZone);
+  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+  const truncatedToMinute = Math.floor(date.getTime() / 60_000) * 60_000;
+  return asIfUtc - truncatedToMinute;
+}
+
+/**
+ * The instant at which `timeZone`'s clock reads the given wall-clock fields.
+ *
+ * The inverse of {@link wallClockPartsInZone}. Solves for the offset by reading
+ * the zone at a guess and correcting, which converges for every real zone
+ * because offsets change by far less than a day. Day/month/hour values outside
+ * their normal range roll over, so `{ day: 32 }` is the 1st of the next month —
+ * which is what makes calendar arithmetic on the parts safe.
+ *
+ * DST leaves two wall clocks that are not a simple 1:1 with an instant, and
+ * this resolves both the way a calendar app should:
+ *
+ * - A clock the zone SKIPS (the spring-forward hour) exists nowhere on the
+ *   timeline. It resolves FORWARD, to the instant the clock jumps to — so
+ *   02:30 on a 02:00→03:00 morning is 03:30, never 01:30.
+ * - A clock the zone REPEATS (the autumn hour) has two instants. It resolves to
+ *   the FIRST, i.e. before the clocks go back.
+ *
+ * @param parts - the wall clock to locate, `month` 1-12
+ * @param timeZone - the IANA zone whose clock reads it
+ * @returns the instant, with zero seconds and milliseconds
+ */
+export function instantFromWallClockInZone(
+  parts: WallClockParts,
+  timeZone: string
+): Date {
+  const asIfUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute
+  );
+
+  // Guess with the offset in force AT the target clock read as UTC, then again
+  // with the offset in force at that guess. Either candidate is right when the
+  // offset it was built from still holds there.
+  const offsetAtGuess = zoneOffsetMs(new Date(asIfUtc), timeZone);
+  const candidate = asIfUtc - offsetAtGuess;
+  const offsetAtCandidate = zoneOffsetMs(new Date(candidate), timeZone);
+  if (offsetAtCandidate === offsetAtGuess) return new Date(candidate);
+
+  const corrected = asIfUtc - offsetAtCandidate;
+  if (zoneOffsetMs(new Date(corrected), timeZone) === offsetAtCandidate) {
+    return new Date(corrected);
+  }
+
+  // Neither holds: the clock falls in a gap, so it has no instant of its own.
+  // The later candidate is the far side of the transition — resolve forward.
+  return new Date(Math.max(candidate, corrected));
+}
+
+/**
+ * Format an instant as the naive wire string `yyyy-MM-ddTHH:mm` in `timeZone`.
+ *
+ * The string carries no offset, so it means nothing on its own — send the zone
+ * it was written in alongside it. Shelf's booking APIs take that as a sibling
+ * `timeZone` field, and the server decodes in the zone the client declares.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param timeZone - the IANA zone to write the wall clock in
+ * @returns the naive `yyyy-MM-ddTHH:mm` string, no offset, no seconds
+ */
+export function wallClockWireInZone(
+  value: string | Date,
+  timeZone: string
+): string {
+  const { year, month, day, hour, minute } = wallClockPartsInZone(
+    value,
+    timeZone
+  );
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`;
+}
+
+/**
+ * Move an instant by whole CALENDAR days as `timeZone` counts them.
+ *
+ * Keeps the wall clock fixed across a DST boundary, where the day is 23 or 25
+ * hours — which is what a booking form means by "the next day at the same
+ * time". Adding `days * 86_400_000` instead keeps the elapsed time fixed and
+ * moves the clock, which is almost never what a date field wants.
+ *
+ * @param value - a Date or parseable date string (a UTC instant)
+ * @param days - calendar days to add; may be negative
+ * @param timeZone - the IANA zone whose calendar and clock are used
+ * @returns the instant one wall-clock-identical calendar day away
+ */
+export function addDaysInZone(
+  value: string | Date,
+  days: number,
+  timeZone: string
+): Date {
+  const parts = wallClockPartsInZone(value, timeZone);
+  return instantFromWallClockInZone(
+    { ...parts, day: parts.day + days },
+    timeZone
+  );
+}
+
+/**
+ * The instant at which `timeZone`'s clock next reads `hour:minute` on the
+ * calendar day `dayOffset` days from `from`.
+ *
+ * Form defaults are written in wall-clock terms ("tomorrow at 9"), but the
+ * value a picker and an API want is an instant. This does both steps in one
+ * place so callers never assemble a `Date` from another zone's fields.
+ *
+ * @param from - the instant the offset counts from (usually now)
+ * @param dayOffset - calendar days ahead, in `timeZone`
+ * @param hour - target hour, 0-23 on that day's clock
+ * @param minute - target minute, 0-59
+ * @param timeZone - the IANA zone the wall clock belongs to
+ * @returns the instant of that wall clock
+ */
+export function wallClockOnDayInZone(
+  from: string | Date,
+  dayOffset: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const parts = wallClockPartsInZone(from, timeZone);
+  return instantFromWallClockInZone(
+    { ...parts, day: parts.day + dayOffset, hour, minute },
+    timeZone
+  );
+}
+
 /** Superset of the option shapes DateS callers pass today (facts-02 §C). */
 export type DateFormatOptions = {
   weekday?: "long" | "short" | "narrow";
@@ -795,4 +995,174 @@ export function formatDate(
   }
 
   return out.join(", ");
+}
+
+/* ────────────────────────── Calendar range helpers ─────────────────────────
+ * Day-level range maths for calendar surfaces. Formatting lives above; this is
+ * about WHICH DAYS a booking touches, which is a different question and one
+ * both apps will ask if web ever redraws its calendar from our own primitives.
+ * Kept here rather than in the companion so the answer can never differ
+ * between surfaces, and so it is testable without a React Native runtime.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `YYYY-MM-DD` for a date, in the LOCAL timezone.
+ *
+ * Deliberately not `toISOString().slice(0, 10)`: that converts to UTC first, so
+ * a booking at 22:00 on the 7th in UTC+3 would be keyed to the 8th and its band
+ * would be drawn on the wrong day.
+ *
+ * @param date - the instant to key
+ * @param timeZone - IANA zone to measure the calendar day in. Pass the user's
+ *   preferred zone whenever the key will be shown next to a date rendered in
+ *   that zone: with the device on a different zone, a booking near midnight
+ *   otherwise gets marked on one day and displays as another.
+ * @returns the calendar day in `timeZone` (or the device zone), zero padded
+ */
+export function calendarDayKey(date: Date, timeZone?: string): string {
+  if (timeZone) {
+    // Same mechanism as calendarDayIndex: the only way to ask what calendar
+    // date an instant falls on in a zone that is not the device's.
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const get = (type: string) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * The inverse of {@link calendarDayKey}: a `YYYY-MM-DD` key back to a local Date
+ * at midnight.
+ *
+ * Deliberately not `new Date(key)`. A bare `YYYY-MM-DD` is parsed as UTC
+ * midnight by the ECMAScript date-only form, so anywhere west of UTC the Date
+ * lands on the PREVIOUS day: `2026-09-01` in Los Angeles becomes 31 August.
+ * Anything that then reads `getMonth()` gets the wrong month, and a calendar
+ * built on that asks the server for the month before the one on screen. The
+ * bug is invisible east of UTC, which is exactly why it needs its own function.
+ *
+ * @param key - a `YYYY-MM-DD` day key
+ * @returns local midnight on that day, or an Invalid Date when unparseable
+ */
+export function calendarDayKeyToDate(key: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return new Date(NaN);
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * The range a one-month calendar view loads: EXACTLY the weeks a month grid
+ * draws, so a booking that began in the previous month still paints its band
+ * into this one.
+ *
+ * why week-aligned and not a flat week either side: a month grid renders whole
+ * weeks, so it shows at most six days of each neighbouring month. A flat
+ * seven-day pad fetched a fringe the grid has no square for, and a booking
+ * landing in it was drawn nowhere while still counting as INSIDE the window -
+ * so the "N more outside this month" line stayed hidden too. It was invisible
+ * with nothing to explain it. Fetching precisely what is rendered makes
+ * "overlaps the window" and "is drawn" the same statement.
+ *
+ * The end is the LAST INSTANT of its day, not midnight. Consumers document an
+ * inclusive window and filter on `from <= end`, so a midnight bound silently
+ * dropped every booking starting later on the window's final day.
+ *
+ * @param monthKey - any `YYYY-MM-DD` day inside the month to show
+ * @param weekStartsOn - first column of the grid, 0 = Sunday. Must match the
+ *   `firstDay` the grid is rendered with, or the window and the squares drift.
+ * @returns the inclusive window to request
+ */
+export function calendarMonthWindow(
+  monthKey: string,
+  weekStartsOn: number = 0
+): {
+  start: Date;
+  end: Date;
+} {
+  const base = calendarDayKeyToDate(monthKey);
+  const firstOfMonth = new Date(base.getFullYear(), base.getMonth(), 1);
+  // Day 0 of the NEXT month is the last day of this one, leap years included.
+  const lastOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+
+  // Tolerate any integer, including the negatives a bad preference could carry.
+  const weekStart = ((Math.trunc(weekStartsOn) % 7) + 7) % 7;
+  const weekEnd = (weekStart + 6) % 7;
+
+  const start = new Date(firstOfMonth);
+  start.setDate(start.getDate() - ((start.getDay() - weekStart + 7) % 7));
+
+  const end = new Date(lastOfMonth);
+  end.setDate(end.getDate() + ((weekEnd - end.getDay() + 7) % 7));
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/**
+ * A `YYYY-MM-DD` key as an instant at UTC midnight, purely so day ranges can be
+ * walked without the device's zone or its DST jumps entering into it. This is
+ * NOT the same as {@link calendarDayKeyToDate}, which deliberately returns a
+ * LOCAL date for callers that read month and day off it.
+ */
+function keyToUtcMidnight(key: string): Date {
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
+/** Upper bound on the days one range may enumerate. */
+const MAX_RANGE_DAYS = 400;
+
+/**
+ * Every local day key a range covers, inclusive of both ends.
+ *
+ * A booking is a range, so a five-day job must be drawable as one continuous
+ * run rather than five unrelated marks.
+ *
+ * @param from - ISO start instant
+ * @param to - ISO end instant
+ * @returns ordered day keys; empty when the range is reversed or unparseable,
+ *   and capped so corrupt data cannot spin the caller
+ */
+export function calendarDaysCovered(
+  from: string,
+  to: string,
+  clip?: { from: Date; to: Date },
+  timeZone?: string
+): string[] {
+  const start = new Date(from);
+  const end = new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  // Iterate pure calendar dates, anchored to UTC midnight so the walk cannot
+  // drift across a DST boundary. Which date each instant belongs to is decided
+  // by calendarDayKey, in `timeZone` when one is given.
+  const cursor = keyToUtcMidnight(calendarDayKey(start, timeZone));
+  const last = keyToUtcMidnight(calendarDayKey(end, timeZone));
+
+  /**
+   * With a clip, only the days inside it are enumerated. A caller drawing one
+   * month does not need the other 900 days of a two-year booking, and without
+   * this the MAX_RANGE_DAYS cap counts from the booking's own start - so a
+   * booking longer than the cap produced no keys at all for the month on
+   * screen, and simply vanished from it.
+   */
+  if (clip) {
+    const clipFrom = keyToUtcMidnight(calendarDayKey(clip.from, timeZone));
+    const clipTo = keyToUtcMidnight(calendarDayKey(clip.to, timeZone));
+    if (cursor < clipFrom) cursor.setTime(clipFrom.getTime());
+    if (last > clipTo) last.setTime(clipTo.getTime());
+  }
+
+  const keys: string[] = [];
+  while (cursor <= last && keys.length < MAX_RANGE_DAYS) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
 }

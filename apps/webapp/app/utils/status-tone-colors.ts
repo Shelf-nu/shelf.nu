@@ -1,15 +1,14 @@
 /**
- * Maps a shared {@link StatusTone} onto this app's badge palette.
+ * Resolves a shared {@link StatusTone} against this app's badge palette.
  *
  * The tone itself lives in `@shelf/labels` alongside the words, so the webapp
  * and the companion app cannot disagree about which status deserves which
  * weight. Only the concrete colours are app-owned: the webapp has one fixed
  * palette, the companion resolves each tone twice for light and dark mode.
  *
- * Keep this visually equivalent to the companion's `buildToneBadge`
- * (`apps/companion/lib/theme-colors.ts`) — if one side changes what "danger"
- * looks like, the two apps drift again, which is the bug this indirection
- * exists to prevent.
+ * This map and the companion's `buildToneBadge`
+ * (`apps/companion/lib/theme-colors.ts`) are what make a tone mean the same
+ * thing in both apps — change one and you must change the other.
  *
  * @see {@link file://./badge-colors.ts}
  */

@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import {
   resolveMostPrivilegedRole,
@@ -54,9 +55,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, assetIds, checkouts, timeZone } = z
-      .object({
+    const { bookingId, assetIds, checkouts, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         // Optional: a QT-only check-out sends its quantities in `checkouts` with
         // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
@@ -80,8 +80,10 @@ export async function action({ request }: ActionFunctionArgs) {
           )
           .optional(),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native

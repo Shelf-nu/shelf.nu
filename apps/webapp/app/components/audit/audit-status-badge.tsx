@@ -4,11 +4,12 @@ import { toneBadgeColors } from "~/utils/status-tone-colors";
 import { Badge } from "../shared/badge";
 
 /**
- * Badge component for displaying audit status with appropriate colors.
- * Colors are sourced from the platform's consistent BADGE_COLORS palette;
- * the words come from `@shelf/labels` so the companion app's audit cards can
- * never show a different one. This file used to carry a byte-identical local
- * copy of that map.
+ * Badge showing an audit session's status.
+ *
+ * Both halves come from `@shelf/labels`: the words from `AUDIT_STATUS_LABELS`
+ * and the semantic weight from `AUDIT_STATUS_TONES`, so the companion app's
+ * audit cards read the same. `toneBadgeColors` turns that tone into this app's
+ * `BADGE_COLORS` hexes.
  *
  * @param status - The audit status from Prisma enum
  */

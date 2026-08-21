@@ -12,10 +12,10 @@ interface AuditAssetStatusBadgeProps {
 }
 
 /**
- * Maps the displayed words back to the stored status so the shared tone map is
- * the single source of colour. `AuditStatusLabel` is the label, not the enum —
- * "Not scanned" and "Missing" are the same PENDING row before and after the
- * audit closes.
+ * Maps the displayed words back to the stored status, so the badge can look up
+ * the shared tone. The component receives an `AuditStatusLabel` — the label,
+ * not the enum — and "Not scanned" and "Missing" are the same PENDING row
+ * before and after the audit closes.
  */
 const STATUS_BY_LABEL: Record<
   AuditStatusLabel,
@@ -28,8 +28,11 @@ const STATUS_BY_LABEL: Record<
 };
 
 /**
- * Badge component to display the audit status of an asset.
- * Shown when viewing "ALL" filter to indicate which category each asset belongs to.
+ * Badge showing one asset's outcome within an audit.
+ *
+ * Shown under the "ALL" filter, where rows of every outcome are mixed together.
+ * The colour comes from the tone `@shelf/labels` assigns the status, so the
+ * companion app's scan list ranks the same outcomes the same way.
  */
 export function AuditAssetStatusBadge({ status }: AuditAssetStatusBadgeProps) {
   const colors = toneBadgeColors(

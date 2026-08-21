@@ -9,6 +9,7 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
@@ -70,13 +71,14 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const body = await request.json();
-    const { bookingId, timeZone } = z
-      .object({
+    const { bookingId, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native

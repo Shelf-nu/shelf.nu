@@ -219,6 +219,19 @@ export default function BookingDetailScreen() {
     announce("Content refreshed");
   };
 
+  /**
+   * The DEVICE zone, deliberately — not the user's preference zone.
+   *
+   * The booking action endpoints take this as a client HINT, standing in for
+   * the `CH-time-zone` cookie a native client cannot set. Web fills the same
+   * field from `getClientHint(request)`, which is also the device. Sending the
+   * preference zone here would make the two platforms disagree on one request
+   * field for no gain.
+   *
+   * The booking FORM screens are the opposite case and use `prefs.timeZone`:
+   * there the zone is not a hint, it is the encoding of a wall-clock string
+   * the user typed. Don't unify the two.
+   */
   const getTimeZone = () => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";

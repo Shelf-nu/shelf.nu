@@ -23,9 +23,9 @@ import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
  * @param prefs - the acting user's resolved date/time format preferences
  * @param opts - optional flags; `includeTime` appends the time part for datetime
  *   columns (leave unset for date-only columns)
- * @returns the CSV-safe formatted string; empty string for `null`. Month-name
- *   prefs produce a comma (e.g. "Jul 6, 2026"), which would break CSV columns,
- *   so any value containing a comma is wrapped in double quotes.
+ * @returns the formatted string, UNQUOTED; empty string for `null`. Month-name
+ *   prefs produce a comma (e.g. `Jul 6, 2026`) — quoting that is the caller's
+ *   responsibility, and the export route does it centrally for every cell.
  */
 export function formatDateForCsv(
   date: Date | null,
@@ -33,7 +33,13 @@ export function formatDateForCsv(
   opts?: { includeTime?: boolean }
 ): string {
   if (!date) return "";
-  const formatted = formatDate(date, prefs, { includeTime: opts?.includeTime });
-  // Month-name prefs emit a comma ("Jul 6, 2026"); quote so it stays one field.
-  return formatted.includes(",") ? `"${formatted}"` : formatted;
+  // Returned RAW, deliberately. Quoting is the caller's job: the export route
+  // sends every cell through `escapeCsvField` via `buildCsv`, so pre-quoting
+  // here would be quoted a second time — a month-name date came out as
+  // `"""Jul 6, 2026"""` rather than `"Jul 6, 2026"`.
+  //
+  // This function used to quote because its result bypassed the escaper
+  // entirely. Central escaping removed that need and made the pre-quoting a
+  // bug, so the responsibility now lives in exactly one place.
+  return formatDate(date, prefs, { includeTime: opts?.includeTime });
 }

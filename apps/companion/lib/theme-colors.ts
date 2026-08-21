@@ -60,11 +60,11 @@ export const lightColors = {
   // the low-stock indicator) must use this deeper shade instead. Mirrors
   // `primaryText`'s relationship to `primary`. WCAG AA 7.1:1 on white.
   warningText: "#92400E", // amber-800 — 6.79:1 on warningBg (AA)
-  // why: `success` (#12B76A) and `error` (#F04438) are 2.49:1 and 3.46:1 on
-  // their own badge backgrounds, both below the 4.5:1 the repo requires. They
-  // stay as-is for icons and bars, where AA does not apply the same way; badge
-  // TEXT uses these darker foregrounds instead. errorText is the same hex the
-  // webapp already uses for red badge text, so the two apps also match visually.
+  // Text-safe foregrounds: use these for any WORDS drawn on `successBg` /
+  // `errorBg`. The `success` and `error` values below are tuned for icons and
+  // bars; as text on those backgrounds they measure 2.49:1 and 3.46:1, under
+  // the 4.5:1 WCAG AA requires. `errorText` is the hex the webapp uses for red
+  // badge text, so both apps also match.
   successText: "#05603A", // green-800 — 7.26:1 on successBg (AA)
   errorText: "#B42318", // red-700 — 6.05:1 on errorBg (AA)
   success: "#12B76A",
@@ -143,8 +143,9 @@ export const darkColors: Colors = {
   // #161B22), so the text token matches `warning` here — same pattern as
   // dark `primaryText` matching `primary`.
   warningText: "#F0A020",
-  // Dark mode already clears AA on its own backgrounds (6.20:1 and 5.18:1), so
-  // these alias the base colours rather than darkening them further.
+  // Dark-mode counterparts of the light palette's text-safe foregrounds. Here
+  // the base colours already clear AA on their own backgrounds (6.20:1 and
+  // 5.18:1), so these alias them rather than darkening them further.
   successText: "#3FB950",
   errorText: "#F85149",
   success: "#3FB950",
@@ -209,15 +210,17 @@ export const lightBookingStatusBadge = buildBookingStatusBadge(lightColors);
 export const darkBookingStatusBadge = buildBookingStatusBadge(darkColors);
 
 /**
- * Resolves a shared {@link StatusTone} against this theme's palette.
+ * Resolves a shared {@link StatusTone} against one theme's palette.
  *
  * The tone-per-status decision lives in `@shelf/labels` next to the words, so
  * this app and the webapp cannot disagree about which status carries which
  * weight. Only the colour VALUES are app-owned, because the companion resolves
- * every tone twice (light and dark) while the webapp has one fixed palette.
+ * every tone twice — once for light, once for dark — while the webapp has one
+ * fixed palette.
  *
- * Keep this visually equivalent to the webapp's `toneBadgeColors`
- * (`apps/webapp/app/utils/status-tone-colors.ts`).
+ * This map and the webapp's `toneBadgeColors`
+ * (`apps/webapp/app/utils/status-tone-colors.ts`) are what make a tone mean the
+ * same thing in both apps — change one and you must change the other.
  */
 function buildToneBadge(
   c: Colors
