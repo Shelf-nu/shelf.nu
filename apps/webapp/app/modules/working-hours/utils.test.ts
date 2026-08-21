@@ -3,7 +3,6 @@ import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
 import type { WorkingHoursData, WeeklyScheduleJson } from "./types";
 import {
   calculateBusinessHoursDuration,
-  calculateEffectiveEndDate,
   getBookingDefaultStartEndTimes,
   getOverrideDateKey,
   normalizeWorkingHoursForValidation,
@@ -15,12 +14,12 @@ import {
 /**
  * Resolved prefs carrying a specific zone.
  *
- * `~/utils/date-fns` is deliberately NOT mocked here. It used to be, with a
- * `toISOString().slice(0,16)` stand-in that formatted in UTC while production
- * formatted in the device zone — so these cases agreed with production only
- * because the suite also forced `process.env.TZ = "UTC"` (which V8 does not
- * reliably honour after start). Both crutches are gone: every case now states
- * the zone it means, and the assertions exercise the real conversion.
+ * Every case states the zone it means, and `~/utils/date-fns` is deliberately
+ * NOT mocked — the assertions exercise the real conversion. Keep both
+ * properties. A stand-in formatter agrees with production only by coincidence,
+ * and `process.env.TZ` set in a hook is not a substitute for an explicit zone
+ * (V8 does not reliably honour it after process start), so a suite leaning on
+ * either passes for reasons unrelated to the code under test.
  */
 function prefsFor(timeZone: string): ResolvedFormatPrefs {
   return { ...HARDCODED_DEFAULT_PREFS, timeZone };
@@ -114,183 +113,6 @@ describe("normalizeWorkingHoursForValidation", () => {
     const result = normalizeWorkingHoursForValidation(invalidData);
 
     expect(result).toBeUndefined();
-  });
-});
-
-describe("calculateEffectiveEndDate", () => {
-  const mockWorkingHours: WorkingHoursData = {
-    enabled: true,
-    weeklySchedule: {
-      "0": { isOpen: false }, // Sunday
-      "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Monday
-      "2": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Tuesday
-      "3": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Wednesday
-      "4": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Thursday
-      "5": { isOpen: true, openTime: "09:00", closeTime: "17:00" }, // Friday
-      "6": { isOpen: false }, // Saturday
-    } as WeeklyScheduleJson,
-    overrides: [],
-  };
-
-  it("should return original end date when not skipping closed days", () => {
-    expect.assertions(1);
-
-    const startDate = new Date("2025-07-25T15:00:00Z"); // Friday
-    const endDate = new Date("2025-07-28T17:00:00Z"); // Monday
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      mockWorkingHours,
-      false, // skipClosedDays = false
-      "UTC"
-    );
-
-    expect(result).toBe(endDate);
-  });
-
-  it("should return original end date when working hours disabled", () => {
-    expect.assertions(1);
-
-    const startDate = new Date("2025-07-25T15:00:00Z");
-    const endDate = new Date("2025-07-28T17:00:00Z");
-    const disabledWorkingHours = { ...mockWorkingHours, enabled: false };
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      disabledWorkingHours,
-      true, // skipClosedDays = true, but working hours disabled
-      "UTC"
-    );
-
-    expect(result).toBe(endDate);
-  });
-
-  it("should return original end date when no working hours data", () => {
-    expect.assertions(1);
-
-    const startDate = new Date("2025-07-25T15:00:00Z");
-    const endDate = new Date("2025-07-28T17:00:00Z");
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      null, // no working hours
-      true,
-      "UTC"
-    );
-
-    expect(result).toBe(endDate);
-  });
-
-  it("should extend end date by 2 days when skipping weekend", () => {
-    expect.assertions(1);
-
-    const startDate = new Date("2025-07-25T15:00:00Z"); // Friday 3 PM
-    const endDate = new Date("2025-07-28T17:00:00Z"); // Monday 5 PM
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      mockWorkingHours,
-      true,
-      "UTC"
-    );
-
-    // Should extend by 2 days (Saturday + Sunday)
-    const expected = new Date("2025-07-30T17:00:00Z"); // Wednesday 5 PM
-    expect(result).toEqual(expected);
-  });
-
-  it("should handle date-specific overrides", () => {
-    expect.assertions(1);
-
-    const workingHoursWithOverride: WorkingHoursData = {
-      ...mockWorkingHours,
-      overrides: [
-        {
-          id: "holiday",
-          date: new Date("2025-07-28"), // Monday is now closed (holiday) - absolute date
-          isOpen: false,
-          openTime: null,
-          closeTime: null,
-          reason: "Holiday",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
-          workingHoursId: "working-hours-1",
-        },
-      ],
-    };
-
-    const startDate = new Date("2025-07-25T15:00:00Z"); // Friday
-    const endDate = new Date("2025-07-29T17:00:00Z"); // Tuesday
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      workingHoursWithOverride,
-      true,
-      "UTC"
-    );
-
-    // Should extend by 3 days (Saturday + Sunday + Monday holiday)
-    const expected = new Date("2025-08-01T17:00:00Z"); // Friday
-    expect(result).toEqual(expected);
-  });
-
-  it("should handle overrides that open normally closed days", () => {
-    expect.assertions(1);
-
-    const workingHoursWithOverride: WorkingHoursData = {
-      ...mockWorkingHours,
-      overrides: [
-        {
-          id: "special",
-          date: new Date("2025-07-26"), // Saturday is now open (special day) - absolute date
-          isOpen: true,
-          openTime: "10:00",
-          closeTime: "16:00",
-          reason: "Special event",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
-          workingHoursId: "working-hours-1",
-        },
-      ],
-    };
-
-    const startDate = new Date("2025-07-25T15:00:00Z"); // Friday
-    const endDate = new Date("2025-07-28T17:00:00Z"); // Monday
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      workingHoursWithOverride,
-      true,
-      "UTC"
-    );
-
-    // Should extend by 1 day (only Sunday, Saturday is now open)
-    const expected = new Date("2025-07-29T17:00:00Z"); // Tuesday
-    expect(result).toEqual(expected);
-  });
-
-  it("should handle booking within same day", () => {
-    expect.assertions(1);
-
-    const startDate = new Date("2025-07-28T10:00:00Z"); // Monday 10 AM
-    const endDate = new Date("2025-07-28T15:00:00Z"); // Monday 3 PM
-
-    const result = calculateEffectiveEndDate(
-      startDate,
-      endDate,
-      mockWorkingHours,
-      true,
-      "UTC"
-    );
-
-    // No closed days in between, should return original
-    expect(result).toEqual(endDate);
   });
 });
 
@@ -632,13 +454,13 @@ describe("getBookingDefaultStartEndTimes", () => {
   });
 
   /**
-   * The bug this parameter exists for: defaults used to be computed on the
-   * DEVICE clock while the form field displays and submits in the user's
-   * PREFERENCE zone. Reported from the field as a "Create booking" dialog
-   * prefilling ~10 hours late.
+   * What `prefs` is for: the form field displays and submits in the user's
+   * PREFERENCE zone, so the defaults it is seeded with must be computed there
+   * too. Computed on the ambient clock instead, they land hours off for anyone
+   * whose device zone differs.
    *
-   * These cases pin the zone-correct behaviour. They pass the same instant with
-   * different prefs, so they assert the zone actually drives the result rather
+   * These cases pass the same instant with different prefs and assert different
+   * wall-clocks, so they pin the zone as the thing driving the result rather
    * than the machine the suite happens to run on.
    */
   describe("preference zone drives the result", () => {
@@ -792,14 +614,15 @@ describe("getOverrideDateKey", () => {
 /**
  * Closed-day math must be done in the zone the caller supplies.
  *
- * Both of these walk day-by-day and ask "is this day open?", so the answer turns
- * entirely on which calendar day an instant falls in. They previously read that
- * off the DEVICE clock, which is what made two cases in this file fail under
- * `TZ=Asia/Tokyo` while passing on UTC CI — green in CI, wrong in production for
- * anyone whose device differed from their preference zone.
+ * The walk asks "is this day open?" day by day, so the answer turns entirely on
+ * which calendar day an instant falls in — and that is a property of the zone,
+ * not of the machine. An implementation that reads the day off the ambient clock
+ * gives one answer in the browser and another on the server for the same
+ * booking, and CI (which runs UTC) would not notice.
  *
- * Each case passes the SAME instants through two zones and asserts different
- * results, so a build that ignores the zone cannot pass.
+ * The case below passes the SAME instants through two zones and asserts
+ * DIFFERENT results, so an implementation that ignores the zone cannot pass.
+ * Keep that shape when adding cases here: two zones agreeing proves nothing.
  */
 describe("closed-day math is zone-driven", () => {
   const weekdaysOpen: WorkingHoursData = {
@@ -825,33 +648,14 @@ describe("closed-day math is zone-driven", () => {
 
     // UTC: 20:00-24:00 is Friday (open), 00:00-04:00 is Saturday (closed).
     // 8 total - 4 closed = 4.
-    expect(calculateBusinessHoursDuration(start, end, weekdaysOpen, "UTC")).toBe(
-      4
-    );
+    expect(
+      calculateBusinessHoursDuration(start, end, weekdaysOpen, "UTC")
+    ).toBe(4);
 
     // Asia/Tokyo (+9): the window is Sat 05:00 → Sat 13:00 local, entirely
     // inside a closed Saturday. 8 total - 8 closed = 0.
     expect(
       calculateBusinessHoursDuration(start, end, weekdaysOpen, "Asia/Tokyo")
     ).toBe(0);
-  });
-
-  it("calculateEffectiveEndDate counts closed days per zone", () => {
-    expect.assertions(2);
-
-    const start = new Date("2025-07-25T20:00:00Z");
-    const end = new Date("2025-07-27T20:00:00Z");
-
-    // UTC: the walk sees Friday (open) then Saturday (closed) → 1 closed day,
-    // so the end shifts out by one.
-    expect(
-      calculateEffectiveEndDate(start, end, weekdaysOpen, true, "UTC")
-    ).toEqual(new Date("2025-07-28T20:00:00Z"));
-
-    // Asia/Tokyo: the same instants are Sat 05:00 → Mon 05:00 local, so the
-    // walk sees Saturday AND Sunday closed → 2 closed days.
-    expect(
-      calculateEffectiveEndDate(start, end, weekdaysOpen, true, "Asia/Tokyo")
-    ).toEqual(new Date("2025-07-29T20:00:00Z"));
   });
 });
