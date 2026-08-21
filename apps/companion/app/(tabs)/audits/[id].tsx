@@ -259,6 +259,15 @@ function AuditDetailContent() {
         controller.signal,
         auditAssetId
       );
+      // Drop the controller the moment the request settles, BEFORE anything
+      // can return early. A superseded request still reaches this line, and
+      // cleaning up after the stale check below would retain its controller
+      // for the life of the context — one per row the user opened while an
+      // earlier fetch was still in the air.
+      if (evidenceAborts.current.get(requestFor) === controller) {
+        evidenceAborts.current.delete(requestFor);
+      }
+
       // The context may have changed while this was in the air. Anything from
       // a superseded request is discarded, including its in-flight marker, so
       // it cannot clear a newer fetch's claim.
@@ -278,9 +287,6 @@ function AuditDetailContent() {
       }
       setEvidenceLoading(false);
       evidenceInFlight.current = null;
-      if (evidenceAborts.current.get(requestFor) === controller) {
-        evidenceAborts.current.delete(requestFor);
-      }
     },
     [currentOrg?.id, id, evidenceContext]
   );
