@@ -30,6 +30,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
@@ -478,6 +479,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // `~/modules/barcode/display.ts`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
+          // Model cover image. These rows REPLACE the pivot's `ba.asset`
+          // (`detail ?? ba.asset` below), so every relation `<AssetImage>`
+          // needs must be re-included here — image scalars alone are not
+          // enough for assets that inherit their image from their model.
+          ...ASSET_MODEL_IMAGE_SELECT,
           bookingAssets: {
             where: {
               booking: {
