@@ -8,7 +8,7 @@
  * `AssetImageProps` requires `assetModel`, so a missing spread normally shows up
  * as a typecheck failure rather than as a wrong-looking page. That guarantee is
  * only as strong as the path between the loader and the render, and exactly two
- * things dissolve it — both have shipped this bug already:
+ * patterns dissolve it:
  *
  * 1. **A cast on the row.** `as unknown as SomeRowType` asserts a shape rather
  *    than checking one, so a row missing the relation passes. Where a cast is

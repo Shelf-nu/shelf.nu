@@ -46,8 +46,9 @@ import When from "../when/when";
  * the wrong picture. The constraint is what forces each loader to prove it
  * carries all three fields before its rows may enter this path.
  *
- * A bare `<T>` here is what let the booking overview ship a loader without the
- * relation. Do not widen it back.
+ * Do not relax the constraint to a bare `<T>`: that accepts a row of any shape,
+ * so a loader missing the relation reaches the render path with nothing to stop
+ * it.
  *
  * @see {@link file://./../../modules/asset/image-resolution.ts}
  */

@@ -97,12 +97,11 @@ const Row = ({
      * Cover image of the asset's model, rendered when the asset has no image
      * of its own. See `~/modules/asset/image-resolution`.
      *
-     * REQUIRED, not optional: `null` means "this asset has no model", which is
-     * a real answer, while an absent key means the loader forgot to select the
-     * relation — and that renders every inheriting asset as the placeholder
-     * with nothing failing. Optional here is what let this card ship without
-     * the relation, since `?? null` at the call site made the two
-     * indistinguishable.
+     * Required and nullable, which is what keeps the two cases apart: `null`
+     * says "this asset has no model" and is a real answer, while an absent key
+     * says the loader did not select the relation. Making it optional collapses
+     * that distinction, and so does `?? null` at the call site — both render
+     * every inheriting asset as the placeholder without anything failing.
      */
     assetModel: { image: string | null; thumbnailImage: string | null } | null;
   };
