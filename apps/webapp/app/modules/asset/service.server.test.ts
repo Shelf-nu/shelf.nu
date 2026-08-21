@@ -24,6 +24,10 @@ import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import {
+  ASSET_SEARCH_CEILING_MESSAGE,
+  MAX_MATCHED_ASSET_SEARCH_IDS,
+} from "./search.server";
+import {
   BULK_CREATE_MAX,
   bulkAssignAssetTags,
   bulkCheckOutAssets,
@@ -4481,6 +4485,32 @@ describe("getAssets search via UNION", () => {
     expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
       { id: { in: [] } },
     ]);
+  });
+
+  it("over-ceiling: rethrows the refine-search 400 unchanged, no asset fetch", async () => {
+    // why: return more ids than the bind-param ceiling without building real DB
+    // rows, so resolveAssetSearchIds throws its deliberate 400 and we can assert
+    // getAssets' catch propagates it unchanged rather than re-wrapping it.
+    queryRawMock.mockResolvedValue(
+      Array.from({ length: MAX_MATCHED_ASSET_SEARCH_IDS + 1 }, (_, i) => ({
+        id: `a${i}`,
+      }))
+    );
+
+    let thrown: unknown;
+    try {
+      await getAssets({ ...base, search: "a" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    expect((thrown as ShelfError).status).toBe(400);
+    // exact message — proves the generic catch wrapper did NOT replace it
+    expect((thrown as ShelfError).message).toBe(ASSET_SEARCH_CEILING_MESSAGE);
+    // short-circuited before the asset fetch (both findMany and count)
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
   });
 });
 
