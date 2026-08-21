@@ -1,3 +1,18 @@
+/**
+ * Supabase client for the companion app.
+ *
+ * One module-scope client, built from `EXPO_PUBLIC_SUPABASE_URL` and
+ * `EXPO_PUBLIC_SUPABASE_ANON_PUBLIC`. Those are inlined at bundle time, so the
+ * project this points at is fixed for the life of a build and cannot change at
+ * runtime. Import `supabase` directly; there is nothing to resolve first.
+ *
+ * Sessions persist through {@link secureStoreAdapter} rather than
+ * AsyncStorage, because a refresh token belongs in the keychain. iOS caps a
+ * SecureStore item at ~2KB while a Supabase session exceeds that, so the
+ * adapter splits a long value across numbered chunk keys and reassembles it on
+ * read. Deleting a key must clear every chunk, or a stale tail corrupts the
+ * next read.
+ */
 import { createClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
