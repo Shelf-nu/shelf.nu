@@ -234,12 +234,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       if (i.auditAssetId) bucket(i.auditAssetId).images.push(serialiseImage(i));
     }
 
+    /**
+     * Whether the clamp bit, so the client can say "showing the most recent
+     * N" instead of presenting a short list as the whole truth.
+     *
+     * It matters most on the audit-wide call: `MAX_EVIDENCE_ROWS` applies
+     * across the WHOLE audit, newest first, so once it bites the older
+     * per-asset buckets come back short — or empty — while their count chips
+     * still promise the real number. Without this flag "no photos" and
+     * "photos we did not send" look identical. Narrow with `auditAssetId` to
+     * get a bucket that cannot be clamped by unrelated rows.
+     */
+    const truncated =
+      notes.length === MAX_EVIDENCE_ROWS || images.length === MAX_EVIDENCE_ROWS;
+
     return data({
       general: {
         notes: notes.filter((n) => !n.auditAssetId).map(serialiseNote),
         images: images.filter((i) => !i.auditAssetId).map(serialiseImage),
       },
       byAuditAsset,
+      truncated,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

@@ -119,6 +119,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
+    // Gate here, not at the end: this is the earliest point `session` exists,
+    // and every query below is work a caller about to be refused never sees.
+    requireAuditAssigneeForBaseSelfService({
+      audit: session,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
+    });
+
     // Split images into general and asset-specific
     const generalImages = allImages.filter((img) => img.auditAssetId === null);
     const assetImages = allImages.filter((img) => img.auditAssetId !== null);
@@ -151,7 +160,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             displayName: true,
             firstName: true,
             lastName: true,
-            profilePicture: true,
           },
         },
         auditAsset: {
@@ -177,13 +185,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const isCreator = session.createdById === userId;
     const canRemoveAssets =
       (isCreator || isAdminOrOwner) && session.status === "PENDING";
-
-    requireAuditAssigneeForBaseSelfService({
-      audit: session,
-      userId,
-      isSelfServiceOrBase,
-      auditId,
-    });
 
     return data(
       payload({

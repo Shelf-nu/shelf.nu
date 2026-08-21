@@ -438,7 +438,7 @@ const AuditPDFContent = ({
                   <p className="whitespace-pre-wrap text-xs text-gray-900">
                     {note.content}
                   </p>
-                  <p className="mt-1 text-[10px] text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500">
                     {note.user
                       ? resolveUserDisplayName(note.user) || note.user.email
                       : "System"}{" "}
@@ -485,7 +485,7 @@ const AuditPDFContent = ({
                   <p className="whitespace-pre-wrap text-xs text-gray-900">
                     {note.content}
                   </p>
-                  <p className="mt-1 text-[10px] text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500">
                     {note.user
                       ? resolveUserDisplayName(note.user) || note.user.email
                       : "System"}{" "}

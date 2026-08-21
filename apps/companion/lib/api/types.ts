@@ -1096,6 +1096,19 @@ export type AuditEvidenceResponse = {
     string,
     { notes: AuditEvidenceNote[]; images: AuditEvidenceImage[] }
   >;
+  /**
+   * The server clamped the response, so what arrived is the most recent rows
+   * rather than all of them.
+   *
+   * The clamp applies across the WHOLE audit on an audit-wide request, so once
+   * it bites, older per-asset buckets come back short — or empty — while their
+   * count chips still promise the real number. Request a single
+   * `auditAssetId` to get a bucket no unrelated row can clamp.
+   *
+   * Optional so a client built against an older server still type-checks;
+   * absent means the server predates the flag, not that nothing was clamped.
+   */
+  truncated?: boolean;
 };
 
 export type RecordScanResponse = {

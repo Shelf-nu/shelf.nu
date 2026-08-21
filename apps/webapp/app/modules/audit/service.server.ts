@@ -2285,6 +2285,10 @@ export async function requireAuditAssignee({
       additionalData: { auditSessionId, organizationId },
       status: 404,
       label,
+      // An authorization outcome, not a fault: this fires whenever a caller
+      // names an audit outside their workspace, which the read routes hit on
+      // ordinary use. Capturing it turns routine refusals into Sentry volume.
+      shouldBeCaptured: false,
     });
   }
 
@@ -2300,6 +2304,10 @@ export async function requireAuditAssignee({
       additionalData: { auditSessionId, userId },
       status: 403,
       label,
+      // Same reasoning as the 404 above, and it matters more here: the
+      // evidence route runs this on every row tap, so an unassigned user
+      // browsing generates one capture per request.
+      shouldBeCaptured: false,
     });
   }
 }

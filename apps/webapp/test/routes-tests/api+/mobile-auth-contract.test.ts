@@ -39,7 +39,24 @@ const AUTH_EXEMPT = new Set<string>([
   "config.ts",
 ]);
 
-const ROUTE_FILES = readdirSync(MOBILE_DIR).filter((f) => f.endsWith(".ts"));
+/**
+ * Every route file under the mobile directory, at any depth and either
+ * extension.
+ *
+ * Recursive and `.tsx`-inclusive on purpose: a flat `.ts`-only listing makes
+ * the exemption set below stop being the only way out of this contract, since
+ * a route in a subdirectory or written as `.tsx` would simply not be
+ * enumerated — unguarded and unreported. Excludes `.test.` files, which are
+ * not routes.
+ */
+const ROUTE_FILES = readdirSync(MOBILE_DIR, { recursive: true })
+  .map((entry) => String(entry))
+  .filter(
+    (f) =>
+      (f.endsWith(".ts") || f.endsWith(".tsx")) &&
+      !f.includes(".test.") &&
+      !f.includes(".spec.")
+  );
 const GUARDED_FILES = ROUTE_FILES.filter((f) => !AUTH_EXEMPT.has(f));
 
 describe("mobile route auth contract", () => {
