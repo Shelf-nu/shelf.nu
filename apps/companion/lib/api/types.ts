@@ -983,6 +983,15 @@ export type AuditExpectedAsset = {
   id: string;
   name: string;
   auditAssetId: string;
+  /**
+   * Evidence recorded against this asset, whether or not anyone scanned it —
+   * a note or photo can be attached to an expected asset directly.
+   *
+   * Optional because a server predating them omits both; absent then means
+   * "unknown", and the caller falls back to the scan's counts.
+   */
+  auditNotesCount?: number;
+  auditImagesCount?: number;
   mainImage: string | null;
   thumbnailImage: string | null;
   /**
@@ -1059,6 +1068,15 @@ export type AuditDetailResponse = {
  * `authorName` is null when the account has been removed — the evidence
  * survives the person, so the UI says "Unknown" rather than hiding the row.
  */
+/**
+ * One note a person wrote during an audit, as the evidence route serves it.
+ *
+ * Only `COMMENT` rows reach here — the system activity trail is `UPDATE` and is
+ * filtered out server-side, so this never carries Markdoc tag source the phone
+ * cannot render.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
 export type AuditEvidenceNote = {
   id: string;
   content: string;
@@ -1067,6 +1085,13 @@ export type AuditEvidenceNote = {
   authorImage: string | null;
 };
 
+/**
+ * One photo taken during an audit, as the evidence route serves it.
+ *
+ * URLs arrive resolved and ready to render — the client never rebuilds them.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
 export type AuditEvidenceImage = {
   id: string;
   imageUrl: string;
