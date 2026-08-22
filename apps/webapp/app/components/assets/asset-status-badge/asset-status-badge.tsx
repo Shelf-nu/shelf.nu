@@ -88,8 +88,10 @@ export function AssetStatusBadge({
   // exists for INDIVIDUAL assets only).
   const isQtyTracked = asset ? isQuantityTracked(asset) : false;
 
-  const hasInlineBookingSlices =
-    (inlineQuantityData?.bookingAssets?.length ?? 0) > 0;
+  // Read the RAW asset, not the derived breakdown: getQuantityData normalises a
+  // missing `bookingAssets` to [], so the derived field cannot tell an index
+  // fragment (relation absent) from a complete payload with no bookings ([]).
+  const hasInlineBookingSlices = Array.isArray(asset?.bookingAssets);
 
   /**
    * Lazy-fetch the breakdown for qty-tracked assets that didn't get the

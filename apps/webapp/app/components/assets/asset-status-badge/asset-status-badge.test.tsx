@@ -108,7 +108,8 @@ beforeEach(() => {
  * Builds a minimal QT asset shape carrying a custody slice so the
  * default (non-suppressed) qty-aware branch would produce a "Partial
  * custody" relabel — used to prove that `suppressQtyAware` overrides
- * that inference.
+ * that inference. Note: this asset has NO `bookingAssets` field at all,
+ * representing an index/fragment loader that omits the relation.
  */
 function makeQtAssetWithCustodyElsewhere(): QuantityAwareAsset {
   return {
@@ -118,6 +119,20 @@ function makeQtAssetWithCustodyElsewhere(): QuantityAwareAsset {
     // suppression this would relabel an AVAILABLE row to "Partial
     // custody" via `getQuantityBadgeLabelAndColor`.
     custody: [{ quantity: 4 }],
+    assetKits: [],
+  };
+}
+
+/**
+ * Builds a QT asset shape as shipped by the asset detail page loader:
+ * `bookingAssets: []` means the asset has no bookings (complete data),
+ * distinct from an index fragment that omits `bookingAssets` entirely.
+ */
+function makeQtAssetWithEmptyBookingAssets(): QuantityAwareAsset {
+  return {
+    type: "QUANTITY_TRACKED",
+    quantity: 29,
+    custody: [{ quantity: 20 }],
     bookingAssets: [],
     assetKits: [],
   };
@@ -200,12 +215,12 @@ describe("AssetStatusBadge", () => {
     it("does not relabel a custody-only inline snapshot and arms the lazy fetch instead", () => {
       // Case (c): index-surface regression guard (asset index, picker
       // rows, scanner drawer). Those loaders ship custody but no
-      // `bookingAssets`, so the inline breakdown is INCOMPLETE: reading
-      // it as authoritative would report `checkedOut = 0` and infer
-      // "Partial custody" even when units are out on a booking
-      // (issue #2875). The badge must render the caller status until
-      // the lazy `/quantity-breakdown` fetch resolves, and must arm
-      // that fetch on hover.
+      // `bookingAssets` field at all, so the inline breakdown is
+      // INCOMPLETE: reading it as authoritative would report
+      // `checkedOut = 0` and infer "Partial custody" even when units
+      // are out on a booking (issue #2875). The badge must render
+      // the caller status until the lazy `/quantity-breakdown` fetch
+      // resolves, and must arm that fetch on hover.
       const { container } = render(
         <AssetStatusBadge
           id="asset-qt-3"
@@ -220,6 +235,32 @@ describe("AssetStatusBadge", () => {
 
       hoverBadge(container);
       expect(breakdownCalls().some((call) => call.enabled)).toBe(true);
+    });
+
+    it("does not arm the lazy fetch when detail page ships bookingAssets: [] (complete but empty)", () => {
+      // Case (new): detail page with `bookingAssets: []` ships
+      // complete data saying this asset has no bookings. The badge
+      // must NOT arm the lazy fetch (the inline snapshot is
+      // authoritative), and must render "Partial custody" when QT
+      // units are in custody with no bookings.
+      const { container } = render(
+        <AssetStatusBadge
+          id="asset-qt-5"
+          status="AVAILABLE"
+          availableToBook
+          asset={makeQtAssetWithEmptyBookingAssets()}
+        />
+      );
+
+      expect(screen.getByText("Partial custody")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/partially checked out/i)
+      ).not.toBeInTheDocument();
+
+      hoverBadge(container);
+      expect(breakdownCalls().every((call) => call.enabled === false)).toBe(
+        true
+      );
     });
 
     it("prefers the lazy breakdown over an incomplete custody-only inline snapshot once it resolves", () => {
