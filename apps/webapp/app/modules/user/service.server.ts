@@ -720,11 +720,20 @@ export async function updateUserFromSSO(
               // insert, leaving one user with two live custodian records. The
               // membership row does have that uniqueness and always exists on
               // this branch, so locking it serialises the pair of repairs.
-              await tx.$queryRaw`
+              const membership = await tx.$queryRaw<{ id: string }[]>`
                 SELECT id FROM "UserOrganization"
                 WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
                 FOR UPDATE
               `;
+
+              // The membership was read before the transition ran and can be
+              // gone by the time the lock resolves — a concurrent callback
+              // whose group claims revoke access deletes the row. Creating the
+              // record anyway would leave a custodian attached to a workspace
+              // its user is no longer in.
+              if (!membership || membership.length === 0) {
+                return;
+              }
 
               await ensureUserTeamMember(tx, {
                 userId,

@@ -262,6 +262,28 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     expect(sql.join("?")).toContain('"UserOrganization"');
   });
 
+  it("creates nothing when the membership disappeared under the lock", async () => {
+    // The membership is read before the transition runs, so a concurrent
+    // callback whose claims revoke access can delete the row in between. The
+    // lock then finds nothing, and creating the record anyway would attach a
+    // custodian to a workspace its user is no longer in.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.$queryRaw.mockResolvedValue([]);
+
+    await login({
+      userOrganizations: [
+        { organization: { id: ORG_ID }, roles: [OrganizationRoles.ADMIN] },
+      ],
+    });
+
+    expect(mockDb.db.teamMember.create).not.toHaveBeenCalled();
+    expect(committed).toEqual([]);
+  });
+
   it("does not duplicate a team member that already exists", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
