@@ -344,6 +344,12 @@ export async function getLocation(
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {
+                // The list column shows ONE custodian, chosen as `custody[0]`
+                // by `getPrimaryCustody`. Without an order the database is
+                // free to return the rows differently between requests, so a
+                // multi-custodian asset would show a different holder on
+                // refresh. `id` breaks ties on identical timestamps.
+                orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 select: {
                   quantity: true,
                   custodian: {
