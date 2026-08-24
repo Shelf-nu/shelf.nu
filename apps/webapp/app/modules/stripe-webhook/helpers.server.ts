@@ -239,12 +239,38 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
     });
 
   // Custom install users — no processing needed
-  const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
-  if (customInstallUsers.includes(customerId)) {
+  if (
+    parseCustomInstallCustomers(CUSTOM_INSTALL_CUSTOMERS).includes(customerId)
+  ) {
     return { event, customerId, user: null };
   }
 
   return { event, customerId, user };
+}
+
+/**
+ * Parses the comma-separated `CUSTOM_INSTALL_CUSTOMERS` env var into customer
+ * ids.
+ *
+ * Entries are trimmed: a list written the way a human writes one,
+ * `cus_A, cus_B`, otherwise yields `" cus_B"`, which matches no customer. The
+ * consequence is not a missed match but an inverted one — a self-hosted
+ * customer stops being excluded from webhook processing and gets downgraded to
+ * free and their subscription paused.
+ *
+ * Casing is preserved: Stripe customer ids are case-sensitive, so normalising
+ * them the way domain lists are normalised would break every match.
+ *
+ * @param raw - The raw env var value, possibly undefined
+ * @returns Customer ids, empty entries dropped
+ */
+export function parseCustomInstallCustomers(
+  raw: string | undefined | null
+): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((customerId) => customerId.trim())
+    .filter(Boolean);
 }
 
 /**
