@@ -20,6 +20,7 @@ import {
 } from "~/modules/barcode/addon.server";
 import {
   claimAddonTrial,
+  mayHaveCreatedSubscription,
   releaseAddonTrial,
 } from "~/modules/billing/addon-trial-claim.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
@@ -141,20 +142,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId: personalOrg.id,
         }));
       } catch (cause) {
-        // A Stripe failure must not cost the workspace a trial it never got.
-        await releaseAddonTrial({
-          organizationId: personalOrg.id,
-          addon: "audits",
-        }).catch((releaseCause: unknown) => {
-          Logger.error(
-            new ShelfError({
-              cause: releaseCause,
-              message: "Failed to release an unclaimed audit trial",
-              additionalData: { organizationId: personalOrg.id },
-              label: "Stripe",
-            })
-          );
-        });
+        // A refusal Stripe never received is safe to undo. An ambiguous
+        // failure is not: the subscription may exist and only its response
+        // was lost, so handing the trial back would let a retry open a
+        // second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: personalOrg.id,
+            addon: "audits",
+          }).catch((releaseCause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message: "Failed to release an unclaimed audit trial",
+                additionalData: { organizationId: personalOrg.id },
+                label: "Stripe",
+              })
+            );
+          });
+        }
         throw cause;
       }
 
@@ -193,19 +199,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId: personalOrg.id,
         }));
       } catch (cause) {
-        await releaseAddonTrial({
-          organizationId: personalOrg.id,
-          addon: "barcodes",
-        }).catch((releaseCause: unknown) => {
-          Logger.error(
-            new ShelfError({
-              cause: releaseCause,
-              message: "Failed to release an unclaimed barcode trial",
-              additionalData: { organizationId: personalOrg.id },
-              label: "Stripe",
-            })
-          );
-        });
+        // A refusal Stripe never received is safe to undo. An ambiguous
+        // failure is not: the subscription may exist and only its response
+        // was lost, so handing the trial back would let a retry open a
+        // second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: personalOrg.id,
+            addon: "barcodes",
+          }).catch((releaseCause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message: "Failed to release an unclaimed barcode trial",
+                additionalData: { organizationId: personalOrg.id },
+                label: "Stripe",
+              })
+            );
+          });
+        }
         throw cause;
       }
 

@@ -85,12 +85,45 @@ export async function claimAddonTrial({
 }
 
 /**
+ * Whether a failed trial attempt may have left a real subscription at Stripe.
+ *
+ * `subscriptions.create` failing does not mean nothing was created: a lost
+ * response looks exactly like a refusal from the caller's side. The add-on
+ * helpers record whether the request had been sent, and that is the only safe
+ * basis for deciding whether to hand the trial back — releasing it after an
+ * ambiguous failure lets a retry open a SECOND subscription, which is the
+ * outcome the claim exists to prevent.
+ *
+ * Unknown shapes count as attempted. A trial wrongly kept costs the workspace
+ * a free week and a support message; a trial wrongly released costs them a
+ * duplicate subscription.
+ *
+ * @param cause - The error thrown while creating the trial
+ * @returns `true` when a subscription may exist, so the claim must stand
+ */
+export function mayHaveCreatedSubscription(cause: unknown): boolean {
+  // A 4xx from the add-on helper is its own pre-flight validation (an invalid
+  // price, a missing Stripe client) and is rethrown before the request goes
+  // out, so nothing can exist yet.
+  if (cause instanceof ShelfError && (cause.status ?? 500) < 500) {
+    return false;
+  }
+
+  if (cause instanceof ShelfError) {
+    const attempted = cause.additionalData?.subscriptionCreateAttempted;
+    return attempted !== false;
+  }
+
+  return true;
+}
+
+/**
  * Returns a claimed trial to the workspace after the trial could not be
  * started.
  *
- * Only the caller that claimed it may release it — releasing a trial someone
- * else is mid-way through creating would hand out a second subscription, which
- * is the thing the claim exists to prevent.
+ * Only the caller that claimed it may release it, and only for a failure that
+ * provably happened before Stripe was asked to create anything — see
+ * {@link mayHaveCreatedSubscription}.
  *
  * A release failure is logged by the caller rather than replacing the original
  * error: what the user needs to hear is why their trial did not start.

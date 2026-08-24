@@ -141,16 +141,21 @@ describe("createAuditAddonTrialSubscription", () => {
 
     await createAuditAddonTrialSubscription(trialParams);
 
-    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith({
-      customer: "cus_xyz",
-      items: [{ price: "price_123" }],
-      trial_period_days: 7,
-      trial_settings: {
-        end_behavior: { missing_payment_method: "pause" },
+    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
+      {
+        customer: "cus_xyz",
+        items: [{ price: "price_123" }],
+        trial_period_days: 7,
+        trial_settings: {
+          end_behavior: { missing_payment_method: "pause" },
+        },
+        default_payment_method: "pm_abc",
+        metadata: { userId: "user_abc", organizationId: "org_456" },
       },
-      default_payment_method: "pm_abc",
-      metadata: { userId: "user_abc", organizationId: "org_456" },
-    });
+      // Keyed on the workspace: a retry after a lost response returns this
+      // same subscription instead of opening a second one.
+      { idempotencyKey: "addon-trial:audits:org_456" }
+    );
   });
 
   it("creates subscription without default_payment_method when none exists", async () => {
@@ -162,15 +167,18 @@ describe("createAuditAddonTrialSubscription", () => {
 
     await createAuditAddonTrialSubscription(trialParams);
 
-    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith({
-      customer: "cus_xyz",
-      items: [{ price: "price_123" }],
-      trial_period_days: 7,
-      trial_settings: {
-        end_behavior: { missing_payment_method: "pause" },
+    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
+      {
+        customer: "cus_xyz",
+        items: [{ price: "price_123" }],
+        trial_period_days: 7,
+        trial_settings: {
+          end_behavior: { missing_payment_method: "pause" },
+        },
+        metadata: { userId: "user_abc", organizationId: "org_456" },
       },
-      metadata: { userId: "user_abc", organizationId: "org_456" },
-    });
+      { idempotencyKey: "addon-trial:audits:org_456" }
+    );
     // Ensure default_payment_method is NOT in the call
     const callArgs = mockStripe.subscriptions.create.mock.calls[0][0];
     expect(callArgs).not.toHaveProperty("default_payment_method");

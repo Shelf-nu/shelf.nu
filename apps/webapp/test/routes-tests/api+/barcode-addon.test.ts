@@ -17,6 +17,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { ShelfError } from "~/utils/error";
 
 // why: mocking Remix's data() so the action's error path returns a Response
 // whose status we can assert (React Router v7 single fetch)
@@ -206,16 +207,24 @@ describe("POST /api/barcode-addon", () => {
       expect(createBarcodeAddonTrialSubscription).not.toHaveBeenCalled();
     });
 
-    it("returns the claim when Stripe refuses, so the trial is not lost", async () => {
+    it("returns the claim when the failure preceded the Stripe request", async () => {
+      // The add-on helper reports that it never sent the create, so nothing
+      // can exist and the workspace keeps its trial.
       (
         createBarcodeAddonTrialSubscription as ReturnType<typeof vi.fn>
-      ).mockRejectedValueOnce(new Error("card_declined"));
+      ).mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "Stripe not initialized",
+          additionalData: { subscriptionCreateAttempted: false },
+          label: "Stripe",
+        })
+      );
 
       await post("trial");
 
       // Claim then release: the second call puts the flag back, so the
-      // workspace can try again rather than being charged for a trial it
-      // never received.
+      // workspace can try again rather than losing a trial it never received.
       expect(mockOrgUpdateMany).toHaveBeenCalledTimes(2);
       expect(mockOrgUpdateMany).toHaveBeenLastCalledWith({
         where: { id: ORG, usedBarcodeTrial: true },
@@ -223,6 +232,31 @@ describe("POST /api/barcode-addon", () => {
       });
       // The add-on must not be switched on for a subscription that failed.
       expect(mockOrgUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps the claim when the create may already have succeeded", async () => {
+      // A lost response is indistinguishable from a refusal, and Stripe may
+      // hold a real subscription. Releasing here would let the user's retry
+      // open a second one — the exact outcome the claim exists to prevent.
+      (
+        createBarcodeAddonTrialSubscription as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(
+        new ShelfError({
+          cause: new Error("socket hang up"),
+          message: "Something went wrong while creating barcode add-on trial.",
+          additionalData: { subscriptionCreateAttempted: true },
+          label: "Stripe",
+        })
+      );
+
+      await post("trial");
+
+      // The claim, and nothing after it.
+      expect(mockOrgUpdateMany).toHaveBeenCalledTimes(1);
+      expect(mockOrgUpdateMany).toHaveBeenCalledWith({
+        where: { id: ORG, usedBarcodeTrial: false },
+        data: { usedBarcodeTrial: true },
+      });
     });
   });
 });

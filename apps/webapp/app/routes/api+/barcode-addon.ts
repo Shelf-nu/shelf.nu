@@ -10,6 +10,7 @@ import {
 } from "~/modules/barcode/addon.server";
 import {
   claimAddonTrial,
+  mayHaveCreatedSubscription,
   releaseAddonTrial,
 } from "~/modules/billing/addon-trial-claim.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
@@ -138,20 +139,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId,
         }));
       } catch (cause) {
-        await releaseAddonTrial({ organizationId, addon: "barcodes" }).catch(
-          (releaseCause: unknown) => {
+        // A refusal Stripe never received is safe to undo. An ambiguous failure
+        // is not: the subscription may exist and only its response was lost, so
+        // handing the trial back would let a retry open a second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: organizationId,
+            addon: "barcodes",
+          }).catch((releaseCause: unknown) => {
             // Report why the trial did not start, not why the bookkeeping
             // afterwards failed.
             Logger.error(
               new ShelfError({
                 cause: releaseCause,
                 message: "Failed to release an unclaimed barcode trial",
-                additionalData: { organizationId },
+                additionalData: { organizationId: organizationId },
                 label: "Stripe",
               })
             );
-          }
-        );
+          });
+        }
         throw cause;
       }
 
