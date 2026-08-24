@@ -10034,6 +10034,142 @@ describe("addScannedAssetsToBooking", () => {
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
+  describe("QUANTITY_TRACKED pool", () => {
+    const QT_ID = "asset-qty-scan";
+    const from = new Date("2026-07-01T09:00:00Z");
+    const to = new Date("2026-07-01T17:00:00Z");
+
+    /**
+     * One quantity-tracked asset with a fixed pool, answering every
+     * `asset.findMany` this path drives (the org-scope check, the conflict
+     * candidates, the scanned-asset metadata and the availability read — one
+     * mock, different `select` shapes, which the stub does not project).
+     */
+    /**
+     * Order of the two steps that matter, appended as they happen.
+     *
+     * No delegate belongs to the pool read alone — `asset.findMany` serves the
+     * org-scope check, the conflict candidates, the scanned metadata and the
+     * note builder as well — so invocation counters cannot separate them.
+     * The pool read is identifiable by its projection instead: `id` and
+     * `quantity` and nothing else.
+     */
+    let sequence: string[] = [];
+
+    function mockPool(
+      total: number,
+      type: AssetType = AssetType.QUANTITY_TRACKED
+    ) {
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: {
+          where?: { id?: { in?: string[] } };
+          select?: Record<string, boolean>;
+        }) => {
+          const select = args?.select ?? {};
+          const keys = Object.keys(select).sort();
+          if (keys.length === 2 && keys[0] === "id" && keys[1] === "quantity") {
+            sequence.push("measure");
+          }
+          return Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => ({
+              id,
+              type,
+              title: "Folding Chairs",
+              unitOfMeasure: "chairs",
+              quantity: total,
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            }))
+          );
+        }
+      );
+    }
+
+    beforeEach(() => {
+      sequence = [];
+      // why: the lock is a module mock, so it records its own turn in the
+      // sequence and still resolves the minimal asset stub its callers expect.
+      (
+        quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => {
+        sequence.push("lock");
+        return Promise.resolve({
+          id: QT_ID,
+          title: "Folding Chairs",
+          quantity: 2,
+        });
+      });
+      mockPool(2);
+      // No rows anywhere: nothing already on this booking, nothing reserved
+      // elsewhere, nothing checked out.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+        from,
+        to,
+      });
+    });
+
+    it("refuses to scan more units than the pool can cover", async () => {
+      // The conflict guard above this one is INDIVIDUAL semantics — one asset,
+      // one booking at a time. A quantity-tracked asset legitimately sits in
+      // many bookings at once, so nothing there measures the pool and the
+      // units could be promised twice.
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: [QT_ID],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          quantities: { [QT_ID]: 5 },
+        })
+      ).rejects.toThrow(ShelfError);
+
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("locks each quantity-tracked asset before measuring the pool", async () => {
+      await addScannedAssetsToBooking({
+        assetIds: [QT_ID],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        quantities: { [QT_ID]: 1 },
+      }).catch(() => undefined);
+
+      // Measuring an unclaimed pool is the race: a plain SELECT takes no lock
+      // under READ COMMITTED, so two scans read the same free count.
+      expect(quantityLock.lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        QT_ID,
+        "org-1"
+      );
+
+      // Taking the lock is only half of it — taking it AFTER the measurement
+      // leaves the race exactly as it was.
+      expect(sequence).toEqual(["lock", "measure"]);
+    });
+
+    it("leaves INDIVIDUAL assets to the conflict guard", async () => {
+      mockPool(2, AssetType.INDIVIDUAL);
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-individual"],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      }).catch(() => undefined);
+
+      // An INDIVIDUAL asset has no pool to draw on — locking it here would
+      // serialize scans that never compete.
+      expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects when a scanned asset is reserved for an overlapping booking", async () => {
     const from = new Date("2026-07-01T09:00:00Z");
     const to = new Date("2026-07-01T17:00:00Z");
