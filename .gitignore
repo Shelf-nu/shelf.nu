@@ -16,6 +16,8 @@ yarn.lock
 .env.local
 .env.staging
 .env.production
+.env.*.backup
+.env.production-backup
 
 .cache
 
@@ -83,3 +85,6 @@ node-compile-cache/
 
 # Expo build/cache artifacts (root-level; apps/companion/.gitignore covers its own)
 .expo/
+
+# Planning docs / specs — kept locally, never committed
+superpowers/

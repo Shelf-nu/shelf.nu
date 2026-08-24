@@ -189,6 +189,11 @@ describe("manage-assets route validation", () => {
       id: "booking123",
       name: "Test Booking",
       status: BookingStatus.ONGOING,
+      // why: updateBookingAssets now selects from/to for its in-tx
+      // QUANTITY_TRACKED availability guard; the mocked resolved value
+      // must satisfy the widened return type.
+      from: new Date("2024-01-01"),
+      to: new Date("2024-01-10"),
     });
     vi.mocked(noteService.createNotes).mockResolvedValue({ count: 0 });
     vi.mocked(bookingService.removeAssets).mockResolvedValue({} as any);
@@ -645,6 +650,13 @@ describe("manage-assets route validation", () => {
         assetIds: ["asset3"], // only the new asset
         quantities: {},
         userId: "user123",
+        // This route writes its own booking-side note (below, carrying the
+        // quantity annotations). The service must NOT write a second one —
+        // for a single INDIVIDUAL asset the two are byte-identical, so the
+        // feed reported one add twice. Asserted here because the exact-object
+        // form makes a silent regression impossible: dropping the flag fails
+        // this test rather than quietly restoring the duplicate.
+        skipBookingNote: true,
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -1168,5 +1180,51 @@ describe("manage-assets loader — Models tab payload", () => {
       matchedAssetModels: 0,
       modelRequests: [],
     });
+  });
+
+  it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: this fixture mirrors what `assetIndexFields()` actually selects —
+    // the full `custody.custodian.user` including `email` — so the assertion
+    // measures redaction rather than the shape of a real query. The picker is
+    // reachable with `booking: update`, which BASE and SELF_SERVICE both hold
+    // on their own DRAFT booking, and renders no custodian column, so the
+    // identity was pure over-fetch with nothing on screen to hint at it.
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      ...mockPaginatedAssets,
+      assets: [
+        {
+          id: "asset1",
+          title: "Camera",
+          custody: [
+            {
+              custodian: {
+                name: "Colleague Name",
+                userId: "someone-else",
+                user: {
+                  id: "someone-else",
+                  email: "colleague@example.com",
+                  firstName: "Colleague",
+                  lastName: "Name",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    } as any);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // Asset custody is an ARRAY (a qty-tracked asset splits across custodians),
+    // unlike the kit's single row — the helper has to handle both shapes.
+    const custodian = result.items[0].custody[0].custodian;
+    expect(custodian.name).toBe("");
+    expect(custodian.userId).toBeNull();
+    expect(custodian.user).toBeNull();
+    // The custody row survives: the availability label tests it for presence,
+    // so dropping it would change which assets read as available.
+    expect(result.items[0].custody).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
+import { getPrimaryLocation } from "../asset/utils";
 
 type AssetWithKit = {
   id: string;
@@ -422,6 +423,28 @@ export function isBookingArchivable({
 }
 
 /**
+ * Whether a booking in this status outranks an overlapping RESERVED booking
+ * when competing for the same asset.
+ *
+ * An ONGOING/OVERDUE booking is physically in flight: its custodian is holding
+ * (or collecting) the assets right now. A RESERVED booking has taken nothing —
+ * it is a claim on the future. So the in-flight booking wins, and the loser is
+ * told at ITS check-out, where `hasAssetBookingConflicts` correctly reports the
+ * asset as CHECKED_OUT on an in-flight booking.
+ *
+ * Without this asymmetry the priority inverts: because an ONGOING booking does
+ * not "occupy" an asset it has not yet checked out, anyone could reserve that
+ * asset afterwards — and that later reservation would then permanently block
+ * the in-flight booking from checking out an asset it already holds.
+ *
+ * @param status - The booking's current status
+ * @returns `true` when the booking is in flight (ONGOING or OVERDUE)
+ */
+export function outranksReservations(status: string): boolean {
+  return status === BookingStatus.ONGOING || status === BookingStatus.OVERDUE;
+}
+
+/**
  * Core logic for determining if an asset has booking conflicts.
  * Assets now reference bookings through the BookingAsset pivot table,
  * so we traverse `asset.bookingAssets[].booking` instead of the
@@ -435,6 +458,12 @@ export function isBookingArchivable({
  * `computeBookingAvailableQuantity()`.
  *
  * Used by both isAssetAlreadyBooked and kit-related functions.
+ *
+ * @param asset - Minimal asset shape (status, type, pivot rows to bookings)
+ * @param currentBookingId - Booking being evaluated; its own rows never conflict
+ * @param options.ignoreReservedConflicts - Drop the "RESERVED always conflicts"
+ *   rule. Pass this ONLY when the current booking is itself already in flight
+ *   (ONGOING/OVERDUE) — see {@link outranksReservations}.
  */
 export function hasAssetBookingConflicts(
   asset: {
@@ -442,7 +471,8 @@ export function hasAssetBookingConflicts(
     type?: string;
     bookingAssets?: { booking: { id: string; status: string } }[];
   },
-  currentBookingId: string
+  currentBookingId: string,
+  options?: { ignoreReservedConflicts?: boolean }
 ): boolean {
   /**
    * QUANTITY_TRACKED assets can appear in multiple concurrent bookings,
@@ -460,10 +490,13 @@ export function hasAssetBookingConflicts(
 
   if (conflictingBookings.length === 0) return false;
 
-  // Check if any conflicting booking is RESERVED (always conflicts)
-  const hasReservedConflict = conflictingBookings.some(
-    (b) => b.status === BookingStatus.RESERVED
-  );
+  // Check if any conflicting booking is RESERVED (always conflicts).
+  // `ignoreReservedConflicts` suppresses this rule for callers whose own
+  // booking already outranks a reservation — a reservation has taken nothing
+  // yet, so it must not block a booking that is physically in flight.
+  const hasReservedConflict =
+    !options?.ignoreReservedConflicts &&
+    conflictingBookings.some((b) => b.status === BookingStatus.RESERVED);
 
   if (hasReservedConflict) return true;
 
@@ -612,4 +645,278 @@ export function filterBookingAssets<T extends SearchableBookingAsset>(
       directIds.has(asset.id) ||
       (asset.kitId != null && matchedKitIds.has(asset.kitId))
   );
+}
+
+/**
+ * A single search-visible `BookingAsset` slice, reduced to the fields the PDF
+ * per-slice row builder needs.
+ *
+ * One QUANTITY_TRACKED asset can contribute several slices to a single booking
+ * (one standalone / free-pool slice plus one per kit it is booked under), and
+ * the exported PDF renders EACH slice as its own row — so a slice must carry
+ * its own booked quantity and a unique key, not be collapsed into one asset row.
+ */
+export type PdfBookingAssetSlice = {
+  /** The asset id. Shared across a QT asset's multiple slices. */
+  id: string;
+  /**
+   * The slice's `BookingAsset.assetKitId`: `null` for a standalone (free-pool)
+   * slice, otherwise the `AssetKit.id` (a MEMBERSHIP row id, NOT a `Kit.id`)
+   * this slice was booked under. Matched against `assetKits[].id` on the
+   * joined asset to resolve the slice's kit.
+   *
+   * Named `assetKitId` — not `kitId` — because {@link PdfSliceOverrides.kitId}
+   * on the produced row holds a real `Kit.id`; the two were previously
+   * indistinguishable by name. A QT asset in two kits has two slices with
+   * the SAME asset id but different `assetKitId`s and different `kitId`s.
+   */
+  assetKitId: string | null;
+  /**
+   * The slice's `BookingAsset.sourceKitId`: the `Kit` this slice was booked
+   * under, recorded durably. Unlike `assetKitId` it survives the asset leaving
+   * the kit, so it is the fallback that keeps detached residue rendering under
+   * its original kit instead of degrading to a loose asset row.
+   */
+  sourceKitId: string | null;
+  /** Booked units for THIS slice (`BookingAsset.quantity`). */
+  quantity: number;
+  /** Unique `BookingAsset.id`, used as the rendered row's React key. */
+  bookingAssetId: string;
+};
+
+/**
+ * Minimal shape of the full per-asset data joined onto each slice. `assetKits`
+ * carries each membership's `AssetKit.id` so a slice's `assetKitId` can be
+ * resolved to the specific kit (name + location) it was booked under — a QT
+ * asset can belong to several kits, so `assetKits[0]` is NOT necessarily right.
+ */
+type PdfRawAssetShape = {
+  id: string;
+  assetKits: Array<{
+    /** `AssetKit.id` — matched against a slice's `assetKitId`. */
+    id: string;
+    kit: {
+      id: string;
+      name: string;
+      location: { name: string } | null;
+    } | null;
+  }>;
+  assetLocations?: Array<{ location?: { name: string } | null }>;
+};
+
+/**
+ * A kit resolved from `BookingAsset.sourceKitId` rather than from a live
+ * `AssetKit` membership — the snapshot of a kit whose members have since
+ * changed. Deliberately the same shape a live membership's `kit` has, so both
+ * resolution paths produce identical rows.
+ */
+export type PdfSnapshotKit = {
+  id: string;
+  name: string;
+  location: { name: string } | null;
+};
+
+/** The resolved kit + location + slice metadata layered onto each raw asset. */
+type PdfSliceOverrides = {
+  /** The resolved kit's id (a `Kit.id`), or `null` for a standalone slice. */
+  kitId: string | null;
+  kit: {
+    id: string;
+    name: string;
+    location: { name: string } | null;
+  } | null;
+  location: { name: string } | null;
+  /** THIS slice's booked units. */
+  quantity: number;
+  /** Unique React key for the rendered row. */
+  bookingAssetId: string;
+  /**
+   * Detached kit residue: the slice renders under a kit resolved from the
+   * durable `sourceKitId`, but the asset is no longer a member of that kit.
+   * Mirrors the booking overview's `isRemovedFromKit` (see the loader in
+   * `bookings.$bookingId.overview.tsx`) so the printed PDF marks exactly the
+   * rows the web UI badges — a printed checklist otherwise shows a removed
+   * asset as an indistinguishable live kit member.
+   */
+  isRemovedFromKit: boolean;
+};
+
+/**
+ * Builds the booking PDF's render list as ONE ROW PER `BookingAsset` slice
+ * (mirroring the on-screen booking overview), rather than one deduped row per
+ * asset.
+ *
+ * A QUANTITY_TRACKED asset booked as 4 standalone + 3 via Kit B1 + 3 via Kit B2
+ * yields THREE rows — each carrying its own booked `quantity` and its own kit —
+ * so the reader sees exactly which units belong to which kit. `groupAndSortAssetsByKit`
+ * then groups these rows by their resolved `kitId` (never collapsing duplicate
+ * asset ids), keeping each kit's slices contiguous.
+ *
+ * The join is done by asset id: `rawAssetsById` holds the full (deduped) asset
+ * payload, and each slice's kit is resolved by matching the slice's
+ * `assetKitId` (a `BookingAsset.assetKitId`) against the asset's
+ * `assetKits[].id`. A slice whose asset didn't resolve is skipped defensively
+ * rather than crashing — it cannot normally happen, since the visible slices
+ * are the source of the asset ids fetched into `rawAssetsById`.
+ *
+ * When that membership is gone (the asset was removed from the kit, which
+ * `SET NULL`s `assetKitId`), the slice falls back to its durable
+ * `sourceKitId` via `snapshotKitsById`. Without it a finished booking's PDF
+ * would retroactively re-describe the job as containing loose assets. Such a
+ * row is flagged `isRemovedFromKit` so the renderer can print that it is no
+ * longer a member of the kit it groups under — unless the asset has since been
+ * re-added to that kit, in which case it is a live member again.
+ *
+ * @param visibleSlices - The search-visible, per-slice `BookingAsset` list
+ *   (each already reduced to {@link PdfBookingAssetSlice}).
+ * @param rawAssetsById - Full per-asset data keyed by asset id (deduped fetch).
+ * @param snapshotKitsById - Org-scoped kits keyed by `Kit.id`, used only to
+ *   resolve slices whose live membership is gone. Omit when no slice can be
+ *   detached residue.
+ * @returns One row per slice: the full asset data plus the slice's resolved
+ *   kit, primary location, booked quantity, unique key and the
+ *   `isRemovedFromKit` residue marker.
+ */
+export function buildPdfAssetRows<TRaw extends PdfRawAssetShape>(
+  visibleSlices: PdfBookingAssetSlice[],
+  rawAssetsById: Map<string, TRaw>,
+  snapshotKitsById: Map<string, PdfSnapshotKit> = new Map()
+): Array<TRaw & PdfSliceOverrides> {
+  const rows: Array<TRaw & PdfSliceOverrides> = [];
+
+  for (const slice of visibleSlices) {
+    const raw = rawAssetsById.get(slice.id);
+    // Defensive: a slice whose asset didn't resolve is dropped, not crashed.
+    if (!raw) {
+      continue;
+    }
+
+    // Resolve THIS slice's kit (with location) from the full asset data. A
+    // standalone slice (`assetKitId === null`) has no live membership; a
+    // kit-driven slice matches its `AssetKit.id` against the asset's
+    // memberships. Detached residue (membership gone, `sourceKitId` kept)
+    // falls back to the snapshot map so it still renders under its kit.
+    const liveKit = slice.assetKitId
+      ? raw.assetKits.find((ak) => ak.id === slice.assetKitId)?.kit ?? null
+      : null;
+    const snapshotKit =
+      !liveKit && slice.sourceKitId
+        ? snapshotKitsById.get(slice.sourceKitId) ?? null
+        : null;
+    const sliceKit = liveKit ?? snapshotKit;
+
+    /**
+     * Detached kit residue marker, an exact mirror of the booking overview
+     * loader's `isRemovedFromKit`: the row groups under a SNAPSHOT kit AND the
+     * asset is not currently a member of that same kit.
+     *
+     * The membership re-check is load-bearing. Re-adding the asset to the kit
+     * creates a NEW `AssetKit` row that the already-nulled slice never points
+     * at, so the slice still resolves through `sourceKitId` — without this
+     * condition a genuine current member would be printed as removed.
+     */
+    const isRemovedFromKit =
+      Boolean(snapshotKit) &&
+      !raw.assetKits.some((ak) => ak.kit?.id === slice.sourceKitId);
+
+    rows.push({
+      ...raw,
+      // Group by the resolved KIT id so per-slice rows land in the right kit
+      // group (standalone slices stay individual).
+      kitId: sliceKit?.id ?? null,
+      kit: sliceKit
+        ? { id: sliceKit.id, name: sliceKit.name, location: sliceKit.location }
+        : null,
+      location: getPrimaryLocation<{ name: string }>(raw),
+      quantity: slice.quantity,
+      bookingAssetId: slice.bookingAssetId,
+      isRemovedFromKit,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Source shape the PDF slice projection reads off each `BookingAsset.asset`.
+ * `assetKits` supplies the membership → `Kit.id` mapping (already selected by
+ * `BOOKING_WITH_ASSETS_INCLUDE`); `assetLocations` feeds the primary location.
+ */
+type PdfSliceSourceAsset = {
+  assetKits: Array<{
+    id: string;
+    kit: { id: string; name: string; location: { name: string } | null } | null;
+  }>;
+  assetLocations?: Array<{ location?: { name: string } | null }>;
+};
+
+/** The per-slice fields layered onto each source asset by the projection. */
+type PdfBookingAssetSliceProjection = {
+  /**
+   * The shared `Kit.id` of the slice's kit (`null` for a standalone slice) —
+   * NOT the per-membership `AssetKit.id`. `filterBookingAssets` re-expands a
+   * search match into its whole kit by grouping on this, so it MUST be the
+   * `Kit.id` or an asset's kit siblings never surface on search.
+   */
+  kitId: string | null;
+  /** The slice's `AssetKit.id` — the discriminator {@link buildPdfAssetRows} joins on. */
+  assetKitId: string | null;
+  /**
+   * The slice's durable `BookingAsset.sourceKitId`. Survives the asset leaving
+   * the kit (which `SET NULL`s `assetKitId`), so it is what lets a finished
+   * booking's PDF keep rendering that slice under the kit it went out as part
+   * of, instead of retroactively re-describing it as a loose asset.
+   */
+  sourceKitId: string | null;
+  kit: { id: string; name: string; location: { name: string } | null } | null;
+  location: { name: string } | null;
+  quantity: number;
+  bookingAssetId: string;
+};
+
+/**
+ * Projects a booking's `BookingAsset` rows into the PER-SLICE list the PDF
+ * export renders and searches over — one entry per slice (a standalone slice
+ * plus one per kit the asset is booked under), each carrying its own booked
+ * quantity and unique key.
+ *
+ * The load-bearing detail: `kitId` is set to the resolved **`Kit.id`**, not the
+ * per-membership `AssetKit.id`. {@link filterBookingAssets} groups a search
+ * match's kit siblings by `kitId`; setting it to the `AssetKit.id` (unique per
+ * asset-in-kit) meant searching one kit member never surfaced the rest of the
+ * kit in the exported PDF. The `AssetKit.id` is preserved separately as
+ * `assetKitId` for {@link buildPdfAssetRows}'s per-slice kit join.
+ *
+ * @param bookingAssets - The booking's `BookingAsset` rows (each with its
+ *   `assetKitId`, booked `quantity`, id, and the joined `asset` whose
+ *   `assetKits` supply the `AssetKit.id` → `Kit.id` mapping).
+ * @returns One projected slice per `BookingAsset` row.
+ */
+export function buildPdfBookingAssetSlices<TAsset extends PdfSliceSourceAsset>(
+  bookingAssets: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    sourceKitId: string | null;
+    asset: TAsset;
+  }>
+): Array<TAsset & PdfBookingAssetSliceProjection> {
+  return bookingAssets.map((ba) => {
+    const membership = ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId);
+    const kit = membership?.kit ?? null;
+    return {
+      ...ba.asset,
+      // Kit.id (shared across the kit) — drives search re-expansion + grouping.
+      // Falls back to the durable `sourceKitId` when the membership is gone, so
+      // a detached slice still groups with its kit siblings on search.
+      kitId: kit?.id ?? ba.sourceKitId ?? null,
+      // AssetKit.id (per membership) — the per-slice join discriminator.
+      assetKitId: ba.assetKitId,
+      sourceKitId: ba.sourceKitId,
+      kit,
+      location: getPrimaryLocation<{ name: string }>(ba.asset),
+      quantity: ba.quantity,
+      bookingAssetId: ba.id,
+    };
+  });
 }

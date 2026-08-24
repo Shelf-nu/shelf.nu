@@ -160,6 +160,7 @@ export const AssetsList = ({
                           barcodes: resource.extendedProps?.barcodes,
                         },
                         organization: currentOrganization,
+                        entityKind: "asset",
                       })
                     : null;
                   return (
@@ -172,6 +173,8 @@ export const AssetsList = ({
                             resource.extendedProps?.thumbnailImage,
                           mainImageExpiration:
                             resource.extendedProps?.mainImageExpiration,
+                          assetModel:
+                            resource.extendedProps?.assetModel ?? null,
                         }}
                         alt={`Image of ${resource.title}`}
                         className="size-14 shrink-0 rounded border object-cover"
@@ -251,7 +254,11 @@ export const ListAssetContent = ({
   } = formatCustodyList(custodyArray);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>
@@ -271,6 +278,7 @@ export const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"

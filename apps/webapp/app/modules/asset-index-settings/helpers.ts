@@ -26,6 +26,7 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "minQuantity",
   "type",
   "upcomingBookings",
   "assetModel",
@@ -89,6 +90,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
   quantity: "Quantity",
+  minQuantity: "Min quantity",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
@@ -115,6 +117,7 @@ export const defaultFields: Column[] = [
   { name: "quantity", visible: false, position: 17 },
   { name: "type", visible: false, position: 18 },
   { name: "assetModel", visible: false, position: 19 },
+  { name: "minQuantity", visible: false, position: 20 },
 ];
 
 // Generate barcode columns when barcodes are enabled

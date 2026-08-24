@@ -1,5 +1,7 @@
+import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
+import { ROLE_PRECEDENCE } from "./role-precedence";
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -61,6 +63,58 @@ export function canSeeBooking({
   );
 }
 
+/**
+ * The query-side mirror of {@link validateBookingOwnership}'s default check:
+ * the set of bookings a caller may MUTATE (add assets/kits to, edit, …).
+ *
+ * `validateBookingOwnership` is a per-row gate that runs at submit time. A
+ * picker whose whole purpose is to choose a mutation target has to offer that
+ * SAME set, or the user selects a row the action then 403s on. Sharing the
+ * predicate is what keeps the two from drifting: change the rule below and the
+ * gate, and every picker follows.
+ *
+ * Deliberately independent of `canSeeAllBookings`. That workspace toggle
+ * governs READ visibility only — `validateBookingOwnership` ignores it, so a
+ * SELF_SERVICE user in a workspace with the toggle on can view another user's
+ * booking but still cannot write to it. Gating a mutation-target picker on the
+ * read rule is what produced the dead-end this mirrors away.
+ *
+ * KNOWN GAP, intentionally mirrored rather than fixed here: like
+ * `validateBookingOwnership`, this matches only `custodianUserId` and NOT the
+ * team-member custody link, so a legacy booking whose custody sits solely on
+ * `custodianTeamMemberId` is excluded. That is a faithful reflection of what
+ * the action accepts today — offering those rows would just restore the 403.
+ * Widening both together (as {@link canSeeBooking} already does for reads) is a
+ * separate change that has to sweep every `validateBookingOwnership` call site.
+ *
+ * @param params.userId - The caller.
+ * @param params.role - The caller's effective role in the workspace.
+ * @returns A `Prisma.BookingWhereInput` to AND into the query, or `undefined`
+ *   for ADMIN / OWNER, who may write to every booking in the workspace.
+ */
+export function bookingWriteScopeClause({
+  userId,
+  role,
+}: {
+  userId: string;
+  role: OrganizationRoles;
+}): Prisma.BookingWhereInput | undefined {
+  // ALLOW-list, not a deny-list on SELF_SERVICE/BASE. A role added to the enum
+  // later defaults to RESTRICTED here, so the picker under-offers (a visible
+  // gap) rather than offering rows nobody checked. The gate below still
+  // deny-lists, matching what it has always enforced — so for a hypothetical
+  // new role this clause is deliberately the stricter of the two.
+  const canWriteToEveryBooking =
+    role === OrganizationRoles.ADMIN || role === OrganizationRoles.OWNER;
+
+  if (canWriteToEveryBooking) {
+    return undefined;
+  }
+
+  // Mirrors the `checkCustodianOnly: false` branch below: creator OR custodian.
+  return { OR: [{ creatorId: userId }, { custodianUserId: userId }] };
+}
+
 interface ValidateBookingOwnershipParams {
   booking: {
     creatorId: string | null;
@@ -93,6 +147,29 @@ interface ValidateBookingOwnershipParams {
  *
  * @throws {ShelfError} 403 if user is not authorized
  */
+/**
+ * Picks the most privileged role from a membership's role array.
+ *
+ * `roles` is an array and the codebase conventionally reads `roles[0]`, which
+ * is fine for display and wrong for authorization: a membership ordered
+ * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE, so an actual admin is
+ * treated as restricted and refused. {@link validateBookingOwnership} only
+ * distinguishes privileged (ADMIN/OWNER, allowed through) from restricted
+ * (SELF_SERVICE/BASE, owner-only), so it needs the privileged answer.
+ *
+ * @param roles - Every role on the membership
+ * @returns OWNER or ADMIN when present, otherwise `roles[0]`, defaulting to BASE
+ */
+export function resolveMostPrivilegedRole(
+  roles: OrganizationRoles[]
+): OrganizationRoles {
+  return (
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    roles[0] ??
+    OrganizationRoles.BASE
+  );
+}
+
 export function validateBookingOwnership({
   booking,
   userId,

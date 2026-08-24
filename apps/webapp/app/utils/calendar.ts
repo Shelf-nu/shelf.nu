@@ -4,6 +4,7 @@ import type {
   EventHoveringArg,
 } from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
 export function getStatusClasses(
@@ -58,14 +59,18 @@ export function getStatusClasses(
         "md:focus:!bg-purple-100",
       ];
       break;
+    // Red, not amber. `bookingStatusColorMap` maps OVERDUE to red and every
+    // other place a booking status is shown reads from it - the badge on the
+    // bookings index, the booking detail, the asset page, the companion app.
+    // The calendar was the only surface calling an overdue booking a warning.
     case "OVERDUE":
       statusClasses = [
-        "md:!text-warning-700",
-        "md:bg-warning-50",
-        "md:border-warning-200",
-        "[&_.fc-daygrid-event-dot]:!border-warning-700",
-        "[&_.fc-list-event-dot]:!border-warning-700",
-        "md:focus:!bg-warning-100",
+        "md:!text-error-700",
+        "md:bg-error-50",
+        "md:border-error-200",
+        "[&_.fc-daygrid-event-dot]:!border-error-700",
+        "[&_.fc-list-event-dot]:!border-error-700",
+        "md:focus:!bg-error-100",
       ];
       break;
     case "COMPLETE":
@@ -96,7 +101,7 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   CANCELLED: "md:!bg-gray-100",
   RESERVED: "md:!bg-blue-100",
   ONGOING: "md:!bg-purple-100",
-  OVERDUE: "md:!bg-warning-100",
+  OVERDUE: "md:!bg-error-100",
   COMPLETE: "md:!bg-success-100",
 };
 
@@ -258,39 +263,50 @@ export function handleEventClick(info: EventClickArg) {
 }
 
 /**
- * This function returns the title and subtitle for the calendar
- * based on the current view type.
+ * Build the calendar header title + subtitle for the current view, formatting
+ * every visible date through the user's resolved prefs (absolute).
  *
- * @param viewType - The type of the calendar view (e.g., resourceTimelineWeek, timeGridWeek)
- * @param calendar - The CalendarApi instance to get the current date.
+ * @param viewType - FullCalendar view name (…Week / …Day / month)
+ * @param calendarApi - The CalendarApi instance to read the current date from
+ * @param prefs - Resolved user format prefs
  */
 export function getCalendarTitleAndSubtitle({
   viewType,
   calendarApi,
+  prefs,
 }: {
   viewType: string;
   calendarApi: CalendarApi;
+  prefs: ResolvedFormatPrefs;
 }) {
   const currentDate = calendarApi.getDate();
-  const currentMonth = currentDate.toLocaleString("default", { month: "long" });
-  const currentYear = currentDate.getFullYear();
+  const monthYear = formatDate(currentDate, prefs, {
+    month: "long",
+    year: "numeric",
+    localeOnly: true,
+  });
 
-  let title = `${currentMonth} ${currentYear}`;
+  let title = monthYear;
   let subtitle = "";
 
   if (viewType.endsWith("Week")) {
-    const [startingDay, endingDay] = getWeekStartingAndEndingDates(currentDate);
+    const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+      currentDate,
+      prefs
+    );
 
-    title = `${currentMonth} ${currentYear}`;
+    title = monthYear;
     subtitle = `Week ${startingDay} - ${endingDay}`;
   } else if (viewType.endsWith("Day")) {
-    const formattedDate = currentDate.toLocaleDateString("default", {
+    const formattedDate = formatDate(currentDate, prefs, {
       day: "numeric",
       month: "long",
       year: "numeric",
+      localeOnly: true,
     });
-    const weekday = currentDate.toLocaleDateString("default", {
+    const weekday = formatDate(currentDate, prefs, {
       weekday: "long",
+      localeOnly: true,
     });
     title = formattedDate;
     subtitle = weekday;

@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
+import { DateTime } from "luxon";
 import FormRow from "~/components/forms/form-row";
-import Input from "~/components/forms/input";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoBox } from "~/components/shared/info-box";
 import { Separator } from "~/components/shared/separator";
 import { Spinner } from "~/components/shared/spinner";
@@ -11,7 +12,7 @@ import type {
   useWorkingHours,
   UseWorkingHoursResult,
 } from "~/hooks/use-working-hours";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 
 export function DatesFields({
@@ -50,10 +51,10 @@ export function DatesFields({
         className="mobile-styling-only border-b-0 pb-[10px] pt-0"
         required
       >
-        <Input
+        <DateTimePicker
           key="start-date-input"
+          mode="datetime"
           label="Start Date"
-          type="datetime-local"
           hideLabel
           name={startDateName}
           disabled={workingHoursDisabled}
@@ -68,33 +69,50 @@ export function DatesFields({
           value={startDate}
           placeholder="Booking"
           required
-          onChange={(event) => {
+          onChange={(wire) => {
+            // `wire` is the emitted wire string in DATE_TIME_FORMAT
+            // (YYYY-MM-DDTHH:mm) — the same format the native
+            // datetime-local input previously produced.
             // Update start date state to persist user's selection
-            setStartDate(event.target.value);
+            setStartDate(wire);
 
             /**
              * When user changes the startDate and the new startDate is greater than the endDate
              * in that case, we have to update endDate to be the endDay date of startDate.
              */
-            const inputValue = event.target.value;
+            const inputValue = wire;
             if (isNewBooking && endDate && inputValue) {
               try {
-                // Safari-friendly date parsing: datetime-local format is YYYY-MM-DDTHH:mm
-                const newStartDate = new Date(inputValue);
-                const currentEndDate = new Date(endDate);
+                // Both values are NAIVE wall-clock strings in the user's
+                // preference zone — that is what the field displays and what the
+                // server parses. So this comparison and the 6 PM adjustment stay
+                // entirely in wall-clock space: parse both in a single fixed
+                // zone, do the arithmetic, format straight back. Never convert to
+                // an absolute instant, or the device zone leaks in. UTC is used
+                // purely as a neutral reference so no DST transition can shift a
+                // wall clock that is not meant to move.
+                const newStartDate = DateTime.fromISO(inputValue, {
+                  zone: "utc",
+                });
+                const currentEndDate = DateTime.fromISO(endDate, {
+                  zone: "utc",
+                });
 
                 // Check if dates are valid before comparing
                 if (
-                  !isNaN(newStartDate.getTime()) &&
-                  !isNaN(currentEndDate.getTime()) &&
+                  newStartDate.isValid &&
+                  currentEndDate.isValid &&
                   newStartDate > currentEndDate
                 ) {
                   // Create new end date at 6 PM on the same day as start date
-                  const endDateTime = new Date(newStartDate);
-                  endDateTime.setHours(18, 0, 0, 0);
+                  const endDateTime = newStartDate.set({
+                    hour: 18,
+                    minute: 0,
+                    second: 0,
+                    millisecond: 0,
+                  });
 
-                  const newEndDate = dateForDateTimeInputValue(endDateTime);
-                  setEndDate(newEndDate.substring(0, newEndDate.length - 3));
+                  setEndDate(endDateTime.toFormat(DATE_TIME_FORMAT));
                 }
               } catch (error) {
                 // If date parsing fails, just update the start date without affecting end date
@@ -113,10 +131,10 @@ export function DatesFields({
         className="mobile-styling-only mb-2.5 border-b-0 p-0"
         required
       >
-        <Input
+        <DateTimePicker
           key={"end-date-input"}
+          mode="datetime"
           label="End Date"
-          type="datetime-local"
           hideLabel
           name={endDateName}
           disabled={workingHoursDisabled}
@@ -125,8 +143,10 @@ export function DatesFields({
           placeholder="Booking"
           required
           value={endDate}
-          onChange={(event) => {
-            setEndDate(event.target.value);
+          onChange={(wire) => {
+            // `wire` is DATE_TIME_FORMAT (YYYY-MM-DDTHH:mm), matching the
+            // previous native datetime-local value.
+            setEndDate(wire);
           }}
         />
 
@@ -256,6 +276,9 @@ export function WorkingHoursInfo({
               Special dates and holidays are also considered
             </p>
           )}
+          <p className="mt-1 text-xs text-gray-500">
+            Local hours of the physical location
+          </p>
           <div className="shrink-0">
             <WorkingHoursPreviewDialog workingHoursData={workingHoursData} />
           </div>

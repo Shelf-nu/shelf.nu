@@ -8,7 +8,7 @@
  * @see POST /api/mobile/audits/image - Upload photo with optional note
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
+import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -100,6 +101,55 @@ export function EvidenceModal({
   onEvidenceAdded,
 }: EvidenceModalProps) {
   const { currentOrg } = useOrg();
+
+  /**
+   * The evidence already recorded against this asset.
+   *
+   * why the modal fetches it: this sheet printed "1 note, 1 photo" and then
+   * offered only Add Photo and Save Note. On the SCANNER — where a field
+   * worker actually stands — the counts were a promise the screen did not
+   * keep, which is the same gap the read-only viewer closed on the audit
+   * detail screen. Someone checking whether a scratch was already recorded
+   * had to leave the scan, find the audit, and come back.
+   */
+  const [existing, setExisting] = useState<{
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  }>({ notes: [], images: [] });
+  const [existingLoading, setExistingLoading] = useState(false);
+  /** Bumped after each write so the list above refreshes with what was added. */
+  const [savedCount, setSavedCount] = useState(0);
+
+  const auditAssetId = item?.auditAssetId ?? null;
+
+  useEffect(() => {
+    if (!visible || !auditAssetId || !currentOrg?.id) {
+      setExisting({ notes: [], images: [] });
+      return;
+    }
+    // Aborts on close or on switching to another asset, so a slow reply for
+    // the previous row can never paint over the one now open.
+    const controller = new AbortController();
+    setExistingLoading(true);
+    void (async () => {
+      // Narrowed to this asset: the sheet shows one row, and the audit-wide
+      // response carries every note and photo in the audit.
+      const { data } = await api.auditEvidence(
+        auditSessionId,
+        currentOrg.id,
+        controller.signal,
+        auditAssetId
+      );
+      if (controller.signal.aborted) return;
+      setExisting(
+        data?.byAuditAsset?.[auditAssetId] ?? { notes: [], images: [] }
+      );
+      setExistingLoading(false);
+    })();
+    return () => controller.abort();
+    // `savedCount` re-runs this after a note or photo is added, so what the
+    // sheet shows includes what the person just recorded.
+  }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
 
@@ -139,6 +189,7 @@ export function EvidenceModal({
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onEvidenceAdded(item.assetId, "note");
+      setSavedCount((n) => n + 1);
       setNoteText("");
     } catch {
       Alert.alert("Error", "Failed to save note. Please try again.");
@@ -233,9 +284,11 @@ export function EvidenceModal({
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onEvidenceAdded(item.assetId, "image");
+      setSavedCount((n) => n + 1);
       // Server also creates a note when text accompanies the image
       if (noteText.trim()) {
         onEvidenceAdded(item.assetId, "note");
+        setSavedCount((n) => n + 1);
       }
       setSelectedImageUri(null);
       setNoteText("");
@@ -344,6 +397,38 @@ export function EvidenceModal({
                     </Text>
                   </View>
                 </View>
+
+                {/* What is already recorded — the thing the counts point at. */}
+                {existingLoading &&
+                existing.notes.length === 0 &&
+                existing.images.length === 0 ? (
+                  <ActivityIndicator
+                    style={styles.existingLoading}
+                    color={colors.primary}
+                  />
+                ) : null}
+
+                {existing.images.length > 0 ? (
+                  <View style={styles.existingImages}>
+                    {existing.images.map((img) => (
+                      <Image
+                        key={img.id}
+                        source={{ uri: img.thumbnailUrl }}
+                        style={styles.existingThumb}
+                        contentFit="cover"
+                      />
+                    ))}
+                  </View>
+                ) : null}
+
+                {existing.notes.map((note) => (
+                  <View key={note.id} style={styles.existingNote}>
+                    <Text style={styles.existingNoteText}>{note.content}</Text>
+                    <Text style={styles.existingNoteMeta}>
+                      {note.authorName ?? "Unknown"}
+                    </Text>
+                  </View>
+                ))}
 
                 {/* Image preview / picker */}
                 {selectedImageUri ? (
@@ -462,6 +547,36 @@ export function EvidenceModal({
 }
 
 const useStyles = createStyles((colors) => ({
+  existingLoading: { marginBottom: spacing.md },
+  existingImages: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  existingThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.borderLight,
+  },
+  existingNote: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    gap: 4,
+  },
+  existingNoteText: {
+    fontSize: fontSize.sm,
+    color: colors.foreground,
+    lineHeight: 20,
+  },
+  existingNoteMeta: {
+    fontSize: fontSize.xs,
+    // why `muted`, not `mutedLight` — the lighter grey misses 4.5:1 at this size.
+    color: colors.muted,
+  },
   overlay: {
     flex: 1,
     justifyContent: "flex-end",

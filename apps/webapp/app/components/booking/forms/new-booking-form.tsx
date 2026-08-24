@@ -6,6 +6,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -13,7 +14,6 @@ import type {
   NewBookingActionReturnType,
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
-import { useHints } from "~/utils/client-hints";
 
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -61,7 +61,10 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const disabled = useDisabled(fetcher);
-  const hints = useHints();
+  // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
+  // timezone preference (the same one display uses), not the browser hint, so
+  // it agrees with the server parse.
+  const prefs = useFormatPrefs();
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours();
@@ -75,7 +78,8 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner
+      isAdministratorOrOwner,
+      prefs
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -84,7 +88,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints,
+      prefs,
       action: "new",
       workingHours: workingHours,
       bookingSettings,

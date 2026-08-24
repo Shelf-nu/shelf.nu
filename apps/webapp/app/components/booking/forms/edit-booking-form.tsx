@@ -1,18 +1,22 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
+import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { useHints } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -56,8 +60,6 @@ type BookingFormData = {
   booking: {
     id: string;
     name: string;
-    startDate: string;
-    endDate: string;
     custodianRef: string; // This is a stringified value for custodianRef. It can be either a team member id or a user id
     bookingFlags: BookingFlags;
     description: string | null;
@@ -75,17 +77,8 @@ type BookingFormData = {
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export function EditBookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
-  const {
-    id,
-    name,
-    startDate: incomingStartDate,
-    endDate: incomingEndDate,
-    custodianRef,
-    bookingFlags,
-    description,
-    status,
-    tags,
-  } = booking;
+  const { id, name, custodianRef, bookingFlags, description, status, tags } =
+    booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
   const {
@@ -113,13 +106,41 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   // haven't been checked out yet (the Booked bucket). Once everything has been
   // checked out, hide the "Scan to check out" entry point.
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
+
+  const isProcessing = isFormProcessing(navigation.state);
+  // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
+  // user's RESOLVED timezone preference (the same one date DISPLAY uses), so
+  // the edit form shows the same wall-clock the display shows. Seeding from
+  // the raw stored UTC instant via `dateForDateTimeInputValue` (browser/runtime
+  // zone) produced a different wall-clock whenever the browser zone differed
+  // from the pref zone.
+  const prefs = useFormatPrefs();
+  const incomingStartDate = toIsoDateTimeToUserTimezone(
+    loaderBooking.from,
+    prefs.timeZone
+  ).slice(0, 16);
+  const incomingEndDate = toIsoDateTimeToUserTimezone(
+    loaderBooking.to,
+    prefs.timeZone
+  ).slice(0, 16);
+
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
-  const [, updateName] = useAtom(updateDynamicTitleAtom);
+  // TIMEZONE FIX: `startDate` / `endDate` are naive wall-clock strings in the
+  // user's RESOLVED pref zone (see the seed above). Parse them back to absolute
+  // instants using that SAME zone (not the browser zone) before handing Date
+  // objects to the check-in/out dialogs — `new Date(str)` would parse the
+  // wall-clock in the browser zone and yield the wrong instant when the two
+  // differ. `DATE_TIME_FORMAT` matches the `.slice(0, 16)` wall-clock shape.
+  const startDateAsDate = DateTime.fromFormat(startDate, DATE_TIME_FORMAT, {
+    zone: prefs.timeZone,
+  }).toJSDate();
+  const endDateAsDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
+    zone: prefs.timeZone,
+  }).toJSDate();
 
-  const isProcessing = isFormProcessing(navigation.state);
-  const hints = useHints();
+  const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   // Fetch working hours for validation
   const workingHoursData = useWorkingHours();
@@ -151,7 +172,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints,
+      // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+      // (matches display + the server parse), not the browser hint.
+      prefs,
       action: "save", // NOTE: in the front-end the action save basically handles the schema for reserve which is the same, the full schema
       status,
       workingHours: workingHours,
@@ -309,13 +332,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets
                     ? {
+                        // Wording lives in @shelf/labels so the tooltip, the
+                        // mobile route's 400, the in-transaction guard and the
+                        // companion's inline note can never say four different
+                        // things about the same rule (they did, and this copy
+                        // carried an "unavailble" typo).
                         reason: bookingFlags?.hasUnavailableAssets
-                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
                           : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                          ? BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
-                          : "You need to add assets or reserve at least one model on your booking before you can reserve it",
+                          : BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
                       }
                     : false
                 }
@@ -391,7 +419,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
-                    booking={{ id, name: name!, from: new Date(startDate!) }}
+                    booking={{ id, name: name!, from: startDateAsDate }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={
@@ -427,8 +455,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 booking={{
                   id,
                   name: name!,
-                  to: new Date(endDate),
-                  from: new Date(startDate),
+                  to: endDateAsDate,
+                  from: startDateAsDate,
                 }}
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={

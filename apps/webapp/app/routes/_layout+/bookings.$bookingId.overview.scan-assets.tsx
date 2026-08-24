@@ -18,6 +18,7 @@ import AddAssetsToBookingDrawer, {
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import type { ScannedKitSliceSpec } from "~/modules/booking/service.server";
 import {
   addScannedAssetsToBooking,
   getBooking,
@@ -168,7 +169,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // here; the service trusts the IDs and will fail at the FK level if a
     // stale assetKitId is submitted. One element per (asset, AssetKit)
     // membership, so an asset scanned via two kits yields two slices.
-    const kitSlices: Array<{ assetId: string; assetKitId: string }> = [];
+    const kitSlices: ScannedKitSliceSpec[] = [];
     if (rawKitSlices && rawKitSlices !== "[]") {
       try {
         const parsed = JSON.parse(rawKitSlices);
@@ -179,7 +180,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           if (typeof entry !== "object" || entry === null) {
             throw new Error("expected object entry");
           }
-          const { assetId, assetKitId } = entry as Record<string, unknown>;
+          const { assetId, assetKitId, kitId } = entry as Record<
+            string,
+            unknown
+          >;
           if (
             typeof assetId !== "string" ||
             assetId.length === 0 ||
@@ -188,7 +192,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ) {
             throw new Error("invalid kit slice entry");
           }
-          kitSlices.push({ assetId, assetKitId });
+          // why: `kitId` is deliberately NOT required. It feeds
+          // `BookingAsset.sourceKitId`, but the service re-resolves that from
+          // the `AssetKit` row `assetKitId` points at — already proven in-org
+          // by `assertAssetKitsBelongToOrg` — and the server-resolved value
+          // WINS over anything sent here. Rejecting a payload that omits it
+          // would 400 every browser tab left open across the deploy while
+          // buying zero safety, so a stale client is filled in server-side
+          // instead. Empty string means "client didn't say"; the service
+          // normalizes it away.
+          kitSlices.push({
+            assetId,
+            assetKitId,
+            kitId: typeof kitId === "string" ? kitId : "",
+          });
         }
       } catch (e) {
         throw new ShelfError({

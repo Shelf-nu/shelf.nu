@@ -231,6 +231,24 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     statusCode === 404;
 
   /**
+   * A rate-limit terminal state: the request tripped a server-side rate
+   * limiter (e.g. `appLoaderRateLimit`'s per-(user, path) cap on `.data`
+   * revalidations — see `server/rate-limit.ts`). This is a transient,
+   * EXPECTED condition, not a bug — the boundary shows a calm "try again in
+   * a moment" screen instead of the alarming generic one.
+   *
+   * Gated purely on `statusCode` (like `isNotFound`), NOT `isRouteError`:
+   * `appLoaderRateLimit` is Hono middleware that responds with a plain
+   * `c.json(...)` 429 BEFORE the request reaches Remix's single-fetch data
+   * handling, so the client can't decode it into the Shelf
+   * `{ error: { message, title, … } }` payload shape — `response.data` ends
+   * up as a bare `Error`, the same way a router-generated 404 does (see
+   * `isNotFound`'s doc comment). Relying on `isRouteError` here would miss
+   * exactly the case this fix exists for.
+   */
+  const isRateLimited = isRouteErrorResponse(response) && statusCode === 429;
+
+  /**
    * Route-error responses in the 4xx range (bad input, permission denials,
    * genuine not-found, …) that reach this boundary are NOT already captured
    * server-side — `error()` in http.server.ts only routes 5xx (and
@@ -242,11 +260,11 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
    * cross-org UX, not a bug).
    *
    * EXPECTED terminal states (403 permission-denied / expired claim, 404
-   * not-found — see `EXPECTED_ERROR_BOUNDARY_STATUSES`) are also excluded:
-   * they are normal UX, not bugs, so they must not open a Sentry issue. All
-   * other 4xx (400/409/422/429, …) stay captured. `beforeSend` re-checks the
-   * `status` tag as defense-in-depth, but this is the primary skip — the
-   * intent is clearest where the status is a number in hand.
+   * not-found, 429 rate-limited — see `EXPECTED_ERROR_BOUNDARY_STATUSES`)
+   * are also excluded: they are normal UX, not bugs, so they must not open a
+   * Sentry issue. All other 4xx (400/409/422, …) stay captured. `beforeSend`
+   * re-checks the `status` tag as defense-in-depth, but this is the primary
+   * skip — the intent is clearest where the status is a number in hand.
    *
    * Gated on `isRouteErrorResponse` (see `isNotFound` above for why) so
    * router-generated 4xx responses (e.g. an unmatched-route 404) are
@@ -270,6 +288,18 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   const notFoundMessage = isRouteError(response)
     ? message
     : "The page or item you're looking for doesn't exist.";
+
+  /**
+   * Body copy for the rate-limit screen. Same fallback pattern as
+   * `notFoundMessage`: a Shelf-shaped 429 payload (e.g. the mobile
+   * `enforceUserRateLimit` ShelfError) carries its own `message`; the
+   * `appLoaderRateLimit` Hono-middleware 429 (this issue's actual source)
+   * has no Shelf payload, so `message` is still at its generic default —
+   * swap in copy appropriate for a calm "you're going too fast" screen.
+   */
+  const rateLimitMessage = isRouteError(response)
+    ? message
+    : "You're doing that a bit too quickly. Please wait a moment, then refresh the page.";
 
   // Capture unhandled Error instances (client-side crashes) client-side,
   // and capturable 4xx route errors (see shouldCaptureRouteError above).
@@ -337,6 +367,18 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
         className={className}
         title={rawTitle || "Not found"}
         message={notFoundMessage}
+        traceId={traceId}
+        actions={<BackHomeButton />}
+      />
+    );
+  }
+
+  if (isRateLimited) {
+    return (
+      <ErrorScreenLayout
+        className={className}
+        title={rawTitle || "Too many requests"}
+        message={rateLimitMessage}
         traceId={traceId}
         actions={<BackHomeButton />}
       />

@@ -5,16 +5,16 @@ import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
-import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import { DateTimePicker } from "../shared/date-time-picker";
 import When from "../when/when";
 import { WorkingHoursInfo } from "./forms/fields/dates";
 import {
@@ -34,7 +34,11 @@ export default function ExtendBookingDialog({
   const [open, setOpen] = useState(false);
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
-  const hints = useHints();
+  // TIMEZONE FIX: validate the new end date in the user's RESOLVED pref zone.
+  // The server action parses the submitted value with that same zone, so using
+  // the browser hint here made the two disagree for anyone with an explicit
+  // timezone preference.
+  const prefs = useFormatPrefs();
   const { booking } = useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours();
   const bookingSettings = useBookingSettings();
@@ -45,7 +49,7 @@ export default function ExtendBookingDialog({
   const zo = useZorm(
     "ExtendBooking",
     ExtendBookingSchema({
-      timeZone: hints.timeZone,
+      prefs,
       workingHours: workingHoursData.workingHours,
       bookingSettings,
       isAdminOrOwner: isAdministratorOrOwner,
@@ -112,11 +116,11 @@ export default function ExtendBookingDialog({
                 New end date
               </div>
 
-              <Input
+              <DateTimePicker
                 key={currentEndDate}
+                mode="datetime"
                 defaultValue={currentEndDate}
                 label="End Date"
-                type="datetime-local"
                 hideLabel
                 name={zo.fields.endDate()}
                 disabled={disabled || workingHoursDisabled}

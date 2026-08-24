@@ -25,12 +25,17 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
+import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
@@ -75,7 +80,6 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const body = await request.json();
     const {
       title,
       description,
@@ -85,8 +89,8 @@ export async function action({ request }: ActionFunctionArgs) {
       valuation,
       customFields,
       qrId,
-    } = z
-      .object({
+    } = await parseMobileBody(
+      z.object({
         title: z.string().min(2, "Title must be at least 2 characters"),
         description: z.string().optional(),
         categoryId: z.string().optional(),
@@ -104,8 +108,10 @@ export async function action({ request }: ActionFunctionArgs) {
           )
           .optional(),
         qrId: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: a categoryId from the request body is attacker-controlled. Without
     // verifying it belongs to the caller's organization we'd happily use it to
@@ -214,6 +220,74 @@ export async function action({ request }: ActionFunctionArgs) {
       customFieldsValues,
       qrId: qrId || undefined,
     });
+
+    // why: the same two notes the web create route writes. `createAsset` emits
+    // the ASSET_CREATED activity event on its own, so reports were already in
+    // step, but the human-readable feed on the asset page was not: an asset
+    // created from the phone opened with an empty history while the identical
+    // asset created on the website said who made it and where they put it.
+    //
+    // `asset.user` is the full User row (createAsset's include is `user: true`),
+    // so it is passed whole: `wrapUserLinkForNote` prefers `displayName` over
+    // first+last, and hand-picking the two name fields renamed anyone who had
+    // set one.
+    const actor = wrapUserLinkForNote(asset.user);
+
+    // Each note carries its kind so a failure can name which one failed. Tagged
+    // at construction rather than by loop index: a third note added later would
+    // silently inherit the wrong label from a positional check.
+    const notes: { kind: "creation" | "placement"; content: string }[] = [
+      { kind: "creation", content: `Asset was created by ${actor}.` },
+    ];
+
+    // Shared with the web create route — the primary-placement selection, the
+    // QT-aware phrasing and the actor mapping all live in the helper, so the two
+    // routes cannot drift on how they name the person or count the units.
+    const placementNote = getInitialPlacementNoteContent(asset);
+    if (placementNote) {
+      notes.push({ kind: "placement", content: placementNote });
+    }
+
+    // why: the asset and its ASSET_CREATED event are already committed by the
+    // time we get here, so a failed note must not be reported as a failed
+    // creation. It made the companion create screen offer a retry for an asset
+    // that already existed - and with a scanned `qrId` the retry took a fresh
+    // QR while the first asset kept the scanned one, so the label in the user's
+    // hand pointed at the wrong row. A missing note costs far less than that.
+    // Same shape as the sibling mobile routes (asset.adjust-quantity.ts).
+    //
+    // Written one at a time rather than concurrently: the feed orders by
+    // `createdAt` and two inserts issued in the same tick routinely land in the
+    // same millisecond, which showed the placement above the creation. Failures
+    // are swallowed per note, so a failed placement note cannot also cost us the
+    // creation note.
+    for (const { kind, content } of notes) {
+      try {
+        await createNote({
+          content,
+          type: "UPDATE",
+          userId: user.id,
+          assetId: asset.id,
+          organizationId,
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to write an activity note for a new asset",
+            label: "Assets",
+            // Both notes throw from this one line with one message, so Sentry
+            // groups them into a single issue — `noteKind` is the only thing
+            // that tells an on-call engineer which of the two actually failed.
+            additionalData: {
+              assetId: asset.id,
+              userId: user.id,
+              noteKind: kind,
+            },
+          })
+        );
+      }
+    }
 
     return data({
       asset: {

@@ -1,55 +1,19 @@
 /**
  * Client-side permission helpers for the mobile companion app.
  *
- * Mirrors the webapp's Role2PermissionMap to determine which UI actions
- * a user can see based on their organization role. These checks are
- * purely cosmetic (hide/show UI) — the server enforces permissions
- * via requireMobilePermission on every API call.
+ * No longer a hand-copied mirror: both helpers delegate to the shared
+ * `@shelf/permissions` package — the SAME matrix + resolution logic
+ * (including the ADMIN/OWNER allow-all short-circuit) that the webapp's
+ * server validator uses, so web and mobile can never drift.
+ *
+ * These checks remain purely cosmetic (hide/show UI) — the server
+ * independently enforces permissions via requireMobilePermission on every
+ * API call.
+ *
+ * @see {@link file://../../../packages/permissions/src/index.ts}
  */
-
-type PermissionEntity = "asset" | "booking" | "audit" | "kit";
-type PermissionAction =
-  | "read"
-  | "create"
-  | "update"
-  | "delete"
-  | "custody"
-  | "checkout"
-  | "checkin";
-
-/**
- * Simplified permission map matching the webapp's Role2PermissionMap.
- * Only includes entities/actions relevant to mobile scanner actions.
- */
-const ROLE_PERMISSIONS: Record<
-  string,
-  Record<PermissionEntity, PermissionAction[]>
-> = {
-  OWNER: {
-    asset: ["read", "create", "update", "delete", "custody"],
-    booking: ["read", "create", "update", "delete", "checkout", "checkin"],
-    audit: ["read", "create", "update", "delete"],
-    kit: ["read", "create", "update", "delete", "custody"],
-  },
-  ADMIN: {
-    asset: ["read", "create", "update", "delete", "custody"],
-    booking: ["read", "create", "update", "delete", "checkout", "checkin"],
-    audit: ["read", "create", "update", "delete"],
-    kit: ["read", "create", "update", "delete", "custody"],
-  },
-  SELF_SERVICE: {
-    asset: ["read", "custody"],
-    booking: ["read", "create", "update", "checkout", "checkin"],
-    audit: ["read", "update"],
-    kit: ["read", "custody"],
-  },
-  BASE: {
-    asset: ["read"],
-    booking: ["read"],
-    audit: ["read"],
-    kit: ["read"],
-  },
-};
+import type { PermissionAction, PermissionEntity } from "@shelf/permissions";
+import { roleHasPermission } from "@shelf/permissions";
 
 /**
  * Returns true when the user holds an org role that grants visibility
@@ -78,6 +42,16 @@ export function userCanSeeOrgWideAudits(roles: string[] | undefined): boolean {
 /**
  * Checks if a user with the given roles has permission for an entity/action.
  * Returns true if any of the user's roles grant the permission.
+ *
+ * Thin adapter over the shared resolver: call sites keep passing plain
+ * string literals (`"asset"`, `"create"`), which the shared package accepts
+ * as template-literal types of its enums.
+ *
+ * @param roles - The user's org-role strings as returned by `/me`.
+ * @param entity - The permission entity being checked.
+ * @param action - The action being checked on that entity.
+ * @returns `true` when any held role grants the action on the entity.
+ * @throws Never — unknown roles/entities safely resolve to `false`.
  */
 export function userHasPermission({
   roles,
@@ -85,14 +59,8 @@ export function userHasPermission({
   action,
 }: {
   roles: string[] | undefined;
-  entity: PermissionEntity;
-  action: PermissionAction;
+  entity: `${PermissionEntity}`;
+  action: `${PermissionAction}`;
 }): boolean {
-  if (!roles?.length) return false;
-
-  return roles.some((role) => {
-    const perms = ROLE_PERMISSIONS[role];
-    if (!perms) return false;
-    return perms[entity]?.includes(action) ?? false;
-  });
+  return roleHasPermission({ roles, entity, action });
 }

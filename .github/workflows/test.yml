@@ -125,6 +125,37 @@ jobs:
       - name: ⚡ Run vitest
         run: pnpm --filter @shelf/webapp test -- --run
 
+      # Workspace packages run their own suites (node:test), which the webapp
+      # vitest run above does not reach. Without this step a package's `test`
+      # script is dead weight — @shelf/quantity-control's had never run in CI.
+      # NOT `turbo run test`: turbo.json marks that task persistent (vitest
+      # watch mode), so it would hang the job.
+      - name: 🧩 Run workspace package tests
+        run: pnpm -r --filter "./packages/*" run test
+
+  tooling:
+    name: 🛠️ PR review tooling
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: 🛠️ Run pr-review-loop bash suite
+        run: pnpm test:tooling
+
   # NOTE: this job consumes secrets — see the SECURITY INVARIANT at the top of
   # this file. Do NOT re-enable it here. It belongs in its own workflow gated
   # behind the `external` environment, and must not check out fork PR code.

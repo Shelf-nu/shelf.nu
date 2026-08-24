@@ -14,9 +14,19 @@
  *
  * @see {@link file://./booking-authorization.server.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { canSeeBooking } from "./booking-authorization.server";
+import {
+  bookingWriteScopeClause,
+  canSeeBooking,
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "./booking-authorization.server";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 const ME = "user-me";
 const SOMEONE_ELSE = "user-victim";
@@ -130,5 +140,208 @@ describe("canSeeBooking", () => {
         })
       ).toBe(true);
     });
+  });
+});
+
+/**
+ * A booking reduced to the two columns both the clause and the gate read.
+ */
+type BookingRow = { creatorId: string | null; custodianUserId: string | null };
+
+/**
+ * Evaluates the clause against a row, the way Postgres would.
+ *
+ * Deliberately narrow: it understands ONLY the `{ OR: [{ field: value }, …] }`
+ * shape {@link bookingWriteScopeClause} emits, and throws on anything else. If
+ * the clause grows a construct this cannot evaluate, the equivalence test below
+ * fails loudly instead of quietly passing on an unchecked predicate.
+ *
+ * @param clause - The where-input under test.
+ * @param row - The candidate booking.
+ * @returns Whether the row would be returned by a query carrying the clause.
+ */
+function rowMatches(
+  clause: Record<string, unknown> | undefined,
+  row: BookingRow
+): boolean {
+  if (!clause) {
+    return true; // No restriction — every row qualifies.
+  }
+
+  const branches = clause.OR;
+
+  if (!Array.isArray(branches)) {
+    throw new Error(
+      `Unsupported clause shape: ${JSON.stringify(
+        clause
+      )}. Extend rowMatches to cover it.`
+    );
+  }
+
+  return branches.some((branch: Record<string, unknown>) =>
+    Object.entries(branch).every(([field, value]) => {
+      if (typeof value !== "string") {
+        throw new Error(`Unsupported branch: ${JSON.stringify(branch)}`);
+      }
+      return row[field as keyof BookingRow] === value;
+    })
+  );
+}
+
+/**
+ * Runs the submit-time gate and reports whether it let the caller through.
+ *
+ * @param row - The candidate booking.
+ * @param role - The caller's effective role.
+ * @returns `true` when {@link validateBookingOwnership} does not throw.
+ */
+function gateAllows(row: BookingRow, role: OrganizationRoles): boolean {
+  try {
+    validateBookingOwnership({
+      booking: row,
+      userId: ME,
+      role,
+      action: "add items to",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The point of the clause: it is the query-side mirror of the submit-time gate.
+ * Any row a picker offers must be one the action will accept, or the user hits
+ * a 403 dead end — so these two must agree on EVERY row, for EVERY role.
+ */
+describe("bookingWriteScopeClause", () => {
+  const ROWS: Array<{ label: string; row: BookingRow }> = [
+    {
+      label: "created and custodied by me",
+      row: { creatorId: ME, custodianUserId: ME },
+    },
+    {
+      label: "created by me, custodied by someone else",
+      row: { creatorId: ME, custodianUserId: SOMEONE_ELSE },
+    },
+    {
+      label: "created by someone else, custodied by me",
+      row: { creatorId: SOMEONE_ELSE, custodianUserId: ME },
+    },
+    {
+      label: "entirely someone else's",
+      row: { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE },
+    },
+    {
+      label: "unassigned with no creator",
+      row: { creatorId: null, custodianUserId: null },
+    },
+  ];
+
+  const ROLES = [
+    OrganizationRoles.SELF_SERVICE,
+    OrganizationRoles.BASE,
+    OrganizationRoles.ADMIN,
+    OrganizationRoles.OWNER,
+  ];
+
+  for (const role of ROLES) {
+    for (const { label, row } of ROWS) {
+      it(`agrees with validateBookingOwnership for ${role} on a booking ${label}`, () => {
+        const clause = bookingWriteScopeClause({ userId: ME, role }) as
+          | Record<string, unknown>
+          | undefined;
+
+        expect(rowMatches(clause, row)).toBe(gateAllows(row, role));
+      });
+    }
+  }
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "returns no restriction for %s",
+    (role) => {
+      expect(bookingWriteScopeClause({ userId: ME, role })).toBeUndefined();
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "restricts %s to bookings they created or hold",
+    (role) => {
+      expect(bookingWriteScopeClause({ userId: ME, role })).toEqual({
+        OR: [{ creatorId: ME }, { custodianUserId: ME }],
+      });
+    }
+  );
+
+  /**
+   * The clause allow-lists ADMIN / OWNER rather than deny-listing the two
+   * restricted roles, so a role added to `OrganizationRoles` later lands in the
+   * RESTRICTED branch by default. That direction is the safe one: the picker
+   * under-offers, which someone notices, instead of offering rows no rule
+   * covered.
+   */
+  it("restricts an unrecognised role rather than waving it through", () => {
+    const futureRole = "AUDITOR" as OrganizationRoles;
+
+    expect(bookingWriteScopeClause({ userId: ME, role: futureRole })).toEqual({
+      OR: [{ creatorId: ME }, { custodianUserId: ME }],
+    });
+  });
+
+  it("covers every role in the enum, so a new one cannot slip past unreviewed", () => {
+    // Fails the moment `OrganizationRoles` grows a member: whoever adds it has
+    // to decide which side of this clause it belongs on.
+    expect(Object.values(OrganizationRoles).sort()).toEqual([
+      OrganizationRoles.ADMIN,
+      OrganizationRoles.BASE,
+      OrganizationRoles.OWNER,
+      OrganizationRoles.SELF_SERVICE,
+    ]);
+  });
+});
+
+describe("resolveMostPrivilegedRole", () => {
+  it("prefers OWNER over anything else", () => {
+    expect(
+      resolveMostPrivilegedRole([
+        OrganizationRoles.SELF_SERVICE,
+        OrganizationRoles.OWNER,
+        OrganizationRoles.ADMIN,
+      ])
+    ).toBe(OrganizationRoles.OWNER);
+  });
+
+  it("prefers ADMIN when it is not first in the array", () => {
+    // The bug this exists for: `roles[0]` on a [SELF_SERVICE, ADMIN]
+    // membership resolves to SELF_SERVICE, and the ownership guard then
+    // refuses an actual admin.
+    expect(
+      resolveMostPrivilegedRole([
+        OrganizationRoles.SELF_SERVICE,
+        OrganizationRoles.ADMIN,
+      ])
+    ).toBe(OrganizationRoles.ADMIN);
+  });
+
+  it("returns the single role when there is only one", () => {
+    expect(resolveMostPrivilegedRole([OrganizationRoles.BASE])).toBe(
+      OrganizationRoles.BASE
+    );
+  });
+
+  it("falls back to BASE for an empty membership rather than undefined", () => {
+    expect(resolveMostPrivilegedRole([])).toBe(OrganizationRoles.BASE);
+  });
+
+  it("shares its order with SSO, minus OWNER", () => {
+    // SSO must never confer ownership — pinned so the exclusion cannot be
+    // "tidied away" when someone edits the shared order.
+    expect(ROLE_PRECEDENCE[0]).toBe(OrganizationRoles.OWNER);
+    expect(SSO_ASSIGNABLE_ROLE_PRECEDENCE).not.toContain(
+      OrganizationRoles.OWNER
+    );
+    expect([...SSO_ASSIGNABLE_ROLE_PRECEDENCE]).toEqual(
+      ROLE_PRECEDENCE.filter((r) => r !== OrganizationRoles.OWNER)
+    );
   });
 });

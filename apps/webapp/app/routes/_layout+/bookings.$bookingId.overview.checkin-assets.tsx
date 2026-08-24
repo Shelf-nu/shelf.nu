@@ -19,6 +19,7 @@ import { db } from "~/database/db.server";
 import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   attributeCategorizedDispositionsByBookingAsset,
@@ -287,6 +288,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Resolve the kit attribution for THIS slice (kit-driven row
         // has `assetKitId`; standalone rows fall back to null even when
         // the asset happens to belong to other kits).
+        //
+        // why: out of this rule — deliberately no `sourceKitId` fallback here.
+        // The booking overview renders detached residue under its original
+        // kit because it describes what the booking WAS; this drawer drives a
+        // live physical operation, where CURRENT membership is the more
+        // useful grouping for the person holding the items.
         const sourceKit = ba.assetKitId
           ? asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
           : null;
@@ -294,8 +301,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           id: asset.id,
           bookingAssetId: ba.id,
           title: asset.title,
-          mainImage: asset.mainImage ?? null,
-          thumbnailImage: asset.thumbnailImage ?? null,
+          // Collapse the model-image cascade into the flat fields the
+          // scanner drawer reads (`thumbnailImage || mainImage`), so an
+          // asset with no image of its own renders its model's cover.
+          // `null` stays `null` for the true no-image case — the drawer's
+          // own placeholder branch handles it.
+          ...(() => {
+            const image = resolveAssetImage({
+              mainImage: asset.mainImage ?? null,
+              thumbnailImage: asset.thumbnailImage ?? null,
+              assetModel: asset.assetModel ?? null,
+            });
+            const isPlaceholder = image.source === "placeholder";
+            return {
+              mainImage: isPlaceholder ? null : image.fullUrl,
+              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+            };
+          })(),
           kitId: sourceKit?.id ?? null,
           kitName: sourceKit?.name ?? null,
         };

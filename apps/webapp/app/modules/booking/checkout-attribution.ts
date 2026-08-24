@@ -117,3 +117,89 @@ export function checkoutSessionsToLogsByAsset(
 
   return logsByAsset;
 }
+
+/**
+ * Distributes a (booking, asset) pair's ConsumptionLog / checkout dispositions
+ * across its BookingAsset rows for per-row "logged" reads.
+ *
+ * Logs with a non-null `bookingAssetId` are attributed exactly to
+ * that row (the Polish-6+ contract). Logs with `bookingAssetId IS NULL`
+ * (legacy rows + back-compat callers) are greedy-filled: standalone
+ * rows first by `createdAt`, then kit-driven rows by `createdAt`, each
+ * taking up to its booked quantity until the legacy pool is exhausted.
+ *
+ * Standalone slices fill first because loose items are scanned/returned
+ * individually, whereas kits are handled as a whole — so an untagged
+ * disposition is more likely the flexible standalone pool than the
+ * kit's fixed allocation.
+ *
+ * Returns a Map<bookingAssetId, dispositionedQuantity>. Rows with no
+ * attribution are present in the map with `0`.
+ *
+ * Pure derivation — no DB calls. Caller pre-fetches the rows and logs.
+ *
+ * Lives here (next to {@link checkoutSessionsToLogsByAsset}, the parser that
+ * produces its input) rather than in the heavyweight `service.server.ts` so
+ * pure read sites — e.g. `asset/availability.server.ts`'s batched checked-out
+ * split — can consume it without dragging in the booking service's import
+ * graph (and without that graph's full-module test mocks blanking it out).
+ * `service.server.ts` re-exports it, so existing `~/modules/booking/service.server`
+ * import sites keep working unchanged.
+ *
+ * @param args.bookingAssetRows - The asset's slices on the booking (`id`,
+ *   booked `quantity`, and `assetKitId` discriminator).
+ * @param args.consumptionLogs - The dispositions to attribute (`bookingAssetId`
+ *   tag or `null` for the legacy greedy pool, plus `quantity`).
+ * @returns Map keyed by every input row `id` → attributed quantity.
+ */
+export function attributeDispositionsByBookingAsset(args: {
+  bookingAssetRows: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  consumptionLogs: Array<{
+    bookingAssetId: string | null;
+    quantity: number;
+  }>;
+}): Map<string, number> {
+  const { bookingAssetRows, consumptionLogs } = args;
+  const out = new Map<string, number>();
+  for (const row of bookingAssetRows) out.set(row.id, 0);
+
+  let legacyPool = 0;
+  for (const log of consumptionLogs) {
+    if (log.bookingAssetId) {
+      out.set(
+        log.bookingAssetId,
+        (out.get(log.bookingAssetId) ?? 0) + (log.quantity ?? 0)
+      );
+    } else {
+      legacyPool += log.quantity ?? 0;
+    }
+  }
+
+  if (legacyPool === 0) return out;
+
+  // Greedy fill: standalone-first (loose items are scanned individually;
+  // kits are handled as a whole), then kit-driven. Within each bucket,
+  // sort by `id` ascending — BookingAsset.id is a cuid, which is
+  // chronologically sortable (creation-time prefix), so this stands in
+  // for "by createdAt" without needing the column on the model.
+  const ordered = [...bookingAssetRows].sort((a, b) => {
+    const aIsKit = a.assetKitId != null;
+    const bIsKit = b.assetKitId != null;
+    if (aIsKit !== bIsKit) return aIsKit ? 1 : -1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  for (const row of ordered) {
+    if (legacyPool === 0) break;
+    const already = out.get(row.id) ?? 0;
+    const capacity = Math.max(0, row.quantity - already);
+    if (capacity === 0) continue;
+    const take = Math.min(capacity, legacyPool);
+    out.set(row.id, already + take);
+    legacyPool -= take;
+  }
+  return out;
+}

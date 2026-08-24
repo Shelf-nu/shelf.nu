@@ -17,6 +17,7 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.ove
 import {
   isAssetPartiallyCheckedIn,
   resolveBookingRowQtyState,
+  resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -24,7 +25,9 @@ import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
   AvailabilityLabel,
   InsufficientStockBadge,
+  PendingReturnBadge,
 } from "./availability-label";
+import { RemovedFromKitBadge } from "./removed-from-kit-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -69,16 +72,23 @@ export default function ListAssetContent({
   /**
    * `availableUnitsByAsset` is the workspace-availability map shipped by
    * the booking-overview loader (`bookings.$bookingId.overview.tsx`).
-   * Keyed by `assetId`, scalar = units free across the workspace pool
-   * (after subtracting operator custody + other-booking reservations +
-   * active checkouts elsewhere). Drives the `InsufficientStockBadge`
-   * branch below. `?? {}` keeps the older `bookings._index.tsx` and other
-   * callers that don't surface the map working — the lookup just returns
-   * `undefined` and the badge condition short-circuits.
+   * Keyed by `assetId`, value = `{ bookable, physicalNow, reserved }` units
+   * free across the workspace pool (after subtracting operator custody +
+   * other-booking reservations + active checkouts elsewhere). Drives the
+   * `InsufficientStockBadge` / `PendingReturnBadge` branches below via
+   * `resolveQtyStockBadgeVariant`, and — via `qtyAvailability` passed to
+   * `AssetRowActionsDropdown` below — the "Adjust booked quantity" dialog's
+   * real windowed max (`bookable`) instead of the workspace total. Older
+   * callers that don't surface the map (e.g. `bookings._index.tsx`) keep
+   * working — the lookup just returns `undefined` and both the badge
+   * condition and the dialog fall back to their pre-existing behavior.
    */
   const { booking, availableUnitsByAsset } = useLoaderData<{
     booking: BookingWithCustodians;
-    availableUnitsByAsset?: Record<string, number>;
+    availableUnitsByAsset?: Record<
+      string,
+      { bookable: number; physicalNow: number; reserved: number }
+    >;
   }>();
   const currentOrganization = useCurrentOrganization();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
@@ -90,6 +100,7 @@ export default function ListAssetContent({
     ? resolveDisplayCode({
         entity: item,
         organization: currentOrganization,
+        entityKind: "asset",
       })
     : null;
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
@@ -218,39 +229,36 @@ export default function ListAssetContent({
   /**
    * Workspace-availability lookup for this row's asset. `undefined` when
    * the loader doesn't ship the map (e.g. the legacy bookings index path
-   * uses this component too) — in which case the insufficient-stock
-   * check below short-circuits to `false` and the badge never renders.
+   * uses this component too) or for INDIVIDUAL assets (the builder only
+   * populates QT entries) — in which case `resolveQtyStockBadgeVariant`
+   * short-circuits to `null` and neither stock badge renders.
    */
-  const availableUnits = availableUnitsByAsset?.[item.id];
+  const availability = availableUnitsByAsset?.[item.id];
 
   /**
-   * Per-row "insufficient stock" signal. Fires when this booking's row
-   * reserves more units than are available across the workspace pool
-   * (`availableUnits`), and the booking is still active enough to act on
-   * the signal. Gated on:
+   * Three-state QT stock badge for this row, resolved by the SHARED
+   * decision helper (`~/utils/booking-assets`) so this row and the
+   * sidebar's equivalent row can never disagree:
    *
-   *  - `isQuantityTracked(item)` — INDIVIDUAL assets have their own
-   *    AvailabilityBadge paths and never get this badge.
-   *  - `availableUnits != null` — only fires when the loader actually
-   *    shipped a value (avoids false positives on routes that don't
-   *    surface workspace-availability).
-   *  - `qtyBooked > availableUnits` — strict inequality; at-capacity is
-   *    NOT a problem.
-   *  - `booking.status !== "COMPLETE" && booking.status !== "ARCHIVED"`
-   *    — once the booking is historical the stock signal is stale and
-   *    should not surface; nothing actionable remains.
+   *  - `"insufficient"` — RED `InsufficientStockBadge`: `qtyBooked`
+   *    exceeds `availability.bookable` (a genuine in-window over-commit).
+   *  - `"pending-return"` — AMBER `PendingReturnBadge`: the booking hasn't
+   *    started yet and `qtyBooked` fits within `bookable` but exceeds
+   *    `physicalNow` — some units are checked out elsewhere right now and
+   *    are expected back before this booking starts.
+   *  - `null` — no badge, including when THIS row is already checked out
+   *    or (partially) fulfilled (`contextStatus`, computed above) — at
+   *    that point the stock signal has nothing left to warn about for it.
    *
-   * Each row evaluates independently: a multi-row asset can have
-   * multiple slices and each row's `bookedQuantity` is compared to the
-   * SAME per-asset global headroom, so multiple rows can each light up
-   * the badge.
+   * Each row evaluates independently against the SAME per-asset workspace
+   * headroom, so a multi-row asset can have several rows each light up.
    */
-  const hasInsufficientStock =
-    isQuantityTracked(item) &&
-    availableUnits != null &&
-    qtyBooked > availableUnits &&
-    booking.status !== "COMPLETE" &&
-    booking.status !== "ARCHIVED";
+  const stockBadgeVariant = resolveQtyStockBadgeVariant({
+    rowQty: qtyBooked,
+    availability,
+    contextStatus,
+    bookingStatus: booking.status,
+  });
 
   // Per-asset partial check-OUT record (if any). Presence of a record drives
   // the "Checked out on/by" cell content for this asset.
@@ -293,6 +301,7 @@ export default function ListAssetContent({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel,
                 }}
                 alt={`Image of ${item.title}`}
                 className={tw(
@@ -346,6 +355,13 @@ export default function ListAssetContent({
                 <ConsumptionTypeBadge
                   consumptionType={item.consumptionType ?? null}
                 />
+                {/* Detached kit residue: the row renders grouped under its
+                    original kit (via `sourceKitId`) but the asset has since
+                    left that kit. Lives on this always-visible metadata line
+                    rather than the availability column, which is suppressed
+                    once the booking is finished — exactly where these rows are
+                    most common. Flag is resolved in the overview loader. */}
+                {item.isRemovedFromKit ? <RemovedFromKitBadge /> : null}
               </div>
             </div>
           </div>
@@ -501,9 +517,11 @@ export default function ListAssetContent({
       </Td>
 
       {/* If asset status is different than available, we need to show a label.
-          Also surfaces the QT-only `InsufficientStockBadge` when the row's
-          booked qty exceeds workspace headroom — INDIVIDUAL assets stay on
-          the existing `AvailabilityLabel` paths and never reach the badge. */}
+          Also surfaces the QT-only stock badges when the row's booked qty
+          exceeds workspace headroom (RED, hard blocker) or physical-now
+          availability on a not-started booking (AMBER, soft warning) —
+          INDIVIDUAL assets stay on the existing `AvailabilityLabel` paths
+          and never reach either badge. */}
       <Td
         className={tw(
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
@@ -512,10 +530,15 @@ export default function ListAssetContent({
         {!isFinished ? (
           <div className="flex flex-wrap items-center gap-1">
             <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
-            {hasInsufficientStock ? (
+            {stockBadgeVariant === "insufficient" ? (
               <InsufficientStockBadge
                 bookedQuantity={qtyBooked}
-                availableUnits={availableUnits ?? 0}
+                availableUnits={availability?.bookable ?? 0}
+              />
+            ) : stockBadgeVariant === "pending-return" ? (
+              <PendingReturnBadge
+                bookedQuantity={qtyBooked}
+                physicalUnitsNow={availability?.physicalNow ?? 0}
               />
             ) : null}
           </div>
@@ -652,7 +675,18 @@ export default function ListAssetContent({
         )}
       >
         <When truthy={canSeeActions}>
-          <AssetRowActionsDropdown asset={item} />
+          <AssetRowActionsDropdown
+            asset={item}
+            qtyAvailability={
+              availability
+                ? {
+                    bookable: availability.bookable,
+                    reserved: availability.reserved,
+                    total: item.quantity ?? 0,
+                  }
+                : undefined
+            }
+          />
         </When>
       </Td>
     </>

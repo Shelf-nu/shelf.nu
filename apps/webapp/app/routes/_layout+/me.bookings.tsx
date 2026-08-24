@@ -5,6 +5,7 @@ import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -68,12 +69,31 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           statuses: [status],
         }),
         tags: filterTags,
-        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        extraInclude: {
+          tags: TAG_WITH_COLOR_SELECT,
+          // The unassigned-units pill reads `item.modelRequests`, and this
+          // route renders the shared bookings row via `BookingsIndexPage`.
+          // Without the include the pill vanishes on my own bookings instead of
+          // reading zero — absence reads as "nothing to do".
+          modelRequests: {
+            include: {
+              assetModel: { select: { id: true, name: true } },
+            },
+          },
+        },
       }),
       getTagsForBookingTagsFilter({
         organizationId,
       }),
     ]);
+
+    // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
+    // window, so the shared list renders the amber "Stock conflict" pill here
+    // too (see `~/modules/booking/stock-conflicts.server`).
+    const decoratedBookings = await decorateBookingsWithStockConflicts({
+      bookings,
+      organizationId,
+    });
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -87,7 +107,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: bookings,
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

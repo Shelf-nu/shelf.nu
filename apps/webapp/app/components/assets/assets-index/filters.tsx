@@ -154,6 +154,8 @@ export function AssetIndexFilters({
                   name: "teamMember",
                   queryKey: "name",
                   deletedAt: null,
+                  // A read FILTER — the workspace custody override governs.
+                  custodyPurpose: "custody-filter",
                 }}
                 renderItem={(item) => resolveTeamMemberName(item, true)}
                 label="Filter by custodian"
@@ -182,11 +184,7 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
-        "right-of-search": (
-          <div className="flex items-center gap-2">
-            <AvailabilityViewToggle modeIsSimple={false} />
-          </div>
-        ),
+        "right-of-search": <AvailabilityViewToggle modeIsSimple={false} />,
       }}
       searchClassName="leading-5"
     >
