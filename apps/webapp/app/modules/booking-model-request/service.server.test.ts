@@ -294,6 +294,13 @@ describe("getAssetModelAvailability — injected client", () => {
     // these counts run on the global client they sit outside that
     // transaction — they miss its uncommitted writes and take part in none
     // of its locks, which is what let two reservations claim one pool.
+    //
+    // why: this stub IS the subject of the test, not a dependency stood in
+    // for convenience. It has to be a client distinct from the mocked `db`
+    // so "which client did the reads go to" is observable at all; the four
+    // delegates below are exactly the reads the function issues, and their
+    // values are chosen to make the returned arithmetic checkable
+    // (7 total − 1 in custody − 2 reserved = 4 available).
     const client = {
       asset: { count: vitest.fn().mockResolvedValue(7) },
       custody: {
