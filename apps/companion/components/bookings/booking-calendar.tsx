@@ -386,7 +386,11 @@ export function BookingCalendar({
       const key = cacheKey(monthKey);
       pendingKey.current = key;
 
-      const cached = options.force ? undefined : monthCache.current.get(key);
+      // What the cache holds for this month, and what we are willing to paint
+      // from it. A forced refresh bypasses the second without discarding the
+      // first, so a failed refresh can still fall back on it below.
+      const held = monthCache.current.get(key);
+      const cached = options.force ? undefined : held;
       if (cached) {
         // Paint what we have, then confirm it below. The month is already
         // correct in the common case, so the grid does not blink.
@@ -412,14 +416,17 @@ export function BookingCalendar({
       if (pendingKey.current !== key) return;
 
       if (res.error) {
-        // A cached month stays on screen rather than being replaced by an
-        // error for data we already have. Without one, the grid is emptied
-        // alongside the error: `month` still holds the month we came FROM, and
-        // leaving it would re-clip those bookings into the new month's squares
-        // and count them in "N more outside this month".
+        // A month already on screen stays there rather than being replaced by
+        // an error for data we have. That covers a failed forced refresh too,
+        // which bypasses the cache without invalidating it.
         if (!cached) {
           setError(res.error);
-          setMonth(EMPTY_MONTH);
+          // Blank the grid only with nothing correct for THIS month to show:
+          // `month` still holds the month we came FROM, and leaving it would
+          // re-clip those bookings into the new month's squares and count them
+          // in "N more outside this month".
+          if (held) setMonth(held);
+          else setMonth(EMPTY_MONTH);
         }
       } else if (res.data) {
         const next: CachedMonth = {
