@@ -337,10 +337,16 @@ describe("constructVerifiedWebhookEvent", () => {
     // customer is NOT recognised as custom-install, and the webhook goes on
     // to downgrade them to free and pause their subscription.
     mockCustomInstallCustomers.value = "cus_custom1, cus_custom2";
+    // why: the signed Stripe event is what the helper verifies and unwraps.
+    // Stubbing it lets the test name the customer under test — the SECOND
+    // entry, the one a missing trim would leave with a leading space.
     mockConstructEventAsync.mockResolvedValue({
       type: "invoice.paid",
       data: { object: { customer: "cus_custom2" } },
     });
+    // why: the helper resolves the customer to a user BEFORE the exclusion
+    // check, so a resolvable user is what lets the test reach that check. It
+    // is also what a failure returns instead of null, which is the assertion.
     mockFindFirstOrThrow.mockResolvedValue(baseUser);
 
     const result = await constructVerifiedWebhookEvent(makeRequest());
