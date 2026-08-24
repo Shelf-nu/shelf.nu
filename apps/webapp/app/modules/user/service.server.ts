@@ -55,7 +55,6 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
-import { createTeamMember } from "../team-member/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
   getUserContactById,
