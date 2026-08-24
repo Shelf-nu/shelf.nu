@@ -586,15 +586,16 @@ function CustodyColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="custody-more-chip"
               aria-label={`${others.length} more custodian${
                 others.length === 1 ? "" : "s"
               }`}
             >
               +{others.length}
-            </span>
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"
@@ -675,15 +676,16 @@ function KitColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="kit-more-chip"
               aria-label={`${others.length} more kit${
                 others.length === 1 ? "" : "s"
               }`}
             >
               +{others.length}
-            </span>
+            </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" data-testid="kit-more-tooltip">
             <ul className="flex flex-col gap-1 text-sm">
@@ -761,15 +763,16 @@ function LocationColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="location-more-chip"
               aria-label={`${others.length} more location${
                 others.length === 1 ? "" : "s"
               }`}
             >
               +{others.length}
-            </span>
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"

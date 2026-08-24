@@ -168,4 +168,23 @@ describe("CustodyColumn", () => {
     expect(tooltip).toHaveTextContent("Carol");
     expect(tooltip).not.toHaveTextContent("Carol (1)");
   });
+
+  it("reaches the same tooltip by keyboard, not only by hover", async () => {
+    const user = userEvent.setup();
+
+    renderCell([
+      makeCustody("Alice", 4),
+      makeCustody("Bob", 7),
+      makeCustody("Carol", 1),
+    ]);
+
+    // The chip has to be a focusable control. Radix wires its focus handlers
+    // onto the element it is given, so a tooltip hung on a plain <span> is
+    // unreachable without a pointer.
+    await user.tab();
+    expect(screen.getByTestId("custody-more-chip")).toHaveFocus();
+
+    const tooltip = await screen.findByTestId("custody-more-tooltip");
+    expect(tooltip).toHaveTextContent("Bob (7)");
+  });
 });
